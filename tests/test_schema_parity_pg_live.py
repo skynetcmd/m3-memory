@@ -54,6 +54,10 @@ _SHARED_CORE_TABLES = {
     "entity_extraction_queue",
     "observation_queue",
     "gdpr_requests",
+    "agent_retention_policies",
+    "memory_archive",
+    "entity_coalesce_candidates",
+    "entity_coalesce_embeddings",
 }
 
 

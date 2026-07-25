@@ -182,11 +182,18 @@ def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related
     _suffix = _d.on_conflict_ignore(
         conflict_target="(from_id, to_id, relationship_type)"
     )
+    # Supply the `id` PK. On SQLite a TEXT PRIMARY KEY tolerates NULL (SQLite quirk),
+    # so the old id-less insert worked there — but on PostgreSQL a PRIMARY KEY is
+    # strictly NOT NULL and the insert raised NotNullViolation. A fresh uuid each
+    # call is safe for idempotency: the ON CONFLICT arbiter is the
+    # (from_id, to_id, relationship_type) triple, not the id, so a re-link still
+    # DO-NOTHINGs regardless of the new id.
+    import uuid as _uuid
     with (_db(db) if db is not None else _db()) as db_conn:
         db_conn.execute(
-            f"{_ins} memory_relationships (from_id, to_id, relationship_type) "
-            f"VALUES ({_d.placeholder(3)}) {_suffix}".rstrip(),
-            (from_id, to_id, relationship_type)
+            f"{_ins} memory_relationships (id, from_id, to_id, relationship_type) "
+            f"VALUES ({_d.placeholder(4)}) {_suffix}".rstrip(),
+            (str(_uuid.uuid4()), from_id, to_id, relationship_type)
         )
     return f"Linked {from_id} --[{relationship_type}]--> {to_id}"
 

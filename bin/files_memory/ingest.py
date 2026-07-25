@@ -29,6 +29,7 @@ from typing import Optional
 
 from . import config
 from .chunkers import chunk_file, chunker_version
+from .config import files_table
 from .db import _db
 from .embed import (
     embed_texts,
@@ -114,8 +115,10 @@ def _next_version_label(conn, identity_key: str) -> str:
 
     Convention: `ingest-N` where N is `1 + count of prior versions`.
     """
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     row = conn.execute(
-        "SELECT COUNT(*) FROM file_nodes WHERE identity_key = ?",
+        f"SELECT COUNT(*) FROM {files_table('file_nodes')} WHERE identity_key = {_p}",
         (identity_key,),
     ).fetchone()
     n = (row[0] if row else 0) + 1
@@ -128,11 +131,13 @@ def _find_current_version(conn, identity_key: str) -> Optional[dict]:
     Returns a dict view (sqlite3.Row → dict) of the row, or None if no
     version exists yet.
     """
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     row = conn.execute(
-        "SELECT uuid, content_sha256, version_label, paths_seen, path_absolute "
-        "FROM file_nodes "
-        "WHERE identity_key = ? AND superseded_by IS NULL "
-        "ORDER BY created_at DESC LIMIT 1",
+        f"SELECT uuid, content_sha256, version_label, paths_seen, path_absolute "
+        f"FROM {files_table('file_nodes')} "
+        f"WHERE identity_key = {_p} AND superseded_by IS NULL "
+        f"ORDER BY created_at DESC LIMIT 1",
         (identity_key,),
     ).fetchone()
     return dict(row) if row else None
@@ -231,6 +236,9 @@ def ingest_one_file(
     identity_key = resolve_identity_key(path, text=text)
 
     # 3. Check for prior version. The supersession decision happens here.
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     with _db(db_path) as conn:
         prior = _find_current_version(conn, identity_key)
         if prior and prior["content_sha256"] == content_sha:
@@ -303,11 +311,11 @@ def ingest_one_file(
 
         # Insert the new file_node.
         conn.execute(
-            "INSERT INTO file_nodes("
-            "uuid, identity_key, filename, filetype, path_absolute, path_repo_relative, "
-            "size_bytes, content_sha256, date_created, date_modified, source_host, "
-            "version_label, supersedes, paths_seen, corpus_id, file_summary, metadata) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            f"INSERT INTO {files_table('file_nodes')}("
+            f"uuid, identity_key, filename, filetype, path_absolute, path_repo_relative, "
+            f"size_bytes, content_sha256, date_created, date_modified, source_host, "
+            f"version_label, supersedes, paths_seen, corpus_id, file_summary, metadata) "
+            f"VALUES ({_d.placeholder(17)})",
             (
                 file_node_uuid, identity_key, entry.filename, entry.filetype,
                 os.path.abspath(path), entry.repo_relative,
@@ -327,15 +335,16 @@ def ingest_one_file(
         superseded_prior = None
         if prior:
             conn.execute(
-                "UPDATE file_nodes "
-                "SET superseded_by = ?, superseded_at = ?, supersession_reason = ? "
-                "WHERE uuid = ?",
+                f"UPDATE {files_table('file_nodes')} "
+                f"SET superseded_by = {_p}, superseded_at = {_p}, supersession_reason = {_p} "
+                f"WHERE uuid = {_p}",
                 (file_node_uuid, _iso_utc(), "content_changed", prior["uuid"]),
             )
             # Record the supersession edge for graph traversal.
             conn.execute(
-                "INSERT OR IGNORE INTO memory_links(src_uuid, dst_uuid, edge_type) "
-                "VALUES (?, ?, 'supersedes')",
+                f"{_d.insert_or_ignore()} {files_table('memory_links')}(src_uuid, dst_uuid, edge_type) "
+                f"VALUES ({_p}, {_p}, 'supersedes') "
+                f"{_d.on_conflict_ignore(conflict_target='(src_uuid, dst_uuid, edge_type)')}",
                 (file_node_uuid, prior["uuid"]),
             )
             superseded_prior = prior["uuid"]
@@ -350,11 +359,11 @@ def ingest_one_file(
             config.EXTRACTOR_VERSION if extract_mode != "none" else None
         )
         conn.execute(
-            "INSERT INTO ingestion_runs("
-            "uuid, file_node, run_id, ingest_date, ingester_version, "
-            "chunker_version, extractor_version, extract_mode, model_id, "
-            "chunk_count, leaf_count, status, metadata) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'ok', ?)",
+            f"INSERT INTO {files_table('ingestion_runs')}("
+            f"uuid, file_node, run_id, ingest_date, ingester_version, "
+            f"chunker_version, extractor_version, extract_mode, model_id, "
+            f"chunk_count, leaf_count, status, metadata) "
+            f"VALUES ({_p}, {_p}, {_p}, {_p}, {_p}, {_p}, {_p}, {_p}, NULL, {_p}, {_p}, 'ok', {_p})",
             (
                 run_uuid, file_node_uuid, run_id, _iso_utc(),
                 config.INGESTER_VERSION, chunker_ver, run_extractor_version,
@@ -395,12 +404,12 @@ def ingest_one_file(
             evolved_from = diff.prior_uuid if (diff and diff.kind in ("carry", "evolve")) else None
 
             conn.execute(
-                "INSERT INTO leaves("
-                "uuid, file_node, ingestion_run, division_type, division_id, "
-                "division_label, text, text_sha256, char_range_start, "
-                "char_range_end, leaf_summary, boundary_confidence, truncated, "
-                "extraction_status, evolved_from, metadata) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                f"INSERT INTO {files_table('leaves')}("
+                f"uuid, file_node, ingestion_run, division_type, division_id, "
+                f"division_label, text, text_sha256, char_range_start, "
+                f"char_range_end, leaf_summary, boundary_confidence, truncated, "
+                f"extraction_status, evolved_from, metadata) "
+                f"VALUES ({_d.placeholder(16)})",
                 (
                     leaf_uuid, file_node_uuid, run_uuid,
                     leaf.division_type, leaf.division_id, leaf.division_label,
@@ -514,12 +523,12 @@ def ingest_one_file(
                         # double-counting facts at LLM cost.
                         if ldiff is not None and ldiff.kind == "carry":
                             row = conn.execute(
-                                "SELECT extraction_status FROM leaves WHERE uuid = ?",
+                                f"SELECT extraction_status FROM {files_table('leaves')} WHERE uuid = {_p}",
                                 (leaf_uuid,),
                             ).fetchone()
                             if row and row[0] == "ok":
                                 fact_count += conn.execute(
-                                    "SELECT COUNT(*) FROM facts WHERE leaf = ?",
+                                    f"SELECT COUNT(*) FROM {files_table('facts')} WHERE leaf = {_p}",
                                     (leaf_uuid,),
                                 ).fetchone()[0]
                                 continue
@@ -541,8 +550,8 @@ def ingest_one_file(
                     # No LLM: mark every leaf 'failed' with reason logged.
                     for leaf_uuid, _, _, _ in leaf_records:
                         conn.execute(
-                            "UPDATE leaves SET extraction_status = 'failed' "
-                            "WHERE uuid = ?", (leaf_uuid,),
+                            f"UPDATE {files_table('leaves')} SET extraction_status = 'failed' "
+                            f"WHERE uuid = {_p}", (leaf_uuid,),
                         )
                     logger.warning(
                         "inline extraction requested but no LLM endpoint configured; "
@@ -553,7 +562,7 @@ def ingest_one_file(
 
         duration_ms = int((time.perf_counter() - t_start) * 1000)
         conn.execute(
-            "UPDATE ingestion_runs SET duration_ms = ?, fact_count = ? WHERE uuid = ?",
+            f"UPDATE {files_table('ingestion_runs')} SET duration_ms = {_p}, fact_count = {_p} WHERE uuid = {_p}",
             (duration_ms, fact_count, run_uuid),
         )
 
@@ -576,11 +585,14 @@ def ingest_one_file(
 def _record_noop_run(conn, file_node_uuid: str, run_id: str, entry: WalkEntry) -> None:
     """Write an 'unchanged_skipped' ingestion_run for audit purposes."""
     import json as _json
+
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
     conn.execute(
-        "INSERT INTO ingestion_runs("
-        "uuid, file_node, run_id, ingester_version, chunker_version, "
-        "extractor_version, extract_mode, leaf_count, status, metadata) "
-        "VALUES (?, ?, ?, ?, ?, ?, 'none', 0, 'unchanged_skipped', ?)",
+        f"INSERT INTO {files_table('ingestion_runs')}("
+        f"uuid, file_node, run_id, ingester_version, chunker_version, "
+        f"extractor_version, extract_mode, leaf_count, status, metadata) "
+        f"VALUES ({_d.placeholder(6)}, 'none', 0, 'unchanged_skipped', {_d.param()})",
         (
             str(_uuid.uuid4()), file_node_uuid, run_id,
             config.INGESTER_VERSION, chunker_version(entry.filetype),

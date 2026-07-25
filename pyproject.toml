@@ -7,8 +7,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.7.23.0"
-description = "Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable"
+version = "2026.7.25.0"
+description = "Give your AI agent a memory — local-first, private, easy to install. Guided setup wizard; works out of the box on your own machine, no cloud. For everyday agent users, homelabs, and developers alike · 99.2% LongMemEval-S retrieval @ k=10 · Works with Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · any MCP agent (native + one-command plugins) · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable"
 
 readme = "README.md"
 license = "Apache-2.0"
@@ -16,9 +16,15 @@ license = "Apache-2.0"
 # sdist/wheel — setuptools>=77 packages these globs into the distribution.
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
+# skynetcmd is THE author, maintainer, and copyright holder (see NOTICE). The AI
+# coding assistants that helped build m3 (Gemini CLI, Claude Code, Google
+# Antigravity) are credited in the README's "Built with" acknowledgment — NOT
+# listed here, so they aren't given equal-footing authorship with skynetcmd.
 authors = [
     { name = "skynetcmd", email = "skynetcmd@users.noreply.github.com" },
-    { name = "Gemini CLI", email = "gemini-cli@google.com" }
+]
+maintainers = [
+    { name = "skynetcmd", email = "skynetcmd@users.noreply.github.com" },
 ]
 keywords = [
     "mcp",
@@ -52,13 +58,30 @@ keywords = [
     "longmemeval",
     "fips-140-3",
     "openclaw",
+    # end-user / discovery intent (not just developer terms) — m3 is installable and
+    # usable by anyone running an AI agent, via the guided setup wizard.
+    "assistant-memory",
+    "agent-memory",
+    "self-hosted",
+    "offline",
+    "no-cloud",
+    "easy-install",
+    "mcp-agent",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
+    # Audience is BROAD by design: a guided installer/wizard makes m3 usable by
+    # anyone running an AI agent (end users), by homelab/IT operators, AND by
+    # developers embedding it. Listing only "Developers" made discovery agents
+    # report m3 as dev-only — it isn't.
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: System Administrators",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Operating System :: OS Independent",
@@ -101,6 +124,12 @@ dependencies = [
     # transitively present (via fpdf2) — pinned directly so the safe path is
     # guaranteed on a fresh install.
     "defusedxml>=0.7.1,<1",
+    # Topic clustering for the Memory Wiki (bin/wiki/cluster.py, `m3 wiki
+    # generate`). The wiki is a core feature, so networkx is a base dependency —
+    # imported directly, no optional extra, no in-tree fallback (the pure-Python
+    # clustering path was retired 2026-07-24 when the wiki became core). Pure-Python
+    # wheel, no compiled/torch-class weight; deterministic run-to-run.
+    "networkx>=3.0,<4",
     # Windows-only: keyring backend + hook process control. Marker-gated so it
     # installs only where relevant.
     "pywin32>=311; sys_platform == 'win32'",
@@ -151,13 +180,13 @@ entity-ner = ["gliner>=0.2.26"]
 # cosine path is the fallback). The PyPI wheel ships the platform-native
 # extension binary, so no separate compilation/bundling step is needed.
 vector = ["sqlite-vec>=0.1.6"]
-# Higher-quality topic clustering for the wiki generator (bin/wiki/cluster.py),
-# used by `m3 wiki generate`. Optional by design: the generator runs fully without
-# it via a pure-Python weighted connected-components fallback — networkx only
-# upgrades cluster quality (greedy-modularity communities). Imported lazily and
-# guarded inside cluster.py, so `pip install m3-memory` gains NO hard dependency;
-# opt in with `pip install "m3-memory[wiki]"`.
-wiki = ["networkx>=3.0,<4"]
+# The Memory Wiki is a CORE feature and its clustering dep (networkx) is now a
+# BASE dependency (see [project].dependencies above) — `pip install m3-memory`
+# already includes everything the wiki needs. This `[wiki]` extra is kept as an
+# empty BACK-COMPAT alias so existing `pip install "m3-memory[wiki]"` commands and
+# scripts keep working; it installs nothing beyond the base. It can be removed in a
+# future major version.
+wiki = []
 # LangChain / LangGraph integration (m3_memory/integrations/langchain/). Optional
 # by design: core m3 gains NO hard LangChain dependency — the adapter imports
 # langchain-core / langgraph lazily, so `pip install m3-memory` stays light and
@@ -224,7 +253,7 @@ Homepage = "https://github.com/skynetcmd/m3-memory"
 Repository = "https://github.com/skynetcmd/m3-memory"
 "Bug Tracker" = "https://github.com/skynetcmd/m3-memory/issues"
 Changelog = "https://github.com/skynetcmd/m3-memory/blob/main/docs/CHANGELOG.md"
-Documentation = "https://github.com/skynetcmd/m3-memory/blob/main/docs/AGENT_INSTRUCTIONS.md"
+Documentation = "https://github.com/skynetcmd/m3-memory/blob/main/docs/GETTING_STARTED.md"
 
 # NOTE: package discovery, package_dir and package_data are defined in setup.py,
 # NOT here. The root-level payload trees (bin/, docs/, _assets/, examples/) must
@@ -333,6 +362,7 @@ markers = [
     "requires_native: needs the m3_core_rs native wheel (not the pure-Python fallback)",
     "requires_gguf: needs a GGUF model file (M3_TEST_GGUF)",
     "requires_files_db: needs the shipped files_database.db present",
+    "requires_llm: needs a reachable local chat model (M3_WIKI_DRIFT_URL / LM Studio) for the citation-drift judge",
 ]
 # Warnings are ERRORS by default: a NEW, un-reviewed warning fails the suite, so it
 # can't slip in unnoticed. Every `ignore` below is a REVIEWED exception with its

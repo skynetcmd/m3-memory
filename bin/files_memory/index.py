@@ -15,10 +15,10 @@ file-level summaries.
 from __future__ import annotations
 
 import logging
-import sqlite3
 from dataclasses import dataclass
 from typing import Optional
 
+from .config import files_table
 from .db import _db
 
 logger = logging.getLogger("files_memory.index")
@@ -66,10 +66,13 @@ def files_index(
         include_history: include superseded file_nodes.
         limit: max entries returned (sorted by date_modified DESC).
     """
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     sql_parts = [
-        "SELECT uuid, filename, filetype, path_absolute, version_label, "
-        "       date_modified, file_summary, metadata, corpus_id "
-        "FROM file_nodes WHERE 1 = 1"
+        f"SELECT uuid, filename, filetype, path_absolute, version_label, "
+        f"       date_modified, file_summary, metadata, corpus_id "
+        f"FROM {files_table('file_nodes')} WHERE 1 = 1"
     ]
     params: list = []
     if not include_history:
@@ -77,30 +80,35 @@ def files_index(
     if corpora:
         clean = [c for c in corpora if c]
         if clean:
-            placeholders = ",".join("?" * len(clean))
-            sql_parts.append(f"AND corpus_id IN ({placeholders})")
+            sql_parts.append(f"AND corpus_id IN ({_d.placeholder(len(clean))})")
             params.extend(clean)
     elif corpus_id:
-        sql_parts.append("AND corpus_id = ?")
+        sql_parts.append(f"AND corpus_id = {_p}")
         params.append(corpus_id)
     if filetype:
-        sql_parts.append("AND filetype = ?")
+        sql_parts.append(f"AND filetype = {_p}")
         params.append(filetype)
     if directory:
         import os as _os
         prefix = _os.path.abspath(directory)
-        sql_parts.append("AND path_absolute LIKE ?")
-        # SQLite LIKE uses % for any-chars; escape any literal % in path.
+        sql_parts.append(f"AND path_absolute LIKE {_p}")
+        # LIKE uses % for any-chars; escape any literal % in path. (LIKE is
+        # portable; the pattern semantics match on both backends.)
         params.append(prefix.replace("%", "[%]") + "%")
     if filename_glob:
-        sql_parts.append("AND filename GLOB ?")
-        params.append(filename_glob)
+        # GLOB is SQLite-only. The seam emits GLOB on SQLite and a translated,
+        # case-sensitive LIKE on PG. It returns (sql_fragment, bound_value) because
+        # PG needs the glob wildcards (* ?) rewritten to LIKE ones (% _) in the
+        # VALUE, not just the operator.
+        _frag, _val = _d.glob_match("filename", _p, filename_glob)
+        sql_parts.append("AND " + _frag)
+        params.append(_val)
 
-    sql_parts.append("ORDER BY date_modified DESC LIMIT ?")
+    sql_parts.append(f"ORDER BY date_modified DESC LIMIT {_p}")
     params.append(limit)
 
     with _db(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+        # seam yields name-addressable rows on both backends (no sqlite3.Row).
         rows = conn.execute(" ".join(sql_parts), params).fetchall()
 
     from .provenance import original_path_for_metadata
@@ -126,19 +134,26 @@ def files_stats(
     db_path: Optional[str] = None,
 ) -> dict:
     """Corpus-level counters for files_stats MCP tool."""
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+        # seam yields name-addressable rows on both backends (no sqlite3.Row).
         scope_clause = ""
         params: list = []
         if corpus_id:
-            scope_clause = " WHERE corpus_id = ?"
+            scope_clause = f" WHERE corpus_id = {_p}"
             params = [corpus_id]
 
+        _fn = files_table('file_nodes')
+        _lv = files_table('leaves')
+        _le = files_table('leaf_embeddings')
+        _ir = files_table('ingestion_runs')
+
         fn_count = conn.execute(
-            f"SELECT COUNT(*) FROM file_nodes{scope_clause}", params,
+            f"SELECT COUNT(*) FROM {_fn}{scope_clause}", params,
         ).fetchone()[0]
         fn_current = conn.execute(
-            f"SELECT COUNT(*) FROM file_nodes{scope_clause} "
+            f"SELECT COUNT(*) FROM {_fn}{scope_clause} "
             f"{'AND' if scope_clause else 'WHERE'} superseded_by IS NULL",
             params,
         ).fetchone()[0]
@@ -146,37 +161,37 @@ def files_stats(
         # Leaf counts can't be conditionally scoped without a join; we
         # join through file_nodes.
         leaf_q = (
-            "SELECT COUNT(*) FROM leaves l JOIN file_nodes fn ON fn.uuid = l.file_node"
+            f"SELECT COUNT(*) FROM {_lv} l JOIN {_fn} fn ON fn.uuid = l.file_node"
         )
         leaf_current_q = leaf_q + " WHERE l.superseded_by IS NULL AND fn.superseded_by IS NULL"
         if corpus_id:
-            leaf_q += " WHERE fn.corpus_id = ?"
-            leaf_current_q += " AND fn.corpus_id = ?"
+            leaf_q += f" WHERE fn.corpus_id = {_p}"
+            leaf_current_q += f" AND fn.corpus_id = {_p}"
         leaf_count = conn.execute(leaf_q, params).fetchone()[0]
         leaf_current = conn.execute(leaf_current_q, params).fetchone()[0]
 
         embed_q = (
-            "SELECT COUNT(*) FROM leaf_embeddings le "
-            "JOIN leaves l ON l.uuid = le.leaf_uuid "
-            "JOIN file_nodes fn ON fn.uuid = l.file_node "
-            "WHERE le.kind = 'text'"
+            f"SELECT COUNT(*) FROM {_le} le "
+            f"JOIN {_lv} l ON l.uuid = le.leaf_uuid "
+            f"JOIN {_fn} fn ON fn.uuid = l.file_node "
+            f"WHERE le.kind = 'text'"
         )
         if corpus_id:
-            embed_q += " AND fn.corpus_id = ?"
+            embed_q += f" AND fn.corpus_id = {_p}"
         leaf_embed_count = conn.execute(embed_q, params).fetchone()[0]
 
         # Per-filetype breakdown (current only).
         ft_q = (
-            "SELECT filetype, COUNT(*) AS n FROM file_nodes "
-            "WHERE superseded_by IS NULL"
+            f"SELECT filetype, COUNT(*) AS n FROM {_fn} "
+            f"WHERE superseded_by IS NULL"
         )
         if corpus_id:
-            ft_q += " AND corpus_id = ?"
+            ft_q += f" AND corpus_id = {_p}"
         ft_q += " GROUP BY filetype ORDER BY n DESC"
         by_filetype = {r["filetype"]: r["n"] for r in conn.execute(ft_q, params).fetchall()}
 
         # Run counts
-        run_q = "SELECT COUNT(DISTINCT run_id) FROM ingestion_runs"
+        run_q = f"SELECT COUNT(DISTINCT run_id) FROM {_ir}"
         run_count = conn.execute(run_q).fetchone()[0]
 
         return {
@@ -205,12 +220,14 @@ def files_get(uuid: str, *, db_path: Optional[str] = None) -> Optional[dict]:
 
     Returns None if no UUID match.
     """
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     from .provenance import original_path_for_metadata
     with _db(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+        # seam yields name-addressable rows on both backends (no sqlite3.Row).
         # Try file_nodes first
         r = conn.execute(
-            "SELECT * FROM file_nodes WHERE uuid = ?", (uuid,),
+            f"SELECT * FROM {files_table('file_nodes')} WHERE uuid = {_p}", (uuid,),
         ).fetchone()
         if r:
             d = dict(r)
@@ -218,10 +235,10 @@ def files_get(uuid: str, *, db_path: Optional[str] = None) -> Optional[dict]:
             d["original_path"] = original_path_for_metadata(d.get("metadata"))
             return d
         r = conn.execute(
-            "SELECT l.*, fn.filename, fn.path_absolute, fn.filetype, "
-            "       fn.metadata AS file_metadata "
-            "FROM leaves l JOIN file_nodes fn ON fn.uuid = l.file_node "
-            "WHERE l.uuid = ?",
+            f"SELECT l.*, fn.filename, fn.path_absolute, fn.filetype, "
+            f"       fn.metadata AS file_metadata "
+            f"FROM {files_table('leaves')} l JOIN {files_table('file_nodes')} fn ON fn.uuid = l.file_node "
+            f"WHERE l.uuid = {_p}",
             (uuid,),
         ).fetchone()
         if r:

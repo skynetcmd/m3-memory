@@ -115,6 +115,13 @@ def _make_compat_cursor_factory():
     return _DualCursor
 
 
+# NOTE: this shim deliberately does NOT translate '?'->'%s'. sqlite-style qmark
+# SQL must be ported to dialect().param() at the call site (the critical-path
+# _impl directive) — a runtime translator was tried and removed 2026-07-24: it
+# added a per-execute string scan on the hot path plus a hand-rolled SQL-literal
+# parser (a silent correctness surface), and it MASKED the loud PG SyntaxError
+# that is the useful signal "this query still needs porting to the seam". A raw
+# '?' reaching PG is meant to fail loudly, not be silently rewritten.
 class _SqliteCompatConnection:
     """Wrap a psycopg2 connection to present the SQLite-connection surface the
     memory core expects, so ``db.execute(...)`` and ``row["col"]``/``row[0]`` both
@@ -139,6 +146,9 @@ class _SqliteCompatConnection:
         cur = self._raw.cursor(  # type: ignore[attr-defined]
             cursor_factory=_make_compat_cursor_factory()
         )
+        # SQL is passed verbatim: callers must use dialect().param() ('%s' on PG).
+        # A raw '?' here raises a loud psycopg2 SyntaxError by design — that is the
+        # signal to port the query to the seam, not to silently rewrite it.
         cur.execute(sql, params)
         return cur
 
@@ -151,7 +161,7 @@ class _SqliteCompatConnection:
         cur = self._raw.cursor(  # type: ignore[attr-defined]
             cursor_factory=_make_compat_cursor_factory()
         )
-        cur.executemany(sql, seq_of_params)
+        cur.executemany(sql, seq_of_params)  # verbatim; use dialect().param()
         return cur
 
     def cursor(self, *args, **kwargs):
@@ -360,6 +370,57 @@ class PostgresDialect(Dialect):
         # %s binds an int number of minutes; multiply a 1-minute interval.
         return f"NOW() - ({minutes_placeholder} * INTERVAL '1 minute')"
 
+    def age_days_gt(self, ts_column: str, days_expr: str) -> str:
+        # "row older than N days": col < now - N*1day. Mirrors SQLite's
+        # julianday('now')-julianday(col) > N without PG-absent julianday().
+        return f"{ts_column} < NOW() - ({days_expr} * INTERVAL '1 day')"
+
+    def all_rows_after_offset(self, offset_placeholder: str) -> str:
+        # PG spells "no upper bound" as LIMIT ALL (vs SQLite's LIMIT -1).
+        return f"LIMIT ALL OFFSET {offset_placeholder}"
+
+    def group_concat(self, expr: str, separator: str = ",") -> str:
+        # PG's string_agg is the GROUP_CONCAT analogue. string_agg requires a text
+        # arg; ids/columns used here are already TEXT, so no cast needed.
+        return f"string_agg({expr}, '{separator}')"
+
+    # SQLSTATE codes for the "object does not exist" class (class 42, syntax/access):
+    #   42703 undefined_column, 42P01 undefined_table, 42704 undefined_object,
+    #   42883 undefined_function. Stable across PG versions/locales — far more
+    #   robust than matching the English message.
+    def greatest(self, *exprs: str) -> str:
+        return f"GREATEST({', '.join(exprs)})"
+
+    def least(self, *exprs: str) -> str:
+        return f"LEAST({', '.join(exprs)})"
+
+    _UNDEFINED_SQLSTATES = frozenset({"42703", "42P01", "42704", "42883"})
+
+    def is_undefined_object_error(self, exc: BaseException) -> bool:
+        for e in (exc, getattr(exc, "__cause__", None)):
+            if e is None:
+                continue
+            code = getattr(e, "pgcode", None)
+            if code in self._UNDEFINED_SQLSTATES:
+                return True
+            # Fallback for a non-psycopg wrapper that lost pgcode: match the text.
+            msg = str(e).lower()
+            if "does not exist" in msg and ("column" in msg or "relation" in msg):
+                return True
+        return False
+
+    def is_integrity_error(self, exc: BaseException) -> bool:
+        # Integrity violations are SQLSTATE class 23 (23505 unique_violation,
+        # 23503 foreign_key_violation, 23502 not_null_violation, 23514
+        # check_violation). Match the CLASS prefix so any 23xxx counts.
+        for e in (exc, getattr(exc, "__cause__", None)):
+            if e is None:
+                continue
+            code = getattr(e, "pgcode", None)
+            if isinstance(code, str) and code.startswith("23"):
+                return True
+        return False
+
     def day_bucket(self, column: str) -> str:
         # to_char keeps the TEXT 'YYYY-MM-DD' shape identical to SQLite's substr;
         # ::date would return a PG date type and change the bucket value shape.
@@ -397,6 +458,33 @@ class PostgresDialect(Dialect):
             "WHERE table_name = %s ORDER BY ordinal_position"
         )
         return (sql, (table,))
+
+    def _qualified_table_expr(self, name: str, schema: str) -> str:
+        # A separate logical store is a SCHEMA namespace in the one primary
+        # database on PG (single DSN) — qualify the name so it resolves there
+        # regardless of search_path. Identifiers are pre-validated in the base.
+        return f"{schema}.{name}"
+
+    def _glob_fragment(self, column: str, placeholder: str, pattern: str) -> "tuple[str, str]":
+        # PG has no GLOB; use case-sensitive LIKE and translate the glob wildcards
+        # to LIKE ones. Escape literal % and _ (LIKE wildcards) in the SOURCE first
+        # so they stay literal, THEN map glob * -> % and ? -> _.
+        translated = (
+            pattern.replace("\\", "\\\\")   # escape the escape char itself
+                   .replace("%", "\\%")
+                   .replace("_", "\\_")
+                   .replace("*", "%")
+                   .replace("?", "_")
+        )
+        return (f"{column} LIKE {placeholder}", translated)
+
+    def compact_storage(self, *, sqlite_path: "str | None" = None,
+                        max_bytes: int = 500 * 1024 * 1024) -> str:
+        # No client-issued compaction: autovacuum reclaims dead tuples in the
+        # background, and a manual VACUUM here would need its own out-of-txn
+        # connection without shrinking the files (only VACUUM FULL does, under an
+        # exclusive lock — not something a routine maintenance pass should take).
+        return "VACUUM skipped: not applicable on PostgreSQL (autovacuum handles this)"
 
 
 # The one shared frozen singleton for PostgreSQL.
@@ -550,6 +638,17 @@ class PostgresBackend:
     def placeholder(self, n: int = 1) -> str:
         """Positional binds for psycopg: ``placeholder(3) -> "%s, %s, %s"``."""
         return POSTGRES.placeholder(n)
+
+    def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
+        """No-op: PostgreSQL manages its own WAL (checkpointer + bgwriter).
+
+        SQLite's ``PRAGMA wal_checkpoint`` has no Postgres analogue a client
+        should invoke — the server's checkpointer handles it, and ``CHECKPOINT``
+        is a superuser-ish server-wide operation that a batch writer has no
+        business issuing. Present so callers can checkpoint on a cadence without
+        knowing the backend (§1 storage seam).
+        """
+        return None
 
     def schema_version(self) -> "int | None":
         """MAX(version) from schema_versions, or None if the table is absent."""

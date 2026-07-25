@@ -285,7 +285,7 @@ def _cmd_governor(args: argparse.Namespace) -> int:
 
 
 def _cmd_wiki(args: argparse.Namespace) -> int:
-    """Dispatch `m3 wiki <generate|status>` to bin/gen_wiki.py."""
+    """Dispatch `m3 wiki <generate|compile|status>` to bin/gen_wiki.py."""
     if not _resolve_bin_script("gen_wiki.py"):
         print("wiki command requires the project payload (run `m3 install`).")
         return 1
@@ -310,6 +310,17 @@ def _cmd_wiki(args: argparse.Namespace) -> int:
             argv.append("--html")
         if getattr(args, "obsidian", False):
             argv.append("--obsidian")
+    elif sub == "compile":
+        if getattr(args, "importance_threshold", None) is not None:
+            argv += ["--importance-threshold", str(args.importance_threshold)]
+        if getattr(args, "no_networkx", False):
+            argv.append("--no-networkx")
+        if getattr(args, "scope", None):
+            argv += ["--scope", args.scope]
+        if getattr(args, "user_id", None):
+            argv += ["--user-id", args.user_id]
+        if getattr(args, "dry_run", False):
+            argv.append("--dry-run")
     return _run_bin_script("gen_wiki.py", argv)
 
 
@@ -1063,7 +1074,7 @@ Examples:
         "wiki",
         help="Generate a browsable, interlinked wiki from your core memories + files corpus.",
     )
-    wiki_sub = p_wiki.add_subparsers(dest="wiki_cmd", metavar="<generate|status>")
+    wiki_sub = p_wiki.add_subparsers(dest="wiki_cmd", metavar="<generate|compile|status>")
     p_wiki_gen = wiki_sub.add_parser("generate", help="Compile the wiki vault (default <engine_root>/wiki).")
     p_wiki_gen.add_argument("--out", default=None, help="Output vault dir.")
     p_wiki_gen.add_argument("--check", action="store_true",
@@ -1076,7 +1087,7 @@ Examples:
                             help="Add an LLM prose lede per topic via a local chat "
                                  "endpoint (opt-in, cached). Not compatible with --check.")
     p_wiki_gen.add_argument("--importance-threshold", type=float, default=None,
-                            help="Min importance to count as 'core' (default 0.6).")
+                            help="Min importance to count as 'core' (default 0.55).")
     p_wiki_gen.add_argument("--exclude", default=None, metavar="REGEX",
                             help="Drop memories whose title/content matches this "
                                  "regex (e.g. to exclude private/bench notes).")
@@ -1086,6 +1097,20 @@ Examples:
     p_wiki_gen.add_argument("--obsidian", action="store_true",
                             help="Emit [[wikilinks]] so Obsidian's graph view and "
                                  "backlinks work (opt-in; literal text elsewhere).")
+    p_wiki_compile = wiki_sub.add_parser(
+        "compile",
+        help="WRITE compiled synthesis memories for topic clusters (mutates the "
+             "store; idempotent — safe to re-run). Use --dry-run to preview.")
+    p_wiki_compile.add_argument("--importance-threshold", type=float, default=None,
+                                help="Min importance to count as 'core' (default 0.55).")
+    p_wiki_compile.add_argument("--no-networkx", action="store_true",
+                                help="Force the pure-Python clustering fallback.")
+    p_wiki_compile.add_argument("--scope", default="agent",
+                                help="Tenancy scope for written syntheses (default agent).")
+    p_wiki_compile.add_argument("--user-id", default="",
+                                help="Owner user_id for written syntheses.")
+    p_wiki_compile.add_argument("--dry-run", action="store_true",
+                                help="Report what would be compiled; no model call, no write.")
     p_wiki_status = wiki_sub.add_parser("status", help="Report vault location, page count, last build.")
     p_wiki_status.add_argument("--out", default=None, help="Vault dir to inspect.")
     p_wiki.set_defaults(func=_cmd_wiki)

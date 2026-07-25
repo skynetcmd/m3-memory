@@ -64,6 +64,41 @@ def embed_backend_reachable() -> bool:
         return False
 
 
+def _llm_chat_reachable() -> bool:
+    """True iff a local OpenAI-compatible CHAT endpoint answers a real completion.
+
+    Gates `requires_llm` tests (the citation-drift judge). A bare TCP probe is not
+    enough: LM Studio accepts the connection but returns 401 without the resolved
+    token, so we do the same authenticated round-trip the judge does (token via
+    auth_utils) and require a non-empty reply. Fast-fails on any error so the suite
+    stays hermetic when no model is loaded."""
+    url = (_os.environ.get("M3_WIKI_DRIFT_URL")
+           or _os.environ.get("M3_WIKI_SYNTH_URL")
+           or "http://127.0.0.1:1234/v1/chat/completions")
+    try:
+        import httpx
+
+        sys.path.insert(0, _BIN_DIR)
+        try:
+            from auth_utils import get_api_key  # type: ignore
+            token = get_api_key("LM_API_TOKEN")
+        except Exception:
+            token = None
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        r = httpx.post(
+            url,
+            json={"messages": [{"role": "user", "content": "reply with: ok"}],
+                  "max_tokens": 5, "temperature": 0, "stream": False},
+            headers=headers, timeout=5.0,
+        )
+        r.raise_for_status()
+        return bool(r.json()["choices"][0]["message"]["content"])
+    except Exception:
+        return False
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Capability probes + gating (docs/design/TEST_SUITE_DESIGN.md)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -91,16 +126,32 @@ def pg_dsn() -> "str | None":
 def _pg_reachable() -> bool:
     """True iff a Postgres cluster answers within a short connect timeout.
     Reachability, not mere presence — the presence-only gate in the old
-    test_backend_conformance was an inconsistency this unifies away."""
+    test_backend_conformance was an inconsistency this unifies away.
+
+    The result is cached per pytest session (see the collection hook), so a SINGLE
+    transient failure here would silently skip EVERY requires_pg test for the whole
+    run — a false green. That is a real hazard when the cluster is still accepting
+    connections (CI service just started, a WSL `service postgresql start` mid-run,
+    a brief pause). So retry a few times with a short backoff before concluding
+    "not reachable": a genuinely-absent cluster still fails fast (no DSN → instant
+    False; refused connection → the retries add at most ~2s), while a momentary
+    blip no longer poisons the session's PG coverage."""
     dsn = pg_dsn()
     if not dsn:
         return False
+    import time as _time
     try:
         import psycopg2
-        psycopg2.connect(dsn, connect_timeout=3).close()
-        return True
-    except Exception:  # noqa: BLE001 — any failure = not reachable
+    except Exception:  # noqa: BLE001 — driver absent = not reachable
         return False
+    for attempt in range(3):
+        try:
+            psycopg2.connect(dsn, connect_timeout=3).close()
+            return True
+        except Exception:  # noqa: BLE001 — any failure = retry, then give up
+            if attempt < 2:
+                _time.sleep(1.0)
+    return False
 
 
 def _native_wheel_present() -> bool:
@@ -138,6 +189,8 @@ _CAPABILITY_PROBES = {
                       "no GGUF model (set M3_TEST_GGUF)"),
     "requires_files_db": (_files_db_present,
                           "shipped files_database.db absent"),
+    "requires_llm": (_llm_chat_reachable,
+                     "no reachable local chat model (set M3_WIKI_DRIFT_URL / load a model in LM Studio)"),
 }
 
 
@@ -273,6 +326,17 @@ def _restore_memory_modules():
     # memory.* namespace instead and let the next test reimport a clean,
     # consistently cross-bound set. When nothing was replaced (the common case),
     # keep the cheap restore.
+    #
+    # This heals CROSS-test leakage on teardown, but it is a safety net, not a
+    # license: DO NOT monkeypatch.setitem(sys.modules, "memory.backends", <fake>)
+    # in a test. memory.backends re-exports a `dialect` CALLABLE and also has a
+    # `dialect` SUBMODULE (same name) -- replacing the package object breaks that
+    # resolution so `from memory.backends import dialect; dialect()` binds the
+    # MODULE and raises "module object is not callable" in tests that run before
+    # this teardown fires (bit test_wiki_determinism, 2026-07-24). Use the REAL
+    # dialect() factory (defaults to SqliteDialect with no active backend) against
+    # an in-memory DB instead. See m3 memory
+    # "test-hazard-monkeypatch-memory.backends-dialect-poisons-suite".
     replaced = any(
         name in before and before[name] is not mod
         for name, mod in after.items()
@@ -731,3 +795,54 @@ def main_db_template() -> Path:
     handles the copy and is the public API.
     """
     return _get_template_db()
+
+
+# ── schema-correct row seeding (raw-SQL primitive tests) ─────────────────────
+#
+# WHY: many tests hand-write `INSERT INTO memory_items(id, title, content) ...`
+# with an ad-hoc column list. Against a lenient minimal fixture schema that
+# passes; against the REAL schema (SQLite ensure_schema / live PostgreSQL) it
+# fails a NOT NULL constraint — `type` on memory_items and the `id` PK on
+# memory_embeddings are required. That drift bit test_backend_conformance and
+# test_postgres_backend_live on PG (2026-07-24). These helpers are the ONE place
+# that knows the required columns, so a raw-SQL primitive test (one that must
+# stay below the seam to exercise keyword/vector/CAS native paths) can seed a
+# schema-VALID row on either backend without re-listing columns and drifting.
+#
+# NOTE: this is for tests that legitimately bypass the seam. A test that just
+# needs a row to EXIST (not exercise a primitive) should write through the seam
+# (`memory_write_impl`) instead — that path supplies every column itself and is
+# what production uses.
+
+def seed_memory_row(conn, dialect, *, mid, type="note", title="", content="",
+                    importance=0.5, confidence=None, pinned=0, user_id="",
+                    scope="agent"):
+    """Insert ONE schema-valid memory_items row via raw SQL, supplying every
+    NOT NULL column the real schema requires. `dialect` is the active seam
+    dialect (for the placeholder + now()). Returns `mid`."""
+    p = dialect.param()
+    conn.execute(
+        f"INSERT INTO memory_items "
+        f"(id, type, title, content, importance, confidence, pinned, is_deleted, "
+        f" user_id, scope, valid_from, created_at, updated_at) "
+        f"VALUES ({p},{p},{p},{p},{p},{p},{p},0,{p},{p},{dialect.now()},"
+        f"{dialect.now()},{dialect.now()})",
+        (mid, type, title, content, importance, confidence, pinned,
+         user_id, scope),
+    )
+    return mid
+
+
+def seed_embedding_row(conn, dialect, *, mid, embedding, dim, embed_model,
+                       emb_id=None):
+    """Insert ONE schema-valid memory_embeddings row (supplies the NOT NULL `id`
+    PK, which hand-written fixtures routinely omit). Returns the embedding id."""
+    p = dialect.param()
+    eid = emb_id or f"emb-{mid}"
+    conn.execute(
+        f"INSERT INTO memory_embeddings "
+        f"(id, memory_id, embedding, dim, embed_model) "
+        f"VALUES ({p},{p},{p},{p},{p})",
+        (eid, mid, embedding, dim, embed_model),
+    )
+    return eid

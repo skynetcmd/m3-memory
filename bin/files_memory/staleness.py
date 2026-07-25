@@ -26,6 +26,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Optional
 
+from .config import files_table
 from .db import _db
 from .identity import file_content_sha256, file_content_sha256_batch
 
@@ -153,24 +154,26 @@ def files_staleness_review(
     t0 = time.perf_counter()
     report = StalenessReport(directory=directory, corpus_id=corpus_id)
 
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+        # seam yields name-addressable rows on both backends (no sqlite3.Row).
 
         # 1. Load current file_nodes scoped by corpus + directory.
         sql_parts = [
-            "SELECT uuid, path_absolute, identity_key, content_sha256, "
-            "       date_modified, version_label, "
-            "       (SELECT MAX(ingest_date) FROM ingestion_runs "
-            "        WHERE file_node = fn.uuid) AS last_ingest_date "
-            "FROM file_nodes fn "
-            "WHERE superseded_by IS NULL"
+            f"SELECT uuid, path_absolute, identity_key, content_sha256, "
+            f"       date_modified, version_label, "
+            f"       (SELECT MAX(ingest_date) FROM {files_table('ingestion_runs')} "
+            f"        WHERE file_node = fn.uuid) AS last_ingest_date "
+            f"FROM {files_table('file_nodes')} fn "
+            f"WHERE superseded_by IS NULL"
         ]
         params: list = []
         if corpus_id:
-            sql_parts.append("AND corpus_id = ?")
+            sql_parts.append(f"AND corpus_id = {_p}")
             params.append(corpus_id)
         if directory:
-            sql_parts.append("AND path_absolute LIKE ?")
+            sql_parts.append(f"AND path_absolute LIKE {_p}")
             params.append(os.path.abspath(directory).replace("%", "[%]") + "%")
         db_rows = conn.execute(" ".join(sql_parts), params).fetchall()
         report.scanned_db_files = len(db_rows)
@@ -297,23 +300,23 @@ def files_staleness_review(
         # 5. Failed extractions.
         if include_failed_extraction:
             sql = (
-                "SELECT fn.uuid, fn.path_absolute, "
-                "       COUNT(*) AS failed_count, "
-                "       (SELECT COUNT(*) FROM leaves WHERE file_node = fn.uuid) AS total_count, "
-                "       (SELECT error FROM extraction_attempts ea "
-                "        WHERE ea.leaf_uuid = l.uuid AND ea.status = 'failed' "
-                "        ORDER BY attempted_at DESC LIMIT 1) AS last_error "
-                "FROM leaves l "
-                "JOIN file_nodes fn ON fn.uuid = l.file_node "
-                "WHERE l.extraction_status = 'failed' "
-                "  AND fn.superseded_by IS NULL "
+                f"SELECT fn.uuid, fn.path_absolute, "
+                f"       COUNT(*) AS failed_count, "
+                f"       (SELECT COUNT(*) FROM {files_table('leaves')} WHERE file_node = fn.uuid) AS total_count, "
+                f"       (SELECT error FROM {files_table('extraction_attempts')} ea "
+                f"        WHERE ea.leaf_uuid = l.uuid AND ea.status = 'failed' "
+                f"        ORDER BY attempted_at DESC LIMIT 1) AS last_error "
+                f"FROM {files_table('leaves')} l "
+                f"JOIN {files_table('file_nodes')} fn ON fn.uuid = l.file_node "
+                f"WHERE l.extraction_status = 'failed' "
+                f"  AND fn.superseded_by IS NULL "
             )
             extra_params: list = []
             if corpus_id:
-                sql += "  AND fn.corpus_id = ? "
+                sql += f"  AND fn.corpus_id = {_p} "
                 extra_params.append(corpus_id)
             if directory:
-                sql += "  AND fn.path_absolute LIKE ? "
+                sql += f"  AND fn.path_absolute LIKE {_p} "
                 extra_params.append(os.path.abspath(directory).replace("%", "[%]") + "%")
             sql += "GROUP BY fn.uuid, fn.path_absolute"
             for r in conn.execute(sql, extra_params).fetchall():
@@ -328,15 +331,15 @@ def files_staleness_review(
         # 6. Drifted promotions (source superseded after promotion).
         if include_drifted_promotions:
             sql = (
-                "SELECT pm.uuid AS marker_uuid, pm.promoted_to, pm.source_memory, "
-                "       pm.reason, fn.path_absolute, fn.superseded_at "
-                "FROM promotion_markers pm "
-                "JOIN file_nodes fn ON ( "
-                "    fn.uuid = pm.source_memory "
-                "    OR fn.uuid = (SELECT file_node FROM facts WHERE uuid = pm.source_memory) "
-                "    OR fn.uuid = (SELECT file_node FROM leaves WHERE uuid = pm.source_memory) "
-                ") "
-                "WHERE fn.superseded_by IS NOT NULL"
+                f"SELECT pm.uuid AS marker_uuid, pm.promoted_to, pm.source_memory, "
+                f"       pm.reason, fn.path_absolute, fn.superseded_at "
+                f"FROM {files_table('promotion_markers')} pm "
+                f"JOIN {files_table('file_nodes')} fn ON ( "
+                f"    fn.uuid = pm.source_memory "
+                f"    OR fn.uuid = (SELECT file_node FROM {files_table('facts')} WHERE uuid = pm.source_memory) "
+                f"    OR fn.uuid = (SELECT file_node FROM {files_table('leaves')} WHERE uuid = pm.source_memory) "
+                f") "
+                f"WHERE fn.superseded_by IS NOT NULL"
             )
             for r in conn.execute(sql).fetchall():
                 report.drifted_promotions.append(DriftedPromotion(
@@ -356,7 +359,7 @@ def files_staleness_review(
             missing_by_sha: dict[str, MissingFile] = {}
             for m in report.missing:
                 row = conn.execute(
-                    "SELECT content_sha256 FROM file_nodes WHERE uuid = ?",
+                    f"SELECT content_sha256 FROM {files_table('file_nodes')} WHERE uuid = {_p}",
                     (m.file_node_uuid,),
                 ).fetchone()
                 if row:
@@ -418,11 +421,13 @@ def link_rename(
             f"sha mismatch: expected {expect_sha256!r}, got {actual_sha!r}"
         )
 
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+        # seam yields name-addressable rows on both backends (no sqlite3.Row).
         row = conn.execute(
-            "SELECT uuid, path_absolute, content_sha256, paths_seen, metadata "
-            "FROM file_nodes WHERE uuid = ?",
+            f"SELECT uuid, path_absolute, content_sha256, paths_seen, metadata "
+            f"FROM {files_table('file_nodes')} WHERE uuid = {_p}",
             (missing_file_node_uuid,),
         ).fetchone()
         if row is None:
@@ -465,8 +470,8 @@ def link_rename(
         md["rename_history"] = renames
 
         conn.execute(
-            "UPDATE file_nodes SET path_absolute = ?, paths_seen = ?, metadata = ? "
-            "WHERE uuid = ?",
+            f"UPDATE {files_table('file_nodes')} SET path_absolute = {_p}, paths_seen = {_p}, metadata = {_p} "
+            f"WHERE uuid = {_p}",
             (new_abs, _json.dumps(paths_seen), _json.dumps(md), missing_file_node_uuid),
         )
 
@@ -478,17 +483,19 @@ def link_rename(
     }
 
 
-def _fact_and_promotion_counts(conn: sqlite3.Connection, file_node_uuid: str) -> tuple[int, int]:
+def _fact_and_promotion_counts(conn, file_node_uuid: str) -> tuple[int, int]:
     """Return (fact_count, promoted_count) for a file_node."""
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     facts = conn.execute(
-        "SELECT COUNT(*) FROM facts WHERE file_node = ?", (file_node_uuid,),
+        f"SELECT COUNT(*) FROM {files_table('facts')} WHERE file_node = {_p}", (file_node_uuid,),
     ).fetchone()[0]
     # Promoted = anything in promotion_markers whose source is owned by this file_node.
     promoted = conn.execute(
-        "SELECT COUNT(*) FROM promotion_markers pm "
-        "WHERE pm.source_memory = ? "
-        "   OR pm.source_memory IN (SELECT uuid FROM leaves WHERE file_node = ?) "
-        "   OR pm.source_memory IN (SELECT uuid FROM facts WHERE file_node = ?)",
+        f"SELECT COUNT(*) FROM {files_table('promotion_markers')} pm "
+        f"WHERE pm.source_memory = {_p} "
+        f"   OR pm.source_memory IN (SELECT uuid FROM {files_table('leaves')} WHERE file_node = {_p}) "
+        f"   OR pm.source_memory IN (SELECT uuid FROM {files_table('facts')} WHERE file_node = {_p})",
         (file_node_uuid, file_node_uuid, file_node_uuid),
     ).fetchone()[0]
     return (facts, promoted)

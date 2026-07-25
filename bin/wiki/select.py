@@ -7,7 +7,7 @@ determinism test can drive it from a fixture DB.
 The "core set" is m3's three overlapping notions of a canonical memory:
     pinned = 1          — explicit "this is canon, never age it out"
     importance >= tau   — high-ranked
-    type in (belief, procedure, reference)
+    type in (belief, procedure, reference, synthesis)
                         — already-consolidated distillations / curated refs
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import Optional
 
 # Memory types that are themselves distillations / curated references, so they
 # belong in the wiki regardless of importance.
-CORE_TYPES = ("belief", "procedure", "reference")
+CORE_TYPES = ("belief", "procedure", "reference", "synthesis")
 
 # memory_relationships types, weighted for clustering. Higher = pulls harder
 # toward "same topic page". `contradicts` is special: keep the two memories on
@@ -48,6 +48,67 @@ ENTITY_COMENTION_WEIGHT = 1.0
 # Skip it when building co-mention edges.
 ENTITY_MAX_DEGREE = 8
 
+# Entity TYPES that are non-discriminative for topic co-mention: they appear
+# across unrelated topics and bridge them into one blob (a date, a file path, an
+# env var, a port, a branch name, a generic module/table). Two memories sharing
+# only "2026-04-10" or "pyproject.toml" or "M3_ENGINE_ROOT" are NOT about the same
+# thing. Excluding these from co-mention is what keeps clusters coherent — a much
+# sharper lever than lowering ENTITY_MAX_DEGREE (which would also drop the GOOD
+# links from discriminative entities like a person, benchmark, model, or device).
+# (Measured 2026-07-24: file_path/datetime/env_var/port/commit_or_branch were the
+# top mergers that fused 40 unrelated notes into one "debugging" cluster.)
+NON_DISCRIMINATIVE_ENTITY_TYPES = frozenset({
+    # Structural / temporal noise — appear everywhere.
+    "datetime", "file_path", "env_var", "port", "commit_or_branch",
+    "module", "class_or_table", "memory_type", "task_id", "task_category",
+    "bench_run_id", "migration", "mac_address", "memory_id",
+    # Infrastructure addressing — a host/container/IP/VLAN/endpoint is shared by
+    # every note that happens to touch that box, across unrelated topics.
+    "host", "container", "ip_address", "vlan", "endpoint_url", "service",
+    "protocol",
+    # Model/tool names are too generic: "Opus", "gpt-4o-mini", "bge-m3" co-occur
+    # across bench, infra, and feature notes alike. (Discriminative entities that
+    # SURVIVE and rightly co-locate: person, benchmark, organization, metric.)
+    "model", "variant", "device",
+})
+
+# Self-referential entity VALUES: the project's own name / repo / org identifiers.
+# Type alone can't catch these — "skynetcmd/m3-memory" is an `organization`, and
+# real external orgs of that type (Technitium, Mem0, PyPI) ARE discriminative and
+# must survive. But the project's own repo/org means "this is an m3 note", not
+# "this is about X", so it bridges everything. A VALUE-level exclusion, config-
+# overridable per deployment (a different project has a different name).
+# (Measured 2026-07-24: `skynetcmd/m3-memory` [org] + `m3-memory` [org] were the
+# last bridges fusing a release note into the debugging cluster.)
+_SELF_REF_CONFIG_BASENAME = ".wiki_self_entities.json"
+_DEFAULT_SELF_REF_NAMES = frozenset({
+    "m3-memory", "skynetcmd/m3-memory", "skynetcmd", "skynetCMD", "m3", "M3",
+})
+
+
+def _self_ref_names() -> "frozenset[str]":
+    """Project self-reference entity names to exclude from co-mention. Default set
+    plus an optional config file at M3_CONFIG_ROOT/.wiki_self_entities.json
+    (`{"self_entities": ["myproj", "org/repo"]}`). Case-insensitive match. Config
+    is a code-resolved FILE, not an env var (§3: headless launchers inherit no
+    shell env). Malformed/absent → the default. Cached per config path."""
+    import json as _json
+    import os as _os
+    root = (_os.environ.get("M3_CONFIG_ROOT")
+            or (_os.path.join(_os.environ["M3_MEMORY_ROOT"], "config")
+                if _os.environ.get("M3_MEMORY_ROOT") else None)
+            or _os.path.join(_os.path.expanduser("~"), ".m3", "config"))
+    path = _os.path.join(root, _SELF_REF_CONFIG_BASENAME)
+    names = set(_DEFAULT_SELF_REF_NAMES)
+    try:
+        if _os.path.isfile(path):
+            extra = _json.load(open(path, encoding="utf-8")).get("self_entities")
+            if isinstance(extra, list):
+                names.update(str(x) for x in extra)
+    except Exception:
+        pass  # config problems never break clustering
+    return frozenset(n.lower() for n in names)
+
 
 @dataclass
 class Mem:
@@ -63,6 +124,11 @@ class Mem:
     pinned: int
     created_at: Optional[str]
     updated_at: Optional[str]
+    # Parsed metadata_json (already a dict via the seam's json_column_to_dict, so
+    # a Postgres JSONB dict and a SQLite TEXT string both normalize here). Empty
+    # dict when the column is absent or unparseable — never None, so callers need
+    # no nil-check (§3 empty=zero, never None).
+    metadata: dict = field(default_factory=dict)
 
     @property
     def display_title(self) -> str:
@@ -123,6 +189,51 @@ def _param() -> str:
         return "?"
 
 
+def _json_column_to_dict(value) -> dict:
+    """Normalize a fetched JSON column to a dict via the backend seam.
+
+    Routes through dialect.json_column_to_dict so a Postgres JSONB dict and a
+    SQLite TEXT string both work — never a bare json.loads(), which TypeErrors on
+    a pre-parsed JSONB dict. Falls back to a local safe parse only when the seam
+    isn't importable (a standalone sqlite fixture), matching _param()'s pattern.
+    Fails safe: anything unparseable / non-object yields {}.
+    """
+    try:
+        from memory.backends import dialect
+    except ImportError:
+        # Seam not importable — a standalone sqlite fixture, definitionally TEXT.
+        # Degrade with the SAME fail-safe contract the seam guarantees. Not a
+        # backend branch: there is no backend here, only a raw sqlite column.
+        return _local_json_to_dict(value)
+    return dialect().json_column_to_dict(value)
+
+
+def _local_json_to_dict(value) -> dict:
+    """Fallback parse for when the backend seam isn't importable. Mirrors the
+    seam's fail-safe contract: None/empty/malformed/non-object → {}."""
+    if value is None or value == "" or value == b"":
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        import json as _json
+        if isinstance(value, (bytes, bytearray)):
+            value = value.decode("utf-8")
+        parsed = _json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _row_get(row, key):
+    """Column value by name across a sqlite3.Row (dict-like) and a seam row, or
+    None if the column is absent (e.g. the NULL AS ... alias on an older schema)."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
+
+
 def _set_dict_rows(conn) -> None:
     """Ensure column access by name works. On a raw sqlite3 connection we set the
     Row factory; on a backend-seam connection (PostgreSQL) rows already support
@@ -158,10 +269,19 @@ def _has_column(conn, table: str, column: str) -> bool:
             return False
 
 
+# Default core-memory importance floor. 0.55 splits the difference between 0.6
+# (maximally clean but leaves ~300 high-value memories orphaned) and 0.5 (broad
+# coverage but admits weak clusters). At 0.55 the admission gate (wiki.admission)
+# demotes the two thin-provenance pages that would otherwise appear, bringing it
+# to 0-low-anchor parity with 0.6 while keeping the extra coverage. Swept on the
+# live 3,337-memory corpus 2026-07-24; see wiki.admission for the gate calibration.
+DEFAULT_IMPORTANCE_THRESHOLD = 0.55
+
+
 def select_core_memories(
     conn: sqlite3.Connection,
     *,
-    importance_threshold: float = 0.6,
+    importance_threshold: float = DEFAULT_IMPORTANCE_THRESHOLD,
     limit: int = 5000,
     exclude_regex: Optional[str] = None,
 ) -> list[Mem]:
@@ -180,11 +300,13 @@ def select_core_memories(
     has_pinned = _has_column(conn, "memory_items", "pinned")
     has_conf = _has_column(conn, "memory_items", "confidence")
     has_valid = _has_column(conn, "memory_items", "valid_from")
+    has_meta = _has_column(conn, "memory_items", "metadata_json")
 
     pinned_sel = "pinned" if has_pinned else "0 AS pinned"
     conf_sel = "confidence" if has_conf else "NULL AS confidence"
     vfrom_sel = "valid_from" if has_valid else "NULL AS valid_from"
     vto_sel = "valid_to" if has_valid else "NULL AS valid_to"
+    meta_sel = "metadata_json" if has_meta else "NULL AS metadata_json"
 
     p = _param()  # backend placeholder: '?' (SQLite) or '%s' (PostgreSQL)
     type_placeholders = ",".join([p] * len(CORE_TYPES))
@@ -199,7 +321,8 @@ def select_core_memories(
 
     sql = (
         f"SELECT id, type, title, content, importance, {conf_sel}, "
-        f"       {vfrom_sel}, {vto_sel}, {pinned_sel}, created_at, updated_at "
+        f"       {vfrom_sel}, {vto_sel}, {pinned_sel}, created_at, updated_at, "
+        f"       {meta_sel} "
         f"FROM memory_items WHERE {where_sql} "
         f"ORDER BY id LIMIT {p}"
     )
@@ -210,6 +333,7 @@ def select_core_memories(
 
     _set_dict_rows(conn)
     rows = conn.execute(sql, params).fetchall()
+    _to_dict = _json_column_to_dict  # bind once (seam lookup is cached inside)
     out: list[Mem] = []
     for r in rows:
         if _excl is not None:
@@ -229,6 +353,7 @@ def select_core_memories(
                 pinned=int(r["pinned"] or 0),
                 created_at=r["created_at"],
                 updated_at=r["updated_at"],
+                metadata=_to_dict(_row_get(r, "metadata_json")),
             )
         )
     out.sort(key=lambda m: m.rank_key())
@@ -278,12 +403,31 @@ def load_entity_comention_edges(conn: sqlite3.Connection, ids: set[str]) -> list
         "SELECT entity_id, memory_id FROM memory_item_entities"
     ).fetchall()
 
+    # Non-discriminative entity types (dates, file paths, env vars, …) bridge
+    # unrelated topics, so drop their entities from co-mention. Load the type map
+    # if the entities table is present; if it isn't, degrade to no filtering
+    # (behaviour unchanged on a DB without the entity catalog).
+    excluded_ids: set[str] = set()
+    if _has_column(conn, "entities", "entity_type"):
+        self_names = _self_ref_names()
+        has_name = _has_column(conn, "entities", "canonical_name")
+        cols = "id, entity_type" + (", canonical_name" if has_name else "")
+        for er in conn.execute(f"SELECT {cols} FROM entities").fetchall():
+            # (a) non-discriminative TYPE, or (b) a self-referential project name.
+            if er["entity_type"] in NON_DISCRIMINATIVE_ENTITY_TYPES:
+                excluded_ids.add(er["id"])
+            elif has_name and (er["canonical_name"] or "").lower() in self_names:
+                excluded_ids.add(er["id"])
+
     # entity_id -> sorted list of core memory ids that mention it
     by_entity: dict[str, list[str]] = {}
     for r in rows:
+        eid = r["entity_id"]
+        if eid in excluded_ids:
+            continue  # non-discriminative type — no cross-topic bridge
         mid = r["memory_id"]
         if mid in ids:
-            by_entity.setdefault(r["entity_id"], []).append(mid)
+            by_entity.setdefault(eid, []).append(mid)
 
     pair_seen: set[tuple[str, str]] = set()
     edges: list[Edge] = []
@@ -303,21 +447,31 @@ def load_entity_comention_edges(conn: sqlite3.Connection, ids: set[str]) -> list
     return edges
 
 
-def load_promotions(files_conn: sqlite3.Connection, memory_ids: set[str]) -> list[Promo]:
+def load_promotions(files_conn, memory_ids: set[str]) -> list[Promo]:
     """Load promotion_markers whose target memory is in the core set.
 
     This is the cross-DB bridge: files-DB fact/leaf/summary -> memory row. Only
     keep markers pointing at a core memory (so Evidence links resolve). Sorted.
+
+    Backend-agnostic (like wiki.files_layer): reads the SQLite sidecar OR the PG
+    `files` schema via files_table()-qualified names — so the wiki's Evidence links
+    resolve on a PostgreSQL deployment too, not just SQLite.
     """
-    files_conn.row_factory = sqlite3.Row
+    from files_memory.config import files_table
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    if isinstance(files_conn, sqlite3.Connection):
+        files_conn.row_factory = sqlite3.Row
     try:
         rows = files_conn.execute(
-            "SELECT uuid, promoted_to, source_memory, source_memory_type "
-            "FROM promotion_markers"
+            f"SELECT uuid, promoted_to, source_memory, source_memory_type "
+            f"FROM {files_table('promotion_markers')}"
         ).fetchall()
-    except sqlite3.OperationalError:
-        # files DB may predate promotion_markers; degrade gracefully.
-        return []
+    except Exception as e:
+        # files store may predate promotion_markers; degrade gracefully.
+        if _d.is_undefined_object_error(e) or isinstance(e, sqlite3.OperationalError):
+            return []
+        raise
 
     # Enrich with filename/source_path via the source item where possible.
     out: list[Promo] = []
@@ -340,29 +494,38 @@ def load_promotions(files_conn: sqlite3.Connection, memory_ids: set[str]) -> lis
 
 
 def _resolve_source_file(
-    conn: sqlite3.Connection, source_uuid: str, source_type: str
+    conn, source_uuid: str, source_type: str
 ) -> tuple[Optional[str], Optional[str]]:
-    """Best-effort filename + path for a promoted files-DB item."""
+    """Best-effort filename + path for a promoted files-store item. Backend-agnostic
+    (files_table()-qualified names + dialect placeholder); positional row access, so
+    no row_factory needed."""
+    from files_memory.config import files_table
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
+    _fn = files_table("file_nodes")
     try:
         if source_type == "fact":
             row = conn.execute(
-                "SELECT fn.filename, fn.path_absolute FROM facts f "
-                "JOIN file_nodes fn ON fn.uuid = f.file_node WHERE f.uuid = ?",
+                f"SELECT fn.filename, fn.path_absolute FROM {files_table('facts')} f "
+                f"JOIN {_fn} fn ON fn.uuid = f.file_node WHERE f.uuid = {_p}",
                 (source_uuid,),
             ).fetchone()
         elif source_type == "leaf":
             row = conn.execute(
-                "SELECT fn.filename, fn.path_absolute FROM leaves l "
-                "JOIN file_nodes fn ON fn.uuid = l.file_node WHERE l.uuid = ?",
+                f"SELECT fn.filename, fn.path_absolute FROM {files_table('leaves')} l "
+                f"JOIN {_fn} fn ON fn.uuid = l.file_node WHERE l.uuid = {_p}",
                 (source_uuid,),
             ).fetchone()
         else:  # file_summary → source_uuid is the file_node
             row = conn.execute(
-                "SELECT filename, path_absolute FROM file_nodes WHERE uuid = ?",
+                f"SELECT filename, path_absolute FROM {_fn} WHERE uuid = {_p}",
                 (source_uuid,),
             ).fetchone()
-    except sqlite3.OperationalError:
-        return (None, None)
+    except Exception as e:
+        if _d.is_undefined_object_error(e) or isinstance(e, sqlite3.OperationalError):
+            return (None, None)
+        raise
     if not row:
         return (None, None)
     return (row[0], row[1])

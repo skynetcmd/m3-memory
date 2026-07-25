@@ -25,6 +25,34 @@ SCHEMA_VERSION: int = 3
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# PG schema namespace for the files store
+# ──────────────────────────────────────────────────────────────────────────────
+# On PostgreSQL the files store is a SCHEMA namespace inside the ONE primary
+# database (single DSN), not a separate database — so its tables are qualified
+# `files.<table>`. On SQLite it stays a separate physical file (files_database.db)
+# and the name is bare. `files_table()` is the single place that difference is
+# expressed; every files-store SQL statement routes table names through it so
+# schema separation is STRUCTURAL (no `search_path` juggling — a pooled PG
+# connection can freely touch both `public` and `files` tables with no reset).
+FILES_SCHEMA: str = "files"
+
+
+def files_table(name: str) -> str:
+    """Return the files-store table reference for the ACTIVE backend.
+
+    SQLite  -> ``name``          (separate DB file; no schema)
+    Postgres-> ``files.name``    (schema namespace in the primary DB)
+
+    Thin wrapper over ``dialect().qualified_table(name, schema=FILES_SCHEMA)`` so
+    call sites read ``files_table("leaves")`` instead of repeating the schema
+    argument. Resolved per call against the active dialect, so the same code path
+    is correct whichever backend is active.
+    """
+    from memory.backends import dialect as _dialect
+    return _dialect().qualified_table(name, schema=FILES_SCHEMA)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Ingestion knobs (env-driven, sane defaults)
 # ──────────────────────────────────────────────────────────────────────────────
 

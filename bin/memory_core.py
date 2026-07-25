@@ -383,12 +383,14 @@ def __dir__() -> list[str]:
 async def conversation_summarize_impl(conversation_id: str, threshold: int = 20) -> str:
     """Summarizes a conversation into key points using the local LLM."""
     # 1. Fetch all messages for the conversation
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db() as db:
         rows = db.execute(
-            """SELECT mi.title AS role, mi.content
+            f"""SELECT mi.title AS role, mi.content
                FROM memory_relationships mr
                JOIN memory_items mi ON mr.to_id = mi.id
-               WHERE mr.from_id = ? AND mr.relationship_type = 'message' AND mi.is_deleted = 0
+               WHERE mr.from_id = {_p} AND mr.relationship_type = 'message' AND mi.is_deleted = 0
                ORDER BY mi.created_at ASC""",
             (conversation_id,)
         ).fetchall()
@@ -432,9 +434,11 @@ async def conversation_summarize_impl(conversation_id: str, threshold: int = 20)
     # 5. Store the summary as a new memory item
     summary_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db() as db:
         db.execute(
-            "INSERT INTO memory_items (id, type, title, content, created_at, content_hash) VALUES (?, 'summary', ?, ?, ?, ?)",
+            f"INSERT INTO memory_items (id, type, title, content, created_at, content_hash) VALUES ({_p}, 'summary', {_p}, {_p}, {_p}, {_p})",
             (summary_id, f"Summary of {conversation_id[:8]}", summary_text, now, _content_hash(summary_text))
         )
 
@@ -756,16 +760,21 @@ def memory_get_impl(id):
     # to be clever about other prefix lengths because the index only
     # covers SUBSTR(id,1,8).
     ident = (id or "").strip()
+    # Backend-portable placeholder: '?' on SQLite, '%s' on PostgreSQL. A hardcoded
+    # '?' raises a SyntaxError on PG ("syntax error at end of input"), so this read
+    # primitive must go through the dialect like every other seam query.
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     if len(ident) == 36:
         with _db() as db:
-            row = db.execute("SELECT * FROM memory_items WHERE id = ?", (ident,)).fetchone()
+            row = db.execute(f"SELECT * FROM memory_items WHERE id = {_p}", (ident,)).fetchone()
             if not row:
                 return "Error: not found"
         return json.dumps(dict(row), indent=2, default=str)
     if len(ident) == 8:
         with _db() as db:
             rows = db.execute(
-                "SELECT * FROM memory_items WHERE SUBSTR(id,1,8) = ?",
+                f"SELECT * FROM memory_items WHERE SUBSTR(id,1,8) = {_p}",
                 (ident,),
             ).fetchall()
             if not rows:
@@ -778,8 +787,10 @@ def memory_get_impl(id):
 
 def memory_verify_impl(memory_id: str) -> str:
     """Verify content integrity by comparing stored hash with computed hash."""
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db() as db:
-        row = db.execute("SELECT content, content_hash FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
+        row = db.execute(f"SELECT content, content_hash FROM memory_items WHERE id = {_p}", (memory_id,)).fetchone()
         if not row:
             return f"Error: memory {memory_id} not found"
         stored_hash = row["content_hash"] or ""
@@ -807,41 +818,43 @@ async def memory_update_impl(id, content="", title="", metadata="", importance=-
         importance = float(importance)
     except (TypeError, ValueError):
         importance = -1.0
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db() as db:
         # Read old values for audit trail
         old = db.execute(
-            "SELECT content, title, refresh_on, refresh_reason, conversation_id FROM memory_items WHERE id = ?",
+            f"SELECT content, title, refresh_on, refresh_reason, conversation_id FROM memory_items WHERE id = {_p}",
             (id,)
         ).fetchone()
         if content:
             _record_history(id, "update", old["content"] if old else None, content, "content", db=db)
-            db.execute("UPDATE memory_items SET content = ? WHERE id = ?", (content, id))
+            db.execute(f"UPDATE memory_items SET content = {_p} WHERE id = {_p}", (content, id))
         if title:
             _record_history(id, "update", old["title"] if old else None, title, "title", db=db)
-            db.execute("UPDATE memory_items SET title = ? WHERE id = ?", (title, id))
-        if importance >= 0: db.execute("UPDATE memory_items SET importance = ? WHERE id = ?", (importance, id))
-        if metadata: db.execute("UPDATE memory_items SET metadata_json = ? WHERE id = ?", (metadata, id))
+            db.execute(f"UPDATE memory_items SET title = {_p} WHERE id = {_p}", (title, id))
+        if importance >= 0: db.execute(f"UPDATE memory_items SET importance = {_p} WHERE id = {_p}", (importance, id))
+        if metadata: db.execute(f"UPDATE memory_items SET metadata_json = {_p} WHERE id = {_p}", (metadata, id))
         # Refresh lifecycle: empty string leaves unchanged, "clear" clears, anything
         # else is treated as a new ISO timestamp. Using the explicit sentinel "clear"
         # lets callers distinguish "no change" from "mark as refreshed, remove reminder".
         if refresh_on:
             new_val = None if refresh_on == "clear" else refresh_on
             _record_history(id, "update", old["refresh_on"] if old else None, new_val, "refresh_on", db=db)
-            db.execute("UPDATE memory_items SET refresh_on = ? WHERE id = ?", (new_val, id))
+            db.execute(f"UPDATE memory_items SET refresh_on = {_p} WHERE id = {_p}", (new_val, id))
         if refresh_reason:
             new_val = None if refresh_reason == "clear" else refresh_reason
             _record_history(id, "update", old["refresh_reason"] if old else None, new_val, "refresh_reason", db=db)
-            db.execute("UPDATE memory_items SET refresh_reason = ? WHERE id = ?", (new_val, id))
+            db.execute(f"UPDATE memory_items SET refresh_reason = {_p} WHERE id = {_p}", (new_val, id))
         if conversation_id:
             new_val = None if conversation_id == "clear" else conversation_id
             _record_history(id, "update", old["conversation_id"] if old else None, new_val, "conversation_id", db=db)
-            db.execute("UPDATE memory_items SET conversation_id = ? WHERE id = ?", (new_val, id))
-        db.execute("UPDATE memory_items SET updated_at = ? WHERE id = ?", (now, id))
+            db.execute(f"UPDATE memory_items SET conversation_id = {_p} WHERE id = {_p}", (new_val, id))
+        db.execute(f"UPDATE memory_items SET updated_at = {_p} WHERE id = {_p}", (now, id))
     if reembed and content:
         vec, m = await _embed(content)
         if vec:
             with _db() as db:
-                db.execute("UPDATE memory_embeddings SET embedding = ?, embed_model = ? WHERE memory_id = ?", (_pack(vec), m, id))
+                db.execute(f"UPDATE memory_embeddings SET embedding = {_p}, embed_model = {_p} WHERE memory_id = {_p}", (_pack(vec), m, id))
     return f"Updated: {id}"
 
 
@@ -853,8 +866,9 @@ def _resolve_pin_id(db, ident: str) -> str:
     if len(ident) == 36:
         return ident
     if len(ident) == 8:
+        from memory.backends import dialect as _dialect
         rows = db.execute(
-            "SELECT id FROM memory_items WHERE SUBSTR(id,1,8) = ?", (ident,)
+            f"SELECT id FROM memory_items WHERE SUBSTR(id,1,8) = {_dialect().param()}", (ident,)
         ).fetchall()
         if not rows:
             raise ValueError(f"Error: no memory with id {ident}")
@@ -876,7 +890,9 @@ def _set_pinned(id, val) -> str:
             full_id = _resolve_pin_id(db, id)
         except ValueError as e:
             return str(e)
-        cur = db.execute("UPDATE memory_items SET pinned = ? WHERE id = ?", (val, full_id))
+        from memory.backends import dialect as _dialect
+        _p = _dialect().param()
+        cur = db.execute(f"UPDATE memory_items SET pinned = {_p} WHERE id = {_p}", (val, full_id))
         if cur.rowcount == 0:
             return f"Error: no memory with id {id}"
     return f"{'Pinned' if val else 'Unpinned'}: {full_id}"
@@ -896,17 +912,19 @@ def memory_unpin_impl(id: str) -> str:
 
 def memory_delete_impl(id, hard=False):
     """Deletes a MemoryItem (soft or hard). Implements cascade for hard delete (C5)."""
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db() as db:
-        row = db.execute("SELECT id, content FROM memory_items WHERE id = ?", (id,)).fetchone()
+        row = db.execute(f"SELECT id, content FROM memory_items WHERE id = {_p}", (id,)).fetchone()
         if not row:
             return f"Error: item {id} not found"
         _record_history(id, "delete", row["content"], None, "content", db=db)
         if hard:
-            db.execute("DELETE FROM memory_embeddings WHERE memory_id = ?", (id,))
-            db.execute("DELETE FROM memory_relationships WHERE from_id = ? OR to_id = ?", (id, id))
-            db.execute("DELETE FROM memory_items WHERE id = ?", (id,))
+            db.execute(f"DELETE FROM memory_embeddings WHERE memory_id = {_p}", (id,))
+            db.execute(f"DELETE FROM memory_relationships WHERE from_id = {_p} OR to_id = {_p}", (id, id))
+            db.execute(f"DELETE FROM memory_items WHERE id = {_p}", (id,))
         else:
-            db.execute("UPDATE memory_items SET is_deleted = 1, updated_at = ? WHERE id = ?",
+            db.execute(f"UPDATE memory_items SET is_deleted = 1, updated_at = {_p} WHERE id = {_p}",
                        (datetime.now(timezone.utc).isoformat(), id))
     try:
         from audit_trail import write_audit_entry
@@ -1319,20 +1337,23 @@ def memory_link_bulk_impl(links, relationship_type: str = "related"):
 
 
 def _memory_link_inner(from_id: str, to_id: str, relationship_type: str, db) -> str:
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     # Verify both items exist
     for mid in (from_id, to_id):
-        if not db.execute("SELECT id FROM memory_items WHERE id = ?", (mid,)).fetchone():
+        if not db.execute(f"SELECT id FROM memory_items WHERE id = {_p}", (mid,)).fetchone():
             return f"Error: memory {mid} not found"
     # Check for duplicate link
     existing = db.execute(
-        "SELECT id FROM memory_relationships WHERE from_id = ? AND to_id = ? AND relationship_type = ?",
+        f"SELECT id FROM memory_relationships WHERE from_id = {_p} AND to_id = {_p} AND relationship_type = {_p}",
         (from_id, to_id, relationship_type)
     ).fetchone()
     if existing:
         return f"Link already exists: {existing['id']}"
     rid = str(uuid.uuid4())
     db.execute(
-        "INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
+        f"INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES ({_d.placeholder(5)})",
         (rid, from_id, to_id, relationship_type, datetime.now(timezone.utc).isoformat())
     )
     return f"Linked: {from_id} --[{relationship_type}]--> {to_id} (id: {rid})"
@@ -1355,14 +1376,16 @@ def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
     now = datetime.now(timezone.utc).isoformat()
 
     # 2. Insert handoff memory directly via raw SQL
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db() as db:
         meta = {"from_agent": from_agent, "note": note}
         if task_id:
             meta["task_id"] = task_id
         metadata_json = json.dumps(meta)
         db.execute(
-            "INSERT INTO memory_items (id, type, title, content, agent_id, scope, metadata_json, created_at, updated_at, is_deleted) "
-            "VALUES (?, 'handoff', ?, ?, ?, 'agent', ?, ?, ?, 0)",
+            f"INSERT INTO memory_items (id, type, title, content, agent_id, scope, metadata_json, created_at, updated_at, is_deleted) "
+            f"VALUES ({_p}, 'handoff', {_p}, {_p}, {_p}, 'agent', {_p}, {_p}, {_p}, 0)",
             (new_id, f"Handoff from {from_agent}", task, to_agent, metadata_json, now, now)
         )
 
@@ -1392,8 +1415,10 @@ def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
 
 def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
     """Retrieves handoff messages for an agent, optionally filtered to unread."""
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     # Build WHERE clause dynamically
-    where_clause = "WHERE agent_id = ? AND type = 'handoff' AND is_deleted = 0"
+    where_clause = f"WHERE agent_id = {_p} AND type = 'handoff' AND is_deleted = 0"
     if unread_only:
         where_clause += " AND read_at IS NULL"
 
@@ -1401,7 +1426,7 @@ def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20) 
     with _db() as db:
         rows = db.execute(
             f"SELECT id, title, content, metadata_json, created_at, read_at FROM memory_items "
-            f"{where_clause} ORDER BY created_at DESC LIMIT ?",
+            f"{where_clause} ORDER BY created_at DESC LIMIT {_p}",
             (agent_id, limit)
         ).fetchall()
 
@@ -1431,15 +1456,17 @@ def memory_inbox_ack_impl(memory_id: str) -> str:
     now = datetime.now(timezone.utc).isoformat()
 
     # 2. Update read_at and updated_at
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db() as db:
         db.execute(
-            "UPDATE memory_items SET read_at = ?, updated_at = ? WHERE id = ? AND type = 'handoff' AND is_deleted = 0",
+            f"UPDATE memory_items SET read_at = {_p}, updated_at = {_p} WHERE id = {_p} AND type = 'handoff' AND is_deleted = 0",
             (now, now, memory_id)
         )
 
         # Verify update actually happened
         verify = db.execute(
-            "SELECT id FROM memory_items WHERE id = ? AND type = 'handoff' AND is_deleted = 0 AND read_at IS NOT NULL",
+            f"SELECT id FROM memory_items WHERE id = {_p} AND type = 'handoff' AND is_deleted = 0 AND read_at IS NOT NULL",
             (memory_id,)
         ).fetchone()
 
@@ -1458,10 +1485,12 @@ def _count_refresh_backlog(agent_id: str = "") -> int:
     idx_mi_refresh_on, so this is O(index-size-of-flagged-rows).
     """
     now = datetime.now(timezone.utc).isoformat()
-    where = ["is_deleted = 0", "refresh_on IS NOT NULL", "refresh_on <= ?"]
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
+    where = ["is_deleted = 0", "refresh_on IS NOT NULL", f"refresh_on <= {_p}"]
     params: list = [now]
     if agent_id:
-        where.append("agent_id = ?")
+        where.append(f"agent_id = {_p}")
         params.append(agent_id)
     try:
         with _db() as db:
@@ -1500,20 +1529,22 @@ def memory_refresh_queue_impl(agent_id: str = "", limit: int = 50, include_futur
         limit = 50
     limit = max(1, min(limit, 500))
 
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     where = ["is_deleted = 0", "refresh_on IS NOT NULL"]
     params: list = []
     if not include_future:
-        where.append("refresh_on <= ?")
+        where.append(f"refresh_on <= {_p}")
         params.append(now)
     if agent_id:
-        where.append("agent_id = ?")
+        where.append(f"agent_id = {_p}")
         params.append(agent_id)
     where_sql = " AND ".join(where)
 
     with _db() as db:
         rows = db.execute(
             f"SELECT id, type, title, refresh_on, refresh_reason, agent_id, updated_at "
-            f"FROM memory_items WHERE {where_sql} ORDER BY refresh_on ASC LIMIT ?",
+            f"FROM memory_items WHERE {where_sql} ORDER BY refresh_on ASC LIMIT {_p}",
             (*params, limit)
         ).fetchall()
 
@@ -1537,17 +1568,21 @@ async def conversation_start_impl(title, agent_id="", model_id="", tags=""):
     cid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     metadata = json.dumps({"tags": [t.strip() for t in tags.split(",") if t.strip()]}) if tags else "{}"
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db() as db:
         db.execute(
-            "INSERT INTO memory_items (id, type, title, agent_id, model_id, metadata_json, created_at) VALUES (?, 'conversation', ?, ?, ?, ?, ?)",
+            f"INSERT INTO memory_items (id, type, title, agent_id, model_id, metadata_json, created_at) VALUES ({_p}, 'conversation', {_p}, {_p}, {_p}, {_p}, {_p})",
             (cid, title, agent_id, model_id, metadata, now)
         )
     return f"Conversation started: {cid}"
 
 async def conversation_append_impl(conversation_id, role, content, agent_id="", model_id="", embed=True):
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db() as db:
         exists = db.execute(
-            "SELECT id FROM memory_items WHERE id = ? AND type = 'conversation' AND is_deleted = 0",
+            f"SELECT id FROM memory_items WHERE id = {_p} AND type = 'conversation' AND is_deleted = 0",
             (conversation_id,)
         ).fetchone()
     if not exists:
@@ -1556,16 +1591,16 @@ async def conversation_append_impl(conversation_id, role, content, agent_id="", 
     now = datetime.now(timezone.utc).isoformat()
     with _db() as db:
         db.execute(
-            "INSERT INTO memory_items (id, type, title, content, agent_id, model_id, created_at) VALUES (?, 'message', ?, ?, ?, ?, ?)",
+            f"INSERT INTO memory_items (id, type, title, content, agent_id, model_id, created_at) VALUES ({_p}, 'message', {_p}, {_p}, {_p}, {_p}, {_p})",
             (mid, role, content, agent_id, model_id, now)
         )
-        db.execute("INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?, ?, ?, 'message', ?)",
+        db.execute(f"INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES ({_p}, {_p}, {_p}, 'message', {_p})",
                    (str(uuid.uuid4()), conversation_id, mid, now))
     if embed:
         vec, m = await _embed(content)
         if vec:
             with _db() as db:
-                db.execute("INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at) VALUES (?,?,?,?,?,?)",
+                db.execute(f"INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at) VALUES ({_p},{_p},{_p},{_p},{_p},{_p})",
                           (str(uuid.uuid4()), mid, _pack(vec), m, len(vec), now))
     return f"Appended: {mid}"
 
@@ -1589,15 +1624,18 @@ def observation_enqueue_impl(
     if not conversation_id:
         return "Error: conversation_id required"
     try:
+        from memory.backends import dialect as _dialect
+        _d = _dialect()
+        _p = _d.param()
         with _db() as db:
             db.execute(
-                "INSERT OR IGNORE INTO observation_queue (conversation_id, user_id) "
-                "VALUES (?, ?)",
+                f"{_d.insert_or_ignore()} observation_queue (conversation_id, user_id) "
+                f"VALUES ({_p}, {_p}) {_d.on_conflict_ignore(conflict_target='(conversation_id)')}",
                 (conversation_id, user_id or None),
             )
             db.commit()
             row = db.execute(
-                "SELECT id, attempts FROM observation_queue WHERE conversation_id=?",
+                f"SELECT id, attempts FROM observation_queue WHERE conversation_id={_p}",
                 (conversation_id,),
             ).fetchone()
         if row:
@@ -1621,16 +1659,20 @@ def reflector_enqueue_impl(
     if not conversation_id:
         return "Error: conversation_id required"
     try:
+        from memory.backends import dialect as _dialect
+        _d = _dialect()
+        _p = _d.param()
         with _db() as db:
             db.execute(
-                "INSERT OR IGNORE INTO reflector_queue "
-                "(conversation_id, user_id, obs_count_at_enqueue) VALUES (?, ?, ?)",
+                f"{_d.insert_or_ignore()} reflector_queue "
+                f"(conversation_id, user_id, obs_count_at_enqueue) VALUES ({_p}, {_p}, {_p}) "
+                f"{_d.on_conflict_ignore(conflict_target='(user_id, conversation_id)')}",
                 (conversation_id, user_id or None, obs_count),
             )
             db.commit()
             row = db.execute(
-                "SELECT id, attempts FROM reflector_queue "
-                "WHERE conversation_id=? AND COALESCE(user_id,'')=COALESCE(?,'')",
+                f"SELECT id, attempts FROM reflector_queue "
+                f"WHERE conversation_id={_p} AND COALESCE(user_id,'')=COALESCE({_p},'')",
                 (conversation_id, user_id or None),
             ).fetchone()
         if row:

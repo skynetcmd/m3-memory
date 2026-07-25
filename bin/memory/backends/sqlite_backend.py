@@ -49,6 +49,40 @@ class SqliteDialect(Dialect):
     def now_minus_minutes(self, minutes_placeholder: str) -> str:
         return f"datetime('now', '-' || {minutes_placeholder} || ' minutes')"
 
+    def age_days_gt(self, ts_column: str, days_expr: str) -> str:
+        return f"(julianday('now') - julianday({ts_column})) > {days_expr}"
+
+    def all_rows_after_offset(self, offset_placeholder: str) -> str:
+        return f"LIMIT -1 OFFSET {offset_placeholder}"
+
+    def group_concat(self, expr: str, separator: str = ",") -> str:
+        return f"GROUP_CONCAT({expr}, '{separator}')"
+
+    def greatest(self, *exprs: str) -> str:
+        return f"MAX({', '.join(exprs)})"
+
+    def least(self, *exprs: str) -> str:
+        return f"MIN({', '.join(exprs)})"
+
+    def is_undefined_object_error(self, exc: BaseException) -> bool:
+        # SQLite has no SQLSTATE for this; classify by the OperationalError text.
+        for e in (exc, getattr(exc, "__cause__", None)):
+            if e is None:
+                continue
+            msg = str(e).lower()
+            if ("no such column" in msg or "no such table" in msg
+                    or "no column named" in msg):
+                return True
+        return False
+
+    def is_integrity_error(self, exc: BaseException) -> bool:
+        # SQLite raises sqlite3.IntegrityError for unique/PK/NOT NULL/FK conflicts.
+        import sqlite3 as _sqlite3
+        for e in (exc, getattr(exc, "__cause__", None)):
+            if isinstance(e, _sqlite3.IntegrityError):
+                return True
+        return False
+
     def day_bucket(self, column: str) -> str:
         return f"substr({column},1,10)"
 
@@ -83,6 +117,43 @@ class SqliteDialect(Dialect):
         # pragma_table_info('t') is a table-valued function (SQLite >= 3.16);
         # its `name` column is the column name. Caller reads row[0].
         return (f"SELECT name FROM pragma_table_info('{table}')", ())
+
+    def _glob_fragment(self, column: str, placeholder: str, pattern: str) -> "tuple[str, str]":
+        # SQLite has a native case-sensitive GLOB; the pattern passes through.
+        return (f"{column} GLOB {placeholder}", pattern)
+
+    def _qualified_table_expr(self, name: str, schema: str) -> str:
+        # A separate logical store is a separate DB FILE on SQLite — opened
+        # directly — so there is no schema to qualify: the reference is bare.
+        # SQLite states this explicitly (the base is abstract) so no dialect is
+        # privileged as "the default". `schema` is intentionally unused here.
+        return name
+
+    def compact_storage(self, *, sqlite_path: "str | None" = None,
+                        max_bytes: int = 500 * 1024 * 1024) -> str:
+        # VACUUM rewrites the file to reclaim free pages. It needs a fresh
+        # connection OUTSIDE any open transaction (VACUUM cannot run inside one)
+        # and the *active* path — hence sqlite_path from the caller, not a constant.
+        import os
+        import sqlite3
+        if not sqlite_path:
+            return "VACUUM skipped: no active SQLite path supplied"
+        try:
+            db_size = os.path.getsize(sqlite_path)
+        except OSError as e:
+            return f"VACUUM skipped: {e}"
+        # Size-gated (#46): a multi-hundred-MB VACUUM can hang for minutes.
+        if db_size > max_bytes:
+            return f"VACUUM skipped: database too large ({db_size / 1e9:.2f} GB)"
+        try:
+            vconn = sqlite3.connect(sqlite_path)
+            try:
+                vconn.execute("VACUUM")
+            finally:
+                vconn.close()
+            return "Space reclaimed (VACUUM)"
+        except Exception as e:  # noqa: BLE001 — VACUUM is best-effort maintenance
+            return f"VACUUM skipped: {e}"
 
 
 # The one shared frozen singleton for SQLite. Obtain via dialect_for / dialect(),
@@ -202,6 +273,26 @@ class SqliteBackend:
         if n < 1:
             raise ValueError(f"placeholder count must be >= 1, got {n}")
         return ", ".join(["?"] * n)
+
+    def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
+        """WAL checkpoint: PASSIVE mid-batch, TRUNCATE at clean exit (§10).
+
+        Delegates to bin/sqlite_pragmas.py so the PRAGMA text lives in exactly
+        one place. Best-effort by contract: a checkpoint is housekeeping, and a
+        failure here (a reader holding a read txn blocks TRUNCATE, a closed
+        conn) must never abort the batch that called it.
+        """
+        try:
+            import sqlite_pragmas
+        except ImportError:  # payload not importable — nothing to do
+            return
+        try:
+            if final:
+                sqlite_pragmas.checkpoint_truncate(conn)  # type: ignore[arg-type]
+            else:
+                sqlite_pragmas.checkpoint_passive(conn)  # type: ignore[arg-type]
+        except Exception:
+            pass
 
     def keyword_search(
         self,

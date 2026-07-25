@@ -30,6 +30,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Optional
 
+from .config import files_table
+
 logger = logging.getLogger("files_memory.carry_forward")
 
 
@@ -85,9 +87,11 @@ def compute_leaf_diffs(
     by_hash: dict[str, str] = {}
     by_division: dict[tuple[str, str], tuple[str, str]] = {}  # (type,id) -> (uuid, text)
 
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     rows = conn.execute(
-        "SELECT uuid, text, text_sha256, division_type, division_id "
-        "FROM leaves WHERE file_node = ?",
+        f"SELECT uuid, text, text_sha256, division_type, division_id "
+        f"FROM {files_table('leaves')} WHERE file_node = {_p}",
         (prior_file_node_uuid,),
     ).fetchall()
     for r in rows:
@@ -145,17 +149,23 @@ def apply_carry_forward(
     if diff.kind != "carry" or not diff.prior_uuid:
         return (False, 0)
 
-    # Copy text + summary embeddings (whichever kinds exist).
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
+    _le = files_table('leaf_embeddings')
+    # Copy text + summary embeddings (whichever kinds exist). INSERT OR REPLACE
+    # SELECT → INSERT ... SELECT with an upsert on the (leaf_uuid, kind) PK.
     cur = conn.execute(
-        "INSERT OR REPLACE INTO leaf_embeddings(leaf_uuid, kind, embedding, embed_model, dim) "
-        "SELECT ?, kind, embedding, embed_model, dim "
-        "FROM leaf_embeddings WHERE leaf_uuid = ?",
+        f"INSERT INTO {_le}(leaf_uuid, kind, embedding, embed_model, dim) "
+        f"SELECT {_p}, kind, embedding, embed_model, dim "
+        f"FROM {_le} WHERE leaf_uuid = {_p} "
+        f"{_d.on_conflict_update('(leaf_uuid, kind)', ['embedding', 'embed_model', 'dim'])}",
         (new_leaf_uuid, diff.prior_uuid),
     )
     embedded = cur.rowcount > 0
     if embedded:
         conn.execute(
-            "UPDATE leaves SET embedded = 1 WHERE uuid = ?", (new_leaf_uuid,),
+            f"UPDATE {files_table('leaves')} SET embedded = 1 WHERE uuid = {_p}", (new_leaf_uuid,),
         )
 
     facts_copied = 0
@@ -165,20 +175,22 @@ def apply_carry_forward(
         # source_span, confidence. extraction_run points at the NEW
         # ingestion run so the audit trail says "carried, not extracted".
         prior_facts = conn.execute(
-            "SELECT uuid, statement, source_span_start, source_span_end, confidence "
-            "FROM facts WHERE leaf = ?",
+            f"SELECT uuid, statement, source_span_start, source_span_end, confidence "
+            f"FROM {files_table('facts')} WHERE leaf = {_p}",
             (diff.prior_uuid,),
         ).fetchall()
         import uuid as _uuid
+        _fe = files_table('fact_embeddings')
+        _fer = files_table('fact_entity_refs')
         for pf in prior_facts:
             new_fact_uuid = str(_uuid.uuid4())
             new_file_node = conn.execute(
-                "SELECT file_node FROM leaves WHERE uuid = ?", (new_leaf_uuid,),
+                f"SELECT file_node FROM {files_table('leaves')} WHERE uuid = {_p}", (new_leaf_uuid,),
             ).fetchone()[0]
             conn.execute(
-                "INSERT INTO facts(uuid, leaf, file_node, statement, "
-                "source_span_start, source_span_end, confidence, extraction_run) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                f"INSERT INTO {files_table('facts')}(uuid, leaf, file_node, statement, "
+                f"source_span_start, source_span_end, confidence, extraction_run) "
+                f"VALUES ({_d.placeholder(8)})",
                 (
                     new_fact_uuid, new_leaf_uuid, new_file_node,
                     pf["statement"], pf["source_span_start"], pf["source_span_end"],
@@ -186,25 +198,27 @@ def apply_carry_forward(
                     new_ingestion_run_uuid or pf["uuid"],  # safe fallback
                 ),
             )
-            # Carry the fact's embedding too.
+            # Carry the fact's embedding too (upsert on the fact_uuid PK).
             conn.execute(
-                "INSERT OR REPLACE INTO fact_embeddings(fact_uuid, embedding, embed_model, dim) "
-                "SELECT ?, embedding, embed_model, dim FROM fact_embeddings "
-                "WHERE fact_uuid = ?",
+                f"INSERT INTO {_fe}(fact_uuid, embedding, embed_model, dim) "
+                f"SELECT {_p}, embedding, embed_model, dim FROM {_fe} "
+                f"WHERE fact_uuid = {_p} "
+                f"{_d.on_conflict_update('(fact_uuid)', ['embedding', 'embed_model', 'dim'])}",
                 (new_fact_uuid, pf["uuid"]),
             )
-            # Carry entity refs.
+            # Carry entity refs (ignore on the (fact, entity_uuid) PK).
             conn.execute(
-                "INSERT OR IGNORE INTO fact_entity_refs(fact, entity_uuid, confidence) "
-                "SELECT ?, entity_uuid, confidence FROM fact_entity_refs "
-                "WHERE fact = ?",
+                f"{_d.insert_or_ignore()} {_fer}(fact, entity_uuid, confidence) "
+                f"SELECT {_p}, entity_uuid, confidence FROM {_fer} "
+                f"WHERE fact = {_p} "
+                f"{_d.on_conflict_ignore(conflict_target='(fact, entity_uuid)')}",
                 (new_fact_uuid, pf["uuid"]),
             )
             facts_copied += 1
         if prior_facts:
             # Mark the leaf as already-extracted (no work needed for queue/inline).
             conn.execute(
-                "UPDATE leaves SET extraction_status = 'ok' WHERE uuid = ?",
+                f"UPDATE {files_table('leaves')} SET extraction_status = 'ok' WHERE uuid = {_p}",
                 (new_leaf_uuid,),
             )
 

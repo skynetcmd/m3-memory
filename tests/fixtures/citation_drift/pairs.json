@@ -1,0 +1,125 @@
+{
+  "_doc": "Labelled citation-drift pairs for validating wiki.citation_drift.ModelDriftJudge. Each case: a SYNTHESIS (compiled claim) + the SOURCES it was compiled from + the ground-truth `drifted` label + the drift `kind`. Used by tests/test_wiki_citation_drift_judge_live.py to measure the judge prompt's recall (catches real drift) and precision (no false alarms) against DRIFT_RECALL_FLOOR / DRIFT_PRECISION_FLOOR. Judge against the sources ONLY; labels reflect what the sources support, not outside knowledge. Balanced: ~half drifted, ~half faithful, plus edge cases.",
+  "cases": [
+    {
+      "id": "overclaim-universal",
+      "drifted": true,
+      "kind": "overclaim",
+      "synthesis": "Vector search always outperforms keyword search for retrieval.",
+      "sources": [
+        "On our LongMemEval-S runs, hybrid vector+keyword search beat keyword-only at k=10.",
+        "For rare tokens and exact IDs, keyword (BM25) still outranks pure vector search."
+      ]
+    },
+    {
+      "id": "unsupported-addition",
+      "drifted": true,
+      "kind": "unsupported_addition",
+      "synthesis": "The auth service uses RS256 JWTs with a 15-minute access-token TTL and rotates signing keys weekly.",
+      "sources": [
+        "We chose RS256 for JWT signing so the public key can verify without sharing the secret.",
+        "Access tokens expire after 15 minutes; refresh tokens after 30 days."
+      ]
+    },
+    {
+      "id": "contradiction",
+      "drifted": true,
+      "kind": "contradiction",
+      "synthesis": "The embedder runs as an external HTTP service that must be started before m3.",
+      "sources": [
+        "The BGE-M3 embedder is bundled and runs in-process from a GGUF; no external service or API key is needed.",
+        "An optional EMBED_BASE_URL fallback to Ollama/LM Studio exists but is not required."
+      ]
+    },
+    {
+      "id": "omitted-reversal",
+      "drifted": true,
+      "kind": "omitted_reversal",
+      "synthesis": "Chatlog turns are stored in the main agent_memory.db under type='chat_log'.",
+      "sources": [
+        "Originally chatlog shared the main DB (type='chat_log' rows in agent_memory.db).",
+        "As of the split-store migration, chatlog turns live in a separate agent_chatlog.db; the main DB no longer receives new chat_log rows."
+      ]
+    },
+    {
+      "id": "number-drift",
+      "drifted": true,
+      "kind": "overclaim",
+      "synthesis": "Retrieval hits the correct session as the #1 result over 99% of the time.",
+      "sources": [
+        "The correct session is the #1 result for about 92% of questions.",
+        "Session-hit-rate @ k=10 is 99.2%; @ k=20 it is 100%."
+      ]
+    },
+    {
+      "id": "faithful-summary",
+      "drifted": false,
+      "kind": "none",
+      "synthesis": "m3 stores memory locally in SQLite and can also run on PostgreSQL as the primary store.",
+      "sources": [
+        "By default, memory lives in a local SQLite file on your hardware.",
+        "You can run m3 with PostgreSQL as the primary store via M3_DB_BACKEND=postgres and M3_PRIMARY_PG_URL."
+      ]
+    },
+    {
+      "id": "lossy-but-correct",
+      "drifted": false,
+      "kind": "none",
+      "synthesis": "The storage seam abstracts SQL differences so the same code runs on SQLite and PostgreSQL.",
+      "sources": [
+        "The dialect seam maps each SQLite construct (placeholders, INSERT OR IGNORE, JSON functions, PRAGMA) to its PostgreSQL equivalent.",
+        "A caller asks the dialect for the fragment it needs; the dialect knows the target backend.",
+        "Divergent SQL methods are abstract so a new backend fails loud rather than inheriting the wrong SQL."
+      ]
+    },
+    {
+      "id": "faithful-single-source",
+      "drifted": false,
+      "kind": "none",
+      "synthesis": "GDPR erasure in m3 purges by explicit enumeration, not only by cascade.",
+      "sources": [
+        "gdpr_forget purges the subject's rows by explicit enumeration across the relevant tables and does not rely on ON DELETE CASCADE alone."
+      ]
+    },
+    {
+      "id": "faithful-paraphrase",
+      "drifted": false,
+      "kind": "none",
+      "synthesis": "Full-text search is native on both backends: FTS5 bm25 on SQLite and a tsvector GIN index on PostgreSQL.",
+      "sources": [
+        "SQLite keyword search uses FTS5 with bm25 ranking.",
+        "On PostgreSQL, files_search uses a generated tsvector column with a GIN index, queried with @@ to_tsquery and ranked by ts_rank."
+      ]
+    },
+    {
+      "id": "subtle-scope-narrowing-ok",
+      "drifted": false,
+      "kind": "none",
+      "synthesis": "The wiki citation-drift check is report-only.",
+      "sources": [
+        "The citation-drift check writes a lint section listing possibly-drifted syntheses.",
+        "It never auto-supersedes, never sets a verdict, and never mutates a row; remediation is a human act."
+      ]
+    },
+    {
+      "id": "invented-cause",
+      "drifted": true,
+      "kind": "unsupported_addition",
+      "synthesis": "The banner was clobbered because the release pipeline regenerates it from a stale source asset.",
+      "sources": [
+        "The banner was updated directly on GitHub main.",
+        "An in-flight feature branch, cut before that edit, still carried the old banner and overwrote it when it merged and released."
+      ]
+    },
+    {
+      "id": "faithful-conjunction",
+      "drifted": false,
+      "kind": "none",
+      "synthesis": "The coalesce cache was renamed to avoid a table-name collision with the core resolution cache.",
+      "sources": [
+        "entity_coalesce's embedding cache was named entity_embeddings, the same table as core migration 032's resolution cache, with incompatible columns.",
+        "It was renamed entity_coalesce_embeddings (module prefix) so the two subsystems stop sharing a name."
+      ]
+    }
+  ]
+}

@@ -12,6 +12,11 @@ import posixpath
 import re
 from typing import Optional
 
+from . import anchor as _anchor
+from . import authority as _authority
+from . import blast_radius as _blast
+from . import citation_drift as _citation_drift
+from . import derivability_review as _derivability
 from .cluster import Cluster
 from .files_layer import FileNode, FilesLayer
 from .select import Edge, Mem, Promo
@@ -188,12 +193,18 @@ def render_pages(
     promotions: list[Promo],
     ledes: Optional[dict[str, str]] = None,
     obsidian: bool = False,
+    drift_judge=None,
+    derivability_judge=None,
 ) -> dict[str, str]:
     """Build the full vault as {relpath: markdown}.
 
     `ledes` maps cluster.key -> a prose summary (from optional synthesis). When a
     cluster has no lede, its page falls back to the deterministic member list.
     `obsidian` switches cross-page links to `[[wikilinks]]` (see LinkResolver).
+    `drift_judge` (optional) enables the citation-drift lint section (4b). When
+    None (the default) the section is omitted entirely and the vault is
+    byte-identical — the judge is model-backed and non-deterministic, so it is
+    kept OUT of the drift-tested surface, exactly like `synthesizer`.
     """
     ledes = ledes or {}
     topic_slugs = SlugBook()
@@ -258,10 +269,27 @@ def render_pages(
 
     pages["index.md"] = _render_index(topic_clusters, topic_slugs, files, source_slugs, links, bool(orphan_members))
     pages["overview.md"] = _render_overview(clusters, files, links)
-    pages["lint.md"] = _render_lint(clusters, edges, mem_to_topic, topic_slugs, links)
+    pages["lint.md"] = _render_lint(clusters, edges, mem_to_topic, topic_slugs,
+                                    links, drift_judge=drift_judge,
+                                    derivability_judge=derivability_judge)
     pages["about.md"] = _render_about(links)
 
     return pages
+
+
+def _topic_synthesis(c: Cluster) -> "Optional[Mem]":
+    """The synthesis member whose compiled prose should be the topic body, or
+    None. Deterministic: prefer a body-authority synthesis (canonical), then the
+    one whose id sorts last (the current head, since a supersede mints a new id).
+    A cluster with no synthesis member returns None — non-synthesis topics render
+    exactly as before."""
+    syns = [m for m in c.members if m.type == "synthesis"]
+    if not syns:
+        return None
+    # Body-eligible (authority passes the gate) beats gated; within each group the
+    # highest id wins (stable, and the head of a supersede chain).
+    syns.sort(key=lambda m: (_authority.renders_as_body(m.metadata), m.id))
+    return syns[-1]
 
 
 def _render_topic(
@@ -308,6 +336,25 @@ def _render_topic(
         lines.append(lede.strip())
         lines.append("")
 
+    # Compiled synthesis body: if this topic has a synthesis member, surface its
+    # full compiled prose as the PAGE BODY (not merely one bullet in the member
+    # list). This is the point of compile-at-ingest — a topic that was compiled
+    # reads as a coherent page, with the source members kept below as provenance.
+    # Honors the S6 authority gate: a provisional/restricted synthesis shows its
+    # withholding marker instead of the prose, exactly like the member-list gate.
+    syn = _topic_synthesis(c)
+    if syn is not None:
+        if _authority.renders_as_body(syn.metadata):
+            body = (syn.content or "").strip()
+            if body:
+                lines.append(body)
+                lines.append("")
+        else:
+            marker = _authority.render_marker(syn.metadata)
+            if marker:
+                lines.append(f"> {marker}")
+                lines.append("")
+
     if contradictions:
         lines.append("> ⚠️ **Contradiction on this page** — members below disagree; "
                      "the higher-confidence claim should be treated as current. "
@@ -319,10 +366,22 @@ def _render_topic(
     lines.append("")
     for m in c.members:
         pin = " 📌" if m.pinned else ""
-        head = m.content.strip().splitlines()[0].strip() if m.content.strip() else ""
-        snippet = (head[:200] + "…") if len(head) > 200 else head
         lines.append(f"- **{m.display_title}**{pin} · `{m.type}` · conf {_conf(m)} "
                      f"· `id:{m.id[:8]}`")
+        # Authority gate (S6): a synthesis renders its content as body prose ONLY
+        # when its authority is in the configured body set AND it is not GDPR-
+        # restricted. Otherwise show a marker and withhold the content — a
+        # provisional/unknown/restricted page must not read as authoritative.
+        # Non-synthesis members are unaffected (renders_as_body is vacuously the
+        # old behavior for them since they carry no authority — but we only gate
+        # the 'synthesis' type to avoid changing any existing page).
+        if m.type == "synthesis" and not _authority.renders_as_body(m.metadata):
+            marker = _authority.render_marker(m.metadata)
+            if marker:
+                lines.append(f"  {marker}")
+            continue
+        head = m.content.strip().splitlines()[0].strip() if m.content.strip() else ""
+        snippet = (head[:200] + "…") if len(head) > 200 else head
         if snippet:
             lines.append(f"  {snippet}")
     lines.append("")
@@ -414,6 +473,13 @@ def _render_orphans(
     for m in sorted(members, key=lambda m: m.rank_key()):
         pin = " 📌" if m.pinned else ""
         lines.append(f"- **{m.display_title}**{pin} · `{m.type}` · conf {_conf(m)} · `id:{m.id[:8]}`")
+        # Orphans are title-only (no content leaks here regardless), but a
+        # restricted/withheld synthesis must still SHOW its status so a reviewer
+        # scanning orphans sees the legal-hold, not a silent plain row.
+        if m.type == "synthesis" and not _authority.renders_as_body(m.metadata):
+            marker = _authority.render_marker(m.metadata)
+            if marker:
+                lines.append(f"  {marker}")
     lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -472,6 +538,12 @@ def _render_source(
 # reader thinks ("runbooks", "decisions") rather than by cluster id.
 _TYPE_SECTIONS = [
     ("belief", "🧠 Knowledge & beliefs"),
+    # Placed second deliberately: _TYPE_ORDER (derived from this list) is the
+    # deterministic tiebreaker in _dominant_type(). A cluster tied between
+    # 'synthesis' and a later type classifies as a synthesis — correct, since a
+    # synthesis is compiled ABOUT its co-members. Appended last it would lose
+    # every tie and never title a topic.
+    ("synthesis", "📝 Compiled syntheses"),
     ("procedure", "📘 Runbooks & procedures"),
     ("decision", "⚖️ Decisions"),
     ("reference", "📎 References"),
@@ -685,7 +757,8 @@ Full guide: the `docs/WIKI.md` file in the m3-memory repository."""
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _render_lint(clusters, edges, mem_to_topic, topic_slugs, links: "LinkResolver") -> str:
+def _render_lint(clusters, edges, mem_to_topic, topic_slugs, links: "LinkResolver",
+                 drift_judge=None, derivability_judge=None) -> str:
     SELF = "lint.md"
     orphans = [m for c in clusters if c.is_orphan for m in c.members]
     # Dangling: edges pointing at a memory not in the core set were already
@@ -720,4 +793,103 @@ def _render_lint(clusters, edges, mem_to_topic, topic_slugs, links: "LinkResolve
     for a, b in contradictions:
         lines.append(f"- `{a[:8]}` ({topic_ref(a)}) ⚔️ `{b[:8]}` ({topic_ref(b)})")
     lines.append("")
+
+    # Blast radius (4a): syntheses transitively compiled FROM a synthesis judged
+    # wrong. Deterministic graph walk over the edges already in hand — no model,
+    # no new query. A file-based wiki can't compute this; m3's provenance edges
+    # can. Section is always emitted (count 0 when clean) so its absence never
+    # reads as "not checked".
+    # GDPR derivability review (Art. 17): syntheses whose source was erased.
+    # `restricted` already halts rendering per topic; this section is the full
+    # review QUEUE in one place (plan G3.5 — "never only a column") with the
+    # derivability signal a reviewer needs: whether surviving provenance sources
+    # remain (unrestrict candidate vs orphaned) and whether the 30-day review SLA
+    # is breached. Deterministic floor (surviving-source count + age), no model;
+    # the optional `derivability_judge` refines it when injected. Always emitted
+    # (count 0 when clean) so its absence never reads as "not reviewed".
+    review_report = _derivability.build_queue(clusters, edges,
+                                              judge=derivability_judge)
+    lines.extend(_derivability.render_section(review_report))
+
+    wrong = sorted(_blast.wrong_ids(clusters))
+    tainted = sorted(_blast.contaminated(clusters, edges))
+    lines.append(f"## Blast radius ({len(tainted)})")
+    lines.append("")
+    if wrong:
+        lines.append(f"_{len(wrong)} synthesis(es) judged wrong; "
+                     f"{len(tainted)} downstream synthesis(es) may carry the error._")
+        lines.append("")
+        for mid in tainted:
+            lines.append(f"- `{mid[:8]}` ({topic_ref(mid)}) — compiled from a "
+                         f"wrong source; re-check")
+    else:
+        lines.append("_No synthesis is marked wrong; nothing downstream to flag._")
+    lines.append("")
+
+    # Citation drift (4b, opt-in). Omitted entirely when no judge is injected, so
+    # the default vault is byte-identical (the judge is model-backed and
+    # non-deterministic — kept out of the drift-tested surface).
+    report = _citation_drift.check_drift(clusters, edges, drift_judge)
+    drift_lines = _citation_drift.render_section(report, links, SELF)
+    if drift_lines:
+        lines.extend(drift_lines)
+
+    # Knowledge Anchor Report: KAS + coverage / staleness / redundancy. Pure,
+    # deterministic (no model, no new query), so it stays in the drift test.
+    lines.extend(_render_anchor_report(clusters, edges))
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_anchor_report(clusters, edges) -> list:
+    """The Knowledge Anchor Report lint section: which topics are anchored vs.
+    adrift (KAS), whether the wiki is representative (coverage), current
+    (staleness), and non-redundant. All deterministic graph math."""
+    from .select import EDGE_WEIGHTS
+    h = _anchor.build_health(clusters, edges, EDGE_WEIGHTS)
+    L = ["## Knowledge Anchor Report", ""]
+    L.append(f"_Coverage {h.coverage:.0%}: {h.covered} high-value memories in real "
+             f"topics, {h.orphaned_high_value} stranded as orphans._")
+    L.append("")
+    # Low-anchor / adrift topics (the headline signal).
+    L.append(f"### Low anchor ({len(h.low_anchor)})")
+    L.append("")
+    if h.low_anchor:
+        L.append("_Topics held together weakly or only by co-mention — candidates "
+                 "for a tighter entity filter or a manual split._")
+        L.append("")
+        by_key = {a.key: a for a in h.anchors}
+        for key in h.low_anchor:
+            a = by_key.get(key)
+            if not a:
+                continue
+            drift = (f" · bridged by: {', '.join(a.drift_entities)}"
+                     if a.drift_entities else "")
+            tag = "adrift" if a.adrift else f"KAS {a.kas}"
+            L.append(f"- {a.title} · `{tag}` · {a.members} members "
+                     f"({a.load_bearing_edges} real / {a.comention_edges} co-mention){drift}")
+    else:
+        L.append("_Every topic is anchored by real connections._")
+    L.append("")
+    # Stale topics.
+    if h.stale:
+        L.append(f"### Stale sources ({len(h.stale)})")
+        L.append("")
+        L.append("_Topics whose source memories are mostly superseded/aged — the "
+                 "page may present outdated knowledge._")
+        L.append("")
+        slug = {c.key: c for c in clusters}
+        for key, frac in h.stale:
+            title = slug[key].members[0].display_title if slug.get(key) else key
+            L.append(f"- {title} · {frac:.0%} stale")
+        L.append("")
+    # Redundant pairs.
+    if h.redundant_pairs:
+        L.append(f"### Redundant topics ({len(h.redundant_pairs)})")
+        L.append("")
+        L.append("_Topic pairs with high member overlap — likely one topic split "
+                 "in two._")
+        L.append("")
+        for a_key, b_key, ov in h.redundant_pairs:
+            L.append(f"- `{a_key[:8]}` ⇄ `{b_key[:8]}` · {ov:.0%} overlap")
+        L.append("")
+    return L

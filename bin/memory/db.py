@@ -161,6 +161,109 @@ def _conn():
         yield db
 
 
+# Monotonic savepoint namer — SAVEPOINT names must be unique when nested; a plain
+# module counter suffices (single-process; never persisted).
+_savepoint_seq = 0
+
+
+@contextmanager
+def savepoint(conn):
+    """Isolate a block's failure to a SAVEPOINT: on ANY exception, roll the
+    savepoint back (leaving the outer transaction USABLE) and re-raise; on success,
+    release it.
+
+    Unlike :func:`tolerant_schema`, this swallows NOTHING — it exists to make an
+    EXISTING ``try/except`` around ``db.execute`` PG-safe. The historical
+    dual-path idiom ``try: <query with pinned> except missing-schema: <query
+    without pinned>`` works on SQLite but breaks on PG (the first query's error
+    aborts the txn before the fallback runs). Wrapping just the first attempt in
+    ``savepoint`` lets the fallback run on a healthy connection:
+
+        try:
+            with savepoint(db):
+                res = db.execute("... COALESCE(pinned,0)=0 ...")
+        except Exception as e:
+            if not _is_missing_schema(e): raise
+            res = db.execute("... without pinned ...")   # runs on a clean txn
+
+    Standard SQL (SAVEPOINT/ROLLBACK TO/RELEASE), identical on SQLite and psycopg2.
+    """
+    global _savepoint_seq
+    _savepoint_seq += 1
+    sp = f"m3_sp_{_savepoint_seq}"
+    conn.execute(f"SAVEPOINT {sp}")
+    try:
+        yield
+    except Exception:
+        try:
+            conn.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+            conn.execute(f"RELEASE SAVEPOINT {sp}")
+        except Exception:
+            pass
+        raise
+    else:
+        conn.execute(f"RELEASE SAVEPOINT {sp}")
+
+
+@contextmanager
+def tolerant_schema(conn, *, reraise_real=True):
+    """Run a block of statements that MAY hit a not-yet-migrated schema (missing
+    column/table), tolerating exactly that class of error and rolling back ONLY
+    that block — never the whole transaction.
+
+    WHY THIS EXISTS. The historical idiom was ``try: db.execute(...) except
+    OperationalError: pass`` — fine on SQLite, but BROKEN on PostgreSQL: a caught
+    error still ABORTS the surrounding transaction, so every later statement fails
+    with ``InFailedSqlTransaction``. Wrapping the block in a SAVEPOINT makes the
+    tolerance real on BOTH backends: on a caught missing-schema error we
+    ``ROLLBACK TO SAVEPOINT`` (undoing only this block) and continue; on success we
+    ``RELEASE`` it. SAVEPOINT / ROLLBACK TO / RELEASE are standard SQL supported
+    identically by SQLite and psycopg2, so this is backend-uniform — no dialect
+    branch.
+
+    Usage (replaces the try/except-missing-schema idiom):
+
+        with tolerant_schema(db):
+            db.execute("UPDATE memory_items SET confidence = ... WHERE ...")
+
+    A missing-column/table error inside the block is swallowed (the pass degrades
+    to a no-op for that statement). Any OTHER error rolls the savepoint back and
+    re-raises (``reraise_real=True``), so real bugs still fail loud (§3).
+
+    Classification of "tolerable" goes through the seam
+    (``dialect().is_undefined_object_error``), so it is correct on both backends
+    (SQLite message text vs PG SQLSTATE 42703/42P01)."""
+    global _savepoint_seq
+    _savepoint_seq += 1
+    sp = f"m3_tol_{_savepoint_seq}"
+    try:
+        from memory.backends import dialect as _dialect
+        _is_undef = _dialect().is_undefined_object_error
+    except Exception:
+        # No seam (raw sqlite fixture): fall back to a message match so the
+        # tolerance still works in tests that pass a bare sqlite3 connection.
+        def _is_undef(exc):
+            m = str(exc).lower()
+            return ("no such column" in m or "no such table" in m
+                    or "no column named" in m)
+
+    conn.execute(f"SAVEPOINT {sp}")
+    try:
+        yield
+    except Exception as exc:  # noqa: BLE001 — classified below
+        # Roll back just this block so the outer transaction stays usable.
+        try:
+            conn.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+            conn.execute(f"RELEASE SAVEPOINT {sp}")
+        except Exception:
+            pass
+        if reraise_real and not _is_undef(exc):
+            raise  # a genuine error — do not swallow it
+        return
+    # Clean block → release the savepoint (keep its effects).
+    conn.execute(f"RELEASE SAVEPOINT {sp}")
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Schema lifecycle
 # ──────────────────────────────────────────────────────────────────────────────
@@ -286,7 +389,18 @@ def ensure_pinned_column(conn) -> None:
     retention purges — see bin/memory_maintenance.py.
     """
     try:
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(memory_items)")}
+        # Portable column check: PRAGMA is SQLite-only and, on PostgreSQL, its
+        # failure ABORTS the psycopg2 transaction (poisoning every later query on
+        # the connection) even though the except below swallows the error. Use the
+        # dialect's metadata query — pragma_table_info on SQLite,
+        # information_schema.columns on PG — which never poisons the txn.
+        try:
+            from memory.backends import dialect as _dialect
+            _sql, _params = _dialect().columns_of("memory_items")
+            cols = {r[0] for r in conn.execute(_sql, _params).fetchall()}
+        except Exception:
+            # No backend seam (raw sqlite fixture): PRAGMA is safe on sqlite.
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(memory_items)")}
         if "pinned" not in cols:
             conn.execute("ALTER TABLE memory_items ADD COLUMN pinned INTEGER DEFAULT 0")
             conn.commit()

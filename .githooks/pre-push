@@ -12,6 +12,12 @@
 # A non-zero exit blocks the push. Override only in a real emergency with
 # `git push --no-verify` — and then fix forward immediately.
 #
+# Local exclusions: a file of extra pathspecs (one per line) exempts them from
+# the leakage scan — for machine/user-specific paths (a developer's own username
+# dirs) that must NOT be hardcoded in this tracked hook. Source: $M3_PREPUSH_EXCLUDES
+# if set, else ~/.m3-private/m3_PrePush_Excludes.txt. The mechanism is public;
+# your exclusion list stays local. See gate 3.
+#
 # Performance: the expensive half is the drift gate, which spawns Python to
 # regenerate artifacts + run pytest. That work is only meaningful when the
 # push actually touches the tool catalog, its generators, or the docs whose
@@ -114,17 +120,51 @@ fi
 # process docs, and the leakage-test fixtures — else the scanner matches its
 # own definition (a false positive blocking the very commit that adds the gate).
 echo "[pre-push] 3/3 bench-data + compromising-content leakage scan"
+
+# Tracked exclusions: meta-files that legitimately CONTAIN the marker patterns
+# (this hook's own regex, process docs, and the leakage/PII-scrub test fixtures)
+# — else the scanner matches its own definition. These are facts about the repo,
+# so they stay tracked.
+EXCLUDES=(
+  ':(exclude).githooks/pre-push'
+  ':(exclude).gitignore'
+  ':(exclude)docs/AGENT_INSTRUCTIONS.md'
+  ':(exclude)docs/SUB_6_7_KICKOFF.md'
+  ':(exclude)tests/test_*leak*'
+  ':(exclude)tests/test_*bench*'
+  ':(exclude)bin/wiki/pii_scrub.py'
+  ':(exclude)tests/test_wiki_pii_scrub.py'
+)
+
+# LOCAL exclusions (optional): a file of additional pathspecs, one per line,
+# appended as ':(exclude)<path>'. This keeps MACHINE/USER-specific exclusions —
+# a developer's own username paths, a local scratch dir — OUT of the tracked
+# repo: the mechanism is generic and public, the list is private and local.
+# Source, in order: $M3_PREPUSH_EXCLUDES if set, else the conventional default
+# ~/.m3-private/m3_PrePush_Excludes.txt (a private tree, never the public repo).
+# Blank lines and '#' comments are ignored. The file is OPTIONAL and read
+# defensively: it is used only if it exists AND is a regular readable file, and
+# a read error never aborts the push — the tracked excludes above always apply,
+# so a missing / empty / unreadable / not-a-file local list degrades to "tracked
+# excludes only", never to a hook failure.
+LOCAL_EXCLUDES="${M3_PREPUSH_EXCLUDES:-${HOME}/.m3-private/m3_PrePush_Excludes.txt}"
+if [ -n "$LOCAL_EXCLUDES" ] && [ -f "$LOCAL_EXCLUDES" ] && [ -r "$LOCAL_EXCLUDES" ]; then
+  _n_local=0
+  # `|| true` on the redirect: a mid-read I/O error must not exit the hook.
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac      # skip blanks + comments
+    EXCLUDES+=(":(exclude)${line}")
+    _n_local=$((_n_local + 1))
+  done < "$LOCAL_EXCLUDES" || true
+  [ "$_n_local" -gt 0 ] && \
+    echo "[pre-push]   (applied $_n_local local exclusion(s) from $LOCAL_EXCLUDES)"
+fi
+
 LEAK=""
 for r in "${RANGES[@]}"; do
   # Only scan addition lines (^+) — deletions can't leak to the remote.
   # Exclude the +++ file header lines to avoid false matches on file paths.
-  hit="$(git diff "$r" -- '**' \
-    ':(exclude).githooks/pre-push' \
-    ':(exclude).gitignore' \
-    ':(exclude)docs/AGENT_INSTRUCTIONS.md' \
-    ':(exclude)docs/SUB_6_7_KICKOFF.md' \
-    ':(exclude)tests/test_*leak*' \
-    ':(exclude)tests/test_*bench*' \
+  hit="$(git diff "$r" -- '**' "${EXCLUDES[@]}" \
     2>/dev/null | grep '^+' | grep -v '^+++' | grep -iE \
     'lme-m/v3|lme_m\.db|PLAN_v4|smoke-142|237,655|2,446,993|enrichment_groups.*lme|locomo[_-]runs|/Users/[a-z]+|C:[\\/]+Users|/home/[a-z]+/|@gmail|sk-ant-[a-z0-9]{20,}|AIza[a-z0-9_-]{30,}|\b10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b|\b192\.168\.[0-9]{1,3}\.[0-9]{1,3}\b|SCHEMA_MIGRATION_FORK|bench[ -]schema|leak bench' \
     || true)"

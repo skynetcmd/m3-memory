@@ -31,6 +31,7 @@ Public API:
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import sqlite3
@@ -38,6 +39,7 @@ import time
 import uuid as _uuid
 from typing import Optional
 
+from .config import files_table
 from .db import _db
 
 logger = logging.getLogger("files_memory.dedup")
@@ -115,25 +117,29 @@ def files_dedup(
         "max_pairs": max_pairs,
     }
 
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     with _db(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+        # NOTE: no `conn.row_factory = sqlite3.Row` — SQLite-only, and the seam
+        # already yields name-addressable rows on both backends.
 
         # Pull current leaves with text embeddings, scoped + capped.
         sql = (
-            "SELECT le.leaf_uuid, le.embedding, le.dim, le.embed_model, "
-            "       l.file_node, l.evolved_from "
-            "FROM leaf_embeddings le "
-            "JOIN leaves l ON l.uuid = le.leaf_uuid "
-            "JOIN file_nodes fn ON fn.uuid = l.file_node "
-            "WHERE le.kind = 'text' "
-            "  AND l.superseded_by IS NULL "
-            "  AND fn.superseded_by IS NULL"
+            f"SELECT le.leaf_uuid, le.embedding, le.dim, le.embed_model, "
+            f"       l.file_node, l.evolved_from "
+            f"FROM {files_table('leaf_embeddings')} le "
+            f"JOIN {files_table('leaves')} l ON l.uuid = le.leaf_uuid "
+            f"JOIN {files_table('file_nodes')} fn ON fn.uuid = l.file_node "
+            f"WHERE le.kind = 'text' "
+            f"  AND l.superseded_by IS NULL "
+            f"  AND fn.superseded_by IS NULL"
         )
         params: list = []
         if corpus_id:
-            sql += " AND fn.corpus_id = ?"
+            sql += f" AND fn.corpus_id = {_p}"
             params.append(corpus_id)
-        sql += " ORDER BY l.created_at DESC LIMIT ?"
+        sql += f" ORDER BY l.created_at DESC LIMIT {_p}"
         params.append(leaf_limit)
 
         rows = conn.execute(sql, params).fetchall()
@@ -152,8 +158,8 @@ def files_dedup(
         existing_pairs: set[tuple[str, str]] = set()
         if not include_already_detected:
             for r in conn.execute(
-                "SELECT leaf_a, leaf_b FROM semantic_dedup_candidates "
-                "WHERE reviewed_at IS NULL",
+                f"SELECT leaf_a, leaf_b FROM {files_table('semantic_dedup_candidates')} "
+                f"WHERE reviewed_at IS NULL",
             ).fetchall():
                 a, b = r[0], r[1]
                 existing_pairs.add((a, b))
@@ -192,8 +198,8 @@ def files_dedup(
 
                     cand_uuid = str(_uuid.uuid4())
                     conn.execute(
-                        "INSERT INTO semantic_dedup_candidates"
-                        "(uuid, leaf_a, leaf_b, cosine) VALUES (?, ?, ?, ?)",
+                        f"INSERT INTO {files_table('semantic_dedup_candidates')}"
+                        f"(uuid, leaf_a, leaf_b, cosine) VALUES ({_d.placeholder(4)})",
                         (cand_uuid, a["leaf_uuid"], b["leaf_uuid"], cos),
                     )
                     out["pairs_recorded"] += 1
@@ -225,18 +231,20 @@ def list_dedup_candidates(
     Returns one dict per candidate with leaf text snippets + file paths
     for context.
     """
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     sql_parts = [
-        "SELECT c.uuid, c.leaf_a, c.leaf_b, c.cosine, c.reviewed_at, "
-        "       c.review_action, c.detected_at, "
-        "       la.text AS text_a, lb.text AS text_b, "
-        "       fa.path_absolute AS path_a, fb.path_absolute AS path_b, "
-        "       fa.filename AS file_a, fb.filename AS file_b "
-        "FROM semantic_dedup_candidates c "
-        "JOIN leaves la ON la.uuid = c.leaf_a "
-        "JOIN leaves lb ON lb.uuid = c.leaf_b "
-        "JOIN file_nodes fa ON fa.uuid = la.file_node "
-        "JOIN file_nodes fb ON fb.uuid = lb.file_node "
-        "WHERE 1 = 1"
+        f"SELECT c.uuid, c.leaf_a, c.leaf_b, c.cosine, c.reviewed_at, "
+        f"       c.review_action, c.detected_at, "
+        f"       la.text AS text_a, lb.text AS text_b, "
+        f"       fa.path_absolute AS path_a, fb.path_absolute AS path_b, "
+        f"       fa.filename AS file_a, fb.filename AS file_b "
+        f"FROM {files_table('semantic_dedup_candidates')} c "
+        f"JOIN {files_table('leaves')} la ON la.uuid = c.leaf_a "
+        f"JOIN {files_table('leaves')} lb ON lb.uuid = c.leaf_b "
+        f"JOIN {files_table('file_nodes')} fa ON fa.uuid = la.file_node "
+        f"JOIN {files_table('file_nodes')} fb ON fb.uuid = lb.file_node "
+        f"WHERE 1 = 1"
     ]
     params: list = []
     if reviewed is False:
@@ -244,13 +252,13 @@ def list_dedup_candidates(
     elif reviewed is True:
         sql_parts.append("AND c.reviewed_at IS NOT NULL")
     if min_cosine is not None:
-        sql_parts.append("AND c.cosine >= ?")
+        sql_parts.append(f"AND c.cosine >= {_p}")
         params.append(min_cosine)
-    sql_parts.append("ORDER BY c.cosine DESC LIMIT ?")
+    sql_parts.append(f"ORDER BY c.cosine DESC LIMIT {_p}")
     params.append(limit)
 
     with _db(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+        # seam yields name-addressable rows on both backends (no sqlite3.Row).
         rows = conn.execute(" ".join(sql_parts), params).fetchall()
 
     return [
@@ -300,14 +308,30 @@ def review_dedup_candidate(
         raise ValueError(f"action must be one of {sorted(valid_actions)}; got {action!r}")
 
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db(db_path) as conn:
-        cur = conn.execute(
-            "UPDATE semantic_dedup_candidates "
-            "SET reviewed_at = ?, review_action = ?, "
-            "    metadata = json_set(COALESCE(metadata, '{}'), '$.note', ?) "
-            "WHERE uuid = ?",
-            (now, action, note, candidate_uuid),
-        )
-        if cur.rowcount == 0:
+        # The metadata note is merged in PYTHON (read → set → write back) rather
+        # than via SQLite's json_set(): json_set is SQLite-only, and `metadata` is
+        # a TEXT column on both backends, so decode/re-encode is backend-uniform.
+        cur_row = conn.execute(
+            f"SELECT metadata FROM {files_table('semantic_dedup_candidates')} WHERE uuid = {_p}",
+            (candidate_uuid,),
+        ).fetchone()
+        if cur_row is None:
             raise ValueError(f"no candidate found for uuid {candidate_uuid!r}")
+        _raw = cur_row["metadata"] if hasattr(cur_row, "keys") else cur_row[0]
+        try:
+            meta = json.loads(_raw) if _raw else {}
+            if not isinstance(meta, dict):
+                meta = {}
+        except (TypeError, ValueError):
+            meta = {}
+        meta["note"] = note
+        conn.execute(
+            f"UPDATE {files_table('semantic_dedup_candidates')} "
+            f"SET reviewed_at = {_p}, review_action = {_p}, metadata = {_p} "
+            f"WHERE uuid = {_p}",
+            (now, action, json.dumps(meta), candidate_uuid),
+        )
     return {"uuid": candidate_uuid, "action": action, "reviewed_at": now}

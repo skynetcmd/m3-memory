@@ -32,6 +32,7 @@ from typing import Any, Optional
 from embedding_utils import pack
 
 from . import config
+from .config import files_table
 from .db import _db
 from .embed import embed_texts
 
@@ -336,13 +337,16 @@ def write_extraction_result(
 
     Atomic — caller wraps this in a transaction (or we're inside _db()).
     """
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     # Always write an attempt row, success or not.
     attempt_uuid = str(_uuid.uuid4())
     conn.execute(
-        "INSERT INTO extraction_attempts("
-        "uuid, leaf_uuid, ingestion_run, extractor_version, model_id, "
-        "status, fact_count, duration_ms, error) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        f"INSERT INTO {files_table('extraction_attempts')}("
+        f"uuid, leaf_uuid, ingestion_run, extractor_version, model_id, "
+        f"status, fact_count, duration_ms, error) "
+        f"VALUES ({_d.placeholder(9)})",
         (
             attempt_uuid, result.leaf_uuid, ingestion_run_uuid,
             extractor_version, model_id,
@@ -352,7 +356,7 @@ def write_extraction_result(
 
     # Update leaf extraction_status.
     conn.execute(
-        "UPDATE leaves SET extraction_status = ? WHERE uuid = ?",
+        f"UPDATE {files_table('leaves')} SET extraction_status = {_p} WHERE uuid = {_p}",
         (result.status, result.leaf_uuid),
     )
 
@@ -365,10 +369,10 @@ def write_extraction_result(
     for fact in result.facts:
         fuuid = str(_uuid.uuid4())
         conn.execute(
-            "INSERT INTO facts("
-            "uuid, leaf, file_node, statement, source_span_start, "
-            "source_span_end, confidence, extraction_run) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            f"INSERT INTO {files_table('facts')}("
+            f"uuid, leaf, file_node, statement, source_span_start, "
+            f"source_span_end, confidence, extraction_run) "
+            f"VALUES ({_d.placeholder(8)})",
             (
                 fuuid, result.leaf_uuid, file_node_uuid,
                 fact.statement, fact.source_span_start, fact.source_span_end,
@@ -381,13 +385,15 @@ def write_extraction_result(
     # Embed facts in one batch.
     if embed_facts and fact_texts:
         try:
+            _fe = files_table('fact_embeddings')
             vecs = embed_texts(fact_texts)
             for fuuid, (vec, model) in zip(fact_uuids, vecs):
                 if vec is not None:
                     conn.execute(
-                        "INSERT OR REPLACE INTO fact_embeddings"
-                        "(fact_uuid, embedding, embed_model, dim) "
-                        "VALUES (?, ?, ?, ?)",
+                        f"INSERT INTO {_fe}"
+                        f"(fact_uuid, embedding, embed_model, dim) "
+                        f"VALUES ({_d.placeholder(4)}) "
+                        f"{_d.on_conflict_update('(fact_uuid)', ['embedding', 'embed_model', 'dim'])}",
                         (fuuid, pack(vec), model, len(vec)),
                     )
         except Exception as e:
@@ -424,17 +430,19 @@ def extract_for_pending_leaves(
         return {"ok": 0, "failed": 0, "skipped": 0, "error": "no LLM endpoint configured"}
 
     counts: dict[str, Any] = {"ok": 0, "failed": 0, "skipped": 0}
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+        # seam yields name-addressable rows on both backends (no sqlite3.Row).
         rows = conn.execute(
-            "SELECT l.uuid, l.text, l.division_type, l.file_node, l.ingestion_run, "
-            "       fn.file_summary "
-            "FROM leaves l "
-            "JOIN file_nodes fn ON fn.uuid = l.file_node "
-            "WHERE l.extraction_status = 'pending' "
-            "  AND fn.superseded_by IS NULL "
-            "ORDER BY l.created_at ASC "
-            "LIMIT ?",
+            f"SELECT l.uuid, l.text, l.division_type, l.file_node, l.ingestion_run, "
+            f"       fn.file_summary "
+            f"FROM {files_table('leaves')} l "
+            f"JOIN {files_table('file_nodes')} fn ON fn.uuid = l.file_node "
+            f"WHERE l.extraction_status = 'pending' "
+            f"  AND fn.superseded_by IS NULL "
+            f"ORDER BY l.created_at ASC "
+            f"LIMIT {_p}",
             (limit,),
         ).fetchall()
 

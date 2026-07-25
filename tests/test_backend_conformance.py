@@ -97,12 +97,25 @@ def _divergent_methods() -> set[str]:
         "temporal_open_clause": ("mi.valid_from", "<="),
         "table_exists": ("memory_items",),
         "columns_of": ("memory_items",),
+        # keyword-only args go in a trailing dict (see the loop below).
+        "qualified_table": ("leaves", {"schema": "files"}),
+        # error classifiers: a plain exception is a valid arg; they must NOT raise
+        # NotImplementedError on the concrete dialects (they return False), and the
+        # base MUST raise (proving each backend implements its own).
+        "is_integrity_error": (Exception("x"),),
+        "is_undefined_object_error": (Exception("x"),),
+        "glob_match": ("filename", "?", "*.md"),
     }
     divergent: set[str] = set()
     for name, args in probes.items():
+        # Allow a trailing dict to carry keyword-only args (qualified_table's
+        # schema=). Everything else is positional-only, as before.
+        kwargs = {}
+        if args and isinstance(args[-1], dict):
+            args, kwargs = args[:-1], args[-1]
         meth = getattr(base, name)
         try:
-            meth(*args)
+            meth(*args, **kwargs)
         except NotImplementedError:
             divergent.add(name)
         except Exception:
@@ -154,6 +167,8 @@ def test_every_dialect_overrides_every_divergent_method():
                 "temporal_open_clause": "_temporal_open_clause_expr",
                 "table_exists": "_table_exists_query",
                 "columns_of": "_columns_of_query",
+                "qualified_table": "_qualified_table_expr",
+                "glob_match": "_glob_fragment",
             }
             check = wrapper_to_fragment.get(meth, meth)
             assert getattr(type(d), check) is not getattr(Dialect, check), (
@@ -246,14 +261,18 @@ def test_postgres_floor_write_then_retrieve_both_ways():
     with backend.connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO memory_items(id, title, content, is_deleted) "
-            "VALUES (%s,%s,%s,0) ON CONFLICT (id) DO NOTHING",
-            (mid, "postgres tuning", "shared buffers guide"),
+            # `type` is NOT NULL in the real schema (memory_items, 001_initial);
+            # the PG floor uses ensure_schema() which enforces it, so supply it.
+            "INSERT INTO memory_items(id, type, title, content, is_deleted) "
+            "VALUES (%s,%s,%s,%s,0) ON CONFLICT (id) DO NOTHING",
+            (mid, "note", "postgres tuning", "shared buffers guide"),
         )
         cur.execute(
-            "INSERT INTO memory_embeddings(memory_id, embedding, dim, embed_model) "
-            "VALUES (%s,%s,%s,%s)",
-            (mid, _blob([1.0, 0.0, 0.0, 0.0]), _DIM, "test-model"),
+            # memory_embeddings.id is the NOT NULL PK in the real schema — supply
+            # it (the SQLite floor conn was lenient; PG's ensure_schema enforces it).
+            "INSERT INTO memory_embeddings(id, memory_id, embedding, dim, embed_model) "
+            "VALUES (%s,%s,%s,%s,%s)",
+            (f"emb-{mid}", mid, _blob([1.0, 0.0, 0.0, 0.0]), _DIM, "test-model"),
         )
         conn.commit()
         khits = backend.keyword_search(conn, "postgres", limit=10)

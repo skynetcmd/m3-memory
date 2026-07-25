@@ -1,7 +1,7 @@
 """Determinism + correctness tests for the wiki generator (bin/wiki/).
 
-Drives the PURE builder (`wiki.build.build_wiki`) from tiny in-memory fixture DBs
-so there's no dependency on the real store, no embedder, and no flake surface. The
+Drives `wiki.build.build_wiki` from tiny in-memory fixture DBs so there's no
+dependency on the real store, no embedder, and no flake surface. The
 core guarantee — same DB in → byte-identical vault out — is asserted by building
 twice and comparing every page.
 """
@@ -47,6 +47,18 @@ def _mem_db() -> sqlite3.Connection:
         ("m-ddd", "reference", "Beta Standalone","Delta body",  0.65, 0.5, 0),
         ("m-eee", "belief",    "Contra One",     "Claim X",     0.85, 0.7, 0),
         ("m-fff", "belief",    "Contra Two",     "Not X",       0.85, 0.6, 0),
+        # Compiled prose. Importance 0.5 is BELOW the 0.6 threshold on purpose:
+        # it must land in the vault via CORE_TYPES, not via importance.
+        ("m-ggg", "synthesis", "Alpha Compiled", "Compiled body", 0.5, 0.75, 0),
+        # A synthesis judged wrong. Must stay VISIBLE and flagged, never hidden —
+        # a contradicts edge needs a live target.
+        ("m-hhh", "synthesis", "Wrong Answer",   "Bad claim",     0.5, 0.40, 0),
+        # A synthesis-DOMINATED topic (2 synthesis + 1 procedure), so the index
+        # renders the "Compiled syntheses" section and _TYPE_ORDER's tiebreak is
+        # actually exercised. Also below threshold → included on type alone.
+        ("m-iii", "synthesis", "Gamma Compiled", "Gamma prose",  0.5, 0.70, 0),
+        ("m-jjj", "synthesis", "Gamma Revised",  "Gamma redux",  0.5, 0.70, 0),
+        ("m-kkk", "procedure", "Gamma Steps",    "steps here",   0.5, None, 0),
         # Below the importance threshold and not a core type → excluded.
         ("m-zzz", "note",      "Ignored",        "noise",       0.1, None, 0),
     ]
@@ -61,6 +73,10 @@ def _mem_db() -> sqlite3.Connection:
         ("m-aaa", "m-bbb", "consolidates"),   # binds alpha cluster
         ("m-aaa", "m-ccc", "related"),        # binds runbook into alpha
         ("m-eee", "m-fff", "contradicts"),    # co-locate + flag
+        ("m-ggg", "m-aaa", "consolidates"),   # synthesis -> its source member
+        ("m-hhh", "m-ggg", "contradicts"),    # wrong synthesis vs the compiled one
+        ("m-iii", "m-kkk", "consolidates"),   # synthesis-dominated gamma cluster
+        ("m-jjj", "m-iii", "supersedes"),     # recompile chain within it
         # m-ddd has no edges → orphan.
     ]
     conn.executemany(
@@ -128,31 +144,34 @@ def _files_db() -> sqlite3.Connection:
     return conn
 
 
-def _build(use_networkx: bool, entity_comention: bool = False,
+def _build(entity_comention: bool = False,
            obsidian: bool = False) -> dict:
     mem, files = _mem_db(), _files_db()
     try:
+        # admission_gate=False: these tests validate clustering + rendering on tiny
+        # fixtures. The gate (which demotes weakly-anchored clusters) has its own
+        # suite in test_wiki_admission.py; leaving it on here would demote fixture
+        # clusters to orphans and mask the rendering behaviour under test.
         return build_wiki(mem, files, WikiOptions(importance_threshold=0.6,
-                                                  use_networkx=use_networkx,
                                                   entity_comention=entity_comention,
-                                                  obsidian=obsidian))
+                                                  obsidian=obsidian,
+                                                  admission_gate=False))
     finally:
         mem.close()
         files.close()
 
 
-@pytest.mark.parametrize("use_networkx", [False, True])
-def test_deterministic(use_networkx):
+def test_deterministic():
     """Same DB in → byte-identical vault out, across two independent builds."""
-    a = _build(use_networkx)
-    b = _build(use_networkx)
+    a = _build()
+    b = _build()
     assert a.keys() == b.keys()
     for k in a:
         assert a[k] == b[k], f"page {k} differs between builds"
 
 
 def test_core_pages_emitted():
-    vault = _build(use_networkx=False)
+    vault = _build()
     assert "index.md" in vault
     assert "overview.md" in vault
     assert "lint.md" in vault
@@ -176,7 +195,7 @@ def test_uses_real_markdown_links_not_wikilinks():
     documentation, not a link — so we forbid only BARE, un-code-fenced wikilinks.)
     """
     import re as _re
-    vault = _build(use_networkx=False, entity_comention=True)
+    vault = _build(entity_comention=True)
     for path, text in vault.items():
         # Strip inline code spans and fenced code blocks, then any [[ is a real link.
         stripped = _re.sub(r"`[^`]*`", "", text)
@@ -191,7 +210,7 @@ def test_uses_real_markdown_links_not_wikilinks():
 def test_obsidian_mode_emits_wikilinks():
     """--obsidian emits [[note-name|label]] wikilinks (so Obsidian's graph view
     and backlinks work) and NO standard markdown page links."""
-    vault = _build(use_networkx=False, entity_comention=True, obsidian=True)
+    vault = _build(entity_comention=True, obsidian=True)
     idx = vault["index.md"]
     assert "[[" in idx, "obsidian mode should emit wikilinks"
     # No standard markdown links to .md pages (the logo data-URI img is not a link).
@@ -200,13 +219,13 @@ def test_obsidian_mode_emits_wikilinks():
     # A wikilink targets the note-name (slug), aliased to the display title.
     assert _re.search(r"\[\[[a-z0-9-]+(\|[^\]]+)?\]\]", idx)
     # Deterministic in obsidian mode too.
-    again = _build(use_networkx=False, entity_comention=True, obsidian=True)
+    again = _build(entity_comention=True, obsidian=True)
     for k in vault:
         assert vault[k] == again[k]
 
 
 def test_cluster_and_wikilinks():
-    vault = _build(use_networkx=False)
+    vault = _build()
     # Alpha Root/Detail/Runbook cluster together on one topic page.
     alpha = [t for p, t in vault.items()
              if p.startswith("topics/") and "Alpha Root" in t]
@@ -219,10 +238,11 @@ def test_cluster_and_wikilinks():
 
 
 def test_contradiction_flagged():
-    vault = _build(use_networkx=False)
-    # The contradicting pair lands together AND is reported in lint.
+    vault = _build()
+    # Two contradicting pairs: the belief pair (eee/fff) and the synthesis pair
+    # (hhh contradicts ggg) — see test_synthesis_is_core_type_and_sections.
     lint = vault["lint.md"]
-    assert "Contradictions (1)" in lint
+    assert "Contradictions (2)" in lint
     # Both members appear on one topic page with the warning.
     contra = [t for p, t in vault.items()
               if p.startswith("topics/") and "Contra One" in t]
@@ -231,8 +251,32 @@ def test_contradiction_flagged():
     assert "Contradiction on this page" in contra[0]
 
 
+def test_synthesis_is_core_type_and_sections():
+    """A synthesis reaches the vault on TYPE, not importance, and a synthesis
+    judged wrong stays visible (flagged) rather than being hidden.
+
+    m-ggg sits at importance 0.5, below the 0.6 threshold — it can only appear
+    via CORE_TYPES. m-hhh contradicts it: a `contradicts` edge needs a live
+    target, so suppressing the wrong page would break the very machinery that
+    records it as wrong.
+    """
+    vault = _build()
+    body = "\n".join(vault.values())
+    assert "Alpha Compiled" in body, "synthesis excluded despite being a CORE_TYPE"
+    assert "Wrong Answer" in body, "a contradicted synthesis must remain visible"
+    # The gamma cluster is synthesis-dominated, so the index gets its section.
+    assert "📝 Compiled syntheses" in vault["index.md"]
+    # _TYPE_ORDER tiebreak: gamma is 2 synthesis + 1 procedure. Were 'synthesis'
+    # appended LAST in _TYPE_SECTIONS it would lose the ordering tiebreak and the
+    # topic would file under runbooks instead.
+    gamma = [t for p, t in vault.items()
+             if p.startswith("topics/") and "Gamma Compiled" in t]
+    assert len(gamma) == 1, "gamma cluster should be exactly one topic page"
+    assert "Gamma Steps" in gamma[0], "procedure member belongs on the same page"
+
+
 def test_evidence_links_to_source():
-    vault = _build(use_networkx=False)
+    vault = _build()
     # m-aaa was promoted from design.md → its topic shows an Evidence link,
     # and a sources/ page exists for the file.
     alpha = [t for p, t in vault.items()
@@ -247,8 +291,8 @@ def test_evidence_links_to_source():
 def test_entity_comention_binds_orphans():
     """With entity co-mention on, two memories sharing a specific entity cluster
     together even with no hand-authored edge — and are NOT left as orphans."""
-    without = _build(use_networkx=False, entity_comention=False)
-    with_ = _build(use_networkx=False, entity_comention=True)
+    without = _build(entity_comention=False)
+    with_ = _build(entity_comention=True)
 
     # Without co-mention, m-ddd (Beta Standalone) is an orphan.
     assert "Beta Standalone" in without["topics/orphans.md"]
@@ -263,16 +307,39 @@ def test_entity_comention_binds_orphans():
     assert len(shared) == 1, "m-ddd and m-fff should share one topic via co-mention"
 
     # Determinism must hold with co-mention on, too.
-    again = _build(use_networkx=False, entity_comention=True)
+    again = _build(entity_comention=True)
     for k in with_:
         assert with_[k] == again[k]
+
+
+def test_admission_gate_demotes_comention_only_cluster():
+    """Default-on gate in build_wiki: a cluster fused ONLY by entity co-mention
+    (m-ddd + m-fff share `ent-specific`, no authored edge → provenance 0,
+    backbone_ratio 0) is a grab-bag and must be demoted back to orphans, NOT
+    rendered as a synthesis topic. Mirror of test_entity_comention_binds_orphans,
+    which turns the gate OFF to show the raw co-mention binding."""
+    mem, files = _mem_db(), _files_db()
+    try:
+        gated = build_wiki(mem, files, WikiOptions(
+            importance_threshold=0.6, entity_comention=True, admission_gate=True))
+    finally:
+        mem.close()
+        files.close()
+    # The co-mention pair is demoted: both fall to orphans, no shared topic page.
+    orphans = gated.get("topics/orphans.md", "")
+    assert "Beta Standalone" in orphans, "grab-bag member should land in orphans"
+    shared = [t for p, t in gated.items()
+              if p.startswith("topics/") and p != "topics/orphans.md"
+              and "Beta Standalone" in t]
+    assert not shared, "co-mention-only cluster must not render as a synthesis topic"
 
 
 def test_memory_only_when_no_files():
     mem = _mem_db()
     try:
         vault = build_wiki(mem, None, WikiOptions(importance_threshold=0.6,
-                                                  include_files=False))
+                                                  include_files=False,
+                                                  admission_gate=False))
     finally:
         mem.close()
     assert not any(p.startswith("sources/") for p in vault)
@@ -290,7 +357,7 @@ def test_html_viewer_self_contained():
         sys.path.insert(0, _bin)
     from wiki.html_view import build_html
 
-    vault = _build(use_networkx=False, entity_comention=True)
+    vault = _build(entity_comention=True)
     html = build_html(vault)
     assert "__PAGES_JSON__" not in html and "__TITLE__" not in html
     m = _re.search(r'<script id="data" type="application/json">(.*?)</script>',
@@ -322,7 +389,7 @@ def test_synthesis_injects_lede():
     try:
         vault = build_wiki(
             mem, files,
-            WikiOptions(importance_threshold=0.6, use_networkx=False, entity_comention=True),
+            WikiOptions(importance_threshold=0.6, entity_comention=True, admission_gate=False),
             synthesizer=stub,
         )
     finally:
@@ -335,7 +402,7 @@ def test_synthesis_injects_lede():
     mem2, files2 = _mem_db(), _files_db()
     try:
         plain = build_wiki(mem2, files2, WikiOptions(importance_threshold=0.6,
-                                                     use_networkx=False))
+                                                     admission_gate=False))
     finally:
         mem2.close()
         files2.close()
@@ -438,3 +505,83 @@ def test_prune_never_escapes_out_dir(tmp_path):
     # Regen with a vault that doesn't include those → prune runs.
     gen_wiki._write_vault({"index.md": "# i\n"}, out)
     assert outside.exists(), "prune must never delete outside the vault dir"
+
+
+def test_non_discriminative_entities_excluded_from_comention():
+    """Upstream clustering fix (2026-07-24): entities of non-discriminative types
+    (dates, file paths, hosts, IPs, generic model names) must NOT create
+    co-mention edges — they bridge unrelated topics into one blob. Only
+    discriminative entities (person, benchmark, …) should link."""
+    import sqlite3
+    from wiki import select as S
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(
+        """CREATE TABLE memory_items (id TEXT PRIMARY KEY, type TEXT, title TEXT,
+             content TEXT, importance REAL DEFAULT 0.5, confidence REAL,
+             valid_from TEXT, valid_to TEXT, pinned INTEGER DEFAULT 0,
+             is_deleted INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT,
+             metadata_json TEXT);
+           CREATE TABLE entities (id TEXT PRIMARY KEY, canonical_name TEXT,
+             entity_type TEXT);
+           CREATE TABLE memory_item_entities (memory_id TEXT, entity_id TEXT,
+             mention_text TEXT, mention_offset INTEGER DEFAULT 0,
+             confidence REAL DEFAULT 0.85);"""
+    )
+    conn.executescript(
+        """INSERT INTO memory_items (id,type,title,content,importance) VALUES
+             ('m1','note','A','a',0.9),('m2','note','B','b',0.9),('m3','note','C','c',0.9);
+           INSERT INTO entities (id,canonical_name,entity_type) VALUES
+             ('e_date','2026-07-24','datetime'),
+             ('e_bench','LongMemEval','benchmark');
+           -- m1,m2 share only a DATE (noise) -> must NOT link
+           INSERT INTO memory_item_entities (memory_id,entity_id) VALUES
+             ('m1','e_date'),('m2','e_date'),
+           -- m2,m3 share a BENCHMARK (discriminative) -> SHOULD link
+             ('m2','e_bench'),('m3','e_bench');"""
+    )
+    conn.commit()
+    edges = S.load_entity_comention_edges(conn, {"m1", "m2", "m3"})
+    pairs = {tuple(sorted((e.from_id, e.to_id))) for e in edges}
+    assert ("m2", "m3") in pairs, "discriminative (benchmark) co-mention must link"
+    assert ("m1", "m2") not in pairs, "date-only co-mention must NOT link (noise)"
+    conn.close()
+
+
+def test_self_referential_project_name_excluded_from_comention():
+    """Finer clustering fix (2026-07-24): the project's OWN repo/org name is
+    non-discriminative (every note mentions it) even though `organization` as a
+    TYPE is discriminative for real external orgs. A value-level exclusion must
+    drop the self-name bridge while keeping real-org links."""
+    import sqlite3
+    from wiki import select as S
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(
+        """CREATE TABLE memory_items (id TEXT PRIMARY KEY, type TEXT, title TEXT,
+             content TEXT, importance REAL DEFAULT 0.5, confidence REAL,
+             valid_from TEXT, valid_to TEXT, pinned INTEGER DEFAULT 0,
+             is_deleted INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT,
+             metadata_json TEXT);
+           CREATE TABLE entities (id TEXT PRIMARY KEY, canonical_name TEXT,
+             entity_type TEXT);
+           CREATE TABLE memory_item_entities (memory_id TEXT, entity_id TEXT,
+             mention_text TEXT, mention_offset INTEGER DEFAULT 0,
+             confidence REAL DEFAULT 0.85);"""
+    )
+    conn.executescript(
+        """INSERT INTO memory_items (id,type,title,content,importance) VALUES
+             ('m1','note','A','a',0.9),('m2','note','B','b',0.9),('m3','note','C','c',0.9);
+           INSERT INTO entities (id,canonical_name,entity_type) VALUES
+             ('e_self','skynetcmd/m3-memory','organization'),
+             ('e_real','Technitium','organization');
+           -- m1,m2 share only the PROJECT's own org name -> must NOT link
+           INSERT INTO memory_item_entities (memory_id,entity_id) VALUES
+             ('m1','e_self'),('m2','e_self'),
+           -- m2,m3 share a REAL external org -> SHOULD link
+             ('m2','e_real'),('m3','e_real');"""
+    )
+    conn.commit()
+    pairs = {tuple(sorted((e.from_id, e.to_id)))
+             for e in S.load_entity_comention_edges(conn, {"m1", "m2", "m3"})}
+    assert ("m2", "m3") in pairs, "real external org must still link"
+    assert ("m1", "m2") not in pairs, "project self-name must NOT bridge (noise)"
+    conn.close()

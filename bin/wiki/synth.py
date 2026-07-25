@@ -57,10 +57,25 @@ class SynthConfig:
 
 
 def _cluster_hash(c: Cluster, model: str) -> str:
+    """Idempotence key for a cluster's synthesis: identical inputs → identical
+    hash across runs, so an unchanged topic is skipped rather than recompiled.
+
+    Hashes the cluster's SOURCE members only — never a synthesis member. This is
+    load-bearing for idempotence: once a topic is compiled, its synthesis is
+    written back into the corpus and, via its `consolidates` edges, re-clusters
+    WITH its own sources on the next run. Hashing `c.members` would then include
+    the synthesis, changing the hash every run (30 sources vs 30 sources + 1
+    synthesis) so the no-op gate never fires — the corpus never converges and
+    duplicate syntheses accumulate. Excluding synthesis members makes the hash
+    depend only on the stable source set (mirrors source_members / the admission
+    gate's synthesis-free view)."""
     h = hashlib.sha256()
     h.update(_PROMPT_VERSION.encode())
     h.update((model or "").encode())
-    for m in c.members:  # members are already deterministically ordered
+    # Source members only, in the cluster's existing deterministic order.
+    for m in c.members:
+        if getattr(m, "type", None) == "synthesis":
+            continue
         head = (m.content or "").strip().splitlines()
         snippet = head[0].strip() if head else ""
         h.update(m.id.encode())

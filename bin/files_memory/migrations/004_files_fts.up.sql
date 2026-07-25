@@ -1,0 +1,18 @@
+-- 004_files_fts.up.sql
+--
+-- SQLite side of the files full-text parity work (PG counterpart:
+-- pg_004_files_fts). INTENTIONALLY A NO-OP on SQLite.
+--
+-- WHY NO-OP. SQLite already has full-text over the files store: migration
+-- 001_files_base created the FTS5 virtual tables leaves_fts / file_summaries_fts
+-- plus their INSERT/DELETE/UPDATE sync triggers, and files_search/files_index
+-- query them via `MATCH` + `bm25()`. Nothing to add here. The PG side had no
+-- full-text at all (pg_001 omitted the SQLite-only FTS5), so pg_004 adds the
+-- native tsvector/GIN equivalent. This file exists so the two backends' files
+-- migration sequences stay VERSION-ALIGNED (both reach v004 for the same logical
+-- change), keeping the story legible: "v004 = files full-text on both backends;
+-- SQLite already had it, PG gains it."
+--
+-- A no-op statement (not an empty file) so the runner has something to execute
+-- and the version is stamped.
+SELECT 1;

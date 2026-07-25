@@ -18,6 +18,7 @@ names are trusted, caller-supplied identifiers, never end-user input.
 """
 from __future__ import annotations
 
+import json as _json
 from dataclasses import dataclass
 from typing import Literal
 
@@ -158,6 +159,114 @@ class Dialect:
         """
         raise NotImplementedError("subclass must implement now_minus_minutes()")
 
+    def age_days_gt(self, ts_column: str, days_expr: str) -> str:
+        """Boolean predicate: the timestamp in ``ts_column`` is OLDER than
+        ``days_expr`` days (i.e. now - ts > days). ``days_expr`` is either a bind
+        placeholder (``self.param()``) or a trusted literal int; ``ts_column`` is a
+        trusted identifier (never user input).
+
+        Replaces the SQLite-only ``julianday('now') - julianday(<col>) > <days>``
+        idiom, which raises on PostgreSQL (no julianday()). Used by the
+        retention/decay/purge passes in memory_maintenance.
+
+            sql = f"... WHERE {_d.age_days_gt('created_at', _d.param())} ..."
+            params = (..., ttl_days, ...)   # an int
+
+        SQLite:   ``(julianday('now') - julianday(<col>)) > <days_expr>``
+        Postgres: ``<col> < NOW() - (<days_expr> * INTERVAL '1 day')``
+        """
+        raise NotImplementedError("subclass must implement age_days_gt()")
+
+    def all_rows_after_offset(self, offset_placeholder: str) -> str:
+        """A ``LIMIT ... OFFSET`` tail that returns ALL rows after ``offset`` (no
+        upper bound) — the "keep newest N, take the rest" idiom.
+
+        Replaces the SQLite-only ``LIMIT -1 OFFSET ?`` (where -1 means "no limit"),
+        which is a syntax error on PostgreSQL. ``offset_placeholder`` binds an int.
+
+        SQLite:   ``LIMIT -1 OFFSET ?``
+        Postgres: ``LIMIT ALL OFFSET %s``
+        """
+        raise NotImplementedError("subclass must implement all_rows_after_offset()")
+
+    def group_concat(self, expr: str, separator: str = ",") -> str:
+        """Aggregate ``expr`` across a GROUP BY into a single separator-joined
+        string. ``expr`` is a trusted column/identifier; ``separator`` is a trusted
+        literal (never user input).
+
+        Replaces the SQLite-only ``GROUP_CONCAT(<expr>, '<sep>')``, which raises on
+        PostgreSQL (uses ``string_agg``). Both return a single TEXT value.
+
+        SQLite:   ``GROUP_CONCAT(<expr>, '<sep>')``
+        Postgres: ``string_agg(<expr>, '<sep>')``
+        """
+        raise NotImplementedError("subclass must implement group_concat()")
+
+    def greatest(self, *exprs: str) -> str:
+        """Scalar "largest of the arguments" — e.g. clamp a value to a floor.
+
+        SQLite spells this ``MAX(a, b, ...)`` (scalar, 2+ args) but PostgreSQL's
+        ``MAX`` is an AGGREGATE; the PG scalar is ``GREATEST(a, b, ...)`` (and
+        vice-versa: SQLite has no GREATEST). Args are trusted SQL fragments.
+
+        SQLite:   ``MAX(a, b, ...)``     Postgres: ``GREATEST(a, b, ...)``
+        """
+        raise NotImplementedError("subclass must implement greatest()")
+
+    def least(self, *exprs: str) -> str:
+        """Scalar "smallest of the arguments" — e.g. clamp a value to a ceiling.
+        The ``least`` analogue of :meth:`greatest`.
+
+        SQLite:   ``MIN(a, b, ...)``     Postgres: ``LEAST(a, b, ...)``
+        """
+        raise NotImplementedError("subclass must implement least()")
+
+    def is_undefined_object_error(self, exc: BaseException) -> bool:
+        """True if ``exc`` is a "no such column / no such table / no such object"
+        error — the class of failure that "tolerate a pre-migration DB, degrade to
+        a no-op" code paths want to catch.
+
+        Backends signal this DIFFERENTLY, and callers must NOT string-match the
+        message themselves: SQLite raises ``sqlite3.OperationalError("no such
+        column: x")`` while PostgreSQL raises ``psycopg2.errors.UndefinedColumn`` /
+        ``UndefinedTable`` with stable SQLSTATE codes (``42703`` / ``42P01``).
+        Matching the PG SQLSTATE is far more robust than its English message (which
+        varies by version/locale). This predicate hides that split so a caller asks
+        one portable question:
+
+            except Exception as e:
+                if not dialect().is_undefined_object_error(e):
+                    raise            # a real error, not a pre-migration schema gap
+
+        Also handles a wrapped/chained exception via ``__cause__`` so a
+        seam-adapted error still classifies.
+        """
+        raise NotImplementedError(
+            "subclass must implement is_undefined_object_error()")
+
+    def is_integrity_error(self, exc: BaseException) -> bool:
+        """True if ``exc`` is an INTEGRITY-constraint violation — a unique/primary-
+        key/NOT-NULL/foreign-key conflict — the class of failure a "insert, and on a
+        uniqueness race re-resolve the existing row" path wants to catch.
+
+        Backends signal this DIFFERENTLY and callers must NOT type-check one
+        backend's exception: SQLite raises ``sqlite3.IntegrityError`` while
+        PostgreSQL raises ``psycopg2.IntegrityError`` (SQLSTATE class ``23xxx`` —
+        ``23505`` unique_violation, ``23503`` foreign_key_violation, ``23502``
+        not_null_violation, ``23514`` check_violation). Matching the PG SQLSTATE
+        class is more robust than its message. This predicate hides the split:
+
+            except Exception as e:
+                if not dialect().is_integrity_error(e):
+                    raise                 # a real error, not a constraint race
+                existing = _find_existing(conn, name)  # re-resolve + continue
+
+        Handles a wrapped/chained exception via ``__cause__`` so a seam-adapted
+        error still classifies.
+        """
+        raise NotImplementedError(
+            "subclass must implement is_integrity_error()")
+
     # -- generated ids -------------------------------------------------------
     def returning_id_clause(self) -> str:
         """Trailing INSERT clause to make the statement return its generated id.
@@ -200,6 +309,87 @@ class Dialect:
         JSON-typed SQL backend (MariaDB) gets ``'{}'`` too, not the SQLite ``''``.
         """
         raise NotImplementedError("subclass must implement empty_json_default()")
+
+    def json_column_to_dict(self, value: object) -> dict:
+        """Normalize a FETCHED JSON column to a dict. The read-side complement
+        to :meth:`empty_json_default` (which handles the write side).
+
+        The same column comes back as a different Python type per backend:
+        SQLite stores ``metadata_json`` as TEXT so the driver yields ``str``,
+        while Postgres JSONB (and MariaDB JSON) yields an ALREADY-PARSED
+        ``dict``. A bare ``json.loads()`` therefore works on SQLite and raises
+        ``TypeError`` on Postgres — the trap documented on
+        :meth:`json_extract_text`.
+
+        Callers must route every read of a JSON column through this instead of
+        writing their own str-or-dict shim: a call-site helper is the same
+        defect in smaller form, because the next author copy-pastes it.
+
+        Fails SAFE, never loud: ``None`` / empty / malformed all yield ``{}``.
+        A caller gating on a field (e.g. rendering only ``authority ==
+        "canonical"``) then treats unparseable metadata as "not authoritative"
+        rather than crashing a whole batch render on one bad row.
+
+        Concrete on the base class because normalization keys on the VALUE's
+        Python type, not on SQL syntax — so it is already correct for any future
+        backend whose driver returns either shape.
+        """
+        if value is None or value == "" or value == b"":
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, (bytes, bytearray)):
+            try:
+                value = value.decode("utf-8")
+            except Exception:
+                return {}
+        if isinstance(value, str):
+            try:
+                parsed = _json.loads(value)
+            except Exception:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
+
+    def json_bind_value(self, value: object) -> "str | None":
+        """Normalize a value for BINDING into a JSON column. The write-side
+        complement to :meth:`json_column_to_dict` (which handles the read side).
+
+        The round-trip trap this closes: a whole-column read of a Postgres JSONB
+        column yields an already-parsed ``dict`` (see :meth:`json_column_to_dict`).
+        Feeding that dict straight back into an INSERT/UPDATE bind — the natural
+        shape of an export→import round-trip — raises psycopg2
+        ``ProgrammingError: can't adapt type 'dict'``, because psycopg2 has no
+        default adapter for a bare dict. SQLite's ``sqlite3`` refuses it too
+        (``InterfaceError``). A JSON *string* binds correctly on BOTH backends:
+        SQLite's column is TEXT so the string is stored verbatim, and Postgres
+        implicitly casts a JSON-shaped ``str`` into JSONB. So the portable bind
+        value is always the serialized string.
+
+        Callers must route every bind of a JSON-column value through this instead
+        of writing their own ``json.dumps(v) if isinstance(v, dict) else v`` shim
+        at the call site — the same defect in smaller form, because the next
+        author copy-pastes it (the rule for :meth:`json_column_to_dict`, applied
+        to the write side).
+
+        Coercion, keyed on the VALUE's Python type (never on SQL syntax, so it is
+        already correct for any future JSON-typed backend):
+          - ``None``                 -> ``None`` (SQL NULL; the column is nullable)
+          - ``dict`` / ``list``      -> ``json.dumps(value)``
+          - ``str``                  -> passed through verbatim (already serialized;
+                                        re-dumping would double-encode it)
+          - anything else            -> ``json.dumps(value)`` (numbers, bools)
+
+        Note this does NOT substitute :meth:`empty_json_default` — an empty/blank
+        metadata still needs that backend-specific default (``''`` vs ``'{}'``)
+        because ``None`` here means SQL NULL, not "empty object". Normalize blanks
+        with ``empty_json_default`` first if the column is NOT NULL.
+        """
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        return _json.dumps(value)
 
     def json_extract_text(self, column: str, json_path: str) -> str:
         """Extract a top-level JSON field AS TEXT.
@@ -273,6 +463,35 @@ class Dialect:
         is a trusted identifier; ``placeholder`` is the caller's bind marker.
         """
         return f"LOWER({column}) = LOWER({placeholder})"
+
+    def glob_match(self, column: str, placeholder: str, pattern: str) -> "tuple[str, str]":
+        """A case-sensitive shell-glob filename match. Returns ``(sql_fragment,
+        bound_value)`` — because the two backends differ in BOTH the operator AND
+        the wildcard alphabet, so the VALUE may need rewriting too, not just the SQL.
+
+        SQLite has a native ``GLOB`` operator (``*`` any run, ``?`` one char,
+        case-sensitive) — the natural fit for a filename filter. PostgreSQL has no
+        ``GLOB``; the closest case-sensitive form is ``LIKE`` with its own wildcards
+        (``%`` any run, ``_`` one char). So on PG the fragment becomes ``LIKE`` and
+        the glob wildcards in the pattern are translated to LIKE wildcards (with any
+        literal ``%``/``_`` in the source pattern escaped first so they stay
+        literal). SQLite passes the pattern through unchanged.
+
+        ``glob_match("filename", param(), "*.md")`` →
+          SQLite:   (``"filename GLOB ?"``,   ``"*.md"``)
+          Postgres: (``"filename LIKE %s"``,   ``"%.md"``)
+
+        Concrete on the base as a validate-then-delegate wrapper: ``column`` must be
+        a bare identifier (single-sourced here); the backend supplies the operator +
+        value transform via :meth:`_glob_fragment`.
+        """
+        if not column.isidentifier():
+            raise ValueError(f"column must be a bare identifier: {column!r}")
+        return self._glob_fragment(column, placeholder, pattern)
+
+    def _glob_fragment(self, column: str, placeholder: str, pattern: str) -> "tuple[str, str]":
+        """Backend fragment for :meth:`glob_match` (post-validation)."""
+        raise NotImplementedError("subclass must implement _glob_fragment()")
 
     # -- temporal validity ---------------------------------------------------
     def temporal_open_clause(self, column: str, op: str) -> str:
@@ -369,6 +588,95 @@ class Dialect:
     def _columns_of_query(self, table: str) -> tuple[str, tuple]:
         """Backend fragment for :meth:`columns_of` (post-validation)."""
         raise NotImplementedError("subclass must implement _columns_of_query()")
+
+    # -- schema namespacing --------------------------------------------------
+    def qualified_table(self, name: str, *, schema: str) -> str:
+        """Qualify a table name that lives in a SEPARATE logical store.
+
+        Some stores (the files-ingestion store, ``files_memory``) are physically
+        separate from the primary memory store. On SQLite that separation is a
+        separate database FILE, so a table reference is just the bare name — there
+        is no schema concept and the file is opened directly. On PostgreSQL the
+        separation is a schema NAMESPACE inside the one primary database (single
+        DSN), so the same table is ``<schema>.<name>``.
+
+        WHY qualification, not ``search_path``. A pooled PG connection that ran
+        ``SET search_path = files, public`` keeps that setting after it returns to
+        the pool — the next borrower silently resolves unqualified names against
+        ``files``, so a process that alternates between the primary (``public``)
+        and files (``files``) stores corrupts or errors depending on which schema
+        it happens to land in. ``SET LOCAL`` reverts at COMMIT but makes
+        correctness DEPEND on transaction discipline. Fully qualifying every name
+        removes the failure mode STRUCTURALLY: there is no session state to leak
+        and no "current schema" mode, so arbitrary mixing of ``public`` and
+        ``files`` tables on ONE connection — even in one transaction — is always
+        correct. This is the standard multi-schema approach (SQLAlchemy
+        ``Table(schema=...)``, schema-qualified ``table_name``).
+
+        ``qualified_table("leaves", schema="files")`` →
+          SQLite:   ``leaves``          (separate DB file; schema ignored)
+          Postgres: ``files.leaves``
+
+        Both ``name`` and ``schema`` are trusted bare identifiers (they name our
+        own tables/schemas, never end-user input) — validated here so a subclass
+        cannot be handed an injection vector. Emitted UNQUOTED (lowercase
+        identifiers on both backends), matching how every other table name in the
+        codebase is written.
+        """
+        if not name.isidentifier():
+            raise ValueError(f"table name must be a bare identifier: {name!r}")
+        if not schema or not schema.isidentifier():
+            raise ValueError(f"schema must be a bare identifier: {schema!r}")
+        return self._qualified_table_expr(name, schema)
+
+    def _qualified_table_expr(self, name: str, schema: str) -> str:
+        """Backend fragment for :meth:`qualified_table` (post-validation).
+
+        ABSTRACT — every dialect states its own qualification. "Bare name" is NOT
+        a universal default: it is the SQLite-FAMILY answer (separation is a
+        separate DB file, so there is no schema to qualify), not a correct default
+        for a schema/namespaced backend. Postgres qualifies with the schema; a
+        future MariaDB files store would qualify too; a document store wouldn't use
+        SQL table names at all. Making the base raise (not silently return the bare
+        name) means a new backend that forgets to implement this FAILS LOUD at first
+        use — "add your dialect's form" — rather than inheriting SQLite's answer and
+        silently targeting the wrong place. Same contract as insert_or_ignore /
+        on_conflict_ignore / the other divergent primitives.
+        """
+        raise NotImplementedError("subclass must implement _qualified_table_expr()")
+
+    # -- storage maintenance -------------------------------------------------
+    def compact_storage(self, *, sqlite_path: "str | None" = None,
+                        max_bytes: int = 500 * 1024 * 1024) -> str:
+        """Reclaim free space in the store, if the backend has a client-issued
+        compaction. Returns a human-readable status line for the maintenance report.
+
+        This exists so the maintenance pass NEVER branches on
+        ``resolve_backend_name() != "sqlite"`` at the call site. That call-site
+        ``if not sqlite`` is a latent bug: a THIRD backend that DOES have a
+        client-issued compaction — MariaDB ``OPTIMIZE TABLE``, or a future store —
+        would fall into the PG "no-op" side and silently never be compacted. The
+        decision belongs to the dialect, which knows its own storage engine.
+
+        Contract, per backend:
+          - **SQLite** — ``VACUUM`` rewrites the DB file to reclaim free pages. It
+            must run OUTSIDE any open transaction and needs the *active* file path
+            (which may differ from an import-time constant when a caller has switched
+            databases), so callers pass it as ``sqlite_path``. Size-gated by
+            ``max_bytes`` (default 500 MB, issue #46) to avoid multi-minute hangs.
+          - **Postgres** — no-op: autovacuum reclaims space in the background and
+            there is no meaningful client-issued file compaction (a manual
+            ``VACUUM`` here would need its own out-of-txn connection and does not
+            shrink the file without ``VACUUM FULL``, which takes an exclusive lock).
+          - **A future JSON/row store (MariaDB, …)** — implements whatever its
+            engine offers (``OPTIMIZE TABLE``) or returns its own no-op line. The
+            point is that adding it is ONE method here, not editing every call site.
+
+        Concrete on the base class as a safe DEFAULT no-op so a backend that adds
+        nothing still works; SQLite overrides it. ``sqlite_path`` is ignored by
+        every non-SQLite backend.
+        """
+        return "Compaction skipped: not applicable on this backend"
 
 
 # ── Concrete per-backend dialects live in their backend modules ──────────────

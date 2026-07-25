@@ -39,7 +39,7 @@ A memory becomes a wiki entry when it is **canonical** — M3's three overlappin
 signals for "this matters":
 
 - **pinned** — explicitly marked as canon (never aged out)
-- **high importance** — at or above the `--importance-threshold` (default `0.6`)
+- **high importance** — at or above the `--importance-threshold` (default `0.55`)
 - **a consolidated type** — `belief`, `procedure`, or `reference` (these are
   already distillations, so they belong in the wiki regardless of importance)
 
@@ -110,6 +110,81 @@ never fails.
 
 ---
 
+## Compiled syntheses (`m3 wiki compile`)
+
+`--synthesize` writes a prose lede into the *rendered vault*. `m3 wiki compile`
+goes further: it writes each topic's synthesis back into your store as a durable
+`synthesis` memory — a first-class, searchable, supersede-tracked row with
+provenance edges to its sources. This is the "compile-at-ingest" model: knowledge
+is distilled once and stored, not re-derived on every read.
+
+```bash
+m3 wiki compile               # compile the whole corpus
+m3 wiki compile --dry-run     # show what would compile — no model call, no write
+```
+
+Compilation is **idempotent**: an unchanged topic is recognized by a content hash
+and skipped (no model call), so re-running only recompiles topics that actually
+changed. Each synthesis records its source `member_ids` and writes `consolidates`
+provenance edges, so blast-radius, citation-drift, and the Knowledge Anchor Report
+can all reason about how a page was derived.
+
+### `--check-drift` — has a synthesis drifted from its sources?
+
+```bash
+m3 wiki generate --check-drift    # opt-in; report-only; mutually exclusive with --check
+```
+
+An **opt-in, report-only** pass that asks an LLM judge whether each compiled
+synthesis still faithfully reflects the sources it cites, flagging any that have
+**drifted**. It never rewrites or withholds a page — it only reports — and it is
+**fail-open**: if the judge is unreachable or errors, the page is treated as
+un-drifted so a model outage never blocks a build. It cannot be combined with
+`--check` (the byte-identity determinism check), because the judge is
+non-deterministic by design. Endpoint/model/timeout come from the
+`M3_WIKI_DRIFT_*` env vars (falling back to `M3_WIKI_SYNTH_*`) — see
+[ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md#wiki--synthesis--compilation).
+
+### The admission gate — which topics earn a synthesis
+
+Not every cluster deserves a compiled page. A cluster fused only by incidental
+co-mention (two memories that happen to name the same file or host) is a grab-bag,
+not a topic. The **admission gate** demotes such clusters back to the orphan list
+*before* the model is called — so compilation spends effort only on genuinely
+anchored topics, and the vault isn't padded with incoherent pages.
+
+The gate scores each cluster on its **member-to-member link structure** and admits
+it if any of these clears its floor:
+
+| Signal | Meaning | Default floor |
+|---|---|---|
+| `backbone_ratio` | share of real (non-co-mention) edges — the primary discriminator | 0.6 |
+| `provenance` | share of edges that are authored lineage (supersedes / extends / …) | 0.5 |
+| `kas` | overall structural [Knowledge Anchor Score](#) | 0.5 |
+
+Two properties are guaranteed by design:
+
+- **Deterministic** — the same store produces a byte-identical result.
+- **State-independent** — the decision reads only *authored* structure, never the
+  `consolidates` edges that a prior compile wrote. A topic is admitted or demoted
+  identically on the first compile and the thousandth; compiling never changes what
+  the gate will do next time.
+
+Tune the floors (or turn the gate off for an audit build) with an optional config
+file at `$M3_CONFIG_ROOT/.wiki_admission.json`:
+
+```json
+{ "min_backbone_ratio": 0.6, "min_provenance": 0.5, "min_kas": 0.5, "enabled": true }
+```
+
+Any field may be omitted (it keeps the default). A `--dry-run` reports how many
+clusters the gate would demote, so you can calibrate before a real run.
+
+> Compiled syntheses derived from a memory that is later erased are handled under
+> GDPR Art. 17 — see [The Wiki & the Right to Erasure](WIKI_GDPR.md).
+
+---
+
 ## Keeping it fresh
 
 The generator is **deterministic**: the same memories produce a byte-identical
@@ -125,17 +200,20 @@ m3 wiki generate --check    # exit 0 if fresh, non-zero (and lists drift) if sta
 
 ---
 
-## Clustering quality (optional dependency)
+## Clustering
 
-Topic clustering works out of the box with a pure-Python algorithm. For tighter
-communities on large memory sets, install the optional extra — it pulls in
-`networkx` and M3 uses it automatically when present:
+The wiki is a **core feature — it ships in the base `pip install m3-memory`** and
+needs no extra to run. `m3 wiki generate` works out of the box.
 
-```bash
-pip install "m3-memory[wiki]"
-```
+Topic clustering uses [`networkx`](https://networkx.org) greedy-modularity
+community detection, which is a **base dependency** of m3-memory — it installs
+with the core package, nothing extra to enable. Clustering is deterministic
+run-to-run, so `m3 wiki generate --check` stays byte-reproducible.
 
-Force the pure-Python path (e.g. to compare) with `--no-networkx`.
+> The old `[wiki]` optional extra (and the `--no-networkx` flag) are gone:
+> networkx is now always present. `pip install "m3-memory[wiki]"` still works as a
+> no-op back-compat alias so existing scripts don't break, but it installs nothing
+> beyond the base package.
 
 ---
 
@@ -164,15 +242,19 @@ wikilinks render as literal text outside Obsidian (GitHub, the HTML viewer), so
 ```
 m3 wiki generate [options]
   --out DIR                  Output vault dir (default <engine_root>/wiki)
-  --importance-threshold F   Min importance to count as "core" (default 0.6)
+  --importance-threshold F   Min importance to count as "core" (default 0.55)
   --no-files                 Memory-only vault (skip the files corpus)
   --synthesize               Add an LLM prose lede per topic (opt-in, cached)
   --obsidian                 Emit [[wikilinks]] so Obsidian's graph view + backlinks
                              work (opt-in; literal text elsewhere)
   --exclude REGEX            Drop memories whose title/content matches REGEX
   --html                     Also write a self-contained wiki.html viewer
-  --no-networkx              Force the pure-Python clustering fallback
   --check                    Exit non-zero if the on-disk vault is stale
+
+m3 wiki compile [options]    Compile topics into durable synthesis memories
+  --importance-threshold F   Min importance to count as "core" (default 0.55)
+  --dry-run                  Report what would compile — no model call, no write
+                             (also shows how many clusters the admission gate demotes)
 
 m3 wiki status [--out DIR]   Vault location, page count, last build time
 ```

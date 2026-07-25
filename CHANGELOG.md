@@ -19,15 +19,20 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-### Planned
-- **PostgreSQL support for the files corpus (`files_database.db`).** The files
-  store is currently a local SQLite sidecar on every backend, so the wiki's
-  *source* pages (from indexed files) are SQLite-scoped even on a PostgreSQL
-  deployment. The wiki's *memory* layer already works on both backends (SQLite and
-  PostgreSQL) via the core seam. Making `files_memory` backend-agnostic — like core
-  memory and chatlog already are — will bring the files layer to PostgreSQL too
-  (new PG migrations incl. a full-text equivalent for FTS5, seam wiring, and
-  dialected queries).
+No unreleased changes.
+
+## [2026.7.25.0] — 2026-07-25 — PostgreSQL portability & wiki synthesis
+
+- **Full parity for PostgreSQL and SQLite, including the testing harness.** The
+  files store (and core memory, maintenance, and archive) now runs on both
+  backends through the storage seam, with backend-native full-text search
+  (FTS5 on SQLite, `tsvector` + GIN on PostgreSQL, no extension required).
+- **Wiki enhancements, including first-class support for GDPR.** Compile-at-ingest
+  syntheses, the opt-in citation-drift check, and a GDPR derivability review queue
+  (30-day SLA + erasure-flushed cluster ledger).
+- **Dashboard fixes for PostgreSQL support.** The dashboard and `chatlog status`
+  now read the files corpus from the PostgreSQL `files` schema instead of
+  reporting it empty.
 
 ## [2026.7.23.0] — 2026-07-23 — Embedding-space integrity
 

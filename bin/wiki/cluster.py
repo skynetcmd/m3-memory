@@ -1,25 +1,23 @@
 """Cluster core memories into topic pages.
 
-Default path is pure-Python (stdlib only): a weighted union-find over the memory
-edge graph groups strongly-connected memories into one topic. This keeps
-build_wiki() dependency-free and byte-deterministic.
+Clustering uses networkx greedy-modularity community detection over the memory
+edge graph: strongly-connected memories are grouped into one topic. networkx is a
+base dependency of m3-memory (the Memory Wiki is a core feature), so it is
+imported directly and trusted to be present — the same way PyYAML, cryptography,
+and the other required deps are. There is no pure-Python fallback: a base dep is
+not reimplemented in-tree.
 
-If networkx is installed (`pip install "m3-memory[wiki]"`), an optional
-greedy-modularity pass produces tighter communities. It is imported lazily and
-guarded — never a hard dependency. The pure path is always correct; networkx only
-improves cluster *quality*.
+Output is deterministic run-to-run: greedy_modularity_communities is a greedy
+algorithm with defined tie-breaks, and members/clusters are sorted by stable keys
+(id, importance) so `m3 wiki generate --check` stays byte-reproducible.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .select import Edge, Mem
+import networkx as nx
 
-# Edges at or above this weight bind two memories into the same cluster in the
-# pure-Python path. Weak edges (related/references at 1.0) still bind — they are
-# real links — but the threshold lets us treat trivial precedes/follows (0.5) as
-# non-binding so a long chain doesn't collapse into one mega-page.
-_BIND_THRESHOLD = 1.0
+from .select import Edge, Mem
 
 # A cluster larger than this is split into chunks to avoid one unreadable page.
 # Set high: a genuine topic of 40-60 related memories reads far better as ONE
@@ -40,68 +38,11 @@ class Cluster:
         return (-len(self.members), -top_imp, self.key)
 
 
-class _UnionFind:
-    def __init__(self, ids: list[str]) -> None:
-        self.parent = {i: i for i in ids}
-
-    def find(self, x: str) -> str:
-        root = x
-        while self.parent[root] != root:
-            root = self.parent[root]
-        # path compression
-        while self.parent[x] != root:
-            self.parent[x], x = root, self.parent[x]
-        return root
-
-    def union(self, a: str, b: str) -> None:
-        ra, rb = self.find(a), self.find(b)
-        if ra == rb:
-            return
-        # Deterministic: smaller id becomes root.
-        if ra < rb:
-            self.parent[rb] = ra
-        else:
-            self.parent[ra] = rb
-
-
-def cluster(memories: list[Mem], edges: list[Edge], *, use_networkx: bool = True) -> list[Cluster]:
+def cluster(memories: list[Mem], edges: list[Edge]) -> list[Cluster]:
     """Group memories into topic clusters. Deterministic ordering guaranteed."""
     if not memories:
         return []
-    nx = _try_networkx() if use_networkx else None
-    if nx is not None:
-        try:
-            return _cluster_networkx(nx, memories, edges)
-        except Exception:
-            # Never let an optional-path failure break generation.
-            pass
-    return _cluster_pure(memories, edges)
-
-
-def _cluster_pure(memories: list[Mem], edges: list[Edge]) -> list[Cluster]:
-    by_id = {m.id: m for m in memories}
-    uf = _UnionFind(list(by_id.keys()))
-    bound: set[str] = set()
-    for e in sorted(edges, key=lambda e: (e.from_id, e.to_id, e.rel)):
-        if e.weight >= _BIND_THRESHOLD and e.from_id in by_id and e.to_id in by_id:
-            uf.union(e.from_id, e.to_id)
-            bound.add(e.from_id)
-            bound.add(e.to_id)
-
-    groups: dict[str, list[Mem]] = {}
-    for mid, m in by_id.items():
-        groups.setdefault(uf.find(mid), []).append(m)
-
-    clusters: list[Cluster] = []
-    for root, members in groups.items():
-        members.sort(key=lambda m: m.rank_key())
-        orphan = len(members) == 1 and members[0].id not in bound
-        for chunk in _split(members):
-            clusters.append(
-                Cluster(key=min(m.id for m in chunk), members=chunk, is_orphan=orphan)
-            )
-    clusters.sort(key=lambda c: c.rank_key())
-    return clusters
+    return _cluster_networkx(memories, edges)
 
 
 def _split(members: list[Mem]) -> list[list[Mem]]:
@@ -111,15 +52,7 @@ def _split(members: list[Mem]) -> list[list[Mem]]:
     return [members[i : i + _MAX_CLUSTER] for i in range(0, len(members), _MAX_CLUSTER)]
 
 
-def _try_networkx():
-    try:
-        import networkx as nx  # type: ignore
-        return nx
-    except ImportError:
-        return None
-
-
-def _cluster_networkx(nx, memories: list[Mem], edges: list[Edge]) -> list[Cluster]:
+def _cluster_networkx(memories: list[Mem], edges: list[Edge]) -> list[Cluster]:
     by_id = {m.id: m for m in memories}
     g = nx.Graph()
     g.add_nodes_from(by_id.keys())
@@ -131,7 +64,7 @@ def _cluster_networkx(nx, memories: list[Mem], edges: list[Edge]) -> list[Cluste
             else:
                 g.add_edge(e.from_id, e.to_id, weight=w)
 
-    from networkx.algorithms.community import greedy_modularity_communities  # type: ignore
+    from networkx.algorithms.community import greedy_modularity_communities
 
     # greedy_modularity_communities needs >1 node with edges to be meaningful;
     # isolated nodes come back as singleton communities, which is what we want.

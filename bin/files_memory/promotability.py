@@ -32,6 +32,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
+from .config import files_table
 from .db import _db
 
 logger = logging.getLogger("files_memory.promotability")
@@ -55,29 +56,34 @@ def record_leaf_hits(
         return 0
     now = datetime.now(timezone.utc).isoformat()
 
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     # Find every fact whose leaf is in the hit set.
     CHUNK = 500
     total_touched = 0
     for start in range(0, len(leaf_uuids), CHUNK):
         chunk = leaf_uuids[start:start + CHUNK]
-        placeholders = ",".join("?" * len(chunk))
+        placeholders = _d.placeholder(len(chunk))
         fact_uuids = [
             r[0] for r in conn.execute(
-                f"SELECT uuid FROM facts WHERE leaf IN ({placeholders})", chunk,
+                f"SELECT uuid FROM {files_table('facts')} WHERE leaf IN ({placeholders})", chunk,
             ).fetchall()
         ]
         if not fact_uuids:
             continue
 
-        # Upsert into fact_hit_stats: increment hit_count, set last_hit_at,
-        # set first_hit_at if it was NULL.
+        # Upsert into fact_hit_stats: increment hit_count, set last_hit_at.
+        # Hand-written DO UPDATE (hit_count = hit_count + 1) — on_conflict_update
+        # only does `col = excluded.col`, so the increment stays explicit here; the
+        # ON CONFLICT (...) DO UPDATE spelling is portable across both backends.
         for fuuid in fact_uuids:
             conn.execute(
-                "INSERT INTO fact_hit_stats(fact_uuid, hit_count, first_hit_at, last_hit_at) "
-                "VALUES (?, 1, ?, ?) "
-                "ON CONFLICT(fact_uuid) DO UPDATE SET "
-                "  hit_count = hit_count + 1, "
-                "  last_hit_at = excluded.last_hit_at",
+                f"INSERT INTO {files_table('fact_hit_stats')}(fact_uuid, hit_count, first_hit_at, last_hit_at) "
+                f"VALUES ({_p}, 1, {_p}, {_p}) "
+                f"ON CONFLICT(fact_uuid) DO UPDATE SET "
+                f"  hit_count = fact_hit_stats.hit_count + 1, "
+                f"  last_hit_at = excluded.last_hit_at",
                 (fuuid, now, now),
             )
             total_touched += 1
@@ -134,29 +140,31 @@ def files_promotable(
             items is noise.
         db_path: target files.db.
     """
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+        # seam yields name-addressable rows on both backends (no sqlite3.Row).
         sql_parts = [
-            "SELECT f.uuid AS fact_uuid, f.statement, f.confidence, "
-            "       f.leaf, f.file_node, "
-            "       fhs.hit_count, fhs.last_hit_at, "
-            "       fn.filename, fn.path_absolute, fn.corpus_id, "
-            "       (SELECT 1 FROM promotion_markers pm "
-            "        WHERE pm.source_memory = f.uuid LIMIT 1) AS already_promoted "
-            "FROM facts f "
-            "JOIN fact_hit_stats fhs ON fhs.fact_uuid = f.uuid "
-            "JOIN file_nodes fn ON fn.uuid = f.file_node "
-            "WHERE fn.superseded_by IS NULL "
-            "  AND fhs.hit_count > 0"
+            f"SELECT f.uuid AS fact_uuid, f.statement, f.confidence, "
+            f"       f.leaf, f.file_node, "
+            f"       fhs.hit_count, fhs.last_hit_at, "
+            f"       fn.filename, fn.path_absolute, fn.corpus_id, "
+            f"       (SELECT 1 FROM {files_table('promotion_markers')} pm "
+            f"        WHERE pm.source_memory = f.uuid LIMIT 1) AS already_promoted "
+            f"FROM {files_table('facts')} f "
+            f"JOIN {files_table('fact_hit_stats')} fhs ON fhs.fact_uuid = f.uuid "
+            f"JOIN {files_table('file_nodes')} fn ON fn.uuid = f.file_node "
+            f"WHERE fn.superseded_by IS NULL "
+            f"  AND fhs.hit_count > 0"
         ]
         params: list = []
         if corpus_id:
-            sql_parts.append("AND fn.corpus_id = ?")
+            sql_parts.append(f"AND fn.corpus_id = {_p}")
             params.append(corpus_id)
         if not include_already_promoted:
-            sql_parts.append("AND NOT EXISTS (SELECT 1 FROM promotion_markers "
-                             "WHERE source_memory = f.uuid)")
-        sql_parts.append("ORDER BY fhs.hit_count * f.confidence DESC LIMIT ?")
+            sql_parts.append(f"AND NOT EXISTS (SELECT 1 FROM {files_table('promotion_markers')} "
+                             f"WHERE source_memory = f.uuid)")
+        sql_parts.append(f"ORDER BY fhs.hit_count * f.confidence DESC LIMIT {_p}")
         params.append(max(limit * 4, 50))  # over-fetch; we'll re-rank with full score
 
         rows = conn.execute(" ".join(sql_parts), params).fetchall()
