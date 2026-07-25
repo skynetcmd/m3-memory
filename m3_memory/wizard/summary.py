@@ -13,10 +13,23 @@ from typing import Optional
 from .ui import _ok, _warn
 
 
-def _summary(plan, governor_result: Optional[dict] = None) -> None:
-    """End-of-run summary so the user knows exactly what to do next."""
+def _summary(plan, governor_result: Optional[dict] = None,
+             verified: bool = True) -> None:
+    """End-of-run summary so the user knows exactly what to do next.
+
+    ``verified`` is the doctor's verdict from _step_doctor. It used to print
+    "Setup complete." unconditionally — including over a doctor run that had
+    just failed — which is the silent-success pattern the doctor exists to
+    catch. The headline now states what is actually true.
+    """
     print()
-    _ok("Setup complete.")
+    if verified:
+        _ok("Setup complete — verified healthy.")
+    else:
+        _warn("Setup finished, but VERIFICATION FAILED.")
+        _warn("m3 is installed and may partly work; the doctor output above "
+              "names each issue and its fix. Do not assume capture or search "
+              "is running until `m3 doctor` is clean.")
     print()
     restart_lines = []
     if plan.targets.claude:

@@ -314,10 +314,26 @@ if [[ $ALLOW_NATIVE_SOURCE_BUILD -eq 1 ]]; then
 fi
 
 say "Running: m3 setup ${SETUP_ARGS[*]}"
-m3 setup "${SETUP_ARGS[@]}"
+# Exit 3 = installed, but the post-install `m3 doctor` did not pass. Under
+# `set -e` that would abort this script before the guidance below, so the user
+# would see a bare failure and no next step. Catch it, say plainly what state
+# the machine is in, and still print the follow-up instructions. Any OTHER
+# non-zero code is a real setup abort and must keep failing loudly.
+SETUP_RC=0
+m3 setup "${SETUP_ARGS[@]}" || SETUP_RC=$?
+if [[ $SETUP_RC -ne 0 && $SETUP_RC -ne 3 ]]; then
+    exit $SETUP_RC
+fi
 
 echo
-color_ok "Done. m3-memory is installed."
+if [[ $SETUP_RC -eq 3 ]]; then
+    color_warn "m3-memory is installed, but verification did NOT pass."
+    color_warn "The doctor output above lists each issue and its fix."
+    color_warn "Do not assume chatlog capture or search is running until"
+    color_warn "'m3 doctor' is clean. Many issues self-repair: m3 doctor --fix"
+else
+    color_ok "Done. m3-memory is installed and verified healthy."
+fi
 echo
 cat <<EOF
 Next steps:

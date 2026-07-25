@@ -628,7 +628,17 @@ def run_gui() -> int:
             lines.append(f"FIPS         : {mode} — wolfSSL {wolf_state}")
         elif wolfssl_result:
             lines.append("wolfSSL      : " + wolfssl_result)
-        lines.append("Result       : " + ("✅ success" if rc == 0 else f"❌ exit {rc}"))
+        # rc 3 = installed but the post-install doctor did not pass. Name that
+        # state instead of showing a bare exit code: "❌ exit 3" reads as a
+        # failed install, when in fact m3 IS installed and the user needs to
+        # act on the doctor's findings.
+        if rc == 0:
+            result = "✅ success — verified healthy"
+        elif rc == 3:
+            result = "⚠️ installed, but NOT verified — run `m3 doctor`"
+        else:
+            result = f"❌ exit {rc}"
+        lines.append("Result       : " + result)
         lines.append("───────────────────────────────")
         return "\n".join(lines) + "\n"
 

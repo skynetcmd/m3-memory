@@ -1988,15 +1988,30 @@ def _step_governor_migration(plan: SetupPlan, *, non_interactive: bool = False,
 
 
 def _step_doctor() -> bool:
-    """Final verification."""
-    _say("Step 5/5: running doctor")
+    """Final verification — DOES the install actually work?
+
+    Returns True only when the doctor exits clean. The caller reports that
+    verdict to the user instead of unconditionally printing "Setup complete."
+
+    History: this used to `return True` in BOTH branches, so a setup that left a
+    broken install still exited 0 under a success summary. That is the same
+    silent-success failure the doctor probes exist to catch — a step that
+    reports a result it did not check. The install steps above are still
+    authoritative for aborting (a doctor warning does not undo them); what
+    changes is that the user is TOLD, and the exit code says so, rather than
+    being handed a green summary over a red system.
+    """
+    _say("Step 5/5: verifying the install (m3 doctor)")
     try:
         _run([sys.executable, "-m", "m3_memory.cli", "doctor"])
-        _ok("doctor passed")
+        _ok("verification passed — m3 is installed and working")
         return True
     except subprocess.CalledProcessError:
-        _warn("doctor reported warnings — review above, then re-run `m3 doctor`")
-        return True  # non-fatal — warnings ≠ broken install
+        _warn("VERIFICATION FAILED — the install completed but m3 is not fully "
+              "healthy. The doctor output above names each issue and its fix.")
+        _warn("Re-run `m3 doctor` after fixing, or `m3 doctor --fix` for the "
+              "issues that self-repair.")
+        return False
 
 
 # ── orchestrator ──────────────────────────────────────────────────────────────
@@ -2128,9 +2143,14 @@ def run_setup(args: argparse.Namespace) -> int:
         _step_install_dashboard(plan)
         governor_result = _step_governor_migration(
             plan, non_interactive=args.non_interactive, gui=getattr(args, "gui_child", False))
-        _step_doctor()
-        _summary(plan, governor_result)
-        return 0
+        verified = _step_doctor()
+        _summary(plan, governor_result, verified=verified)
+        # Exit 3 = "installed but not verified healthy". Distinct from 0
+        # (clean) and from 2 (aborted, nothing installed) so a scripted
+        # installer can tell "did not finish" from "finished but the result is
+        # not usable" — and so a CI/provisioning run cannot report success over
+        # a broken m3.
+        return 0 if verified else 3
     finally:
         # Lower HALT_m3 (idempotent — a no-op if preflight never raised it) so
         # the cognitive loop / embed / MCP resume. Best-effort; never mask the
