@@ -161,3 +161,84 @@ def test_has_column_absent_does_not_poison_txn(pg):
     assert "index.md" in vault
     # Core memories still present; only the co-mention signal is gone.
     assert "m-aaa" in "\n".join(vault.values())
+
+
+def _seed_files_schema(pg):
+    """Create the `files` schema (via the files-store seam) and seed the minimal
+    chain — file_node → ingestion_run → leaf → fact — so both the file_node read
+    and the _load_facts read are exercised on PG. Returns the seeded file uuid."""
+    from files_memory import db as fdb
+    fdb._initialized_dbs.clear()
+    fdb.init_db()  # creates the `files` schema + applies pg_ files migrations
+    fn = f"fn-{uuid.uuid4().hex[:8]}"
+    run = f"run-{uuid.uuid4().hex[:8]}"
+    leaf = f"lf-{uuid.uuid4().hex[:8]}"
+    with fdb._db() as c:
+        c.execute(
+            "INSERT INTO files.file_nodes "
+            "(uuid,identity_key,filename,filetype,path_absolute,size_bytes,"
+            " content_sha256,date_modified,source_host,version_label,file_summary) "
+            "VALUES (%s,'k','design.md','markdown','/design.md',10,'sha','2026','h','v1',"
+            "'A design note about the auth service.')",
+            (fn,),
+        )
+        c.execute(
+            "INSERT INTO files.ingestion_runs "
+            "(uuid,file_node,run_id,ingester_version,chunker_version,extract_mode) "
+            "VALUES (%s,%s,'r1','iv','cv','mode')",
+            (run, fn),
+        )
+        c.execute(
+            "INSERT INTO files.leaves "
+            "(uuid,file_node,ingestion_run,division_type,division_id,text,"
+            " text_sha256,char_range_start,char_range_end) "
+            "VALUES (%s,%s,%s,'heading','h1','body','lsha',0,4)",
+            (leaf, fn, run),
+        )
+        c.execute(
+            "INSERT INTO files.facts "
+            "(uuid,leaf,file_node,statement,source_span_start,source_span_end,"
+            " confidence,extraction_run) "
+            "VALUES (%s,%s,%s,'The service signs JWTs with RS256.',0,4,0.9,%s)",
+            (f"fact-{uuid.uuid4().hex[:8]}", leaf, fn, run),
+        )
+    return fn
+
+
+def test_files_corpus_visible_on_postgres(pg):
+    """The audit fix: the wiki's files corpus must render on a PG deployment, read
+    from the `files` schema via the files-store seam — NOT silently dropped because
+    there is no files_database.db sidecar. Seeds a file_node + fact into files.*,
+    builds with include_files=True through both seams, and asserts the file surfaces."""
+    _seed(pg)
+    _seed_files_schema(pg)
+
+    from files_memory.db import _db as _files_seam
+    from memory.db import _db as _mem_seam
+    from wiki.build import WikiOptions, build_wiki
+
+    with _mem_seam() as mem_conn, _files_seam() as files_conn:
+        vault = build_wiki(
+            mem_conn, files_conn,
+            WikiOptions(importance_threshold=0.6, include_files=True,
+                        admission_gate=False),
+        )
+    blob = "\n".join(vault.values())
+    # The file_node's summary became a sources/* page and the fact is evidence.
+    assert "design.md" in blob, "files corpus not read from the PG files schema"
+    assert "RS256" in blob, "the file's fact was not loaded on PG"
+
+
+def test_files_layer_reads_pg_schema_directly(pg):
+    """Unit-level proof that load_files_layer reads the PG `files` schema through
+    the seam (files_table-qualified names + dialect placeholders)."""
+    fn = _seed_files_schema(pg)
+    from files_memory.db import _db as _files_seam
+    from wiki.files_layer import load_files_layer
+
+    with _files_seam() as c:
+        layer = load_files_layer(c)
+    assert any(f.uuid == fn for f in layer.files), "file_node not loaded from files schema"
+    seeded = next(f for f in layer.files if f.uuid == fn)
+    assert seeded.filename == "design.md"
+    assert any("RS256" in fact.statement for fact in seeded.facts)

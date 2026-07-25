@@ -103,45 +103,57 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
         deriv_cache = os.path.join(out_dir, ".deriv-cache")
         derivability_judge = ModelDerivabilityJudge(DriftConfig.from_env(deriv_cache))
 
-    # Files corpus: always a local SQLite sidecar (files_database.db), on every
-    # backend — open it read-only directly. Absent → memory-only vault.
-    files_conn = None
-    if not args.no_files:
-        fpath = _files_db_path()
-        if os.path.isfile(fpath):
-            files_conn = _open_ro_sqlite(fpath)
+    # Files corpus. On SQLite the files store is a local sidecar file
+    # (files_database.db) opened read-only directly. On PostgreSQL the files store
+    # moved into a `files` SCHEMA of the primary DB (tasks #9–#11), so there is NO
+    # sidecar file — the connection must come from the files-store SEAM
+    # (files_memory.db._db, which borrows from the primary pool). Routing by
+    # backend here is what keeps the wiki's files corpus VISIBLE on PG; before this
+    # it silently rendered memory-only on PG because the sidecar file was absent.
+    from contextlib import ExitStack
+    from contextlib import closing as _closing
 
-    # Memory store: route through m3's backend seam so the wiki reads the ACTIVE
-    # backend (SQLite default, or PostgreSQL) rather than assuming a local .db
-    # file. The seam yields a live connection; build inside the `with`.
+    try:
+        from files_memory.db import _is_postgres as _files_is_pg
+    except Exception:
+        _files_is_pg = lambda: False  # noqa: E731
+
     try:
         from memory.db import _db as _memory_seam
     except Exception:
         _memory_seam = None
 
-    try:
+    with ExitStack() as stack:
+        # Files connection.
+        files_conn = None
+        if not args.no_files:
+            if _files_is_pg():
+                try:
+                    from files_memory.db import _db as _files_seam
+                    files_conn = stack.enter_context(_files_seam())
+                except Exception as e:
+                    print(f"warning: could not open the PostgreSQL files store "
+                          f"({e}); rendering memory-only.", file=sys.stderr)
+            else:
+                fpath = _files_db_path()
+                if os.path.isfile(fpath):
+                    files_conn = stack.enter_context(
+                        _closing(_open_ro_sqlite(fpath)))
+
+        # Memory connection: through the seam (active backend), else legacy sidecar.
         if _memory_seam is not None:
-            with _memory_seam() as mem_conn:
-                vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer,
-                                  drift_judge=drift_judge,
-                                  derivability_judge=derivability_judge)
+            mem_conn = stack.enter_context(_memory_seam())
         else:
-            # Fallback (payload not importable): the legacy local-SQLite path.
             mem_path = _memory_db_path()
             if not os.path.isfile(mem_path):
                 print(f"memory DB not found at {mem_path} — run `m3 setup` first.",
                       file=sys.stderr)
                 raise SystemExit(2)
-            mem_conn = _open_ro_sqlite(mem_path)
-            try:
-                vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer,
-                                  drift_judge=drift_judge,
-                                  derivability_judge=derivability_judge)
-            finally:
-                mem_conn.close()
-    finally:
-        if files_conn is not None:
-            files_conn.close()
+            mem_conn = stack.enter_context(_closing(_open_ro_sqlite(mem_path)))
+
+        vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer,
+                           drift_judge=drift_judge,
+                           derivability_judge=derivability_judge)
 
     if synthesizer is not None:
         print(synthesizer.summary(), file=sys.stderr)
