@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from .config import files_table
 from .db import _db
 from .staleness import files_staleness_review
 
@@ -50,26 +51,36 @@ def _ensure_watch_state_table(conn: sqlite3.Connection) -> None:
     files-memory-scoped and naturally co-located with the file_nodes
     these notifications reference.
     """
+    _ws = files_table('watch_state')
+    # Inline-created (not a migration) — files-scoped ephemeral state. No column
+    # DEFAULT on updated_at (SQLite's `datetime('now')` DEFAULT is not portable to
+    # PG); every writer supplies updated_at explicitly via dialect().now() instead.
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS watch_state ("
-        "  key TEXT PRIMARY KEY, "
-        "  value TEXT NOT NULL, "
-        "  updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
-        ")"
+        f"CREATE TABLE IF NOT EXISTS {_ws} ("
+        f"  key TEXT PRIMARY KEY, "
+        f"  value TEXT NOT NULL, "
+        f"  updated_at TEXT NOT NULL"
+        f")"
     )
 
 
-def _watch_state_get(conn: sqlite3.Connection, key: str) -> Optional[str]:
+def _watch_state_get(conn, key: str) -> Optional[str]:
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     row = conn.execute(
-        "SELECT value FROM watch_state WHERE key = ?", (key,),
+        f"SELECT value FROM {files_table('watch_state')} WHERE key = {_p}", (key,),
     ).fetchone()
     return row["value"] if row else None
 
 
-def _watch_state_set(conn: sqlite3.Connection, key: str, value: str) -> None:
+def _watch_state_set(conn, key: str, value: str) -> None:
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     conn.execute(
-        "INSERT INTO watch_state(key, value, updated_at) VALUES (?, ?, datetime('now')) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        f"INSERT INTO {files_table('watch_state')}(key, value, updated_at) "
+        f"VALUES ({_p}, {_p}, {_d.now()}) "
+        f"{_d.on_conflict_update('(key)', ['value', 'updated_at'])}",
         (key, value),
     )
 
@@ -268,13 +279,15 @@ def watch_once(
     return result
 
 
-def _file_node_for_path(conn: sqlite3.Connection, path: str) -> Optional[str]:
+def _file_node_for_path(conn, path: str) -> Optional[str]:
     """Look up the current file_node uuid for an absolute path. None if
     not found or the row is superseded."""
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     row = conn.execute(
-        "SELECT uuid FROM file_nodes "
-        "WHERE path_absolute = ? AND superseded_by IS NULL "
-        "LIMIT 1",
+        f"SELECT uuid FROM {files_table('file_nodes')} "
+        f"WHERE path_absolute = {_p} AND superseded_by IS NULL "
+        f"LIMIT 1",
         (path,),
     ).fetchone()
     return row["uuid"] if row else None
