@@ -28,7 +28,10 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from . import config
-from .schema import SCHEMA_V1, SCHEMA_V2, SCHEMA_V3
+# NOTE: schema.SCHEMA_V1/2/3 are no longer applied here — the schema now lives in
+# numbered migrations (files_memory/migrations/, run by files_memory.migrate). The
+# blobs remain in schema.py as the historical source those migrations were
+# generated from (byte-identical); do not re-introduce executescript(SCHEMA_*).
 
 logger = logging.getLogger("files_memory.db")
 
@@ -56,110 +59,116 @@ def _ensure_parent_dir(db_path: str) -> None:
 
 
 def _resolve_path(path: str | None) -> str:
-    """Resolve the files.db path. Explicit arg > env > config default."""
+    """Resolve the files.db path. Explicit arg > env > config default.
+
+    The env var is read at CALL time (not just the import-time config constant) so
+    a caller/test that sets M3_FILES_DB_PATH after import is honored — matching the
+    documented precedence. (config.FILES_DB_PATH is frozen at import, so relying on
+    it alone silently ignored a later env change — a real footgun in tests that
+    point the store at a tmpdir.)"""
     if path:
         return os.path.abspath(path)
+    env = os.environ.get("M3_FILES_DB_PATH")
+    if env:
+        return os.path.abspath(env)
     return config.FILES_DB_PATH
 
 
+def _is_postgres() -> bool:
+    """True when the active m3 backend is NOT sqlite (the files store then lives
+    in the `files` schema of the primary PG database, not a separate file)."""
+    try:
+        from memory.backends import active_backend
+        return active_backend().name != "sqlite"
+    except Exception:
+        return False
+
+
 def _new_connection(db_path: str) -> sqlite3.Connection:
-    """Open a fresh connection with row_factory + busy timeout."""
+    """Open a fresh SQLite connection to the separate files DB file.
+
+    SQLite ONLY — on PostgreSQL the files store is a schema in the primary
+    database and connections come from that backend's pool (see _db). Kept for the
+    SQLite path + integrity_check/rebuild_fts which are SQLite-specific.
+    """
     _ensure_parent_dir(db_path)
     conn = sqlite3.connect(db_path, timeout=30.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
-    # autocommit-style for safety; explicit transactions where needed
     conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 
-def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
-    """Test whether a column exists on a table. Used to guard idempotent ALTERs."""
-    try:
-        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    except sqlite3.Error:
-        return False
-    return any(r[1] == column for r in rows)
-
-
-def _apply_v3(conn: sqlite3.Connection) -> None:
-    """Apply v3 schema additions: fact_hit_stats + semantic_dedup_candidates.
-    Pure CREATE-IF-NOT-EXISTS, no ALTER guards needed."""
-    conn.executescript(SCHEMA_V3)
-
-
-def _apply_v2(conn: sqlite3.Connection) -> None:
-    """Apply the v2 schema additions. Fully idempotent.
-
-    ALTER TABLE statements live here (rather than inline in SCHEMA_V2)
-    because SQLite has no ADD COLUMN IF NOT EXISTS — we have to check
-    PRAGMA table_info first.
-    """
-    conn.executescript(SCHEMA_V2)
-    if not _has_column(conn, "promotion_markers", "memory_db_path"):
-        conn.execute("ALTER TABLE promotion_markers ADD COLUMN memory_db_path TEXT")
-    if not _has_column(conn, "promotion_markers", "mapped_type"):
-        conn.execute("ALTER TABLE promotion_markers ADD COLUMN mapped_type TEXT")
+# Track PG-side files-schema init separately from SQLite per-path init: on PG there
+# is no path, so key on a sentinel.
+_PG_INIT_SENTINEL = "<postgres:files-schema>"
 
 
 def init_db(path: str | None = None) -> None:
-    """Initialize the schema if not already done for this path.
+    """Initialize the files-store schema if not already done, via numbered
+    migrations (files_memory/migrations/), backend-aware.
 
-    Idempotent: every CREATE uses IF NOT EXISTS. Safe to call repeatedly.
-    Records in schema_migrations track applied versions; future migrations
-    will compare config.SCHEMA_VERSION against the max applied version.
+    SQLite: applies pending up migrations to the separate files DB file.
+    PostgreSQL: applies pending pg_ up migrations into the `files` schema of the
+    primary database (a single DSN; qualified names, no search_path).
+    Idempotent — the migration runner skips versions already in schema_versions.
     """
-    db_path = _resolve_path(path)
+    is_pg = _is_postgres()
+    key = _PG_INIT_SENTINEL if is_pg else _resolve_path(path)
     with _init_lock:
-        if db_path in _initialized_dbs:
+        if key in _initialized_dbs:
             return
         try:
-            conn = _new_connection(db_path)
-            try:
-                # V1 (base schema). IF NOT EXISTS makes this safe to repeat.
-                conn.executescript(SCHEMA_V1)
-                # V2 (phase 2 additions). Idempotent: all CREATE TABLE
-                # statements use IF NOT EXISTS; ALTER TABLE is guarded
-                # by a PRAGMA check.
-                _apply_v2(conn)
-                # V3 (phase 3 additions). Idempotent.
-                _apply_v3(conn)
-                # Migration version check: if a future version exists in
-                # the DB but our code is older, log a warning.
-                cur = conn.execute(
-                    "SELECT MAX(version) FROM schema_migrations"
-                )
-                row = cur.fetchone()
-                db_version = (row[0] if row and row[0] is not None else 0)
-                if db_version > config.SCHEMA_VERSION:
-                    logger.warning(
-                        "files.db schema version %s is newer than code expects (%s). "
-                        "Some features may not be available.",
-                        db_version, config.SCHEMA_VERSION,
-                    )
-            finally:
-                conn.close()
-            _initialized_dbs.add(db_path)
-            logger.debug("files_memory: schema initialized at %s", db_path)
+            from . import migrate as _migrate
+            if is_pg:
+                # Borrow a connection from the primary backend's pool; the files
+                # schema is a namespace in the same database, so nothing store-
+                # specific to open. The migration runner qualifies every name with
+                # `files.` — no search_path is set, so this pooled connection is
+                # safe to return and reuse for public-schema work.
+                from memory.db import _db as _seam_db
+                with _seam_db() as conn:
+                    _migrate.run_pending(conn)
+            else:
+                # SQLite: the runner applies each up file via executescript, which
+                # manages its own transaction (and implicitly commits) — so we do
+                # NOT wrap it in an outer BEGIN/COMMIT (that would leave no active
+                # txn for our COMMIT to close). The connection is autocommit-style
+                # (isolation_level=None); each executescript + stamp is durable.
+                conn = _new_connection(_resolve_path(path))
+                try:
+                    _migrate.run_pending(conn)
+                finally:
+                    conn.close()
+            _initialized_dbs.add(key)
+            logger.debug("files_memory: schema initialized (%s)", key)
         except Exception:
-            # Don't trap init in a permanently-failed state.
-            _initialized_dbs.discard(db_path)
+            _initialized_dbs.discard(key)
             raise
 
 
 @contextmanager
 def _db(path: str | None = None) -> Iterator[sqlite3.Connection]:
-    """Yield a sqlite3.Connection to files.db. Auto-initializes schema.
+    """Yield a files-store connection. Auto-initializes the schema.
 
-    Each call opens a fresh connection in the current thread. Commits on
-    clean exit, rolls back on exception. Use a single _db() block per
-    logical transaction.
+    SQLite: a fresh sqlite3.Connection to the separate files DB file, wrapped in a
+    single BEGIN/COMMIT (rollback on exception).
+    PostgreSQL: a connection from the primary backend's pool (single DSN). The
+    files tables live in the `files` schema and are addressed by qualified names
+    (files_table()), so this pooled connection carries NO session state (no
+    search_path) and is safe to hand back for public-schema work.
 
-    We do NOT pool aggressively — sqlite WAL mode handles many concurrent
-    readers cheaply, and the ingester is single-writer by design.
+    `path` is a SQLite file path; it is meaningless on PG and IGNORED there.
     """
-    db_path = _resolve_path(path)
-    init_db(db_path)
-    conn = _new_connection(db_path)
+    init_db(path)
+    if _is_postgres():
+        # The seam's _db() already applies commit-on-clean-exit / rollback-on-error
+        # and returns the connection to the pool. We just yield through it.
+        from memory.db import _db as _seam_db
+        with _seam_db() as conn:
+            yield conn
+        return
+
+    conn = _new_connection(_resolve_path(path))
     try:
         conn.execute("BEGIN")
         yield conn
@@ -193,9 +202,15 @@ def integrity_check(path: str | None = None) -> dict:
         'orphan_runs': int,
       }
     """
-    db_path = _resolve_path(path)
-    init_db(db_path)
+    init_db(path)
     out: dict = {"ok": True}
+    # SQLite-only: PRAGMA integrity_check + the FTS5 sync check have no PG analogue
+    # (PG has its own integrity guarantees; FTS lands in Phase 2). Report a clean
+    # skip on PG rather than run SQLite-specific SQL against the wrong backend.
+    if _is_postgres():
+        out["skipped"] = "integrity_check is SQLite-only (PG has no PRAGMA/FTS5)"
+        return out
+    db_path = _resolve_path(path)
     conn = _new_connection(db_path)
     try:
         # PRAGMA integrity_check returns 'ok' or a list of issues.
@@ -230,9 +245,16 @@ def integrity_check(path: str | None = None) -> dict:
 
 
 def rebuild_fts(path: str | None = None) -> None:
-    """Force-rebuild the FTS5 indexes. Use after schema drift is detected."""
+    """Force-rebuild the FTS5 indexes. Use after schema drift is detected.
+
+    SQLite-only: FTS5 exists only on SQLite. On PG full-text is a GIN tsvector
+    (Phase 2) that self-maintains via a generated column, so there is nothing to
+    rebuild — this is a clean no-op there."""
+    init_db(path)
+    if _is_postgres():
+        logger.debug("files_memory: rebuild_fts skipped (no FTS5 on PostgreSQL)")
+        return
     db_path = _resolve_path(path)
-    init_db(db_path)
     conn = _new_connection(db_path)
     try:
         conn.execute("INSERT INTO leaves_fts(leaves_fts) VALUES('rebuild')")
