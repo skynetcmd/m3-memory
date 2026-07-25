@@ -75,6 +75,14 @@ class SqliteDialect(Dialect):
                 return True
         return False
 
+    def is_integrity_error(self, exc: BaseException) -> bool:
+        # SQLite raises sqlite3.IntegrityError for unique/PK/NOT NULL/FK conflicts.
+        import sqlite3 as _sqlite3
+        for e in (exc, getattr(exc, "__cause__", None)):
+            if isinstance(e, _sqlite3.IntegrityError):
+                return True
+        return False
+
     def day_bucket(self, column: str) -> str:
         return f"substr({column},1,10)"
 

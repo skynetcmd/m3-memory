@@ -244,6 +244,29 @@ class Dialect:
         raise NotImplementedError(
             "subclass must implement is_undefined_object_error()")
 
+    def is_integrity_error(self, exc: BaseException) -> bool:
+        """True if ``exc`` is an INTEGRITY-constraint violation — a unique/primary-
+        key/NOT-NULL/foreign-key conflict — the class of failure a "insert, and on a
+        uniqueness race re-resolve the existing row" path wants to catch.
+
+        Backends signal this DIFFERENTLY and callers must NOT type-check one
+        backend's exception: SQLite raises ``sqlite3.IntegrityError`` while
+        PostgreSQL raises ``psycopg2.IntegrityError`` (SQLSTATE class ``23xxx`` —
+        ``23505`` unique_violation, ``23503`` foreign_key_violation, ``23502``
+        not_null_violation, ``23514`` check_violation). Matching the PG SQLSTATE
+        class is more robust than its message. This predicate hides the split:
+
+            except Exception as e:
+                if not dialect().is_integrity_error(e):
+                    raise                 # a real error, not a constraint race
+                existing = _find_existing(conn, name)  # re-resolve + continue
+
+        Handles a wrapped/chained exception via ``__cause__`` so a seam-adapted
+        error still classifies.
+        """
+        raise NotImplementedError(
+            "subclass must implement is_integrity_error()")
+
     # -- generated ids -------------------------------------------------------
     def returning_id_clause(self) -> str:
         """Trailing INSERT clause to make the statement return its generated id.

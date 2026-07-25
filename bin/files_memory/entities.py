@@ -47,42 +47,42 @@ logger = logging.getLogger("files_memory.entities")
 # ──────────────────────────────────────────────────────────────────────────────
 @contextmanager
 def _memory_db(path: "str | None" = None) -> Iterator[sqlite3.Connection]:
-    """Yield a connection to the CORE memory DB (agent_memory.db).
+    """Yield a connection to the CORE memory store (entities live there).
 
-    `path` (optional) targets an EXPLICIT db — used by tests and by mutating
-    callers (e.g. entity_coalesce.apply) that must operate on a known/isolated
-    DB rather than silently inheriting the resolved default. When omitted,
-    resolves the core DB via config.memory_db_path() (honors M3_MEMORY_DB else
-    the m3_sdk default) — deliberately NOT M3_DATABASE, which during file
-    extraction points at the files DB (no `entities` table).
+    Backend-aware. With no explicit ``path`` this routes through the memory SEAM
+    (``memory.db._db()``), so it targets whatever backend the core store runs on —
+    the separate ``agent_memory.db`` file on SQLite, or the primary database on
+    PostgreSQL. Previously this opened a RAW ``sqlite3`` connection to
+    ``agent_memory.db``; on a PG deployment that file does not exist, so entity
+    linking silently raised FileNotFoundError and was skipped. Routing through the
+    seam fixes that — the core memory tables (``entities`` etc.) are reachable on
+    both backends.
 
-    Fresh connection (not pooled) — entity writes are infrequent and we don't
-    want to fight memory.db's pool for transaction ownership.
+    ``path`` (optional) still targets an EXPLICIT SQLite file — used by tests and by
+    mutating callers (e.g. entity_coalesce.apply) that must operate on a known,
+    isolated DB. When given, a raw sqlite3 connection to that file is opened (the
+    seam is bypassed by design for that isolated case). It is deliberately NOT
+    M3_DATABASE, which during file extraction points at the files DB.
     """
-    if path is None:
+    if path is not None:
+        # Explicit-file escape hatch (tests / isolated mutators): raw sqlite3 to the
+        # named file, normalized so an explicit path and the on-disk file compare
+        # equal regardless of spelling.
+        path = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"memory.db not found at {path}")
+        conn = sqlite3.connect(path, timeout=10.0, isolation_level=None)
+        conn.row_factory = sqlite3.Row
         try:
-            path = config.memory_db_path()
-        except ImportError:
-            # Fallback for tests that don't have m3_sdk on path.
-            path = config.MEMORY_DB_PATH or os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                "memory", "agent_memory.db",
-            )
-    # Normalize consistently so an explicit path and the on-disk file compare
-    # equal regardless of how the caller spelled it (e.g. /tmp vs C:\...\Temp,
-    # symlinks, relative segments) — avoids spurious "not found" mismatches.
-    path = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
+            yield conn
+        finally:
+            conn.close()
+        return
 
-    if not os.path.isfile(path):
-        # No memory.db — caller decides what to do (typically skip linking).
-        raise FileNotFoundError(f"memory.db not found at {path}")
-
-    conn = sqlite3.connect(path, timeout=10.0, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    try:
+    # Default: the core memory store via the seam — correct on SQLite AND PG.
+    from memory.db import _db as _seam_db
+    with _seam_db() as conn:
         yield conn
-    finally:
-        conn.close()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -94,10 +94,12 @@ def _normalize(name: str) -> str:
 
 def _find_existing(conn: sqlite3.Connection, name: str) -> Optional[str]:
     """Case-insensitive exact match on canonical_name. Returns entity_id or None."""
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
     row = conn.execute(
-        "SELECT id FROM entities "
-        "WHERE LOWER(canonical_name) = ? "
-        "LIMIT 1",
+        f"SELECT id FROM entities "
+        f"WHERE {_d.ci_equals('canonical_name', _d.param())} "
+        f"LIMIT 1",
         (_normalize(name),),
     ).fetchone()
     return row[0] if row else None
@@ -116,15 +118,21 @@ def _create_provisional(conn: sqlite3.Connection, name: str) -> str:
     content_hash = _h.sha256(
         f"{name}|unknown|{attrs_json}".encode("utf-8")
     ).hexdigest()
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
     try:
         conn.execute(
-            "INSERT INTO entities(id, canonical_name, entity_type, attributes_json, content_hash) "
-            "VALUES (?, ?, ?, ?, ?)",
+            f"INSERT INTO entities(id, canonical_name, entity_type, attributes_json, content_hash) "
+            f"VALUES ({_d.placeholder(5)})",
             (eid, name.strip(), "unknown", attrs_json, content_hash),
         )
-    except sqlite3.IntegrityError:
-        # Unique-constraint race (canonical_name uniqueness on some
-        # installs). Re-resolve.
+    except Exception as e:
+        # Unique-constraint race (canonical_name uniqueness on some installs).
+        # is_integrity_error catches BOTH backends (sqlite3.IntegrityError /
+        # psycopg2 SQLSTATE 23xxx); re-resolve on a constraint race, re-raise
+        # anything else.
+        if not _d.is_integrity_error(e):
+            raise
         existing = _find_existing(conn, name)
         if existing:
             return existing
@@ -153,9 +161,11 @@ def resolve_entity_uuid(name: str, *, autocreate: bool = True) -> tuple[Optional
             new_id = _create_provisional(conn, name)
             return (new_id, True)
     except FileNotFoundError:
-        logger.debug("memory.db unavailable; skipping entity link for %r", name)
+        logger.debug("memory store unavailable; skipping entity link for %r", name)
         return (None, False)
-    except sqlite3.Error as e:
+    except Exception as e:  # noqa: BLE001 — degrade to no-link on any store error
+        # Broadened from sqlite3.Error so a psycopg2 error on PG also degrades to
+        # "no link" rather than propagating and aborting the caller's ingest.
         logger.warning("entity resolution failed for %r: %s", name, e)
         return (None, False)
 
@@ -200,6 +210,8 @@ def link_facts_to_entities(
     if not unique_names:
         return
 
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
     try:
         with _memory_db() as mem:
             # Phase 1: lookup all unique names.
@@ -207,13 +219,14 @@ def link_facts_to_entities(
             for start in range(0, len(unique_names), CHUNK):
                 chunk = unique_names[start:start + CHUNK]
                 lowered = [_normalize(n) for n in chunk]
-                placeholders = ",".join("?" * len(lowered))
+                placeholders = _d.placeholder(len(lowered))
                 rows = mem.execute(
                     f"SELECT LOWER(canonical_name) AS lname, id FROM entities "
                     f"WHERE LOWER(canonical_name) IN ({placeholders})",
                     lowered,
                 ).fetchall()
                 for row in rows:
+                    # seam rows are name-addressable on both backends
                     name_to_uuid[row["lname"]] = row["id"]
             # Phase 2: create provisional entities for the misses.
             for n in unique_names:
@@ -221,13 +234,17 @@ def link_facts_to_entities(
                 if name_to_uuid.get(key) is None:
                     try:
                         name_to_uuid[key] = _create_provisional(mem, n)
-                    except sqlite3.Error as e:
-                        logger.warning("provisional entity create failed for %r: %s", n, e)
+                    except Exception as e:
+                        if not _d.is_integrity_error(e):
+                            # a non-constraint failure creating this one entity —
+                            # log + skip it, don't abort the whole batch.
+                            logger.warning("provisional entity create failed for %r: %s", n, e)
                         name_to_uuid[key] = None
     except FileNotFoundError:
-        # No memory.db → skip linking entirely. Facts still get written;
-        # they just have no entity_refs.
-        logger.debug("memory.db unavailable; skipping entity linking for %d facts",
+        # No memory store reachable → skip linking entirely. Facts still get
+        # written; they just have no entity_refs. (On PG the seam is always
+        # reachable; this covers the SQLite no-file case.)
+        logger.debug("memory store unavailable; skipping entity linking for %d facts",
                      len(fact_uuids))
         return
 
@@ -241,10 +258,13 @@ def link_facts_to_entities(
                 continue
             seen.add(ent_uuid)
             try:
+                from .config import files_table
+                _fer = files_table("fact_entity_refs")
                 files_conn.execute(
-                    "INSERT OR IGNORE INTO fact_entity_refs(fact, entity_uuid, confidence) "
-                    "VALUES (?, ?, ?)",
+                    f"{_d.insert_or_ignore()} {_fer}(fact, entity_uuid, confidence) "
+                    f"VALUES ({_d.placeholder(3)}) "
+                    f"{_d.on_conflict_ignore(conflict_target='(fact, entity_uuid)')}",
                     (fact_uuid, ent_uuid, confidence),
                 )
-            except sqlite3.Error as e:
+            except Exception as e:
                 logger.warning("fact_entity_refs insert failed: %s", e)

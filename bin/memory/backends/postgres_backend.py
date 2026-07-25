@@ -409,6 +409,18 @@ class PostgresDialect(Dialect):
                 return True
         return False
 
+    def is_integrity_error(self, exc: BaseException) -> bool:
+        # Integrity violations are SQLSTATE class 23 (23505 unique_violation,
+        # 23503 foreign_key_violation, 23502 not_null_violation, 23514
+        # check_violation). Match the CLASS prefix so any 23xxx counts.
+        for e in (exc, getattr(exc, "__cause__", None)):
+            if e is None:
+                continue
+            code = getattr(e, "pgcode", None)
+            if isinstance(code, str) and code.startswith("23"):
+                return True
+        return False
+
     def day_bucket(self, column: str) -> str:
         # to_char keeps the TEXT 'YYYY-MM-DD' shape identical to SQLite's substr;
         # ::date would return a PG date type and change the bucket value shape.

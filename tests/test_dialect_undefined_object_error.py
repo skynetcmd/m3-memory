@@ -61,3 +61,53 @@ def test_chained_cause_is_inspected():
     outer = RuntimeError("seam wrapper")
     outer.__cause__ = inner
     assert d.is_undefined_object_error(outer) is True
+
+
+# ── is_integrity_error — portable unique/PK/NOT-NULL/FK-conflict classifier ────
+# "INSERT, and on a uniqueness race re-resolve the existing row" paths must catch
+# a constraint violation but NOT a real error. SQLite raises sqlite3.IntegrityError;
+# PostgreSQL raises psycopg2 SQLSTATE class 23xxx. The PG half is covered live in
+# test_memory_maintenance/files PG suites; this pins the SQLite classifier + guards.
+
+def test_unique_violation_is_classified():
+    d = SqliteDialect()
+    # Pre-seed the duplicate in setup, then a SINGLE INSERT trips the PK conflict
+    # (c.execute runs only the first statement of a multi-statement string, so the
+    # conflicting row must already exist before the executed INSERT).
+    e = _raise(
+        "INSERT INTO t(id) VALUES ('x')",
+        setup="CREATE TABLE t(id TEXT PRIMARY KEY); INSERT INTO t(id) VALUES ('x')",
+    )
+    assert d.is_integrity_error(e) is True
+
+
+def test_not_null_violation_is_classified():
+    d = SqliteDialect()
+    e = _raise(
+        "INSERT INTO t(id, v) VALUES ('a', NULL)",
+        setup="CREATE TABLE t(id TEXT, v TEXT NOT NULL)",
+    )
+    assert d.is_integrity_error(e) is True
+
+
+def test_missing_table_is_NOT_an_integrity_error():
+    """A schema error is not a constraint race — must not be swallowed as one."""
+    d = SqliteDialect()
+    e = _raise("INSERT INTO nope_table(id) VALUES ('x')")
+    assert d.is_integrity_error(e) is False
+
+
+def test_unrelated_error_is_not_an_integrity_error():
+    d = SqliteDialect()
+    assert d.is_integrity_error(ValueError("nope")) is False
+
+
+def test_integrity_chained_cause_is_inspected():
+    d = SqliteDialect()
+    inner = _raise(
+        "INSERT INTO t(id) VALUES ('x')",
+        setup="CREATE TABLE t(id TEXT PRIMARY KEY); INSERT INTO t(id) VALUES ('x')",
+    )
+    outer = RuntimeError("seam wrapper")
+    outer.__cause__ = inner
+    assert d.is_integrity_error(outer) is True

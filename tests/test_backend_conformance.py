@@ -99,6 +99,11 @@ def _divergent_methods() -> set[str]:
         "columns_of": ("memory_items",),
         # keyword-only args go in a trailing dict (see the loop below).
         "qualified_table": ("leaves", {"schema": "files"}),
+        # error classifiers: a plain exception is a valid arg; they must NOT raise
+        # NotImplementedError on the concrete dialects (they return False), and the
+        # base MUST raise (proving each backend implements its own).
+        "is_integrity_error": (Exception("x"),),
+        "is_undefined_object_error": (Exception("x"),),
     }
     divergent: set[str] = set()
     for name, args in probes.items():
