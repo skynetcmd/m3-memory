@@ -447,21 +447,31 @@ def load_entity_comention_edges(conn: sqlite3.Connection, ids: set[str]) -> list
     return edges
 
 
-def load_promotions(files_conn: sqlite3.Connection, memory_ids: set[str]) -> list[Promo]:
+def load_promotions(files_conn, memory_ids: set[str]) -> list[Promo]:
     """Load promotion_markers whose target memory is in the core set.
 
     This is the cross-DB bridge: files-DB fact/leaf/summary -> memory row. Only
     keep markers pointing at a core memory (so Evidence links resolve). Sorted.
+
+    Backend-agnostic (like wiki.files_layer): reads the SQLite sidecar OR the PG
+    `files` schema via files_table()-qualified names — so the wiki's Evidence links
+    resolve on a PostgreSQL deployment too, not just SQLite.
     """
-    files_conn.row_factory = sqlite3.Row
+    from files_memory.config import files_table
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    if isinstance(files_conn, sqlite3.Connection):
+        files_conn.row_factory = sqlite3.Row
     try:
         rows = files_conn.execute(
-            "SELECT uuid, promoted_to, source_memory, source_memory_type "
-            "FROM promotion_markers"
+            f"SELECT uuid, promoted_to, source_memory, source_memory_type "
+            f"FROM {files_table('promotion_markers')}"
         ).fetchall()
-    except sqlite3.OperationalError:
-        # files DB may predate promotion_markers; degrade gracefully.
-        return []
+    except Exception as e:
+        # files store may predate promotion_markers; degrade gracefully.
+        if _d.is_undefined_object_error(e) or isinstance(e, sqlite3.OperationalError):
+            return []
+        raise
 
     # Enrich with filename/source_path via the source item where possible.
     out: list[Promo] = []
@@ -484,29 +494,38 @@ def load_promotions(files_conn: sqlite3.Connection, memory_ids: set[str]) -> lis
 
 
 def _resolve_source_file(
-    conn: sqlite3.Connection, source_uuid: str, source_type: str
+    conn, source_uuid: str, source_type: str
 ) -> tuple[Optional[str], Optional[str]]:
-    """Best-effort filename + path for a promoted files-DB item."""
+    """Best-effort filename + path for a promoted files-store item. Backend-agnostic
+    (files_table()-qualified names + dialect placeholder); positional row access, so
+    no row_factory needed."""
+    from files_memory.config import files_table
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
+    _fn = files_table("file_nodes")
     try:
         if source_type == "fact":
             row = conn.execute(
-                "SELECT fn.filename, fn.path_absolute FROM facts f "
-                "JOIN file_nodes fn ON fn.uuid = f.file_node WHERE f.uuid = ?",
+                f"SELECT fn.filename, fn.path_absolute FROM {files_table('facts')} f "
+                f"JOIN {_fn} fn ON fn.uuid = f.file_node WHERE f.uuid = {_p}",
                 (source_uuid,),
             ).fetchone()
         elif source_type == "leaf":
             row = conn.execute(
-                "SELECT fn.filename, fn.path_absolute FROM leaves l "
-                "JOIN file_nodes fn ON fn.uuid = l.file_node WHERE l.uuid = ?",
+                f"SELECT fn.filename, fn.path_absolute FROM {files_table('leaves')} l "
+                f"JOIN {_fn} fn ON fn.uuid = l.file_node WHERE l.uuid = {_p}",
                 (source_uuid,),
             ).fetchone()
         else:  # file_summary → source_uuid is the file_node
             row = conn.execute(
-                "SELECT filename, path_absolute FROM file_nodes WHERE uuid = ?",
+                f"SELECT filename, path_absolute FROM {_fn} WHERE uuid = {_p}",
                 (source_uuid,),
             ).fetchone()
-    except sqlite3.OperationalError:
-        return (None, None)
+    except Exception as e:
+        if _d.is_undefined_object_error(e) or isinstance(e, sqlite3.OperationalError):
+            return (None, None)
+        raise
     if not row:
         return (None, None)
     return (row[0], row[1])
