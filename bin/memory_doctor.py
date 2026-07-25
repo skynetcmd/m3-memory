@@ -96,6 +96,19 @@ def main() -> int:
         help="Skip the console-entrypoint check (does `m3` on PATH run this install?).",
     )
     parser.add_argument(
+        "--skip-environment", action="store_true",
+        help="Skip the hook-wiring check (do the chatlog hooks point at this install?).",
+    )
+    parser.add_argument(
+        "--fix-hooks", action="store_true",
+        help=(
+            "With --fix: also re-wire broken m3 hook entries in "
+            "~/.claude/settings.json. OFF by default because that file is the "
+            "user's own — it holds non-m3 hooks. Backs it up first and touches "
+            "only m3-owned entries."
+        ),
+    )
+    parser.add_argument(
         "--skip-dashboard", action="store_true",
         help="Skip the web-dashboard liveness check (registry + port probe).",
     )
@@ -146,6 +159,24 @@ def main() -> int:
         if not args.skip_dashboard:
             from doctor import dashboard_probe
             dashboard_probe.run(brief=False, fix=not args.dry_run)
+
+        # Hook re-wiring is opt-in even under --fix: ~/.claude/settings.json is
+        # the USER'S file (their own non-m3 hooks live there), so a bad merge
+        # breaks their whole Claude Code setup, not just m3. --fix reports; only
+        # --fix --fix-hooks writes, and only after a timestamped backup.
+        if not args.skip_environment:
+            from doctor import environment_probe
+            if args.fix_hooks:
+                env_res = environment_probe.repair(dry_run=args.dry_run)
+                for act in env_res["actions"]:
+                    print(f"  [{act['status']}] {act['action']}: {act['detail']}")
+                if env_res.get("backup"):
+                    print(f"  settings.json backed up to {env_res['backup']}")
+            else:
+                rc = environment_probe.run(brief=False, fix=False)
+                if rc:
+                    print("  (hook repair not attempted — re-run with "
+                          "`--fix --fix-hooks` to re-wire)")
 
         if res["summary"] == "failed" or shared_rc != 0:
             return 1
@@ -233,6 +264,15 @@ def main() -> int:
         # plugin manifest, schedule_probe checks scheduled jobs; neither asks
         # whether typing `m3` runs THIS code.
         exit_code = max(exit_code, entrypoint_probe.run(brief=brief))
+
+    if not args.skip_environment:
+        from doctor import environment_probe
+        # DOES bump the exit code: a hook pointing at a path a reinstall moved
+        # fails silently on every fire, so conversation capture is dead with no
+        # error surfaced anywhere — the 48-hour context-loss failure in
+        # CLAUDE.md. Detection only here; repair needs --fix --fix-hooks
+        # because settings.json is the user's file, not ours.
+        exit_code = max(exit_code, environment_probe.run(brief=brief))
 
     if not args.skip_agent_paths:
         from doctor import agent_paths_probe
