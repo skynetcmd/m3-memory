@@ -11,8 +11,12 @@
 --
 -- Type mapping mirrors the SQLite intent: TEXT->TEXT, REAL->REAL,
 -- INTEGER->INTEGER, BLOB->BYTEA (packed float32, DB-blind Rust cosine, same as
--- entity_embeddings/memory_embeddings). PG has ADD COLUMN IF NOT EXISTS so the
--- entities columns are idempotent; migrate_pg wraps the file in one transaction.
+-- entity_embeddings/memory_embeddings), and the JSON `metadata` column ->JSONB
+-- (matching the codebase convention: memory_items.metadata_json /
+-- entities.attributes_json are JSONB on PG, TEXT on SQLite; the seam's
+-- json_bind_value/json_column_to_dict bridge the type difference). PG has ADD
+-- COLUMN IF NOT EXISTS so the entities columns are idempotent; migrate_pg wraps
+-- the file in one transaction.
 
 -- Working-set columns on entities (indexed provisional/quarantined/clustered
 -- filter, replacing the unindexable attributes_json LIKE scan).
@@ -37,7 +41,7 @@ CREATE TABLE IF NOT EXISTS entity_coalesce_candidates (
     detected_at     TEXT,
     reviewed_at     TEXT,
     review_action   TEXT,               -- 'merge' | 'related' | 'reject' | 'defer' | 'unapplied'
-    metadata        TEXT
+    metadata        JSONB               -- JSON on both backends; TEXT on SQLite, JSONB here (convention)
 );
 CREATE INDEX IF NOT EXISTS idx_ecc_reviewed ON entity_coalesce_candidates(reviewed_at);
 
