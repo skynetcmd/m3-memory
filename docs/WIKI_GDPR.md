@@ -53,20 +53,25 @@ edit). Until then the page stays withheld. The review queue is surfaced in the
 wiki's **`lint.md` → "Restricted — GDPR review"** section, so no restricted page is
 hidden in a column.
 
-> The automated review queue and the optional after-N-days LLM derivability check
-> are a follow-on; the current release sets and surfaces the flag, and withholds
-> rendering. The `restricted` flag halts publication regardless, so the review
-> window governs *surfacing*, not destruction.
+> The **deterministic review queue ships now**: every build renders it into
+> `lint.md` → "Restricted — GDPR review", listing each restricted page with its
+> surviving sources and a **30-day OVERDUE SLA** flag. The optional LLM
+> *derivability* judge — which estimates whether a page is still derivable from
+> the survivors alone — is opt-in via `m3 wiki generate --review-derivability`
+> and is **fail-safe** (an unreachable judge leaves the page restricted, never
+> auto-clears it). The `restricted` flag halts publication regardless, so the
+> review window governs *surfacing*, not destruction.
 
 ## The cluster cache and erasure
 
-Clusters are **recomputed** each build, not stored — so there is no persistent
-cluster cache to flush today. If a future release materializes clusters (a
-`cluster_run` provenance record with `cluster_members` as a cache), erasure will
-scan that membership for the erased id and flush the cached rows for any affected
-run, while retaining the run record itself (the erasure record must outlive the
-data). That design keeps **UUIDs only, never content**, in the cache — so a hit is
-detectable and the cache holds no personal data.
+Clusters for a `generate` build are **recomputed** each time, not stored. But
+`m3 wiki compile` now materializes each pass into a **`cluster_run` provenance
+record** with `cluster_members` as the membership cache (plan G1). On erasure,
+`gdpr_forget` calls `scan_and_flush_on_erasure` (plan G2) **before** the cascade
+delete: it scans that membership for the erased id and flushes the cached member
+rows for any affected run, while **retaining the run record itself** (the erasure
+record must outlive the data). By design the cache holds **UUIDs only, never
+content** — so a hit is detectable and the cache holds no personal data.
 
 ## Erasure breaks `--as-of` reproducibility — and m3 says so
 

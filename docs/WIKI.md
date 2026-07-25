@@ -39,7 +39,7 @@ A memory becomes a wiki entry when it is **canonical** — M3's three overlappin
 signals for "this matters":
 
 - **pinned** — explicitly marked as canon (never aged out)
-- **high importance** — at or above the `--importance-threshold` (default `0.6`)
+- **high importance** — at or above the `--importance-threshold` (default `0.55`)
 - **a consolidated type** — `belief`, `procedure`, or `reference` (these are
   already distillations, so they belong in the wiki regardless of importance)
 
@@ -128,6 +128,22 @@ and skipped (no model call), so re-running only recompiles topics that actually
 changed. Each synthesis records its source `member_ids` and writes `consolidates`
 provenance edges, so blast-radius, citation-drift, and the Knowledge Anchor Report
 can all reason about how a page was derived.
+
+### `--check-drift` — has a synthesis drifted from its sources?
+
+```bash
+m3 wiki generate --check-drift    # opt-in; report-only; mutually exclusive with --check
+```
+
+An **opt-in, report-only** pass that asks an LLM judge whether each compiled
+synthesis still faithfully reflects the sources it cites, flagging any that have
+**drifted**. It never rewrites or withholds a page — it only reports — and it is
+**fail-open**: if the judge is unreachable or errors, the page is treated as
+un-drifted so a model outage never blocks a build. It cannot be combined with
+`--check` (the byte-identity determinism check), because the judge is
+non-deterministic by design. Endpoint/model/timeout come from the
+`M3_WIKI_DRIFT_*` env vars (falling back to `M3_WIKI_SYNTH_*`) — see
+[ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md#wiki--synthesis--compilation).
 
 ### The admission gate — which topics earn a synthesis
 

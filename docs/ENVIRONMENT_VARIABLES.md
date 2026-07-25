@@ -360,8 +360,15 @@ compilation to a different/larger model than the lede synthesizer.
 | `M3_WIKI_COMPILE_URL` | (falls back to `M3_WIKI_SYNTH_URL`, then `http://127.0.0.1:1234/v1/chat/completions`) | Chat endpoint for `m3 wiki compile`. Set to route compilation to a different endpoint than lede synthesis. |
 | `M3_WIKI_COMPILE_MODEL` | (falls back to `M3_WIKI_SYNTH_MODEL`, then server's loaded model) | Model id for compilation — e.g. a larger model than the lede synthesizer. |
 | `M3_WIKI_COMPILE_TIMEOUT` | `60` | Per-request timeout (seconds) for compilation. Higher than the lede default: a compiled page is longer than a 2–3 sentence lede. |
+| `M3_WIKI_DRIFT_URL` | (falls back to `M3_WIKI_SYNTH_URL`) | Chat endpoint for the optional citation-drift judge (`gen_wiki.py --check-drift`). |
+| `M3_WIKI_DRIFT_MODEL` | (falls back to `M3_WIKI_SYNTH_MODEL`) | Model id for the drift judge — shared with the derivability judge. |
+| `M3_WIKI_DRIFT_TIMEOUT` | (falls back to the `DriftConfig` default) | Per-request timeout (seconds) for the drift/derivability judge. |
+| `M3_WIKI_DRIFT_RECALL_FLOOR` | `0.80` | Minimum recall the drift judge must clear in its live-validation test (no fallback). |
+| `M3_WIKI_DRIFT_PRECISION_FLOOR` | `0.70` | Minimum precision the drift judge must clear in its live-validation test (no fallback). |
 
-The LLM token is read from `LM_API_TOKEN` (see [API Keys](#-api-keys--authentication)).
+The drift vars also configure the GDPR derivability judge (`--review-derivability`),
+which reuses `DriftConfig`. The LLM token is read from `LM_API_TOKEN`
+(see [API Keys](#api-keys--authentication)).
 Admission-gate tuning is a config file, not an env var — see the [wiki docs](WIKI.md).
 
 ---
