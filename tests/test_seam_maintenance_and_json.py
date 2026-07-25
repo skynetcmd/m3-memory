@@ -215,3 +215,46 @@ def test_compact_storage_base_default_is_a_safe_noop():
     base = Dialect(backend="sqlite", param_style="qmark")
     out = base.compact_storage(sqlite_path=None)
     assert "skipped" in out.lower()
+
+
+# ── qualified_table (schema namespacing for a separate logical store) ─────────
+# SQLite keeps a separate-store table BARE (separate DB file); PG qualifies it
+# with the schema (namespace in the one primary DB). The mechanism the files
+# store uses instead of `search_path`, so a pooled connection is leak-safe.
+
+def test_qualified_table_sqlite_is_bare():
+    """SQLite ignores the schema — the store is a separate file, name is bare."""
+    assert SQLITE.qualified_table("leaves", schema="files") == "leaves"
+
+
+def test_qualified_table_postgres_prepends_schema():
+    """PG qualifies with the schema so the name resolves regardless of search_path."""
+    assert POSTGRES.qualified_table("leaves", schema="files") == "files.leaves"
+    assert POSTGRES.qualified_table("file_nodes", schema="files") == "files.file_nodes"
+
+
+@pytest.mark.parametrize("dialect", [SQLITE, POSTGRES], ids=["sqlite", "postgres"])
+@pytest.mark.parametrize("bad", ["a.b", "a b", "a;b", "", "1x-y", "drop table"])
+def test_qualified_table_rejects_injection(dialect, bad):
+    """name/schema are trusted identifiers — a non-identifier raises, never emits."""
+    with pytest.raises(ValueError):
+        dialect.qualified_table(bad, schema="files")
+    with pytest.raises(ValueError):
+        dialect.qualified_table("leaves", schema=bad)
+
+
+def test_files_table_helper_resolves_per_backend(monkeypatch):
+    """files_memory.config.files_table() threads through the ACTIVE dialect."""
+    import sys as _sys
+    _bin = os.path.normpath(os.path.join(_HERE, "..", "bin"))
+    if _bin not in _sys.path:
+        _sys.path.insert(0, _bin)
+    from files_memory.config import files_table
+
+    # Default active backend is SQLite -> bare.
+    assert files_table("leaves") == "leaves"
+
+    # Point the seam at the postgres dialect and re-resolve -> qualified.
+    import memory.backends as _backends
+    monkeypatch.setattr(_backends, "dialect", lambda: POSTGRES)
+    assert files_table("leaves") == "files.leaves"

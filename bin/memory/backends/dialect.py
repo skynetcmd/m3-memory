@@ -537,6 +537,55 @@ class Dialect:
         """Backend fragment for :meth:`columns_of` (post-validation)."""
         raise NotImplementedError("subclass must implement _columns_of_query()")
 
+    # -- schema namespacing --------------------------------------------------
+    def qualified_table(self, name: str, *, schema: str) -> str:
+        """Qualify a table name that lives in a SEPARATE logical store.
+
+        Some stores (the files-ingestion store, ``files_memory``) are physically
+        separate from the primary memory store. On SQLite that separation is a
+        separate database FILE, so a table reference is just the bare name — there
+        is no schema concept and the file is opened directly. On PostgreSQL the
+        separation is a schema NAMESPACE inside the one primary database (single
+        DSN), so the same table is ``<schema>.<name>``.
+
+        WHY qualification, not ``search_path``. A pooled PG connection that ran
+        ``SET search_path = files, public`` keeps that setting after it returns to
+        the pool — the next borrower silently resolves unqualified names against
+        ``files``, so a process that alternates between the primary (``public``)
+        and files (``files``) stores corrupts or errors depending on which schema
+        it happens to land in. ``SET LOCAL`` reverts at COMMIT but makes
+        correctness DEPEND on transaction discipline. Fully qualifying every name
+        removes the failure mode STRUCTURALLY: there is no session state to leak
+        and no "current schema" mode, so arbitrary mixing of ``public`` and
+        ``files`` tables on ONE connection — even in one transaction — is always
+        correct. This is the standard multi-schema approach (SQLAlchemy
+        ``Table(schema=...)``, schema-qualified ``table_name``).
+
+        ``qualified_table("leaves", schema="files")`` →
+          SQLite:   ``leaves``          (separate DB file; schema ignored)
+          Postgres: ``files.leaves``
+
+        Both ``name`` and ``schema`` are trusted bare identifiers (they name our
+        own tables/schemas, never end-user input) — validated here so a subclass
+        cannot be handed an injection vector. Emitted UNQUOTED (lowercase
+        identifiers on both backends), matching how every other table name in the
+        codebase is written.
+        """
+        if not name.isidentifier():
+            raise ValueError(f"table name must be a bare identifier: {name!r}")
+        if not schema or not schema.isidentifier():
+            raise ValueError(f"schema must be a bare identifier: {schema!r}")
+        return self._qualified_table_expr(name, schema)
+
+    def _qualified_table_expr(self, name: str, schema: str) -> str:
+        """Backend fragment for :meth:`qualified_table` (post-validation).
+
+        Base default is the SQLite form (bare name) — a separate-file store needs
+        no qualification and any future file-per-store backend inherits it
+        correctly. Postgres overrides to prepend the schema.
+        """
+        return name
+
     # -- storage maintenance -------------------------------------------------
     def compact_storage(self, *, sqlite_path: "str | None" = None,
                         max_bytes: int = 500 * 1024 * 1024) -> str:

@@ -447,6 +447,12 @@ class PostgresDialect(Dialect):
         )
         return (sql, (table,))
 
+    def _qualified_table_expr(self, name: str, schema: str) -> str:
+        # A separate logical store is a SCHEMA namespace in the one primary
+        # database on PG (single DSN) — qualify the name so it resolves there
+        # regardless of search_path. Identifiers are pre-validated in the base.
+        return f"{schema}.{name}"
+
     def compact_storage(self, *, sqlite_path: "str | None" = None,
                         max_bytes: int = 500 * 1024 * 1024) -> str:
         # No client-issued compaction: autovacuum reclaims dead tuples in the
