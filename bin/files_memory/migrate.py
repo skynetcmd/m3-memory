@@ -22,9 +22,31 @@ import glob
 import logging
 import os
 import re
+import sqlite3
 from pathlib import Path
 
 logger = logging.getLogger("files_memory.migrate")
+
+# SQLite idempotency errors: DDL that is a no-op because the target already
+# exists. SQLite has no `ADD COLUMN IF NOT EXISTS`, so a version re-applied
+# against a DB that already carries its columns raises one of these. On PG the
+# migrations use `IF NOT EXISTS` and never hit this; this list gives the SQLite
+# runner the same "already satisfied" tolerance (see run_pending).
+_SQLITE_ALREADY_APPLIED = (
+    "duplicate column name",  # ALTER TABLE ... ADD COLUMN (no IF NOT EXISTS in SQLite)
+    "already exists",         # CREATE TABLE/INDEX/TRIGGER without IF NOT EXISTS
+)
+
+
+def _is_sqlite_idempotency_error(exc: Exception) -> bool:
+    """True iff exc is a SQLite OperationalError reporting that the migration's
+    objects already exist — i.e. the version is effectively already applied and
+    only its schema_versions stamp is missing (a crash mid-migration, or a test
+    that cleared the _initialized_dbs cache without recreating the DB file)."""
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _SQLITE_ALREADY_APPLIED)
 
 _HERE = Path(__file__).resolve().parent
 _SQLITE_DIR = _HERE / "migrations"
@@ -126,7 +148,24 @@ def run_pending(conn) -> "list[int]":
         if _is_pg:
             conn.execute(sql)
         else:
-            conn.executescript(sql)
+            try:
+                conn.executescript(sql)
+            except sqlite3.OperationalError as e:
+                # The version isn't stamped in schema_versions, yet its objects
+                # already exist (crash mid-migration before the stamp, or a test
+                # that cleared the init cache without recreating the DB file).
+                # PG tolerates this via `IF NOT EXISTS`; SQLite has no
+                # `ADD COLUMN IF NOT EXISTS`, so give the runner the same
+                # tolerance: treat the version as already applied and stamp it,
+                # LOUDLY — never silently. Any other OperationalError is a real
+                # migration failure and re-raises.
+                if not _is_sqlite_idempotency_error(e):
+                    raise
+                logger.warning(
+                    "files_memory: migration v%s (%s) objects already present "
+                    "(%s) — schema was ahead of the version ledger; stamping "
+                    "without re-applying.", version, up_path.name, e,
+                )
         conn.execute(
             f"INSERT INTO {ref} (version, filename, applied_at) "
             f"VALUES ({_p}, {_p}, {_dialect().now()})",

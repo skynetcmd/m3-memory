@@ -28,6 +28,32 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _resolve_files_location() -> str:
+    """Where the files store lives, for display.
+
+    SQLite: the absolute path to the separate files DB file.
+    PostgreSQL: a ``files`` schema in the primary database — there is NO sidecar
+    file, so returning a .db path (which os.path.exists / _get_file_size_mb would
+    then probe as absent) is misleading. Return a schema descriptor instead; the
+    caller guards file-size probes on ``.endswith('.db')``.
+    """
+    try:
+        from files_memory.db import _is_postgres as _files_is_pg
+        if _files_is_pg():
+            return "postgres://<primary>/files (schema)"
+    except Exception:
+        pass
+    try:
+        from memory.config import FILES_DB_PATH as CONFIG_FILES_DB_PATH
+        return os.path.abspath(CONFIG_FILES_DB_PATH)
+    except Exception:
+        from m3_sdk import get_m3_root
+        return os.path.abspath(
+            os.environ.get("M3_FILES_DB_PATH")
+            or os.path.join(get_m3_root(), "memory", "files_database.db")
+        )
+
+
 def _load_state_file() -> dict[str, Any]:
     state_path = chatlog_config.STATE_FILE
     if not os.path.exists(state_path):
@@ -112,27 +138,50 @@ def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, Any]:
             # Single file — report the same number in both slots for compat.
             counts["chatlog_rows"] = counts["main_chat_log_rows"]
 
-        # Query Files DB counts
+        # Query Files store counts. On SQLite it is a separate DB file; on PG the
+        # files store moved to the `files` SCHEMA of the primary database, so there
+        # is no sidecar file to os.path.exists / sqlite3.connect — route through the
+        # files seam and qualify names via files_table(), else PG reports 0 leaves
+        # on a real corpus.
         try:
-            from memory.config import FILES_DB_PATH as CONFIG_FILES_DB_PATH
-            files_db = os.path.abspath(CONFIG_FILES_DB_PATH)
+            from files_memory.db import _is_postgres as _files_is_pg
+            _pg_files = _files_is_pg()
         except Exception:
-            from m3_sdk import get_m3_root
-            files_db = os.path.abspath(os.environ.get("M3_FILES_DB_PATH") or os.path.join(get_m3_root(), "memory", "files_database.db"))
+            _pg_files = False
 
-        if os.path.exists(files_db):
+        if _pg_files:
             try:
-                conn = sqlite3.connect(files_db, timeout=5)
-                try:
-                    row = conn.execute("SELECT COUNT(*) FROM leaves").fetchone()
+                from files_memory.config import files_table
+                from files_memory.db import _db as _files_seam
+                _leaves = files_table("leaves")
+                with _files_seam() as conn:
+                    row = conn.execute(f"SELECT COUNT(*) FROM {_leaves}").fetchone()
                     counts["files_leaves"] = row[0] if row else 0
-
-                    row = conn.execute("SELECT COUNT(*) FROM leaves WHERE embedded = 0").fetchone()
+                    row = conn.execute(f"SELECT COUNT(*) FROM {_leaves} WHERE embedded = 0").fetchone()
                     counts["files_unembedded"] = row[0] if row else 0
-                finally:
-                    conn.close()
-            except sqlite3.Error:
+            except Exception:
                 pass
+        else:
+            try:
+                from memory.config import FILES_DB_PATH as CONFIG_FILES_DB_PATH
+                files_db = os.path.abspath(CONFIG_FILES_DB_PATH)
+            except Exception:
+                from m3_sdk import get_m3_root
+                files_db = os.path.abspath(os.environ.get("M3_FILES_DB_PATH") or os.path.join(get_m3_root(), "memory", "files_database.db"))
+
+            if os.path.exists(files_db):
+                try:
+                    conn = sqlite3.connect(files_db, timeout=5)
+                    try:
+                        row = conn.execute("SELECT COUNT(*) FROM leaves").fetchone()
+                        counts["files_leaves"] = row[0] if row else 0
+
+                        row = conn.execute("SELECT COUNT(*) FROM leaves WHERE embedded = 0").fetchone()
+                        counts["files_unembedded"] = row[0] if row else 0
+                    finally:
+                        conn.close()
+                except sqlite3.Error:
+                    pass
 
     except Exception as e:
         logger.warning(f"Error fetching row counts: {e}")
@@ -335,13 +384,10 @@ def chatlog_status_impl() -> str:
     main_db = os.path.abspath(resolve_db_path(None))
     chatlog_db = os.path.abspath(config.db_path)
 
-    # Resolve Files DB path
-    try:
-        from memory.config import FILES_DB_PATH as CONFIG_FILES_DB_PATH
-        files_db = os.path.abspath(CONFIG_FILES_DB_PATH)
-    except Exception:
-        from m3_sdk import get_m3_root
-        files_db = os.path.abspath(os.environ.get("M3_FILES_DB_PATH") or os.path.join(get_m3_root(), "memory", "files_database.db"))
+    # Resolve Files store location. On PG there is no sidecar file — the files
+    # store is the `files` schema of the primary database — so report that, not a
+    # nonexistent .db path.
+    files_db = _resolve_files_location()
 
     result = {
         "unified": chatlog_db == main_db,
@@ -621,20 +667,17 @@ def run_live_tui(interval: float = 5.0):
         chatlog_db = os.path.abspath(config.db_path)
         unified = chatlog_db == main_db
 
-        # Resolve Files DB path
-        try:
-            from memory.config import FILES_DB_PATH as CONFIG_FILES_DB_PATH
-            files_db = os.path.abspath(CONFIG_FILES_DB_PATH)
-        except Exception:
-            from m3_sdk import get_m3_root
-            files_db = os.path.abspath(os.environ.get("M3_FILES_DB_PATH") or os.path.join(get_m3_root(), "memory", "files_database.db"))
+        # Resolve Files store location (a .db path on SQLite; the `files` schema on
+        # PG, where the file-size probes below are meaningless and return 0.0).
+        files_db = _resolve_files_location()
+        _files_on_disk = os.path.isabs(files_db) and files_db.endswith(".db")
 
         main_sz = _get_file_size_mb(main_db)
         main_wal_sz = _get_wal_size_mb(main_db)
         chat_sz = _get_file_size_mb(chatlog_db)
         chat_wal_sz = _get_wal_size_mb(chatlog_db)
-        files_sz = _get_file_size_mb(files_db)
-        files_wal_sz = _get_wal_size_mb(files_db)
+        files_sz = _get_file_size_mb(files_db) if _files_on_disk else 0.0
+        files_wal_sz = _get_wal_size_mb(files_db) if _files_on_disk else 0.0
 
         last_turns = _get_last_turns(main_db)
 

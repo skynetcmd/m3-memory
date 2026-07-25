@@ -1340,16 +1340,36 @@ async def get_stats(request: Request):
     except Exception as e:
         print(f"Failed to query Chatlog DB stats: {e}", flush=True)
 
-    # Query Files DB (backend-blind)
+    # Query Files store. On SQLite it is a separate DB file (files_db); on PG it
+    # moved to the `files` SCHEMA of the primary database, so a backend-blind
+    # db_readonly(files_db) would ignore the path, hand back a primary-pool conn,
+    # and probe bare `leaves`/`file_nodes` in `public` — reporting 0 files on a
+    # real corpus. Route through the files seam on PG (like gen_wiki does) and
+    # qualify every name via files_table(); table_exists() can't take a
+    # schema-qualified name (bare-identifier only), so guard by catching the
+    # undefined-object error instead.
     try:
-        with db_readonly(files_db) as conn:
-            if table_exists(conn, "leaves"):
-                file_chunks = conn.execute("SELECT COUNT(*) FROM leaves").fetchone()[0]
-                # Count deduplicated non-blank lines in active leaves
-                dedup_leaves = conn.execute("SELECT text FROM leaves WHERE superseded_by IS NULL GROUP BY text_sha256").fetchall()
+        from files_memory.db import _is_postgres as _files_is_pg
+        if _files_is_pg():
+            from files_memory.config import files_table
+            from files_memory.db import _db as _files_seam
+            _leaves, _nodes = files_table("leaves"), files_table("file_nodes")
+            with _files_seam() as conn:
+                file_chunks = conn.execute(f"SELECT COUNT(*) FROM {_leaves}").fetchone()[0]
+                dedup_leaves = conn.execute(
+                    f"SELECT text FROM {_leaves} WHERE superseded_by IS NULL GROUP BY text_sha256"
+                ).fetchall()
                 file_lines = sum(sum(1 for line in (leaf[0] or "").splitlines() if line.strip()) for leaf in dedup_leaves)
-            if table_exists(conn, "file_nodes"):
-                files_count = conn.execute("SELECT COUNT(*) FROM file_nodes").fetchone()[0]
+                files_count = conn.execute(f"SELECT COUNT(*) FROM {_nodes}").fetchone()[0]
+        else:
+            with db_readonly(files_db) as conn:
+                if table_exists(conn, "leaves"):
+                    file_chunks = conn.execute("SELECT COUNT(*) FROM leaves").fetchone()[0]
+                    # Count deduplicated non-blank lines in active leaves
+                    dedup_leaves = conn.execute("SELECT text FROM leaves WHERE superseded_by IS NULL GROUP BY text_sha256").fetchall()
+                    file_lines = sum(sum(1 for line in (leaf[0] or "").splitlines() if line.strip()) for leaf in dedup_leaves)
+                if table_exists(conn, "file_nodes"):
+                    files_count = conn.execute("SELECT COUNT(*) FROM file_nodes").fetchone()[0]
     except Exception as e:
         print(f"Failed to query Files DB stats: {e}", flush=True)
 
