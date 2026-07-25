@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "m3-memory"
 version = "2026.7.23.0"
-description = "Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable"
+description = "Give your AI agent a memory — local-first, private, easy to install. Guided setup wizard; works out of the box on your own machine, no cloud. For everyday agent users, homelabs, and developers alike · 99.2% LongMemEval-S retrieval @ k=10 · Works with Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · any MCP agent (native + one-command plugins) · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable"
 
 readme = "README.md"
 license = "Apache-2.0"
@@ -52,13 +52,30 @@ keywords = [
     "longmemeval",
     "fips-140-3",
     "openclaw",
+    # end-user / discovery intent (not just developer terms) — m3 is installable and
+    # usable by anyone running an AI agent, via the guided setup wizard.
+    "assistant-memory",
+    "agent-memory",
+    "self-hosted",
+    "offline",
+    "no-cloud",
+    "easy-install",
+    "mcp-agent",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
+    # Audience is BROAD by design: a guided installer/wizard makes m3 usable by
+    # anyone running an AI agent (end users), by homelab/IT operators, AND by
+    # developers embedding it. Listing only "Developers" made discovery agents
+    # report m3 as dev-only — it isn't.
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: System Administrators",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Operating System :: OS Independent",
@@ -230,7 +247,7 @@ Homepage = "https://github.com/skynetcmd/m3-memory"
 Repository = "https://github.com/skynetcmd/m3-memory"
 "Bug Tracker" = "https://github.com/skynetcmd/m3-memory/issues"
 Changelog = "https://github.com/skynetcmd/m3-memory/blob/main/docs/CHANGELOG.md"
-Documentation = "https://github.com/skynetcmd/m3-memory/blob/main/docs/AGENT_INSTRUCTIONS.md"
+Documentation = "https://github.com/skynetcmd/m3-memory/blob/main/docs/GETTING_STARTED.md"
 
 # NOTE: package discovery, package_dir and package_data are defined in setup.py,
 # NOT here. The root-level payload trees (bin/, docs/, _assets/, examples/) must
