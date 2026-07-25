@@ -333,17 +333,16 @@ def run(brief: bool = False, fix: bool = False) -> int:
     if res["status"] == "unknown":
         # Not "healthy" — nothing was verified. Saying OK here would be the
         # same lie this probe exists to catch.
-        print("  environment: SKIPPED — ~/.claude/settings.json absent or "
+        print("⚠️  chatlog hooks: SKIPPED — ~/.claude/settings.json absent or "
               "unreadable; hook wiring was NOT verified")
         return 0
 
     if res["status"] == "ok":
-        if not brief:
-            print(f"  environment: OK — {res['hooks_seen']} m3 hook(s) verified "
-                  "against disk (paths exist, same install, roots pinned)")
+        # `brief` means ONE LINE, not silence — see entrypoint_probe.run.
+        print(f"✅ chatlog hooks: OK ({res['hooks_seen']} verified against disk)")
         return 0
 
-    print("  environment: [FAIL] m3 hook wiring does not match this install")
+    print("⚠️  chatlog hooks: [FAIL] wiring does not match this install — CAPTURE MAY BE DEAD")
     for f in res["findings"]:
         where = f.get("path") or f.get("event")
         print(f"    - {f['event']} ({f['kind']}): {where}")

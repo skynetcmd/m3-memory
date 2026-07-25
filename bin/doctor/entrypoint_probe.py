@@ -187,14 +187,16 @@ def run(brief: bool = False) -> int:
             # "not checked", not "healthy". Exit-code-neutral — an
             # undeterminable version is an environment quirk, not a broken
             # install.
-            print("  entrypoints: SKIPPED — could not determine the installed "
+            print("⚠️  entrypoints: SKIPPED — could not determine the installed "
                   "m3-memory version (stale/shadowed checks did not run)")
             return 0
-        if not brief:
-            print(f"  entrypoints: OK — m3 on PATH runs the installed payload ({expected})")
+        # `brief` means ONE LINE, not silence. Printing nothing in the default
+        # mode hides the check from every user who does not pass --verbose —
+        # which is nearly all of them.
+        print(f"✅ entrypoints: OK — `m3` on PATH runs this install ({expected})")
         return 0
 
-    print("  entrypoints: [FAIL] the m3 commands on PATH do not match this install")
+    print("⚠️  entrypoints: [FAIL] the m3 commands on PATH do not match this install")
     for f in findings:
         print(f"    - {f['entrypoint']} ({f['kind']}): {f['path']}")
         print(f"      {f['detail']}")
