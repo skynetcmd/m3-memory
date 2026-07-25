@@ -569,19 +569,18 @@ def test_embed_backlog_warning_names_the_drain_command():
         w for w in _warnings_for_counts(row_counts) if "embed backlog" in w
     ]
     assert warnings, "expected an embed-backlog warning"
-    w = warnings[0]
-    assert "embed_backfill.py" in w, w
-    # Must NOT point at memory_doctor_fix: it defaults to the MAIN db and
-    # silently no-ops against a split-topology chatlog backlog.
-    assert "memory_doctor_fix" not in w, w
+    assert "memory_doctor_fix" in warnings[0], warnings[0]
 
 
 def test_embed_backlog_warning_names_the_root_cause():
-    """A standing backlog means the scheduled sweeper isn't firing. Draining by
-    hand without that hint fixes the symptom and it comes right back."""
+    """A backlog that survives a drain means the loop owning the embed pass is
+    not running. It is NOT the retired AgentOS_ChatlogEmbedSweep task, which is
+    removed by design once the loop takes that pass over -- pointing users there
+    sends them to re-register something that should not exist."""
     row_counts = {"chatlog_without_embed": 50_000}
     w = [x for x in _warnings_for_counts(row_counts) if "embed backlog" in x][0]
-    assert "AgentOS_ChatlogEmbedSweep" in w, w
+    assert "AgentOS_CognitiveLoop" in w, w
+    assert "AgentOS_ChatlogEmbedSweep" not in w, w
 
 
 def test_redaction_off_is_surfaced_when_rows_exist():

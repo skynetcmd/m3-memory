@@ -409,19 +409,21 @@ def _compute_warnings(
     if "chatlog_without_embed" in row_counts:
         embed_backlog = row_counts["chatlog_without_embed"]
         if embed_backlog > 10_000:
-            # Name the drain command AND the likely root cause. A standing
-            # backlog usually means the scheduled sweeper
-            # (AgentOS_ChatlogEmbedSweep, every 30min) is not registered or not
-            # firing -- draining by hand fixes the symptom and it silently
-            # returns. Do NOT point at `m3 diagnostics memory_doctor_fix`: it
-            # defaults to the MAIN db, so on a split topology it "succeeds"
-            # against the wrong store and leaves this backlog untouched.
+            # Name the repair command and the real root cause. A standing
+            # backlog on a SPLIT topology used to mean the cognitive loop's
+            # embed pass was only sweeping the main DB and never this store
+            # (fixed in m3_cognitive_loop._embed_target_dbs). If a backlog
+            # persists on a current build, the loop is not running at all --
+            # check AgentOS_CognitiveLoop, which owns the 'embed' pass.
+            # (The legacy AgentOS_ChatlogEmbedSweep task is retired BY DESIGN
+            # once the loop owns that pass -- see governor_migration
+            # GOVERNOR_ELIGIBLE -- so its absence is not the fault.)
             warnings.append(
                 f"embed backlog {embed_backlog} rows unembedded "
                 "(searchable via FTS, but NOT via semantic/vector search)"
-                " -> drain: python bin/embed_backfill.py --db <chatlog-db>"
-                " ; root cause is usually the scheduled sweeper not running -- "
-                "check AgentOS_ChatlogEmbedSweep"
+                " -> drain now: m3 diagnostics memory_doctor_fix --yes"
+                " ; if it keeps returning, the loop that owns the embed pass "
+                "is not running -- check AgentOS_CognitiveLoop"
             )
 
     return warnings

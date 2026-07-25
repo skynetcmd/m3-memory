@@ -356,13 +356,54 @@ async def memory_doctor_impl() -> dict[str, Any]:
 
 # ── Quick-repair mode (m3 doctor --fix) ──────────────────────────────────────
 
+def _resolve_embed_stores(main_db: Any) -> list[str]:
+    """Every SQLite store whose missing embeddings `--fix` should backfill.
+
+    Returns the main DB plus the chatlog DB when they are distinct files, so a
+    split-topology deployment does not get a repair pass that silently skips
+    the store holding the actual backlog. De-duplicated, existing paths only,
+    so a unified deployment yields exactly one entry.
+
+    Deliberately does NOT use ``chatlog_config.resolve_config().db_path``: with
+    CHATLOG_DB_PATH unset (the common case — the path lives in the config file)
+    it falls back to M3_DATABASE, which this repair path sets, so it would hand
+    back the main DB and collapse the two stores into one. Read the explicit
+    env override, else the config file.
+    """
+    import os as _os
+
+    paths: list[str] = []
+    if main_db:
+        paths.append(_os.path.abspath(str(main_db)))
+    try:
+        import chatlog_config
+        chat = chatlog_config._path_from_env()
+        if not chat:
+            chat = chatlog_config._build_from_dict(chatlog_config._load_file()).db_path
+        if chat:
+            paths.append(_os.path.abspath(str(chat)))
+    except Exception:  # noqa: BLE001 — chatlog is optional; never break repair
+        pass
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in paths:
+        if p not in seen and _os.path.exists(p):
+            seen.add(p)
+            out.append(p)
+    return out
+
+
 async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
     """Run the doctor in repair mode — attempt to auto-fix detected issues.
 
     Repair actions (ordered safest → most impactful):
       1. Run pending migrations (``migrate_memory.py up --yes``).
       2. Rebuild the FTS5 full-text index (``INSERT INTO ... REBUILD``).
-      3. Run missing-embedding backfill (``embed_backfill.py``).
+      3. Run missing-embedding backfill (``embed_backfill.py``) across EVERY
+         store — the main DB and, on a split topology, the chatlog DB. Scoping
+         this to the main DB alone let `--fix` report success while the real
+         (usually chatlog) backlog went untouched.
       4. Rebuild the m3_system_cohesion table if it is missing or stale.
 
     Each action records its outcome in the returned dict. dry_run=True
@@ -495,52 +536,103 @@ async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
         _record("rebuild_fts5", "skipped", "memory_items_fts table not found")
 
     # ── Action 3: Embed backfill (items missing embeddings) ───────────────────
-    try:
-        import sqlite3 as _sq
-        conn = _sq.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+    # Counts and backfills EVERY store, not just the main DB. On a split
+    # topology the chat turns live in their own file, so scoping this to
+    # db_path made `--fix` report success while the real backlog -- which is
+    # almost always the chatlog one -- went untouched. A repair tool that
+    # cleanly no-ops on the actual problem is worse than one that errors:
+    # it sends people looking somewhere else. (Observed 2026-07-25: `--fix`
+    # saw 2 items on the main DB while 6653 sat unembedded in the chatlog.)
+    _embed_stores = _resolve_embed_stores(db_path)
+
+    def _count_missing(path: str) -> int:
         try:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM memory_items mi "
-                "LEFT JOIN memory_embeddings me ON mi.id = me.memory_id "
-                "WHERE mi.is_deleted = 0 AND me.memory_id IS NULL"
-            ).fetchone()
-            missing_embeds = int(row[0]) if row else 0
-        finally:
-            conn.close()
-    except Exception:
-        missing_embeds = 0
+            import sqlite3 as _sq
+            conn = _sq.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM memory_items mi "
+                    "LEFT JOIN memory_embeddings me ON mi.id = me.memory_id "
+                    "WHERE COALESCE(mi.is_deleted, 0) = 0 "
+                    "AND LENGTH(TRIM(COALESCE(mi.content, ''))) > 0 "
+                    "AND me.memory_id IS NULL"
+                ).fetchone()
+                return int(row[0]) if row else 0
+            finally:
+                conn.close()
+        except Exception:
+            return 0
+
+    _missing_by_store = {p: _count_missing(p) for p in _embed_stores}
+    missing_embeds = sum(_missing_by_store.values())
+
+    # Name the store in every message. "2 items missing embeddings" against an
+    # unnamed DB is what made the earlier no-op so hard to spot.
+    def _breakdown() -> str:
+        import os as _os
+        return ", ".join(
+            f"{_os.path.basename(p)}={n}"
+            for p, n in _missing_by_store.items() if n > 0
+        )
 
     if missing_embeds > 0:
         if dry_run:
             _record(
                 "embed_backfill",
                 "skipped",
-                f"dry_run=True; {missing_embeds} items missing embeddings — would run embed_backfill.py",
+                f"dry_run=True; {missing_embeds} items missing embeddings "
+                f"({_breakdown()}) — would run embed_backfill.py per store",
             )
         else:
-            try:
-                import os as _os
-                env = _os.environ.copy()
-                env["M3_DATABASE"] = str(db_path)
-                bf_script = _os.path.join(
-                    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-                    "bin", "embed_backfill.py"
+            import os as _os
+            bf_script = _os.path.join(
+                _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                "bin", "embed_backfill.py"
+            )
+            _ok: list[str] = []
+            _err: list[str] = []
+            for _store, _n in _missing_by_store.items():
+                if _n <= 0:
+                    continue
+                try:
+                    env = _os.environ.copy()
+                    env["M3_DATABASE"] = str(_store)
+                    result = subprocess.run(
+                        [sys.executable, bf_script, "--db", str(_store), "--limit", "500"],
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                    )
+                    if result.returncode == 0:
+                        _ok.append(f"{_os.path.basename(_store)}={_n}")
+                    else:
+                        _err.append(
+                            f"{_os.path.basename(_store)}: "
+                            f"{result.stderr.strip()[:150]}"
+                        )
+                except Exception as e:
+                    _err.append(f"{_os.path.basename(_store)}: {e}")
+
+            if _ok and not _err:
+                _record(
+                    "embed_backfill", "ok",
+                    f"backfilled {', '.join(_ok)} (capped at 500 per store per run)",
                 )
-                result = subprocess.run(
-                    [sys.executable, bf_script, "--limit", "500"],
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
+            elif _ok:
+                _record(
+                    "embed_backfill", "error",
+                    f"backfilled {', '.join(_ok)}; failed: {'; '.join(_err)}",
                 )
-                if result.returncode == 0:
-                    _record("embed_backfill", "ok", f"backfilled {missing_embeds} items (capped at 500 per run)")
-                else:
-                    _record("embed_backfill", "error", result.stderr.strip()[:300])
-            except Exception as e:
-                _record("embed_backfill", "error", str(e))
+            else:
+                _record("embed_backfill", "error", "; ".join(_err))
     else:
-        _record("embed_backfill", "skipped", "no items missing embeddings")
+        import os as _os
+        _record(
+            "embed_backfill", "skipped",
+            "no items missing embeddings in "
+            + ", ".join(_os.path.basename(p) for p in _embed_stores),
+        )
 
     # ── Action 4: Cohesion table rebuild ──────────────────────────────────────
     try:
