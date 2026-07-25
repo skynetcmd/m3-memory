@@ -5,7 +5,7 @@
 > operation (schema migration, backup, `gdpr_forget`, `doctor --repair`) without
 > corrupting a WAL-mode database that an autonomous m3 process is actively
 > writing. Today it only handles the Windows `mcp-memory.exe` *file-lock*, not
-> the broader *DB-open* hazard from the cognitive loop and embed server.
+> the broader *DB-open* hazard from the cognitive loop and MCP server.
 
 ## Problem
 
@@ -13,9 +13,25 @@ Autonomous, headless m3 writers hold the engine-root DBs open in WAL mode:
 
 - **cognitive loop** (`bin/m3_cognitive_loop.py`, `pythonw`/launchd/systemd) —
   continuous entity/enrich/reflect + maintenance writes to core + chatlog.
-- **embed server** (`bin/embed_server_inproc.py`) — holds DB connections for
-  embed-backfill.
 - **MCP server** (`m3`/`mcp-memory`) — serves live reads/writes for the agent.
+  Usually the longest-lived writer on a desktop install: it lives as long as the
+  agent session.
+
+The **embed server** (`bin/embed_server_inproc.py`, or the Rust
+`m3-embed-server`) is deliberately NOT in that list. An earlier revision of this
+doc claimed it "holds DB connections for embed-backfill"; that is not true of
+either implementation — both are stateless HTTP embedders (text in, vectors
+out) and neither opens a store. The Python one holds a CUDA context, not a WAL
+handle; the Rust crate has no DB dependency at all. The DB writes for a backfill
+belong to the *caller* (the cognitive loop, or `embed_backfill.py` run
+directly), which is already covered above.
+
+It therefore must NOT be treated as a quiesce blocker: halting an upgrade for a
+process that cannot tear a WAL is a false positive, and a step-5 prompt asking
+the operator to kill or wait on an irrelevant process trains them to dismiss the
+prompt. It IS still worth *detecting* (`scan_db_writer_processes` matches it by
+name) so an operator deciding whether to proceed can see what is running —
+being visible and being a blocker are different things.
 
 Running a migration while any of these has the DB open risks a torn WAL /
 plausible-but-wrong state. The current preflight (`setup_wizard.py` Probe 2):
@@ -322,6 +338,15 @@ kill fallback; generalize discovery to the PID registry.
    highest-value writer and already has the governor-yield hook (main_loop, the
    `pacing_cpu_ram HALTED` check). Embed-server and MCP-server HALT-honoring are
    a fast follow — keeps this PR to one feature (§2).
+
+   > **Status (completed 2026-07-25).** The MCP server now registers as role
+   > `mcp` in `memory_bridge.py` before `mcp.run()`. It registers but does not
+   > self-pause: the loop honors HALT by *pausing*, which suits a background
+   > daemon, whereas blocking an MCP tool call would hang a live agent session
+   > with no explanation. Step 5 above already covers that case by prompting the
+   > operator per stuck holder, so being discoverable is the necessary and
+   > sufficient change. The embed server needs no registration at all — see
+   > §Problem: it is not a DB writer.
 4. **Consumers → installer-only now.** Backup / `gdpr_forget` / `doctor
    --repair` reuse the same module later; the API is built for it, but wiring
    every consumer now would break one-feature-per-PR.
