@@ -36,7 +36,12 @@ def _archive_conn():
 
 def _transfer_to_archive(item_id, reason, db):
     now = datetime.now(timezone.utc).isoformat()
-    row = db.execute("SELECT * FROM memory_items WHERE id = ?", (item_id,)).fetchone()
+    # `db` is the seam connection (SQLite or PG) → dialect placeholder. The archive
+    # DB (`adb`) below is ALWAYS a direct local SQLite file (_archive_conn), so its
+    # '?'/INSERT OR REPLACE stay sqlite-native and are intentionally not dialected.
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
+    row = db.execute(f"SELECT * FROM memory_items WHERE id = {_p}", (item_id,)).fetchone()
     if not row: return False
     adb = _archive_conn()
     try:
@@ -172,9 +177,11 @@ def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True, limit=0):
 
     applied = False
     if not dry_run and duplicates:
+        from memory.backends import dialect as _dialect
+        _p = _dialect().param()
         with _db() as db:
             for _, mid_b, _, _, _ in duplicates:
-                db.execute("UPDATE memory_items SET is_deleted = 1 WHERE id = ?", (mid_b,))
+                db.execute(f"UPDATE memory_items SET is_deleted = 1 WHERE id = {_p}", (mid_b,))
         applied = True
 
     groups = duplicates if not limit else duplicates[: int(limit)]
@@ -191,11 +198,14 @@ def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True, limit=0):
 
 def memory_feedback_impl(memory_id, feedback="useful"):
     fb = feedback.lower()
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     with _db() as db:
         if fb == "useful":
-            db.execute("UPDATE memory_items SET importance = MIN(1.0, importance + 0.1) WHERE id = ?", (memory_id,))
+            db.execute(f"UPDATE memory_items SET importance = {_d.least('1.0', 'importance + 0.1')} WHERE id = {_p}", (memory_id,))
         elif fb == "wrong":
-            db.execute("UPDATE memory_items SET is_deleted = 1 WHERE id = ?", (memory_id,))
+            db.execute(f"UPDATE memory_items SET is_deleted = 1 WHERE id = {_p}", (memory_id,))
     return f"Feedback '{fb}' applied to {memory_id}"
 
 def _reinforce_confidence(db):
@@ -226,16 +236,19 @@ def _reinforce_confidence(db):
     # through to the decay block, which reads active_ids — so it must always be
     # defined, or that path raises UnboundLocalError (observed in the cognitive
     # loop's maintenance pass).
+    from memory.db import savepoint as _savepoint
     active_ids: set = set()
     try:
-        # (1) Re-aggregate the memories with ledger activity.
-        active = db.execute(
-            "SELECT DISTINCT memory_id FROM memory_corroborations"
-        ).fetchall()
-        active_ids = {r[0] for r in active}
-        for mid in active_ids:
-            if _trust.reaggregate_confidence(db, mid) is not None:
-                reaggregated += 1
+        # (1) Re-aggregate the memories with ledger activity. savepoint keeps the
+        # txn usable on PG if memory_corroborations is absent (pre-036 DB).
+        with _savepoint(db):
+            active = db.execute(
+                "SELECT DISTINCT memory_id FROM memory_corroborations"
+            ).fetchall()
+            active_ids = {r[0] for r in active}
+            for mid in active_ids:
+                if _trust.reaggregate_confidence(db, mid) is not None:
+                    reaggregated += 1
     except Exception as e:  # noqa: BLE001 — pre-036 DB has no ledger
         if not _is_missing_schema(e):
             raise
@@ -244,36 +257,40 @@ def _reinforce_confidence(db):
         # (2) Decay un-reinforced memories toward NEUTRAL in one UPDATE.
         # new = c + (NEUTRAL - c) * DECAY_RATE, clamped, skipping rows touched by
         # the ledger (already re-aggregated) and rows accessed in the last 7 days.
-        placeholders = ",".join("?" * len(active_ids)) if active_ids else "''"
+        from memory.backends import dialect as _dialect
+        _d = _dialect()
+        _p = _d.param()
+        # Exclude the ledger-active ids via NOT IN. When the set is EMPTY, OMIT the
+        # clause entirely — `id NOT IN (NULL)` evaluates to NULL/unknown for every
+        # row (SQL three-valued logic), matching NOTHING, which silently disabled
+        # the whole decay pass (bug 2026-07-24). An empty set means "exclude
+        # nothing", i.e. no clause.
+        _not_in = f" AND id NOT IN ({_d.placeholder(len(active_ids))})" if active_ids else ""
+        _age7 = _d.age_days_gt("last_accessed_at", "7")
         params = [_conf.NEUTRAL, _conf.DECAY_RATE, *active_ids]
         try:
-            res = db.execute(
-                f"""
-                UPDATE memory_items
-                   SET confidence = MAX(0.0, MIN(1.0,
-                           confidence + (? - confidence) * ?))
-                 WHERE is_deleted = 0
-                   AND confidence IS NOT NULL
-                   AND id NOT IN ({placeholders})
-                   AND (last_accessed_at IS NULL
-                        OR julianday('now') - julianday(last_accessed_at) > 7)
-                   AND COALESCE(pinned, 0) = 0
-                """,
-                params,
-            )
+            with _savepoint(db):
+                res = db.execute(
+                    f"""
+                    UPDATE memory_items
+                       SET confidence = {_d.greatest('0.0', _d.least('1.0', f'confidence + ({_p} - confidence) * {_p}'))}
+                     WHERE is_deleted = 0
+                       AND confidence IS NOT NULL{_not_in}
+                       AND (last_accessed_at IS NULL OR {_age7})
+                       AND COALESCE(pinned, 0) = 0
+                    """,
+                    params,
+                )
         except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
             if not _is_missing_schema(e):
                 raise
             res = db.execute(
                 f"""
                 UPDATE memory_items
-                   SET confidence = MAX(0.0, MIN(1.0,
-                           confidence + (? - confidence) * ?))
+                   SET confidence = {_d.greatest('0.0', _d.least('1.0', f'confidence + ({_p} - confidence) * {_p}'))}
                  WHERE is_deleted = 0
-                   AND confidence IS NOT NULL
-                   AND id NOT IN ({placeholders})
-                   AND (last_accessed_at IS NULL
-                        OR julianday('now') - julianday(last_accessed_at) > 7)
+                   AND confidence IS NOT NULL{_not_in}
+                   AND (last_accessed_at IS NULL OR {_age7})
                 """,
                 params,
             )
@@ -287,9 +304,20 @@ def _reinforce_confidence(db):
 
 def _is_missing_schema(exc) -> bool:
     """True for the pre-035/036 'no such column/table' errors the reinforcement
-    pass tolerates (degrades to a no-op rather than failing maintenance)."""
-    msg = str(exc).lower()
-    return "no such column" in msg or "no such table" in msg or "no column named" in msg
+    pass tolerates (degrades to a no-op rather than failing maintenance).
+
+    Delegates to the seam: SQLite raises OperationalError('no such column') while
+    PostgreSQL raises UndefinedColumn/UndefinedTable with SQLSTATE 42703/42P01.
+    dialect().is_undefined_object_error() classifies both from one call so this
+    tolerance fires correctly on either backend (not just SQLite's message text)."""
+    try:
+        from memory.backends import dialect
+        return dialect().is_undefined_object_error(exc)
+    except Exception:
+        # Seam unavailable (raw sqlite fixture) → fall back to the SQLite text match.
+        msg = str(exc).lower()
+        return ("no such column" in msg or "no such table" in msg
+                or "no column named" in msg)
 
 
 def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
@@ -312,7 +340,12 @@ def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
     """
     window_days = max(1, int(window_days))
     top_n = max(0, int(top_n))
-    cutoff = f"-{window_days} days"
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
+    # window cutoff is now bound as an INT number of days via now_minus_days
+    # (portable), not the SQLite-only "-N days" modifier string.
+    _since = _d.now_minus_days(_p)  # e.g. "datetime('now','-'||?||' days')" / PG interval
     out: dict = {
         "window_days": window_days,
         "events": {"create": 0, "update": 0, "delete": 0, "supersede": 0},
@@ -321,17 +354,19 @@ def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
         "most_revised": [],
     }
     with _db() as db:
-        db.row_factory = sqlite3.Row
+        # NOTE: no `db.row_factory = sqlite3.Row` here — that is SQLite-only and the
+        # PG compat connection already yields name-addressable rows. The seam gives
+        # row["col"] access on both backends.
         # Lifecycle events by type in the window.
         try:
             for row in db.execute(
-                "SELECT event, COUNT(*) AS n FROM memory_history "
-                "WHERE created_at >= datetime('now', ?) GROUP BY event",
-                (cutoff,),
+                f"SELECT event, COUNT(*) AS n FROM memory_history "
+                f"WHERE created_at >= {_since} GROUP BY event",
+                (window_days,),
             ):
                 if row["event"] in out["events"]:
                     out["events"][row["event"]] = row["n"]
-        except sqlite3.OperationalError as e:
+        except Exception as e:
             if not _is_missing_schema(e):
                 raise  # a real error, not a pre-009 DB
 
@@ -341,30 +376,30 @@ def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
                 out["most_revised"] = [
                     {"memory_id": r["memory_id"], "revisions": r["n"], "title": r["title"]}
                     for r in db.execute(
-                        "SELECT h.memory_id AS memory_id, COUNT(*) AS n, "
-                        "       COALESCE(m.title, '') AS title "
-                        "FROM memory_history h "
-                        "LEFT JOIN memory_items m ON m.id = h.memory_id "
-                        "WHERE h.created_at >= datetime('now', ?) "
-                        "  AND h.event IN ('update', 'supersede') "
-                        "GROUP BY h.memory_id ORDER BY n DESC LIMIT ?",
-                        (cutoff, top_n),
+                        f"SELECT h.memory_id AS memory_id, COUNT(*) AS n, "
+                        f"       COALESCE(m.title, '') AS title "
+                        f"FROM memory_history h "
+                        f"LEFT JOIN memory_items m ON m.id = h.memory_id "
+                        f"WHERE h.created_at >= {_since} "
+                        f"  AND h.event IN ('update', 'supersede') "
+                        f"GROUP BY h.memory_id ORDER BY n DESC LIMIT {_p}",
+                        (window_days, top_n),
                     )
                 ]
-            except sqlite3.OperationalError as e:
+            except Exception as e:
                 if not _is_missing_schema(e):
                     raise
 
         # Corroboration vs contradiction in the window (post-036 table).
         try:
             for row in db.execute(
-                "SELECT CASE WHEN delta > 0 THEN 'corroborated' ELSE 'contradicted' END AS kind, "
-                "       COUNT(*) AS n FROM memory_corroborations "
-                "WHERE created_at >= datetime('now', ?) GROUP BY kind",
-                (cutoff,),
+                f"SELECT CASE WHEN delta > 0 THEN 'corroborated' ELSE 'contradicted' END AS kind, "
+                f"       COUNT(*) AS n FROM memory_corroborations "
+                f"WHERE created_at >= {_since} GROUP BY kind",
+                (window_days,),
             ):
                 out["corroboration"][row["kind"]] = row["n"]
-        except sqlite3.OperationalError as e:
+        except Exception as e:
             if not _is_missing_schema(e):
                 raise  # pre-036 DB → leave zeros
 
@@ -374,16 +409,16 @@ def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
                 out["top_contradicted"] = [
                     {"memory_id": r["memory_id"], "contradiction_count": r["n"], "title": r["title"]}
                     for r in db.execute(
-                        "SELECT c.memory_id AS memory_id, COUNT(*) AS n, "
-                        "       COALESCE(m.title, '') AS title "
-                        "FROM memory_corroborations c "
-                        "LEFT JOIN memory_items m ON m.id = c.memory_id "
-                        "WHERE c.created_at >= datetime('now', ?) AND c.delta < 0 "
-                        "GROUP BY c.memory_id ORDER BY n DESC LIMIT ?",
-                        (cutoff, top_n),
+                        f"SELECT c.memory_id AS memory_id, COUNT(*) AS n, "
+                        f"       COALESCE(m.title, '') AS title "
+                        f"FROM memory_corroborations c "
+                        f"LEFT JOIN memory_items m ON m.id = c.memory_id "
+                        f"WHERE c.created_at >= {_since} AND c.delta < 0 "
+                        f"GROUP BY c.memory_id ORDER BY n DESC LIMIT {_p}",
+                        (window_days, top_n),
                     )
                 ]
-            except sqlite3.OperationalError as e:
+            except Exception as e:
                 if not _is_missing_schema(e):
                     raise
     return out
@@ -391,6 +426,9 @@ def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
 
 def _enforce_retention_policies(db):
     """Enforce per-agent memory limits and TTLs from agent_retention_policies table."""
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     try:
         policies = db.execute("SELECT * FROM agent_retention_policies").fetchall()
     except Exception:
@@ -402,17 +440,17 @@ def _enforce_retention_policies(db):
         if p["ttl_days"] and p["ttl_days"] > 0:
             try:
                 res = db.execute(
-                    "UPDATE memory_items SET is_deleted = 1 WHERE agent_id = ? AND is_deleted = 0 "
-                    "AND julianday('now') - julianday(created_at) > ? "
-                    "AND COALESCE(pinned, 0) = 0",
+                    f"UPDATE memory_items SET is_deleted = 1 WHERE agent_id = {_p} AND is_deleted = 0 "
+                    f"AND {_d.age_days_gt('created_at', _p)} "
+                    f"AND COALESCE(pinned, 0) = 0",
                     (agent_id, p["ttl_days"])
                 )
             except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
                 if not _is_missing_schema(e):
                     raise
                 res = db.execute(
-                    "UPDATE memory_items SET is_deleted = 1 WHERE agent_id = ? AND is_deleted = 0 "
-                    "AND julianday('now') - julianday(created_at) > ?",
+                    f"UPDATE memory_items SET is_deleted = 1 WHERE agent_id = {_p} AND is_deleted = 0 "
+                    f"AND {_d.age_days_gt('created_at', _p)}",
                     (agent_id, p["ttl_days"])
                 )
             purged += res.rowcount
@@ -420,23 +458,23 @@ def _enforce_retention_policies(db):
         if p["max_memories"] and p["max_memories"] > 0:
             try:
                 excess = db.execute(
-                    "SELECT id FROM memory_items WHERE agent_id = ? AND is_deleted = 0 "
-                    "AND COALESCE(pinned, 0) = 0 "
-                    "ORDER BY created_at DESC LIMIT -1 OFFSET ?",
+                    f"SELECT id FROM memory_items WHERE agent_id = {_p} AND is_deleted = 0 "
+                    f"AND COALESCE(pinned, 0) = 0 "
+                    f"ORDER BY created_at DESC {_d.all_rows_after_offset(_p)}",
                     (agent_id, p["max_memories"])
                 ).fetchall()
             except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
                 if not _is_missing_schema(e):
                     raise
                 excess = db.execute(
-                    "SELECT id FROM memory_items WHERE agent_id = ? AND is_deleted = 0 "
-                    "ORDER BY created_at DESC LIMIT -1 OFFSET ?",
+                    f"SELECT id FROM memory_items WHERE agent_id = {_p} AND is_deleted = 0 "
+                    f"ORDER BY created_at DESC {_d.all_rows_after_offset(_p)}",
                     (agent_id, p["max_memories"])
                 ).fetchall()
             for row in excess:
                 if p["auto_archive"]:
                     _transfer_to_archive(row["id"], "retention_limit", db)
-                db.execute("UPDATE memory_items SET is_deleted = 1 WHERE id = ?", (row["id"],))
+                db.execute(f"UPDATE memory_items SET is_deleted = 1 WHERE id = {_p}", (row["id"],))
                 purged += 1
     return purged
 
@@ -449,36 +487,48 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
         logger.info("Active query session detected. Suspending curation pass to yield resources.")
         time.sleep(5.0)
 
-    # The decay/retention/archive SQL below uses SQLite-only idioms
-    # (julianday('now'), ? placeholders) in destructive UPDATE/DELETE statements.
-    # On a non-SQLite backend those raise, and the per-statement excepts would
-    # swallow them — a whole maintenance pass silently no-opping on PG. Fail LOUD
-    # and skip intentionally instead (§3), mirroring the VACUUM-skip precedent
-    # below, until this path is fully routed through the dialect seam.
+    # The decay/retention/archive/refresh SQL below is now routed through the
+    # dialect seam (param(), age_days_gt(), all_rows_after_offset(), group_concat(),
+    # greatest/least(), is_undefined_object_error()) and the tolerant blocks use
+    # savepoints so a caught missing-schema error no longer aborts the PG txn.
+    # HOWEVER one PG-only issue remains open (a "can't adapt type dict" bind in the
+    # reachable pass — see m3 to_do "Finish memory_maintenance PG-live"), so until
+    # that is root-caused and test_memory_maintenance_pg_live is green, we still
+    # SKIP on non-sqlite rather than run a partially-validated data-deleting path on
+    # PG. Fail loud + skip intentionally (§3), same as the VACUUM-skip below. Remove
+    # this guard once the PG-live maintenance test passes end-to-end.
     from memory.backends import resolve_backend_name
-    _backend = resolve_backend_name()
-    if _backend != "sqlite":
-        msg = (f"Maintenance skipped: decay/purge/retention not yet dialected "
-               f"for backend '{_backend}'.")
+    if resolve_backend_name() != "sqlite":
+        msg = ("Maintenance skipped: decay/purge/retention dialect port is "
+               "complete but one PG bind issue is still open — not running a "
+               "partially-validated destructive pass on a non-sqlite backend.")
         logger.warning(msg)
         return msg
 
     now = datetime.now(timezone.utc).isoformat()
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
+    _age7 = _d.age_days_gt("created_at", "7")   # literal-day form (no bind)
+    from memory.db import savepoint as _savepoint, tolerant_schema as _tolerant
     report = []
     with _db() as db:
         if decay:
             try:
-                res = db.execute(
-                    "UPDATE memory_items SET importance = MAX(0.0, importance * 0.995) "
-                    "WHERE is_deleted = 0 AND julianday('now') - julianday(created_at) > 7 "
-                    "AND COALESCE(pinned, 0) = 0"
-                )
+                # savepoint isolates the pinned-column attempt so its failure on a
+                # pre-pinned SQLite DB doesn't abort the txn before the fallback.
+                with _savepoint(db):
+                    res = db.execute(
+                        f"UPDATE memory_items SET importance = {_d.greatest('0.0', 'importance * 0.995')} "
+                        f"WHERE is_deleted = 0 AND {_age7} "
+                        f"AND COALESCE(pinned, 0) = 0"
+                    )
             except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
                 if not _is_missing_schema(e):
                     raise
                 res = db.execute(
-                    "UPDATE memory_items SET importance = MAX(0.0, importance * 0.995) "
-                    "WHERE is_deleted = 0 AND julianday('now') - julianday(created_at) > 7"
+                    f"UPDATE memory_items SET importance = {_d.greatest('0.0', 'importance * 0.995')} "
+                    f"WHERE is_deleted = 0 AND {_age7}"
                 )
             report.append(f"Decayed {res.rowcount} items")
         if reinforce:
@@ -492,24 +542,26 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
                 )
         if purge_expired:
             try:
-                expired = db.execute(
-                    "SELECT id FROM memory_items WHERE expires_at < ? AND COALESCE(pinned, 0) = 0",
-                    (now,),
-                ).fetchall()
+                with _savepoint(db):
+                    expired = db.execute(
+                        f"SELECT id FROM memory_items WHERE expires_at < {_p} AND COALESCE(pinned, 0) = 0",
+                        (now,),
+                    ).fetchall()
             except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
                 if not _is_missing_schema(e):
                     raise
-                expired = db.execute("SELECT id FROM memory_items WHERE expires_at < ?", (now,)).fetchall()
+                expired = db.execute(f"SELECT id FROM memory_items WHERE expires_at < {_p}", (now,)).fetchall()
             for row in expired: _transfer_to_archive(row[0], "expired", db)
             try:
-                res = db.execute(
-                    "DELETE FROM memory_items WHERE expires_at < ? AND COALESCE(pinned, 0) = 0",
-                    (now,),
-                )
+                with _savepoint(db):
+                    res = db.execute(
+                        f"DELETE FROM memory_items WHERE expires_at < {_p} AND COALESCE(pinned, 0) = 0",
+                        (now,),
+                    )
             except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
                 if not _is_missing_schema(e):
                     raise
-                res = db.execute("DELETE FROM memory_items WHERE expires_at < ?", (now,))
+                res = db.execute(f"DELETE FROM memory_items WHERE expires_at < {_p}", (now,))
             report.append(f"Purged {res.rowcount} expired")
         if prune_orphan_embeddings:
             res = db.execute("DELETE FROM memory_embeddings WHERE memory_id NOT IN (SELECT id FROM memory_items)")
@@ -526,10 +578,11 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
             # memory_id column) — a different shape, out of scope here. Best-effort:
             # a missing table/column on an older schema is skipped, never fatal.
             try:
-                res = db.execute(
-                    "DELETE FROM entity_extraction_queue WHERE memory_id NOT IN "
-                    "(SELECT id FROM memory_items WHERE COALESCE(is_deleted,0)=0)"
-                )
+                with _savepoint(db):
+                    res = db.execute(
+                        "DELETE FROM entity_extraction_queue WHERE memory_id NOT IN "
+                        "(SELECT id FROM memory_items WHERE COALESCE(is_deleted,0)=0)"
+                    )
                 if res.rowcount:
                     report.append(f"Reaped {res.rowcount} orphaned entity-queue row(s)")
             except Exception as e:  # noqa: BLE001 — missing table/column on old schema
@@ -538,13 +591,13 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
 
         # Auto-archive low-importance memories older than 30 days
         archivable = db.execute(
-            "SELECT id FROM memory_items WHERE is_deleted = 0 AND importance < 0.05 "
-            "AND julianday('now') - julianday(created_at) > 30"
+            f"SELECT id FROM memory_items WHERE is_deleted = 0 AND importance < 0.05 "
+            f"AND {_d.age_days_gt('created_at', '30')}"
         ).fetchall()
         archived = 0
         for row in archivable:
             if _transfer_to_archive(row["id"], "low_importance", db):
-                db.execute("UPDATE memory_items SET is_deleted = 1 WHERE id = ?", (row["id"],))
+                db.execute(f"UPDATE memory_items SET is_deleted = 1 WHERE id = {_p}", (row["id"],))
                 archived += 1
         report.append(f"Archived {archived} low-importance items")
 
@@ -558,48 +611,53 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
         # - Maintenance never mutates refresh flags (that's memory_update's job).
         # - Dedup against existing unacked refresh_due notifications so repeated
         #   maintenance runs don't flood the channel with duplicates.
+        # savepoint: on PG a failure anywhere in this block (missing refresh_on
+        # column on a very old DB, or the notifications insert) would otherwise
+        # abort the whole maintenance txn — the broad except below logs it but
+        # cannot un-poison the connection. The savepoint re-raises into the except,
+        # leaving the txn alive so ANALYZE below still runs.
         try:
-            refresh_due = db.execute(
-                "SELECT COUNT(*) FROM memory_items "
-                "WHERE is_deleted = 0 AND refresh_on IS NOT NULL AND refresh_on <= ?",
-                (now,)
-            ).fetchone()[0]
-            if refresh_due:
-                report.append(f"Refresh queue: {refresh_due} memor{'y' if refresh_due == 1 else 'ies'} due for review")
-
-                # Fan-out notifications by agent_id. NULL/empty agent_ids are
-                # grouped under a synthetic '(unassigned)' bucket and skipped —
-                # notifications require a real agent_id.
-                agent_rows = db.execute(
-                    "SELECT agent_id, COUNT(*) as n, GROUP_CONCAT(id) as ids "
-                    "FROM memory_items "
-                    "WHERE is_deleted = 0 AND refresh_on IS NOT NULL AND refresh_on <= ? "
-                    "  AND agent_id IS NOT NULL AND agent_id != '' "
-                    "GROUP BY agent_id",
+            with _savepoint(db):
+                refresh_due = db.execute(
+                    f"SELECT COUNT(*) FROM memory_items "
+                    f"WHERE is_deleted = 0 AND refresh_on IS NOT NULL AND refresh_on <= {_p}",
                     (now,)
-                ).fetchall()
+                ).fetchone()[0]
+                if refresh_due:
+                    report.append(f"Refresh queue: {refresh_due} memor{'y' if refresh_due == 1 else 'ies'} due for review")
 
-                notified = 0
-                for ar in agent_rows:
-                    aid = ar["agent_id"]
-                    # Dedup: skip if this agent already has an unacked refresh_due notif
-                    existing = db.execute(
-                        "SELECT 1 FROM notifications "
-                        "WHERE agent_id = ? AND kind = 'refresh_due' AND read_at IS NULL LIMIT 1",
-                        (aid,)
-                    ).fetchone()
-                    if existing:
-                        continue
-                    sample = (ar["ids"] or "").split(",")[:3]
-                    payload = json.dumps({"count": ar["n"], "sample_ids": sample})
-                    db.execute(
-                        "INSERT INTO notifications (agent_id, kind, payload_json, created_at) "
-                        "VALUES (?, 'refresh_due', ?, ?)",
-                        (aid, payload, now)
-                    )
-                    notified += 1
-                if notified:
-                    report.append(f"Refresh queue: notified {notified} agent(s)")
+                    # Fan-out notifications by agent_id. NULL/empty agent_ids are
+                    # skipped — notifications require a real agent_id.
+                    agent_rows = db.execute(
+                        f"SELECT agent_id, COUNT(*) as n, {_d.group_concat('id')} as ids "
+                        f"FROM memory_items "
+                        f"WHERE is_deleted = 0 AND refresh_on IS NOT NULL AND refresh_on <= {_p} "
+                        f"  AND agent_id IS NOT NULL AND agent_id != '' "
+                        f"GROUP BY agent_id",
+                        (now,)
+                    ).fetchall()
+
+                    notified = 0
+                    for ar in agent_rows:
+                        aid = ar["agent_id"]
+                        # Dedup: skip if this agent already has an unacked refresh_due notif
+                        existing = db.execute(
+                            f"SELECT 1 FROM notifications "
+                            f"WHERE agent_id = {_p} AND kind = 'refresh_due' AND read_at IS NULL LIMIT 1",
+                            (aid,)
+                        ).fetchone()
+                        if existing:
+                            continue
+                        sample = (ar["ids"] or "").split(",")[:3]
+                        payload = json.dumps({"count": ar["n"], "sample_ids": sample})
+                        db.execute(
+                            f"INSERT INTO notifications (agent_id, kind, payload_json, created_at) "
+                            f"VALUES ({_p}, 'refresh_due', {_p}, {_p})",
+                            (aid, payload, now)
+                        )
+                        notified += 1
+                    if notified:
+                        report.append(f"Refresh queue: notified {notified} agent(s)")
         except Exception as e:
             # refresh_on column may not exist on very old DBs that haven't run v014
             logger.debug(f"refresh queue check skipped: {e}")
@@ -836,12 +894,15 @@ def memory_set_retention_impl(agent_id: str, max_memories: int = 1000, ttl_days:
     if not agent_id or not agent_id.strip():
         return "Error: agent_id is required"
     try:
+        from memory.backends import dialect as _dialect
+        _d = _dialect()
+        _p = _d.param()
         with _db() as db:
             db.execute(
-                "INSERT INTO agent_retention_policies (agent_id, max_memories, ttl_days, auto_archive, updated_at) "
-                "VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now')) "
-                "ON CONFLICT(agent_id) DO UPDATE SET max_memories=excluded.max_memories, ttl_days=excluded.ttl_days, "
-                "auto_archive=excluded.auto_archive, updated_at=excluded.updated_at",
+                f"INSERT INTO agent_retention_policies (agent_id, max_memories, ttl_days, auto_archive, updated_at) "
+                f"VALUES ({_p}, {_p}, {_p}, {_p}, {_d.now()}) "
+                f"ON CONFLICT(agent_id) DO UPDATE SET max_memories=excluded.max_memories, ttl_days=excluded.ttl_days, "
+                f"auto_archive=excluded.auto_archive, updated_at=excluded.updated_at",
                 (agent_id, max_memories, ttl_days, auto_archive)
             )
         return f"Retention policy set for agent '{agent_id}': max={max_memories}, ttl={ttl_days}d, auto_archive={bool(auto_archive)}"
@@ -850,16 +911,18 @@ def memory_set_retention_impl(agent_id: str, max_memories: int = 1000, ttl_days:
 
 def memory_export_impl(agent_filter="", type_filter="", since="", output_format="json"):
     """Export memories as portable JSON. Filter by agent, type, or date."""
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     where = ["mi.is_deleted = 0"]
     params = []
     if agent_filter:
-        where.append("mi.agent_id = ?")
+        where.append(f"mi.agent_id = {_p}")
         params.append(agent_filter)
     if type_filter:
-        where.append("mi.type = ?")
+        where.append(f"mi.type = {_p}")
         params.append(type_filter)
     if since:
-        where.append("mi.created_at >= ?")
+        where.append(f"mi.created_at >= {_p}")
         params.append(since)
 
     where_sql = " AND ".join(where)
@@ -871,7 +934,7 @@ def memory_export_impl(agent_filter="", type_filter="", since="", output_format=
             item = dict(row)
             mid = item["id"]
             # Fetch embeddings
-            embs = db.execute("SELECT embedding, embed_model, dim, created_at, content_hash FROM memory_embeddings WHERE memory_id = ?", (mid,)).fetchall()
+            embs = db.execute(f"SELECT embedding, embed_model, dim, created_at, content_hash FROM memory_embeddings WHERE memory_id = {_p}", (mid,)).fetchall()
             item["embeddings"] = []
             for e in embs:
                 edata = dict(e)
@@ -880,7 +943,7 @@ def memory_export_impl(agent_filter="", type_filter="", since="", output_format=
                 item["embeddings"].append(edata)
 
             # Fetch relationships
-            rels = db.execute("SELECT to_id, relationship_type, created_at FROM memory_relationships WHERE from_id = ?", (mid,)).fetchall()
+            rels = db.execute(f"SELECT to_id, relationship_type, created_at FROM memory_relationships WHERE from_id = {_p}", (mid,)).fetchall()
             item["relationships"] = [dict(r) for r in rels]
             items.append(item)
 
@@ -898,6 +961,9 @@ def memory_import_impl(data: str):
     except Exception as e:
         return f"Error parsing import data: {e}"
 
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     i_count, e_count, r_count = 0, 0, 0
     with _db() as db:
         for item in items:
@@ -905,7 +971,7 @@ def memory_import_impl(data: str):
             fields = ["id", "type", "title", "content", "metadata_json", "agent_id", "model_id", "change_agent", "importance", "source", "origin_device", "user_id", "scope", "expires_at", "created_at", "updated_at", "valid_from", "valid_to", "content_hash", "is_deleted"]
             # Filter item to only include known fields
             clean_item = {k: item.get(k) for k in fields if k in item}
-            placeholders = ", ".join(["?"] * len(clean_item))
+            placeholders = _d.placeholder(len(clean_item))
             columns = ", ".join(clean_item.keys())
             update_stmt = ", ".join([f"{k}=excluded.{k}" for k in clean_item.keys() if k != "id"])
 
@@ -913,20 +979,28 @@ def memory_import_impl(data: str):
             db.execute(sql, list(clean_item.values()))
             i_count += 1
 
-            # 2. Re-insert embeddings
+            # 2. Re-insert embeddings. INSERT OR REPLACE is SQLite-only → dialect
+            #    upsert on the id PK (overwrite the row's mutable columns).
             mid = clean_item["id"]
+            _emb_cols = ["embedding", "embed_model", "dim", "created_at", "content_hash"]
+            _emb_upsert = _d.on_conflict_update("(id)", _emb_cols)
             for edata in item.get("embeddings", []):
                 eblob = base64.b64decode(edata["embedding"]) if edata.get("embedding") else None
                 db.execute(
-                    "INSERT OR REPLACE INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) VALUES (?,?,?,?,?,?,?)",
+                    f"{_d.insert_or_ignore()} memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
+                    f"VALUES ({_d.placeholder(7)}) {_emb_upsert}",
                     (str(uuid.uuid4()), mid, eblob, edata.get("embed_model"), edata.get("dim"), edata.get("created_at"), edata.get("content_hash"))
                 )
                 e_count += 1
 
-            # 3. Re-insert relationships
+            # 3. Re-insert relationships. Idempotent on the (from,to,type) unique
+            #    edge (migration 039) — re-import is a no-op, not a dup.
+            _rel_suffix = _d.on_conflict_ignore(
+                conflict_target="(from_id, to_id, relationship_type)")
             for rdata in item.get("relationships", []):
                 db.execute(
-                    "INSERT OR REPLACE INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
+                    f"{_d.insert_or_ignore()} memory_relationships (id, from_id, to_id, relationship_type, created_at) "
+                    f"VALUES ({_d.placeholder(5)}) {_rel_suffix}",
                     (str(uuid.uuid4()), mid, rdata.get("to_id"), rdata.get("relationship_type"), rdata.get("created_at"))
                 )
                 r_count += 1
@@ -958,20 +1032,24 @@ async def memory_consolidate_impl(
     now_dt = datetime.now(timezone.utc)
     stale_cutoff = (now_dt - timedelta(days=stale_days)).isoformat() if stale_days > 0 else None
 
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     # 1. Query groups exceeding threshold
     sql = "SELECT type, agent_id, user_id, COUNT(*) as cnt FROM memory_items WHERE is_deleted = 0"
     params = []
     if type_filter:
-        sql += " AND type = ?"
+        sql += f" AND type = {_p}"
         params.append(type_filter)
     if agent_filter:
-        sql += " AND agent_id = ?"
+        sql += f" AND agent_id = {_p}"
         params.append(agent_filter)
     if protected_types:
-        placeholders = ",".join(["?"] * len(protected_types))
+        placeholders = _d.placeholder(len(protected_types))
         sql += f" AND type NOT IN ({placeholders})"
         params.extend(protected_types)
-    sql += " GROUP BY type, agent_id, user_id HAVING cnt > ?"
+    # HAVING can't reference the SELECT alias `cnt` on PG → repeat COUNT(*).
+    sql += f" GROUP BY type, agent_id, user_id HAVING COUNT(*) > {_p}"
     params.append(threshold)
 
     with _db() as db:
@@ -998,15 +1076,15 @@ async def memory_consolidate_impl(
 
         # 2. Fetch oldest N items, honoring stale_days + importance gates
         fetch_sql = (
-            "SELECT id, title, content FROM memory_items "
-            "WHERE type = ? AND agent_id = ? AND user_id = ? AND is_deleted = 0 "
-            "AND COALESCE(importance, 0) <= ?"
+            f"SELECT id, title, content FROM memory_items "
+            f"WHERE type = {_p} AND agent_id = {_p} AND user_id = {_p} AND is_deleted = 0 "
+            f"AND COALESCE(importance, 0) <= {_p}"
         )
         fetch_params = [g_type, g_agent, g_user, max_importance]
         if stale_cutoff:
-            fetch_sql += " AND created_at < ?"
+            fetch_sql += f" AND created_at < {_p}"
             fetch_params.append(stale_cutoff)
-        fetch_sql += " ORDER BY created_at ASC LIMIT ?"
+        fetch_sql += f" ORDER BY created_at ASC LIMIT {_p}"
         fetch_params.append(n_to_consolidate)
 
         with _db() as db:
@@ -1053,8 +1131,8 @@ async def memory_consolidate_impl(
                   else f"Consolidated {g_type} memories for {g_agent}")
         with _db() as db:
             db.execute(
-                "INSERT INTO memory_items (id, type, title, content, agent_id, user_id, created_at, content_hash) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                f"INSERT INTO memory_items (id, type, title, content, agent_id, user_id, created_at, content_hash) "
+                f"VALUES ({_d.placeholder(8)})",
                 (summary_id, target_type, _title, summary_text, g_agent, g_user, now, _content_hash(summary_text))
             )
             # A belief is a high-order, multi-source abstraction — give it a high
@@ -1062,21 +1140,21 @@ async def memory_consolidate_impl(
             # pre-035 DB (no confidence column) simply skips it.
             if target_type == "belief":
                 try:
-                    db.execute("UPDATE memory_items SET confidence = ? WHERE id = ?", (0.85, summary_id))
+                    db.execute(f"UPDATE memory_items SET confidence = {_p} WHERE id = {_p}", (0.85, summary_id))
                 except Exception as ce:  # noqa: BLE001 — pre-035 DB lacks confidence
-                    if "no such column" not in str(ce).lower() and "no column named" not in str(ce).lower():
+                    if not _is_missing_schema(ce):
                         raise
 
             if s_vec:
                 db.execute(
-                    "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) VALUES (?,?,?,?,?,?,?)",
+                    f"INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) VALUES ({_d.placeholder(7)})",
                     (str(uuid.uuid4()), summary_id, _pack(s_vec), s_model, len(s_vec), now, _content_hash(summary_text))
                 )
 
             # 6. Link to sources and 7. Soft-delete
             for r in rows:
                 memory_link_impl(summary_id, r["id"], "consolidates", db=db)
-                db.execute("UPDATE memory_items SET is_deleted = 1 WHERE id = ?", (r["id"],))
+                db.execute(f"UPDATE memory_items SET is_deleted = 1 WHERE id = {_p}", (r["id"],))
 
         results.append(f"Consolidated {len(rows)} {g_type} items into {_label} {summary_id}")
 

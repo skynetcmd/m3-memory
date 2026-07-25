@@ -370,6 +370,45 @@ class PostgresDialect(Dialect):
         # %s binds an int number of minutes; multiply a 1-minute interval.
         return f"NOW() - ({minutes_placeholder} * INTERVAL '1 minute')"
 
+    def age_days_gt(self, ts_column: str, days_expr: str) -> str:
+        # "row older than N days": col < now - N*1day. Mirrors SQLite's
+        # julianday('now')-julianday(col) > N without PG-absent julianday().
+        return f"{ts_column} < NOW() - ({days_expr} * INTERVAL '1 day')"
+
+    def all_rows_after_offset(self, offset_placeholder: str) -> str:
+        # PG spells "no upper bound" as LIMIT ALL (vs SQLite's LIMIT -1).
+        return f"LIMIT ALL OFFSET {offset_placeholder}"
+
+    def group_concat(self, expr: str, separator: str = ",") -> str:
+        # PG's string_agg is the GROUP_CONCAT analogue. string_agg requires a text
+        # arg; ids/columns used here are already TEXT, so no cast needed.
+        return f"string_agg({expr}, '{separator}')"
+
+    # SQLSTATE codes for the "object does not exist" class (class 42, syntax/access):
+    #   42703 undefined_column, 42P01 undefined_table, 42704 undefined_object,
+    #   42883 undefined_function. Stable across PG versions/locales — far more
+    #   robust than matching the English message.
+    def greatest(self, *exprs: str) -> str:
+        return f"GREATEST({', '.join(exprs)})"
+
+    def least(self, *exprs: str) -> str:
+        return f"LEAST({', '.join(exprs)})"
+
+    _UNDEFINED_SQLSTATES = frozenset({"42703", "42P01", "42704", "42883"})
+
+    def is_undefined_object_error(self, exc: BaseException) -> bool:
+        for e in (exc, getattr(exc, "__cause__", None)):
+            if e is None:
+                continue
+            code = getattr(e, "pgcode", None)
+            if code in self._UNDEFINED_SQLSTATES:
+                return True
+            # Fallback for a non-psycopg wrapper that lost pgcode: match the text.
+            msg = str(e).lower()
+            if "does not exist" in msg and ("column" in msg or "relation" in msg):
+                return True
+        return False
+
     def day_bucket(self, column: str) -> str:
         # to_char keeps the TEXT 'YYYY-MM-DD' shape identical to SQLite's substr;
         # ::date would return a PG date type and change the bucket value shape.

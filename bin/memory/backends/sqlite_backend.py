@@ -49,6 +49,32 @@ class SqliteDialect(Dialect):
     def now_minus_minutes(self, minutes_placeholder: str) -> str:
         return f"datetime('now', '-' || {minutes_placeholder} || ' minutes')"
 
+    def age_days_gt(self, ts_column: str, days_expr: str) -> str:
+        return f"(julianday('now') - julianday({ts_column})) > {days_expr}"
+
+    def all_rows_after_offset(self, offset_placeholder: str) -> str:
+        return f"LIMIT -1 OFFSET {offset_placeholder}"
+
+    def group_concat(self, expr: str, separator: str = ",") -> str:
+        return f"GROUP_CONCAT({expr}, '{separator}')"
+
+    def greatest(self, *exprs: str) -> str:
+        return f"MAX({', '.join(exprs)})"
+
+    def least(self, *exprs: str) -> str:
+        return f"MIN({', '.join(exprs)})"
+
+    def is_undefined_object_error(self, exc: BaseException) -> bool:
+        # SQLite has no SQLSTATE for this; classify by the OperationalError text.
+        for e in (exc, getattr(exc, "__cause__", None)):
+            if e is None:
+                continue
+            msg = str(e).lower()
+            if ("no such column" in msg or "no such table" in msg
+                    or "no column named" in msg):
+                return True
+        return False
+
     def day_bucket(self, column: str) -> str:
         return f"substr({column},1,10)"
 

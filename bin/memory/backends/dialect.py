@@ -159,6 +159,91 @@ class Dialect:
         """
         raise NotImplementedError("subclass must implement now_minus_minutes()")
 
+    def age_days_gt(self, ts_column: str, days_expr: str) -> str:
+        """Boolean predicate: the timestamp in ``ts_column`` is OLDER than
+        ``days_expr`` days (i.e. now - ts > days). ``days_expr`` is either a bind
+        placeholder (``self.param()``) or a trusted literal int; ``ts_column`` is a
+        trusted identifier (never user input).
+
+        Replaces the SQLite-only ``julianday('now') - julianday(<col>) > <days>``
+        idiom, which raises on PostgreSQL (no julianday()). Used by the
+        retention/decay/purge passes in memory_maintenance.
+
+            sql = f"... WHERE {_d.age_days_gt('created_at', _d.param())} ..."
+            params = (..., ttl_days, ...)   # an int
+
+        SQLite:   ``(julianday('now') - julianday(<col>)) > <days_expr>``
+        Postgres: ``<col> < NOW() - (<days_expr> * INTERVAL '1 day')``
+        """
+        raise NotImplementedError("subclass must implement age_days_gt()")
+
+    def all_rows_after_offset(self, offset_placeholder: str) -> str:
+        """A ``LIMIT ... OFFSET`` tail that returns ALL rows after ``offset`` (no
+        upper bound) — the "keep newest N, take the rest" idiom.
+
+        Replaces the SQLite-only ``LIMIT -1 OFFSET ?`` (where -1 means "no limit"),
+        which is a syntax error on PostgreSQL. ``offset_placeholder`` binds an int.
+
+        SQLite:   ``LIMIT -1 OFFSET ?``
+        Postgres: ``LIMIT ALL OFFSET %s``
+        """
+        raise NotImplementedError("subclass must implement all_rows_after_offset()")
+
+    def group_concat(self, expr: str, separator: str = ",") -> str:
+        """Aggregate ``expr`` across a GROUP BY into a single separator-joined
+        string. ``expr`` is a trusted column/identifier; ``separator`` is a trusted
+        literal (never user input).
+
+        Replaces the SQLite-only ``GROUP_CONCAT(<expr>, '<sep>')``, which raises on
+        PostgreSQL (uses ``string_agg``). Both return a single TEXT value.
+
+        SQLite:   ``GROUP_CONCAT(<expr>, '<sep>')``
+        Postgres: ``string_agg(<expr>, '<sep>')``
+        """
+        raise NotImplementedError("subclass must implement group_concat()")
+
+    def greatest(self, *exprs: str) -> str:
+        """Scalar "largest of the arguments" — e.g. clamp a value to a floor.
+
+        SQLite spells this ``MAX(a, b, ...)`` (scalar, 2+ args) but PostgreSQL's
+        ``MAX`` is an AGGREGATE; the PG scalar is ``GREATEST(a, b, ...)`` (and
+        vice-versa: SQLite has no GREATEST). Args are trusted SQL fragments.
+
+        SQLite:   ``MAX(a, b, ...)``     Postgres: ``GREATEST(a, b, ...)``
+        """
+        raise NotImplementedError("subclass must implement greatest()")
+
+    def least(self, *exprs: str) -> str:
+        """Scalar "smallest of the arguments" — e.g. clamp a value to a ceiling.
+        The ``least`` analogue of :meth:`greatest`.
+
+        SQLite:   ``MIN(a, b, ...)``     Postgres: ``LEAST(a, b, ...)``
+        """
+        raise NotImplementedError("subclass must implement least()")
+
+    def is_undefined_object_error(self, exc: BaseException) -> bool:
+        """True if ``exc`` is a "no such column / no such table / no such object"
+        error — the class of failure that "tolerate a pre-migration DB, degrade to
+        a no-op" code paths want to catch.
+
+        Backends signal this DIFFERENTLY, and callers must NOT string-match the
+        message themselves: SQLite raises ``sqlite3.OperationalError("no such
+        column: x")`` while PostgreSQL raises ``psycopg2.errors.UndefinedColumn`` /
+        ``UndefinedTable`` with stable SQLSTATE codes (``42703`` / ``42P01``).
+        Matching the PG SQLSTATE is far more robust than its English message (which
+        varies by version/locale). This predicate hides that split so a caller asks
+        one portable question:
+
+            except Exception as e:
+                if not dialect().is_undefined_object_error(e):
+                    raise            # a real error, not a pre-migration schema gap
+
+        Also handles a wrapped/chained exception via ``__cause__`` so a
+        seam-adapted error still classifies.
+        """
+        raise NotImplementedError(
+            "subclass must implement is_undefined_object_error()")
+
     # -- generated ids -------------------------------------------------------
     def returning_id_clause(self) -> str:
         """Trailing INSERT clause to make the statement return its generated id.
