@@ -91,16 +91,32 @@ def pg_dsn() -> "str | None":
 def _pg_reachable() -> bool:
     """True iff a Postgres cluster answers within a short connect timeout.
     Reachability, not mere presence — the presence-only gate in the old
-    test_backend_conformance was an inconsistency this unifies away."""
+    test_backend_conformance was an inconsistency this unifies away.
+
+    The result is cached per pytest session (see the collection hook), so a SINGLE
+    transient failure here would silently skip EVERY requires_pg test for the whole
+    run — a false green. That is a real hazard when the cluster is still accepting
+    connections (CI service just started, a WSL `service postgresql start` mid-run,
+    a brief pause). So retry a few times with a short backoff before concluding
+    "not reachable": a genuinely-absent cluster still fails fast (no DSN → instant
+    False; refused connection → the retries add at most ~2s), while a momentary
+    blip no longer poisons the session's PG coverage."""
     dsn = pg_dsn()
     if not dsn:
         return False
+    import time as _time
     try:
         import psycopg2
-        psycopg2.connect(dsn, connect_timeout=3).close()
-        return True
-    except Exception:  # noqa: BLE001 — any failure = not reachable
+    except Exception:  # noqa: BLE001 — driver absent = not reachable
         return False
+    for attempt in range(3):
+        try:
+            psycopg2.connect(dsn, connect_timeout=3).close()
+            return True
+        except Exception:  # noqa: BLE001 — any failure = retry, then give up
+            if attempt < 2:
+                _time.sleep(1.0)
+    return False
 
 
 def _native_wheel_present() -> bool:
