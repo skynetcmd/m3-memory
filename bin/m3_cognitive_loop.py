@@ -99,7 +99,20 @@ def daemonize_windows(args):
     # (or the asyncio runner if we got here late) can swallow, leaving the parent
     # ALIVE alongside the child. Two live loops each dispatch their own
     # Semaphore(2) of SLM calls = over-dispatch that storms the local LLM.
-    with child_out:
+    # NOTE: deliberately NOT `with child_out:`. Closing this handle is what
+    # hung the parent. child_out is duplicated into a DETACHED_PROCESS child as
+    # its stdout; on Windows the parent's close() of that duplicated handle
+    # blocks in a native wait (observed: 1 thread, ThreadWaitReason=UserRequest,
+    # 0.0s CPU) because the detached child holds the other end open and never
+    # exits. `with` runs that close BEFORE os._exit(0), so the exit was
+    # unreachable and the parent survived — the exact "two live loops" bug the
+    # comments below describe, still reproducing after the close_fds fix
+    # because close_fds does not cover the three std handles we pass on purpose.
+    #
+    # os._exit(0) skips flushing and closing entirely, and the OS reclaims the
+    # handle on process death, so there is nothing to leak. Do not "tidy" this
+    # back into a context manager.
+    try:
         subprocess.Popen(
             argv,
             # close_fds=True is REQUIRED here: without it the DETACHED_PROCESS
@@ -118,6 +131,11 @@ def daemonize_windows(args):
             stdout=child_out,
             stderr=subprocess.STDOUT,
         )
+    except Exception:  # noqa: BLE001 — see below: nothing may block the exit
+        # If the spawn itself failed there is no child, and continuing would
+        # leave this process running the loop from a console-less pythonw with
+        # dead std handles. Exiting non-zero lets the supervisor retry.
+        os._exit(1)
     # CRITICAL: the parent MUST hard-exit now, or we get TWO live loops (the
     # detached child worker + this parent). The status print() is best-effort and
     # MUST NOT be able to prevent the exit: under pythonw.exe there is NO console,
