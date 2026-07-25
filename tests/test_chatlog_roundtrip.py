@@ -42,7 +42,6 @@ def _create_supporting_tables(db_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Async queue lifecycle issues in test environment")
 async def test_roundtrip_write_and_search(chatlog_with_schema):
     """Insert 50 rows, flush, search them back."""
     import chatlog_core
@@ -168,7 +167,6 @@ async def test_search_with_filters_does_not_crash(chatlog_with_schema):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Async queue lifecycle issues in test environment")
 async def test_list_conversations(chatlog_with_schema):
     """Insert rows across 3 conversations, verify list_conversations returns them."""
     import chatlog_core
