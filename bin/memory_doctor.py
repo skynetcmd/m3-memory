@@ -92,6 +92,10 @@ def main() -> int:
         help="Skip the cross-agent dead-path check (Gemini/OpenCode/Hermes/...).",
     )
     parser.add_argument(
+        "--skip-entrypoints", action="store_true",
+        help="Skip the console-entrypoint check (does `m3` on PATH run this install?).",
+    )
+    parser.add_argument(
         "--skip-dashboard", action="store_true",
         help="Skip the web-dashboard liveness check (registry + port probe).",
     )
@@ -219,6 +223,16 @@ def main() -> int:
         # (the fix is client-side /plugin + /reload-plugins commands doctor can't
         # invoke), so it nags with the exact commands but never bumps the exit code.
         plugin_version_probe.run(brief=brief)
+
+    if not args.skip_entrypoints:
+        from doctor import entrypoint_probe
+        # DOES bump the exit code: if `m3` on PATH resolves to a stale or
+        # orphaned launcher, every command in every runbook and error message
+        # does something other than what it says. That is a broken install,
+        # and nothing else detects it — plugin_version_probe compares the
+        # plugin manifest, schedule_probe checks scheduled jobs; neither asks
+        # whether typing `m3` runs THIS code.
+        exit_code = max(exit_code, entrypoint_probe.run(brief=brief))
 
     if not args.skip_agent_paths:
         from doctor import agent_paths_probe

@@ -303,3 +303,37 @@ def test_claude_skills_live_at_plugin_root():
             assert os.path.isfile(os.path.join(d, "SKILL.md")), (
                 f"skills/{name}/ has no SKILL.md — it will not load"
             )
+
+
+def test_no_hardcoded_version_in_console_script_version_flags():
+    """`--version` must read package metadata, never a literal.
+
+    pyproject.toml is the single source of truth and sync_manifest_versions.py
+    propagates it to the derived manifests -- but a literal baked into an
+    argparse `version=` string is invisible to that sync and drifts silently
+    every release. `m3-team --version` reported 2026.4.8 for three months while
+    the package was 2026.7.25.0, which makes a CURRENT install look stale to
+    anyone (or any probe) that trusts it.
+    """
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    # A version= keyword whose value is a STRING LITERAL containing a version
+    # number, e.g.  version="m3-team 2026.4.8". An f-string interpolating
+    # __version__ is the correct form and must not match.
+    literal = re.compile(r'\bversion\s*=\s*["\'][^"\']*\d+\.\d+[.\d]*[^"\']*["\']')
+    offenders = []
+    for py in (root / "m3_memory").rglob("*.py"):
+        if "__pycache__" in str(py):
+            continue
+        text = py.read_text(encoding="utf-8", errors="replace")
+        for n, line in enumerate(text.splitlines(), 1):
+            m = literal.search(line)
+            if m and "__version__" not in line:
+                offenders.append(f"{py.relative_to(root)}:{n}: {line.strip()}")
+
+    assert not offenders, (
+        "hardcoded version literal(s) -- read m3_memory.__version__ instead:\n  "
+        + "\n  ".join(offenders)
+    )

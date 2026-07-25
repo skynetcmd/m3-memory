@@ -230,7 +230,16 @@ Examples:
 Docs: https://github.com/skynetcmd/m3-memory/tree/main/examples/multi-agent-team
 """,
     )
-    parser.add_argument("--version", action="version", version="m3-team 2026.4.8")
+    # Read the version from package metadata, never a literal. pyproject.toml is
+    # the single source of truth (sync_manifest_versions.py propagates it to the
+    # derived manifests); a hardcoded string here silently drifts every release
+    # and makes a current install look stale. This one had been reporting
+    # 2026.4.8 for three months. Same source as `mcp-memory --version`.
+    from m3_memory import __version__ as _m3_version
+
+    parser.add_argument(
+        "--version", action="version", version=f"m3-team {_m3_version}"
+    )
     sub = parser.add_subparsers(dest="cmd")
 
     p_init = sub.add_parser("init", help="write a starter team.yaml (LM Studio, no API keys)")
