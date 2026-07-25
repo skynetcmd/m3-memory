@@ -33,6 +33,7 @@ import uuid as _uuid
 from typing import Optional
 
 from . import config
+from .config import files_table
 from .db import _db
 
 logger = logging.getLogger("files_memory.promote")
@@ -53,15 +54,17 @@ def _resolve_source(conn: sqlite3.Connection, source_uuid: str) -> Optional[dict
         source_path: filesystem path at promotion time
         version_label: ingest-N label
     """
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     # Try facts first (most likely target).
     row = conn.execute(
-        "SELECT f.uuid AS fact_uuid, f.statement, f.confidence, f.leaf, "
-        "       f.file_node, l.text AS leaf_text, l.division_label, "
-        "       fn.filename, fn.path_absolute, fn.version_label "
-        "FROM facts f "
-        "JOIN leaves l ON l.uuid = f.leaf "
-        "JOIN file_nodes fn ON fn.uuid = f.file_node "
-        "WHERE f.uuid = ?",
+        f"SELECT f.uuid AS fact_uuid, f.statement, f.confidence, f.leaf, "
+        f"       f.file_node, l.text AS leaf_text, l.division_label, "
+        f"       fn.filename, fn.path_absolute, fn.version_label "
+        f"FROM {files_table('facts')} f "
+        f"JOIN {files_table('leaves')} l ON l.uuid = f.leaf "
+        f"JOIN {files_table('file_nodes')} fn ON fn.uuid = f.file_node "
+        f"WHERE f.uuid = {_p}",
         (source_uuid,),
     ).fetchone()
     if row:
@@ -79,12 +82,12 @@ def _resolve_source(conn: sqlite3.Connection, source_uuid: str) -> Optional[dict
 
     # Try leaves.
     row = conn.execute(
-        "SELECT l.uuid AS leaf_uuid, l.text, l.leaf_summary, l.division_type, "
-        "       l.division_id, l.division_label, l.file_node, "
-        "       fn.filename, fn.path_absolute, fn.version_label "
-        "FROM leaves l "
-        "JOIN file_nodes fn ON fn.uuid = l.file_node "
-        "WHERE l.uuid = ?",
+        f"SELECT l.uuid AS leaf_uuid, l.text, l.leaf_summary, l.division_type, "
+        f"       l.division_id, l.division_label, l.file_node, "
+        f"       fn.filename, fn.path_absolute, fn.version_label "
+        f"FROM {files_table('leaves')} l "
+        f"JOIN {files_table('file_nodes')} fn ON fn.uuid = l.file_node "
+        f"WHERE l.uuid = {_p}",
         (source_uuid,),
     ).fetchone()
     if row:
@@ -101,8 +104,8 @@ def _resolve_source(conn: sqlite3.Connection, source_uuid: str) -> Optional[dict
 
     # Try file_summaries.
     row = conn.execute(
-        "SELECT uuid, filename, file_summary, path_absolute, version_label "
-        "FROM file_nodes WHERE uuid = ?",
+        f"SELECT uuid, filename, file_summary, path_absolute, version_label "
+        f"FROM {files_table('file_nodes')} WHERE uuid = {_p}",
         (source_uuid,),
     ).fetchone()
     if row:
@@ -142,18 +145,25 @@ def _find_promoted_orphan(source_uuid: str) -> Optional[str]:
 
     Used by files_promote() for orphan recovery — see promote() docstring.
     """
+    from memory.backends import dialect as _dialect
     from .entities import _memory_db  # reuse the same connection helper
+    _d = _dialect()
+    _p = _d.param()
     try:
         with _memory_db() as conn:
+            # Core memory store (memory_items) — bare names; json_extract_text seam
+            # primitive handles SQLite json_extract vs PG ->> .
             row = conn.execute(
-                "SELECT id FROM memory_items "
-                "WHERE json_extract(metadata_json, '$.promoted_from') = 'files.db' "
-                "  AND json_extract(metadata_json, '$.source_memory_id') = ? "
-                "ORDER BY created_at DESC LIMIT 1",
+                f"SELECT id FROM memory_items "
+                f"WHERE {_d.json_extract_text('metadata_json', 'promoted_from')} = 'files.db' "
+                f"  AND {_d.json_extract_text('metadata_json', 'source_memory_id')} = {_p} "
+                f"ORDER BY created_at DESC LIMIT 1",
                 (source_uuid,),
             ).fetchone()
             return row[0] if row else None
-    except (FileNotFoundError, sqlite3.Error) as e:
+    except Exception as e:  # noqa: BLE001 — orphan lookup is best-effort
+        # Broadened from (FileNotFoundError, sqlite3.Error) so a psycopg2 error on
+        # PG also degrades to "no orphan" rather than aborting the promote.
         logger.debug("_find_promoted_orphan failed: %s", e)
         return None
 
@@ -188,6 +198,9 @@ def files_promote(
     if scope is None:
         scope = config.PROMOTION_DEFAULT_SCOPE
 
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     with _db(db_path) as conn:
         source = _resolve_source(conn, source_uuid)
         if source is None:
@@ -195,9 +208,9 @@ def files_promote(
 
         # Idempotency: was this already promoted? (marker exists)
         existing = conn.execute(
-            "SELECT uuid, promoted_to, mapped_type FROM promotion_markers "
-            "WHERE source_memory = ? "
-            "ORDER BY promoted_at DESC LIMIT 1",
+            f"SELECT uuid, promoted_to, mapped_type FROM {files_table('promotion_markers')} "
+            f"WHERE source_memory = {_p} "
+            f"ORDER BY promoted_at DESC LIMIT 1",
             (source_uuid,),
         ).fetchone()
         if existing:
@@ -221,10 +234,10 @@ def files_promote(
         if orphan:
             marker_uuid = str(_uuid.uuid4())
             conn.execute(
-                "INSERT INTO promotion_markers("
-                "uuid, source_memory, source_memory_type, promoted_to, promoted_by, "
-                "reason, mapped_type, memory_db_path) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                f"INSERT INTO {files_table('promotion_markers')}("
+                f"uuid, source_memory, source_memory_type, promoted_to, promoted_by, "
+                f"reason, mapped_type, memory_db_path) "
+                f"VALUES ({_d.placeholder(8)})",
                 (
                     marker_uuid, source_uuid, source["kind"],
                     orphan, agent_id,
@@ -273,10 +286,10 @@ def files_promote(
         # Write the marker in files.db.
         marker_uuid = str(_uuid.uuid4())
         conn.execute(
-            "INSERT INTO promotion_markers("
-            "uuid, source_memory, source_memory_type, promoted_to, promoted_by, "
-            "reason, mapped_type, memory_db_path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            f"INSERT INTO {files_table('promotion_markers')}("
+            f"uuid, source_memory, source_memory_type, promoted_to, promoted_by, "
+            f"reason, mapped_type, memory_db_path) "
+            f"VALUES ({_d.placeholder(8)})",
             (
                 marker_uuid, source_uuid, source["kind"],
                 memory_uuid, agent_id, reason, promoted_type,
@@ -387,32 +400,34 @@ def files_promotion_list(
             is now superseded (candidates for promotion review).
         limit: cap on results.
     """
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     sql_parts = [
-        "SELECT pm.uuid AS marker_uuid, pm.source_memory, pm.source_memory_type, "
-        "       pm.promoted_to, pm.promoted_at, pm.reason, pm.mapped_type, "
-        "       fn.uuid AS file_node_uuid, fn.filename, fn.path_absolute, "
-        "       fn.version_label, fn.superseded_by, fn.superseded_at "
-        "FROM promotion_markers pm "
-        "LEFT JOIN file_nodes fn ON ( "
-        "    fn.uuid = pm.source_memory "
-        "    OR fn.uuid = (SELECT file_node FROM facts WHERE uuid = pm.source_memory) "
-        "    OR fn.uuid = (SELECT file_node FROM leaves WHERE uuid = pm.source_memory) "
-        ") "
-        "WHERE 1 = 1"
+        f"SELECT pm.uuid AS marker_uuid, pm.source_memory, pm.source_memory_type, "
+        f"       pm.promoted_to, pm.promoted_at, pm.reason, pm.mapped_type, "
+        f"       fn.uuid AS file_node_uuid, fn.filename, fn.path_absolute, "
+        f"       fn.version_label, fn.superseded_by, fn.superseded_at "
+        f"FROM {files_table('promotion_markers')} pm "
+        f"LEFT JOIN {files_table('file_nodes')} fn ON ( "
+        f"    fn.uuid = pm.source_memory "
+        f"    OR fn.uuid = (SELECT file_node FROM {files_table('facts')} WHERE uuid = pm.source_memory) "
+        f"    OR fn.uuid = (SELECT file_node FROM {files_table('leaves')} WHERE uuid = pm.source_memory) "
+        f") "
+        f"WHERE 1 = 1"
     ]
     params: list = []
     if source_file_node:
-        sql_parts.append("AND fn.uuid = ?")
+        sql_parts.append(f"AND fn.uuid = {_p}")
         params.append(source_file_node)
     if source_superseded is True:
         sql_parts.append("AND fn.superseded_by IS NOT NULL")
     elif source_superseded is False:
         sql_parts.append("AND fn.superseded_by IS NULL")
-    sql_parts.append("ORDER BY pm.promoted_at DESC LIMIT ?")
+    sql_parts.append(f"ORDER BY pm.promoted_at DESC LIMIT {_p}")
     params.append(limit)
 
     with _db(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+        # seam yields name-addressable rows on both backends (no sqlite3.Row).
         rows = conn.execute(" ".join(sql_parts), params).fetchall()
 
     return [
