@@ -97,12 +97,19 @@ def _divergent_methods() -> set[str]:
         "temporal_open_clause": ("mi.valid_from", "<="),
         "table_exists": ("memory_items",),
         "columns_of": ("memory_items",),
+        # keyword-only args go in a trailing dict (see the loop below).
+        "qualified_table": ("leaves", {"schema": "files"}),
     }
     divergent: set[str] = set()
     for name, args in probes.items():
+        # Allow a trailing dict to carry keyword-only args (qualified_table's
+        # schema=). Everything else is positional-only, as before.
+        kwargs = {}
+        if args and isinstance(args[-1], dict):
+            args, kwargs = args[:-1], args[-1]
         meth = getattr(base, name)
         try:
-            meth(*args)
+            meth(*args, **kwargs)
         except NotImplementedError:
             divergent.add(name)
         except Exception:
@@ -154,6 +161,7 @@ def test_every_dialect_overrides_every_divergent_method():
                 "temporal_open_clause": "_temporal_open_clause_expr",
                 "table_exists": "_table_exists_query",
                 "columns_of": "_columns_of_query",
+                "qualified_table": "_qualified_table_expr",
             }
             check = wrapper_to_fragment.get(meth, meth)
             assert getattr(type(d), check) is not getattr(Dialect, check), (

@@ -110,6 +110,13 @@ class SqliteDialect(Dialect):
         # its `name` column is the column name. Caller reads row[0].
         return (f"SELECT name FROM pragma_table_info('{table}')", ())
 
+    def _qualified_table_expr(self, name: str, schema: str) -> str:
+        # A separate logical store is a separate DB FILE on SQLite — opened
+        # directly — so there is no schema to qualify: the reference is bare.
+        # SQLite states this explicitly (the base is abstract) so no dialect is
+        # privileged as "the default". `schema` is intentionally unused here.
+        return name
+
     def compact_storage(self, *, sqlite_path: "str | None" = None,
                         max_bytes: int = 500 * 1024 * 1024) -> str:
         # VACUUM rewrites the file to reclaim free pages. It needs a fresh

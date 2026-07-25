@@ -243,6 +243,16 @@ def test_qualified_table_rejects_injection(dialect, bad):
         dialect.qualified_table("leaves", schema=bad)
 
 
+def test_qualified_table_base_is_abstract_not_a_privileged_default():
+    """The base MUST NOT silently return the bare (SQLite) name — that would let a
+    new backend inherit SQLite's answer and target the wrong place. Each dialect
+    states its own form; the base raises, exactly like insert_or_ignore et al."""
+    from memory.backends.dialect import Dialect
+    base = Dialect(backend="sqlite", param_style="qmark")
+    with pytest.raises(NotImplementedError):
+        base.qualified_table("leaves", schema="files")
+
+
 def test_files_table_helper_resolves_per_backend(monkeypatch):
     """files_memory.config.files_table() threads through the ACTIVE dialect."""
     import sys as _sys

@@ -580,11 +580,18 @@ class Dialect:
     def _qualified_table_expr(self, name: str, schema: str) -> str:
         """Backend fragment for :meth:`qualified_table` (post-validation).
 
-        Base default is the SQLite form (bare name) — a separate-file store needs
-        no qualification and any future file-per-store backend inherits it
-        correctly. Postgres overrides to prepend the schema.
+        ABSTRACT — every dialect states its own qualification. "Bare name" is NOT
+        a universal default: it is the SQLite-FAMILY answer (separation is a
+        separate DB file, so there is no schema to qualify), not a correct default
+        for a schema/namespaced backend. Postgres qualifies with the schema; a
+        future MariaDB files store would qualify too; a document store wouldn't use
+        SQL table names at all. Making the base raise (not silently return the bare
+        name) means a new backend that forgets to implement this FAILS LOUD at first
+        use — "add your dialect's form" — rather than inheriting SQLite's answer and
+        silently targeting the wrong place. Same contract as insert_or_ignore /
+        on_conflict_ignore / the other divergent primitives.
         """
-        return name
+        raise NotImplementedError("subclass must implement _qualified_table_expr()")
 
     # -- storage maintenance -------------------------------------------------
     def compact_storage(self, *, sqlite_path: "str | None" = None,
