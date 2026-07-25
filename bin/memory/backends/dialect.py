@@ -328,6 +328,46 @@ class Dialect:
             return parsed if isinstance(parsed, dict) else {}
         return {}
 
+    def json_bind_value(self, value: object) -> "str | None":
+        """Normalize a value for BINDING into a JSON column. The write-side
+        complement to :meth:`json_column_to_dict` (which handles the read side).
+
+        The round-trip trap this closes: a whole-column read of a Postgres JSONB
+        column yields an already-parsed ``dict`` (see :meth:`json_column_to_dict`).
+        Feeding that dict straight back into an INSERT/UPDATE bind — the natural
+        shape of an export→import round-trip — raises psycopg2
+        ``ProgrammingError: can't adapt type 'dict'``, because psycopg2 has no
+        default adapter for a bare dict. SQLite's ``sqlite3`` refuses it too
+        (``InterfaceError``). A JSON *string* binds correctly on BOTH backends:
+        SQLite's column is TEXT so the string is stored verbatim, and Postgres
+        implicitly casts a JSON-shaped ``str`` into JSONB. So the portable bind
+        value is always the serialized string.
+
+        Callers must route every bind of a JSON-column value through this instead
+        of writing their own ``json.dumps(v) if isinstance(v, dict) else v`` shim
+        at the call site — the same defect in smaller form, because the next
+        author copy-pastes it (the rule for :meth:`json_column_to_dict`, applied
+        to the write side).
+
+        Coercion, keyed on the VALUE's Python type (never on SQL syntax, so it is
+        already correct for any future JSON-typed backend):
+          - ``None``                 -> ``None`` (SQL NULL; the column is nullable)
+          - ``dict`` / ``list``      -> ``json.dumps(value)``
+          - ``str``                  -> passed through verbatim (already serialized;
+                                        re-dumping would double-encode it)
+          - anything else            -> ``json.dumps(value)`` (numbers, bools)
+
+        Note this does NOT substitute :meth:`empty_json_default` — an empty/blank
+        metadata still needs that backend-specific default (``''`` vs ``'{}'``)
+        because ``None`` here means SQL NULL, not "empty object". Normalize blanks
+        with ``empty_json_default`` first if the column is NOT NULL.
+        """
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        return _json.dumps(value)
+
     def json_extract_text(self, column: str, json_path: str) -> str:
         """Extract a top-level JSON field AS TEXT.
 
@@ -496,6 +536,39 @@ class Dialect:
     def _columns_of_query(self, table: str) -> tuple[str, tuple]:
         """Backend fragment for :meth:`columns_of` (post-validation)."""
         raise NotImplementedError("subclass must implement _columns_of_query()")
+
+    # -- storage maintenance -------------------------------------------------
+    def compact_storage(self, *, sqlite_path: "str | None" = None,
+                        max_bytes: int = 500 * 1024 * 1024) -> str:
+        """Reclaim free space in the store, if the backend has a client-issued
+        compaction. Returns a human-readable status line for the maintenance report.
+
+        This exists so the maintenance pass NEVER branches on
+        ``resolve_backend_name() != "sqlite"`` at the call site. That call-site
+        ``if not sqlite`` is a latent bug: a THIRD backend that DOES have a
+        client-issued compaction — MariaDB ``OPTIMIZE TABLE``, or a future store —
+        would fall into the PG "no-op" side and silently never be compacted. The
+        decision belongs to the dialect, which knows its own storage engine.
+
+        Contract, per backend:
+          - **SQLite** — ``VACUUM`` rewrites the DB file to reclaim free pages. It
+            must run OUTSIDE any open transaction and needs the *active* file path
+            (which may differ from an import-time constant when a caller has switched
+            databases), so callers pass it as ``sqlite_path``. Size-gated by
+            ``max_bytes`` (default 500 MB, issue #46) to avoid multi-minute hangs.
+          - **Postgres** — no-op: autovacuum reclaims space in the background and
+            there is no meaningful client-issued file compaction (a manual
+            ``VACUUM`` here would need its own out-of-txn connection and does not
+            shrink the file without ``VACUUM FULL``, which takes an exclusive lock).
+          - **A future JSON/row store (MariaDB, …)** — implements whatever its
+            engine offers (``OPTIMIZE TABLE``) or returns its own no-op line. The
+            point is that adding it is ONE method here, not editing every call site.
+
+        Concrete on the base class as a safe DEFAULT no-op so a backend that adds
+        nothing still works; SQLite overrides it. ``sqlite_path`` is ignored by
+        every non-SQLite backend.
+        """
+        return "Compaction skipped: not applicable on this backend"
 
 
 # ── Concrete per-backend dialects live in their backend modules ──────────────

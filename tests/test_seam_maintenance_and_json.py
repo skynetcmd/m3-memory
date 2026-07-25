@@ -120,3 +120,98 @@ def test_backends_expose_maintenance_checkpoint():
     assert callable(getattr(SqliteBackend(), "maintenance_checkpoint", None))
     from memory.backends import postgres_backend
     assert callable(getattr(postgres_backend.PostgresBackend, "maintenance_checkpoint", None))
+
+
+# ── json_bind_value ──────────────────────────────────────────────────────────
+# The write-side complement to json_column_to_dict. Closes the export→import
+# round-trip trap: a PG JSONB whole-column read yields a dict, and re-binding a
+# bare dict raises psycopg2 "can't adapt type dict". Serializing to a JSON string
+# binds on BOTH backends. Callers must not roll their own json.dumps-if-dict shim.
+
+@pytest.mark.parametrize("dialect", [SQLITE, POSTGRES], ids=["sqlite", "postgres"])
+def test_json_bind_value_serializes_dict_and_list(dialect):
+    """dict / list → a JSON string (the shape that binds on both backends)."""
+    import json
+    assert dialect.json_bind_value({"a": 1, "b": ["x", "y"]}) == json.dumps({"a": 1, "b": ["x", "y"]})
+    assert dialect.json_bind_value([1, 2, 3]) == "[1, 2, 3]"
+
+
+@pytest.mark.parametrize("dialect", [SQLITE, POSTGRES], ids=["sqlite", "postgres"])
+def test_json_bind_value_passes_string_through_verbatim(dialect):
+    """An already-serialized str is NOT re-dumped (that would double-encode)."""
+    assert dialect.json_bind_value('{"already": "json"}') == '{"already": "json"}'
+    # Even a non-JSON string passes through — the seam serializes, it does not validate.
+    assert dialect.json_bind_value("") == ""
+
+
+@pytest.mark.parametrize("dialect", [SQLITE, POSTGRES], ids=["sqlite", "postgres"])
+def test_json_bind_value_none_is_sql_null(dialect):
+    """None → None (SQL NULL), NOT the string 'null' — the column is nullable."""
+    assert dialect.json_bind_value(None) is None
+
+
+def test_json_bind_value_round_trips_with_json_column_to_dict():
+    """The two seam sides agree: bind a dict, read it back, get the same dict.
+
+    This is the exact export→import path that raised 'can't adapt type dict' —
+    modelled here without a live driver by composing the two primitives.
+    """
+    meta = {"provider": "anthropic", "nested": {"k": 1}, "list": [1, 2]}
+    for dialect in (SQLITE, POSTGRES):
+        bound = dialect.json_bind_value(meta)          # dict -> json string
+        assert isinstance(bound, str)
+        assert dialect.json_column_to_dict(bound) == meta  # string -> dict
+
+
+# ── compact_storage ──────────────────────────────────────────────────────────
+# Replaces the `resolve_backend_name() != "sqlite"` VACUUM branch. The dialect
+# owns the compaction decision so a future backend with a real compaction
+# (MariaDB OPTIMIZE TABLE) cannot fall into a call-site no-op silently.
+
+def test_compact_storage_sqlite_vacuums_a_real_db(tmp_path):
+    """SQLite VACUUMs the active file and reports success."""
+    db = tmp_path / "c.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+    conn.executemany("INSERT INTO t (v) VALUES (?)", [(f"r{i}",) for i in range(100)])
+    conn.commit()
+    conn.close()
+    out = SQLITE.compact_storage(sqlite_path=str(db))
+    assert "Space reclaimed (VACUUM)" == out
+
+
+def test_compact_storage_sqlite_size_gated(tmp_path):
+    """A DB over max_bytes is skipped with a clear reason (issue #46), not hung."""
+    db = tmp_path / "big.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+    # Force the gate with a tiny ceiling rather than building a huge file.
+    out = SQLITE.compact_storage(sqlite_path=str(db), max_bytes=0)
+    assert "too large" in out
+
+
+def test_compact_storage_sqlite_missing_path_is_reported_not_raised():
+    """No active path → a skip line, never an exception."""
+    out = SQLITE.compact_storage(sqlite_path=None)
+    assert "skipped" in out.lower()
+
+
+def test_compact_storage_postgres_is_a_documented_noop():
+    """PG returns the autovacuum no-op line and ignores sqlite_path entirely."""
+    out = POSTGRES.compact_storage(sqlite_path="/nonexistent/ignored.db")
+    assert "not applicable on PostgreSQL" in out
+    assert "autovacuum" in out
+
+
+def test_compact_storage_base_default_is_a_safe_noop():
+    """A backend that overrides nothing still works — the base is a no-op, so a
+    future dialect cannot accidentally crash the maintenance pass by omission."""
+    from memory.backends.dialect import Dialect
+    # Construct the base directly (a stand-in for a future backend that inherits
+    # compact_storage without overriding it) — args mirror the concrete dialects.
+    # param_style is a Literal["qmark","format"], so pass the bare string.
+    base = Dialect(backend="sqlite", param_style="qmark")
+    out = base.compact_storage(sqlite_path=None)
+    assert "skipped" in out.lower()

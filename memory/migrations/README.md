@@ -67,6 +67,13 @@ Compute each from the directory listing at the time you add a file — never ass
 - **After adding a pair, sanity-check parity locally.** The SQLite up-migration
   should apply to a scratch `:memory:` DB, and the PG variant should produce the
   same logical tables/indexes. `test_schema_parity_pg_live.py` is the CI gate.
+- **The parity test only guards tables in its explicit `_SHARED_CORE_TABLES`
+  set.** It diffs the two live schemas *for the tables it is told to compare* — a
+  table missing from BOTH the PG schema and that set ships undetected (this is
+  exactly how `agent_retention_policies` — SQLite `010`, never mirrored to PG —
+  went unnoticed until it surfaced as a live PG runtime error, fixed by
+  `pg_046_parity_agent_retention`). **When you add a shared table, add it to
+  `_SHARED_CORE_TABLES` in the same change** so the gate can catch future drift.
 
 ## Numbering at a glance (why they're offset)
 

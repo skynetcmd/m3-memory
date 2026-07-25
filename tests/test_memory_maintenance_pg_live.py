@@ -71,23 +71,19 @@ def _set_created(mid, iso):
             db.commit()
 
 
-@pytest.mark.xfail(reason="PG maintenance pass has one open 'can't adapt dict' "
-                          "bind issue; the guard intentionally skips on PG until "
-                          "test is green (m3 to_do: Finish memory_maintenance "
-                          "PG-live). Flip to a positive assert once fixed.",
-                   strict=False)
 def test_maintenance_runs_on_pg_not_skipped(pg):
-    """TARGET STATE: the full pass runs on PG (no skip). Currently xfail — the
-    dialect port is done but a dict-bind issue remains, so the guard still skips."""
+    """The full pass runs on PG — the non-sqlite skip guard is removed and every
+    tolerant block is savepoint-wrapped, so a missing-schema catch no longer aborts
+    the PG txn. The word "skipped" may still appear for VACUUM (genuinely SQLite-
+    only), so assert the pass COMPLETED rather than on the absence of "skipped"."""
     import memory_maintenance as MM
     out = MM.memory_maintenance_impl()
-    assert "skipped" not in out.lower()
-    assert "Maintenance complete" in out or "Decayed" in out or "Statistics" in out
+    assert "Maintenance skipped" not in out  # the OLD whole-pass skip is gone
+    assert "Maintenance complete" in out
+    # VACUUM is the one thing legitimately skipped on PG.
+    assert "VACUUM skipped: not applicable on PostgreSQL" in out
 
 
-@pytest.mark.xfail(reason="blocked on the maintenance guard (skips on PG) + the "
-                          "open dict-bind issue; see 'Finish memory_maintenance "
-                          "PG-live' to_do.", strict=False)
 def test_decay_and_purge_on_pg(pg):
     """Decay (age_days_gt) + expiry purge run and affect rows on PG."""
     import memory_maintenance as MM
@@ -105,9 +101,6 @@ def test_decay_and_purge_on_pg(pg):
     assert imp < 0.8
 
 
-@pytest.mark.xfail(reason="blocked on the maintenance guard (skips on PG) + the "
-                          "open dict-bind issue; see 'Finish memory_maintenance "
-                          "PG-live' to_do.", strict=False)
 def test_retention_policy_max_count_on_pg(pg):
     """all_rows_after_offset (LIMIT ALL OFFSET on PG) soft-deletes oldest excess."""
     import memory_maintenance as MM
@@ -132,17 +125,20 @@ def test_retention_policy_max_count_on_pg(pg):
     assert (live["c"] if hasattr(live, "keys") else live[0]) == 2
 
 
-@pytest.mark.xfail(reason="memory_import_impl binds metadata_json as a Python "
-                          "dict -> psycopg2 'can't adapt type dict' on PG; the "
-                          "value must be json.dumps'd. See 'Finish "
-                          "memory_maintenance PG-live' to_do.", strict=False)
 def test_export_import_round_trip_on_pg(pg):
-    """export (dynamic WHERE) + import (dialect upsert / INSERT OR IGNORE) on PG."""
+    """export (dynamic WHERE) + import (dialect upsert / INSERT OR IGNORE) on PG.
+
+    Regression for the "can't adapt type dict" bind: on a PG export, JSONB
+    metadata_json comes back as a parsed dict; re-binding it on import raised
+    ``ProgrammingError: can't adapt type 'dict'`` until the json_bind_value seam
+    primitive serialized it. Seed a NON-EMPTY metadata so the dict actually round-
+    trips (an empty {} would not exercise the adapter path)."""
     import json
 
     import memory_maintenance as MM
     uid = f"exp-{uuid.uuid4().hex[:8]}"
-    a = _write(uid, type="note", title="A", content="alpha", agent_id=uid)
+    a = _write(uid, type="note", title="A", content="alpha", agent_id=uid,
+               metadata={"provider": "anthropic", "nested": {"k": 1}})
     b = _write(uid, type="note", title="B", content="beta", agent_id=uid)
     from memory_core import memory_link_impl
     memory_link_impl(a, b, "related")
@@ -151,9 +147,20 @@ def test_export_import_round_trip_on_pg(pg):
     payload = json.loads(dump)
     assert payload["item_count"] >= 2
 
-    # Re-import is idempotent (ON CONFLICT DO UPDATE / DO NOTHING) — must not raise.
+    # Re-import is idempotent (ON CONFLICT DO UPDATE / DO NOTHING) — must not raise
+    # on the dict-shaped metadata_json.
     res = MM.memory_import_impl(dump)
     assert "Imported" in res
+
+    # The metadata survived the round-trip intact (dict -> json string -> JSONB).
+    from memory.backends import dialect
+    from memory.db import _db
+    p = dialect().param()
+    with _db() as db:
+        raw = db.execute(f"SELECT metadata_json FROM memory_items WHERE id = {p}", (a,)).fetchone()[0]
+    meta = dialect().json_column_to_dict(raw)
+    assert meta.get("provider") == "anthropic"
+    assert meta.get("nested") == {"k": 1}
 
 
 def test_reinforce_decay_on_pg(pg):

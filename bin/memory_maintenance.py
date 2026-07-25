@@ -353,12 +353,21 @@ def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
         "top_contradicted": [],
         "most_revised": [],
     }
+    from memory.db import tolerant_schema as _tolerant
     with _db() as db:
         # NOTE: no `db.row_factory = sqlite3.Row` here — that is SQLite-only and the
         # PG compat connection already yields name-addressable rows. The seam gives
         # row["col"] access on both backends.
+        #
+        # Each block below queries a table that may not exist on an un-migrated DB
+        # (memory_history pre-009, memory_corroborations pre-036). tolerant_schema
+        # wraps the block in a SAVEPOINT so a missing-schema error is swallowed AND
+        # the outer transaction stays usable on PG — the bare try/except-missing
+        # idiom left the PG txn aborted for every later block. Real errors still
+        # raise (reraise_real=True default).
+        #
         # Lifecycle events by type in the window.
-        try:
+        with _tolerant(db):
             for row in db.execute(
                 f"SELECT event, COUNT(*) AS n FROM memory_history "
                 f"WHERE created_at >= {_since} GROUP BY event",
@@ -366,13 +375,10 @@ def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
             ):
                 if row["event"] in out["events"]:
                     out["events"][row["event"]] = row["n"]
-        except Exception as e:
-            if not _is_missing_schema(e):
-                raise  # a real error, not a pre-009 DB
 
         # Most-revised memories (update + supersede events per memory_id).
         if top_n:
-            try:
+            with _tolerant(db):
                 out["most_revised"] = [
                     {"memory_id": r["memory_id"], "revisions": r["n"], "title": r["title"]}
                     for r in db.execute(
@@ -386,12 +392,9 @@ def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
                         (window_days, top_n),
                     )
                 ]
-            except Exception as e:
-                if not _is_missing_schema(e):
-                    raise
 
         # Corroboration vs contradiction in the window (post-036 table).
-        try:
+        with _tolerant(db):
             for row in db.execute(
                 f"SELECT CASE WHEN delta > 0 THEN 'corroborated' ELSE 'contradicted' END AS kind, "
                 f"       COUNT(*) AS n FROM memory_corroborations "
@@ -399,13 +402,10 @@ def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
                 (window_days,),
             ):
                 out["corroboration"][row["kind"]] = row["n"]
-        except Exception as e:
-            if not _is_missing_schema(e):
-                raise  # pre-036 DB → leave zeros
 
         # Most-contradicted memories (post-036 table).
         if top_n:
-            try:
+            with _tolerant(db):
                 out["top_contradicted"] = [
                     {"memory_id": r["memory_id"], "contradiction_count": r["n"], "title": r["title"]}
                     for r in db.execute(
@@ -418,15 +418,13 @@ def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
                         (window_days, top_n),
                     )
                 ]
-            except Exception as e:
-                if not _is_missing_schema(e):
-                    raise
     return out
 
 
 def _enforce_retention_policies(db):
     """Enforce per-agent memory limits and TTLs from agent_retention_policies table."""
     from memory.backends import dialect as _dialect
+    from memory.db import savepoint as _savepoint
     _d = _dialect()
     _p = _d.param()
     try:
@@ -438,13 +436,18 @@ def _enforce_retention_policies(db):
         agent_id = p["agent_id"]
         # TTL enforcement
         if p["ttl_days"] and p["ttl_days"] > 0:
+            # Dual path: prefer the pinned-aware form; fall back without `pinned`
+            # on a pre-pinned-column DB. The first attempt is wrapped in a
+            # SAVEPOINT so its failure on PG (missing column aborts the txn)
+            # doesn't poison the connection before the fallback runs.
             try:
-                res = db.execute(
-                    f"UPDATE memory_items SET is_deleted = 1 WHERE agent_id = {_p} AND is_deleted = 0 "
-                    f"AND {_d.age_days_gt('created_at', _p)} "
-                    f"AND COALESCE(pinned, 0) = 0",
-                    (agent_id, p["ttl_days"])
-                )
+                with _savepoint(db):
+                    res = db.execute(
+                        f"UPDATE memory_items SET is_deleted = 1 WHERE agent_id = {_p} AND is_deleted = 0 "
+                        f"AND {_d.age_days_gt('created_at', _p)} "
+                        f"AND COALESCE(pinned, 0) = 0",
+                        (agent_id, p["ttl_days"])
+                    )
             except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
                 if not _is_missing_schema(e):
                     raise
@@ -457,12 +460,13 @@ def _enforce_retention_policies(db):
         # Max count enforcement (keep newest, soft-delete oldest excess)
         if p["max_memories"] and p["max_memories"] > 0:
             try:
-                excess = db.execute(
-                    f"SELECT id FROM memory_items WHERE agent_id = {_p} AND is_deleted = 0 "
-                    f"AND COALESCE(pinned, 0) = 0 "
-                    f"ORDER BY created_at DESC {_d.all_rows_after_offset(_p)}",
-                    (agent_id, p["max_memories"])
-                ).fetchall()
+                with _savepoint(db):
+                    excess = db.execute(
+                        f"SELECT id FROM memory_items WHERE agent_id = {_p} AND is_deleted = 0 "
+                        f"AND COALESCE(pinned, 0) = 0 "
+                        f"ORDER BY created_at DESC {_d.all_rows_after_offset(_p)}",
+                        (agent_id, p["max_memories"])
+                    ).fetchall()
             except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
                 if not _is_missing_schema(e):
                     raise
@@ -489,22 +493,14 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
 
     # The decay/retention/archive/refresh SQL below is now routed through the
     # dialect seam (param(), age_days_gt(), all_rows_after_offset(), group_concat(),
-    # greatest/least(), is_undefined_object_error()) and the tolerant blocks use
-    # savepoints so a caught missing-schema error no longer aborts the PG txn.
-    # HOWEVER one PG-only issue remains open (a "can't adapt type dict" bind in the
-    # reachable pass — see m3 to_do "Finish memory_maintenance PG-live"), so until
-    # that is root-caused and test_memory_maintenance_pg_live is green, we still
-    # SKIP on non-sqlite rather than run a partially-validated data-deleting path on
-    # PG. Fail loud + skip intentionally (§3), same as the VACUUM-skip below. Remove
-    # this guard once the PG-live maintenance test passes end-to-end.
-    from memory.backends import resolve_backend_name
-    if resolve_backend_name() != "sqlite":
-        msg = ("Maintenance skipped: decay/purge/retention dialect port is "
-               "complete but one PG bind issue is still open — not running a "
-               "partially-validated destructive pass on a non-sqlite backend.")
-        logger.warning(msg)
-        return msg
-
+    # greatest/least(), is_undefined_object_error()) and every tolerant block uses a
+    # savepoint (savepoint()/tolerant_schema()) so a caught missing-schema error no
+    # longer aborts the PG txn. The pass is validated end-to-end on live PG by
+    # test_memory_maintenance_pg_live — so the non-sqlite SKIP guard is gone. (The
+    # earlier "can't adapt type dict" issue lived in memory_import_impl, a SEPARATE
+    # function this pass never calls; it is fixed via the json_bind_value seam
+    # primitive and covered by its own round-trip test.) VACUUM below is still
+    # skipped on PG — that is genuinely SQLite-only, unlike decay/purge/retention.
     now = datetime.now(timezone.utc).isoformat()
     from memory.backends import dialect as _dialect
     _d = _dialect()
@@ -665,31 +661,20 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
         db.execute("ANALYZE")
         report.append("Statistics updated (ANALYZE)")
 
-    # VACUUM is SQLite-specific (PostgreSQL has autovacuum and no client-issued
-    # file-compaction). On a PG-primary deployment, skip it explicitly with a
-    # clear note rather than sqlite3.connect a stale file and appear to maintain
-    # the live store.
-    from memory.backends import resolve_backend_name
-    if resolve_backend_name() != "sqlite":
-        report.append("VACUUM skipped: not applicable on PostgreSQL (autovacuum handles this)")
-        return "Maintenance complete:\n" + "\n".join(report)
-
-    # VACUUM must run outside any transaction and needs the *active* DB path,
-    # which may differ from the import-time DB_PATH constant when a caller has
-    # set active_database() or M3_DATABASE.
+    # Storage compaction is delegated to the dialect via compact_storage() — NOT
+    # gated on `resolve_backend_name() != "sqlite"` here. That call-site branch was
+    # a latent bug: a third backend with a real client-issued compaction (MariaDB
+    # OPTIMIZE TABLE, or a future store) would fall into the PG no-op side and never
+    # compact. The seam owns the decision: SQLite VACUUMs (size-gated, out of txn),
+    # PG returns its autovacuum no-op line, any future backend does its own thing.
+    # The active SQLite path (may differ from a constant when a caller switched DBs
+    # via active_database()/M3_DATABASE) is passed for the SQLite path; other
+    # backends ignore it.
     try:
         active_path = memory_core._current_ctx().db_path
-        # Skip VACUUM on databases > 500MB to prevent multi-minute hangs (#46)
-        db_size = os.path.getsize(active_path)
-        if db_size > 500 * 1024 * 1024:
-            report.append(f"VACUUM skipped: database too large ({db_size / 1e9:.2f} GB)")
-        else:
-            vconn = sqlite3.connect(active_path)
-            vconn.execute("VACUUM")
-            vconn.close()
-            report.append("Space reclaimed (VACUUM)")
-    except Exception as e:
-        report.append(f"VACUUM skipped: {e}")
+    except Exception:
+        active_path = None
+    report.append(_d.compact_storage(sqlite_path=active_path))
 
     return "Maintenance complete:\n" + "\n".join(report)
 
@@ -971,6 +956,11 @@ def memory_import_impl(data: str):
             fields = ["id", "type", "title", "content", "metadata_json", "agent_id", "model_id", "change_agent", "importance", "source", "origin_device", "user_id", "scope", "expires_at", "created_at", "updated_at", "valid_from", "valid_to", "content_hash", "is_deleted"]
             # Filter item to only include known fields
             clean_item = {k: item.get(k) for k in fields if k in item}
+            # metadata_json rides back as a dict on a PG export (JSONB whole-column
+            # read → dict); binding a bare dict raises "can't adapt type dict". The
+            # seam serializes it to a string, which binds on both backends.
+            if "metadata_json" in clean_item:
+                clean_item["metadata_json"] = _d.json_bind_value(clean_item["metadata_json"])
             placeholders = _d.placeholder(len(clean_item))
             columns = ", ".join(clean_item.keys())
             update_stmt = ", ".join([f"{k}=excluded.{k}" for k in clean_item.keys() if k != "id"])
@@ -1137,10 +1127,14 @@ async def memory_consolidate_impl(
             )
             # A belief is a high-order, multi-source abstraction — give it a high
             # first-class confidence (knowledge-maintenance Phase 4). Guarded so a
-            # pre-035 DB (no confidence column) simply skips it.
+            # pre-035 DB (no confidence column) simply skips it. savepoint keeps the
+            # txn usable on PG: a missing-column error here would otherwise abort the
+            # whole consolidation write (embedding + links + soft-deletes below).
             if target_type == "belief":
+                from memory.db import savepoint as _savepoint
                 try:
-                    db.execute(f"UPDATE memory_items SET confidence = {_p} WHERE id = {_p}", (0.85, summary_id))
+                    with _savepoint(db):
+                        db.execute(f"UPDATE memory_items SET confidence = {_p} WHERE id = {_p}", (0.85, summary_id))
                 except Exception as ce:  # noqa: BLE001 — pre-035 DB lacks confidence
                     if not _is_missing_schema(ce):
                         raise

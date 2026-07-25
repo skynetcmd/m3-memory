@@ -228,6 +228,22 @@ CREATE TABLE IF NOT EXISTS agents (
 );
 
 -- =====================================================
+-- agent_retention_policies (per-agent retention limits/TTLs; SQLite migr. 010)
+-- =====================================================
+-- memory_set_retention_impl writes it; the maintenance pass
+-- (_enforce_retention_policies) reads it to soft-delete/archive excess. INTEGER
+-- -> BIGINT and strftime() defaults -> NOW(), per the type-mapping convention.
+
+CREATE TABLE IF NOT EXISTS agent_retention_policies (
+    agent_id        TEXT PRIMARY KEY,
+    max_memories    BIGINT DEFAULT 1000,
+    ttl_days        BIGINT DEFAULT 0,
+    auto_archive    BIGINT DEFAULT 1,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =====================================================
 -- memory_corroborations (trust/corroboration ledger)
 -- =====================================================
 

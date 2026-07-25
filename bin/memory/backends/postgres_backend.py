@@ -447,6 +447,14 @@ class PostgresDialect(Dialect):
         )
         return (sql, (table,))
 
+    def compact_storage(self, *, sqlite_path: "str | None" = None,
+                        max_bytes: int = 500 * 1024 * 1024) -> str:
+        # No client-issued compaction: autovacuum reclaims dead tuples in the
+        # background, and a manual VACUUM here would need its own out-of-txn
+        # connection without shrinking the files (only VACUUM FULL does, under an
+        # exclusive lock — not something a routine maintenance pass should take).
+        return "VACUUM skipped: not applicable on PostgreSQL (autovacuum handles this)"
+
 
 # The one shared frozen singleton for PostgreSQL.
 POSTGRES = PostgresDialect()

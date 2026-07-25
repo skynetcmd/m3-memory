@@ -110,6 +110,32 @@ class SqliteDialect(Dialect):
         # its `name` column is the column name. Caller reads row[0].
         return (f"SELECT name FROM pragma_table_info('{table}')", ())
 
+    def compact_storage(self, *, sqlite_path: "str | None" = None,
+                        max_bytes: int = 500 * 1024 * 1024) -> str:
+        # VACUUM rewrites the file to reclaim free pages. It needs a fresh
+        # connection OUTSIDE any open transaction (VACUUM cannot run inside one)
+        # and the *active* path — hence sqlite_path from the caller, not a constant.
+        import os
+        import sqlite3
+        if not sqlite_path:
+            return "VACUUM skipped: no active SQLite path supplied"
+        try:
+            db_size = os.path.getsize(sqlite_path)
+        except OSError as e:
+            return f"VACUUM skipped: {e}"
+        # Size-gated (#46): a multi-hundred-MB VACUUM can hang for minutes.
+        if db_size > max_bytes:
+            return f"VACUUM skipped: database too large ({db_size / 1e9:.2f} GB)"
+        try:
+            vconn = sqlite3.connect(sqlite_path)
+            try:
+                vconn.execute("VACUUM")
+            finally:
+                vconn.close()
+            return "Space reclaimed (VACUUM)"
+        except Exception as e:  # noqa: BLE001 — VACUUM is best-effort maintenance
+            return f"VACUUM skipped: {e}"
+
 
 # The one shared frozen singleton for SQLite. Obtain via dialect_for / dialect(),
 # not by constructing per call site.
