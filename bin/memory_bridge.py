@@ -402,6 +402,32 @@ if __name__ == "__main__":
     #   M3_HTTP_PORT=8080                (default: 8080)
     #   M3_HTTP_PATH=/mcp                (default mount path)
     transport = _os.environ.get("M3_TRANSPORT", "stdio").lower().strip()
+
+    # ── HALT protocol: register as a live DB writer ───────────────────────────
+    # The MCP server is typically the LONGEST-LIVED writer on a desktop install
+    # (it lives as long as the agent session), yet it was the one writer that
+    # never registered — HALT_PROTOCOL.md §Rollout deferred embed-server and
+    # MCP-server HALT-honoring as a "fast follow" that never landed. Until now
+    # an exclusive op could only find this process via the psutil cmdline scan,
+    # which is a best-effort net: it misses an elevated process whose cmdline is
+    # unreadable, and it depends on signature tables matching however the client
+    # happened to launch us (the Claude Code plugin runs bare `m3`, which those
+    # tables did not know about at all).
+    #
+    # Registering makes us discoverable by the RELIABLE path, so a migration
+    # waits for us to quiesce instead of proceeding against an open WAL-mode DB.
+    # Registration is best-effort by contract (never fatal) and deregisters via
+    # atexit on clean exit; a hard kill leaves an entry whose dead PID the next
+    # reader reaps.
+    try:
+        import atexit as _atexit
+
+        import m3_halt as _m3_halt
+        _m3_halt.register_process("mcp", extra={"transport": transport})
+        _atexit.register(_m3_halt.deregister, "mcp")
+        logger.debug("registered with the HALT protocol as role 'mcp'")
+    except Exception as _e:  # noqa: BLE001 — coordination is degraded, not fatal
+        logger.debug(f"HALT registration skipped: {type(_e).__name__}: {_e}")
     if transport in ("http", "streamable-http", "streamable_http"):
         host = _os.environ.get("M3_HTTP_HOST", "127.0.0.1")
         port = int(_os.environ.get("M3_HTTP_PORT", "8080"))
