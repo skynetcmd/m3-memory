@@ -115,6 +115,13 @@ def _make_compat_cursor_factory():
     return _DualCursor
 
 
+# NOTE: this shim deliberately does NOT translate '?'->'%s'. sqlite-style qmark
+# SQL must be ported to dialect().param() at the call site (the critical-path
+# _impl directive) — a runtime translator was tried and removed 2026-07-24: it
+# added a per-execute string scan on the hot path plus a hand-rolled SQL-literal
+# parser (a silent correctness surface), and it MASKED the loud PG SyntaxError
+# that is the useful signal "this query still needs porting to the seam". A raw
+# '?' reaching PG is meant to fail loudly, not be silently rewritten.
 class _SqliteCompatConnection:
     """Wrap a psycopg2 connection to present the SQLite-connection surface the
     memory core expects, so ``db.execute(...)`` and ``row["col"]``/``row[0]`` both
@@ -139,6 +146,9 @@ class _SqliteCompatConnection:
         cur = self._raw.cursor(  # type: ignore[attr-defined]
             cursor_factory=_make_compat_cursor_factory()
         )
+        # SQL is passed verbatim: callers must use dialect().param() ('%s' on PG).
+        # A raw '?' here raises a loud psycopg2 SyntaxError by design — that is the
+        # signal to port the query to the seam, not to silently rewrite it.
         cur.execute(sql, params)
         return cur
 
@@ -151,7 +161,7 @@ class _SqliteCompatConnection:
         cur = self._raw.cursor(  # type: ignore[attr-defined]
             cursor_factory=_make_compat_cursor_factory()
         )
-        cur.executemany(sql, seq_of_params)
+        cur.executemany(sql, seq_of_params)  # verbatim; use dialect().param()
         return cur
 
     def cursor(self, *args, **kwargs):

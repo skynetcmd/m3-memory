@@ -286,7 +286,18 @@ def ensure_pinned_column(conn) -> None:
     retention purges — see bin/memory_maintenance.py.
     """
     try:
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(memory_items)")}
+        # Portable column check: PRAGMA is SQLite-only and, on PostgreSQL, its
+        # failure ABORTS the psycopg2 transaction (poisoning every later query on
+        # the connection) even though the except below swallows the error. Use the
+        # dialect's metadata query — pragma_table_info on SQLite,
+        # information_schema.columns on PG — which never poisons the txn.
+        try:
+            from memory.backends import dialect as _dialect
+            _sql, _params = _dialect().columns_of("memory_items")
+            cols = {r[0] for r in conn.execute(_sql, _params).fetchall()}
+        except Exception:
+            # No backend seam (raw sqlite fixture): PRAGMA is safe on sqlite.
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(memory_items)")}
         if "pinned" not in cols:
             conn.execute("ALTER TABLE memory_items ADD COLUMN pinned INTEGER DEFAULT 0")
             conn.commit()
