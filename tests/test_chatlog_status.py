@@ -497,3 +497,62 @@ def test_recent_write_probe_opens_read_only(status_test_env):
     result = chatlog_status._recent_write_count(cfg)
     assert isinstance(result, int)
     assert result >= -1
+
+
+# ── Hook liveness warning ────────────────────────────────────────────────────
+# Regression guard: _compute_warnings defaulted a missing last_write_ms_ago to
+# float("inf"), so "<hook> silent 24h+" fired unconditionally on any deployment
+# whose hooks omit per-agent write timestamps (the state file has no "hooks" key
+# at all). The alarm was permanently on and therefore carried no signal.
+
+def _warn_cfg(**hook_flags):
+    """A ChatlogConfig with only the named host agents enabled."""
+    import chatlog_config
+
+    cfg = chatlog_config.ChatlogConfig()
+    for name, spec in cfg.host_agents.items():
+        spec.enabled = hook_flags.get(name, False)
+    return cfg
+
+
+def _warnings_for(state, cfg):
+    import chatlog_status
+
+    return chatlog_status._compute_warnings(
+        state, cfg, row_counts={}, recent_writes=5, recent_window_min=15,
+    )
+
+
+def test_no_silent_warning_when_hook_state_absent():
+    """No "hooks" key in the state file means the hook does not report per-agent
+    timestamps -- unknown, not silent. Must not warn."""
+    warnings = _warnings_for({}, _warn_cfg(**{"claude-code": True}))
+    assert not any("silent 24h+" in w for w in warnings), warnings
+
+
+def test_no_silent_warning_when_last_write_is_none():
+    """An explicit null timestamp is also "unknown", not "silent forever"."""
+    state = {"hooks": {"claude-code": {"last_write_ms_ago": None}}}
+    warnings = _warnings_for(state, _warn_cfg(**{"claude-code": True}))
+    assert not any("silent 24h+" in w for w in warnings), warnings
+
+
+def test_silent_warning_still_fires_on_genuinely_stale_hook():
+    """A real, known-stale timestamp must still raise the alarm."""
+    state = {"hooks": {"claude-code": {"last_write_ms_ago": 90_000_000}}}
+    warnings = _warnings_for(state, _warn_cfg(**{"claude-code": True}))
+    assert any("claude-code silent 24h+" in w for w in warnings), warnings
+
+
+def test_no_silent_warning_for_recently_active_hook():
+    """A fresh timestamp is healthy."""
+    state = {"hooks": {"claude-code": {"last_write_ms_ago": 1_000}}}
+    warnings = _warnings_for(state, _warn_cfg(**{"claude-code": True}))
+    assert not any("silent 24h+" in w for w in warnings), warnings
+
+
+def test_disabled_hook_never_warns_even_when_stale():
+    """Staleness on a disabled hook is not actionable."""
+    state = {"hooks": {"gemini-cli": {"last_write_ms_ago": 90_000_000}}}
+    warnings = _warnings_for(state, _warn_cfg(**{"claude-code": True}))
+    assert not any("silent 24h+" in w for w in warnings), warnings

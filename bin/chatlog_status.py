@@ -360,8 +360,16 @@ def _compute_warnings(
     hooks = config.host_agents
     for hook_name, hook_spec in hooks.items():
         if hook_spec.enabled:
-            last_write_ms = state.get("hooks", {}).get(hook_name, {}).get("last_write_ms_ago", float("inf"))
-            if last_write_ms > 86_400_000:
+            # An absent/None timestamp means "this hook does not report per-agent
+            # write times", NOT "this hook has been silent forever". Defaulting to
+            # inf here fired the warning unconditionally on every deployment whose
+            # hooks omit the field (the state file has no "hooks" key at all), so
+            # the alarm was always on and carried no signal. Treat unknown as
+            # unknown and let the PRIMARY capture-health check above -- which is
+            # driven by a real recent-write DB count -- own the "capture is down"
+            # call. Matches chatlog_status_line.py and the render path below.
+            last_write_ms = state.get("hooks", {}).get(hook_name, {}).get("last_write_ms_ago")
+            if last_write_ms is not None and last_write_ms > 86_400_000:
                 warnings.append(f"{hook_name} silent 24h+")
 
     if "chatlog_without_embed" in row_counts:
