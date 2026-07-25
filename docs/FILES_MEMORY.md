@@ -13,8 +13,11 @@ m3-memory has three stores, separated by lifecycle:
 | `chatlog.db` | append firehose | decay + promote | Conversational turns; selectively promoted |
 | **`files.db`** | bulk (regeneratable) | tied to source | Directory ingestion, hierarchical document store |
 
-Files-memory is the third store. Default location: `~/.m3/files_database.db`
-(override with `M3_FILES_DB_PATH`).
+Files-memory is the third store. On SQLite (the default) it is a separate
+database file at `~/.m3/files_database.db` (override with `M3_FILES_DB_PATH`); on
+PostgreSQL it is a `files` schema inside the primary database. Either way it is
+kept logically separate from `memory.db` because its contents are bulk and
+regeneratable. See [Storage backends](#storage-backends) for the details.
 
 ## When to use it
 
@@ -77,6 +80,36 @@ Measured on the fixed eval corpus: **22/22 top-5 text recall (100%)** and
   extraction files and emits notifications via `memory.db`'s inbox.
 - **Multi-corpus.** One files.db can hold many corpora; `corpora=[a,b]`
   fans out searches across them.
+
+## Storage backends
+
+Files-memory runs on the same storage seam as the rest of m3, so it follows
+whichever backend the deployment selects (`M3_DB_BACKEND`) — no files-specific
+configuration:
+
+| Backend | Files store lives in | Notes |
+|---|---|---|
+| **SQLite** (default) | a separate database **file** (`files_database.db`, override via `M3_FILES_DB_PATH`) | Full feature set, including FTS5 hybrid search. |
+| **PostgreSQL** | a **`files` schema** inside the primary database (single DSN) | Same schema, migrated in lock-step; ingestion, facts, dedup, promotion, staleness, and the **vector** search channel all run on PG. |
+
+On PostgreSQL the files store is a *schema namespace*, not a second database, so a
+single DSN reaches it and cross-store promotion queries (`files.* JOIN
+public.memory_items`) stay in-database. Table access is schema-qualified through the
+storage seam — no `search_path` juggling — so a pooled connection can serve both the
+files and primary stores safely. The schema is built by numbered migrations
+(`bin/files_memory/migrations/`, mirrored under `postgres/`), tracked in a
+`schema_versions` table inside the store.
+
+> **PostgreSQL caveat (in progress).** Two pieces of the SQLite feature set are not
+> yet at parity on PG and are being finished:
+> - **Full-text search.** FTS5 (the keyword channel) is SQLite-only. On PG,
+>   `files_search` currently runs the **vector channel only**; the FTS5 → `tsvector`
+>   / GIN port is underway. Ranking parity is the goal, not just "search works".
+> - **Entity coalescing.** The post-ingest entity-cleanup pass
+>   (`entity_coalesce`) still has SQLite-specific paths being ported.
+>
+> Everything else — ingest, chunking, embeddings, facts, dedup, promotion,
+> version history, watch-mode staleness, and vector search — works on both backends.
 
 ## Enabling fact extraction
 
