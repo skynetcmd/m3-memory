@@ -603,7 +603,23 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
     # thus don't register or poll) still detects the processes holding the DB.
     # Without the scan, list_live_processes() would be empty on that path and we'd
     # migrate right under the old writers.
-    live = halt.list_all_db_writers()
+    # Two different questions. `all` is what to SHOW the operator (context for a
+    # decision); `live` is what to BLOCK on. They differ: the embed server holds
+    # a CUDA context, not a store, so waiting for it to "release the DB" would
+    # stall a legitimate upgrade for the full timeout and then ask the operator
+    # to kill an irrelevant process. See m3_halt.NON_BLOCKING_ROLES.
+    try:
+        all_procs = halt.list_all_db_writers()
+        live = halt.list_blocking_db_writers()
+    except AttributeError:
+        # Older m3_halt on the payload being upgraded FROM — no split yet.
+        all_procs = live = halt.list_all_db_writers()
+
+    informational = [p for p in all_procs if p not in live]
+    if informational:
+        noted = ", ".join(f"{p.role}(pid {p.pid})" for p in informational)
+        _say(f"  note: {noted} running but holds no DB — not a quiesce blocker")
+
     if not live:
         _ok("  no autonomous m3 DB-writers running (nothing to quiesce)")
         return True

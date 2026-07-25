@@ -438,17 +438,54 @@ def elevated_kill_commands(pids: "list[int]") -> "list[str]":
     ]
 
 
+# Roles that are DETECTED (worth showing an operator) but must NOT block an
+# exclusive op, because they hold no store. The embed server — both the Python
+# in-process one and the Rust m3-embed-server — is a stateless HTTP embedder:
+# text in, vectors out. The Python one holds a CUDA context, not a WAL handle;
+# the Rust crate has no DB dependency at all. The DB writes for a backfill
+# belong to its CALLER (the cognitive loop / embed_backfill.py), which does
+# block. See docs/design/HALT_PROTOCOL.md §Problem.
+#
+# Blocking on it would be a false positive with teeth: it stalls a legitimate
+# upgrade for the full quiesce timeout and then asks the operator to kill an
+# irrelevant process — which is how people learn to reflex-dismiss the prompt.
+NON_BLOCKING_ROLES = ("embed-server",)
+
+
+def _role_blocks(role: str) -> bool:
+    """Does a writer of this role have to quiesce before a DB-exclusive op?
+
+    Matches on the role PREFIX so scan-derived suffixes ("embed-server(elevated?)")
+    classify the same as a clean registry role.
+    """
+    base = (role or "").split("(", 1)[0].strip()
+    return base not in NON_BLOCKING_ROLES
+
+
 def list_all_db_writers(engine_root: Optional[str] = None) -> list[ProcInfo]:
     """Union of registered writers (list_live_processes) and cmdline-discovered
-    writers (scan_db_writer_processes), deduplicated by pid. This is the complete
-    set an exclusive op must quiesce — covering both current-protocol writers and
-    pre-HALT writers from an older version being upgraded over."""
+    writers (scan_db_writer_processes), deduplicated by pid.
+
+    This is every m3 process worth SHOWING an operator — current-protocol
+    writers and pre-HALT ones from an older version being upgraded over. It is
+    NOT the set to block on: use ``list_blocking_db_writers`` for that.
+    """
     by_pid: dict[int, ProcInfo] = {}
     for p in list_live_processes(engine_root):
         by_pid[p.pid] = p
     for p in scan_db_writer_processes(engine_root):
         by_pid.setdefault(p.pid, p)  # registry entry wins (richer metadata)
     return list(by_pid.values())
+
+
+def list_blocking_db_writers(engine_root: Optional[str] = None) -> list[ProcInfo]:
+    """The set an exclusive op must actually quiesce.
+
+    list_all_db_writers minus roles that hold no store (NON_BLOCKING_ROLES).
+    Detection and blocking are deliberately different questions — see the note
+    on NON_BLOCKING_ROLES.
+    """
+    return [p for p in list_all_db_writers(engine_root) if _role_blocks(p.role)]
 
 
 def kill_stale_daemons(
@@ -633,7 +670,12 @@ def wait_for_quiesce(engine_root: Optional[str] = None, timeout: float = 30.0,
     """
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        live = list_all_db_writers(engine_root)
+        # BLOCKING writers only. A role that holds no store (the embed server —
+        # a stateless HTTP embedder holding a CUDA context, not a WAL handle)
+        # can never "release the DB", so waiting on it burns the whole timeout
+        # and then reports it stuck, pushing the caller to kill a process that
+        # was never a hazard. See NON_BLOCKING_ROLES.
+        live = list_blocking_db_writers(engine_root)
         if not live:
             return QuiesceResult(ok=True, stuck=[])
         if time.monotonic() >= deadline:

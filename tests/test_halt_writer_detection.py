@@ -80,3 +80,58 @@ def test_legacy_entrypoints_still_matched(halt):
 def test_unrelated_processes_are_not_claimed(halt, cmdline):
     """A false positive stops a legitimate upgrade, so anchor on separators."""
     assert _cmd_role(halt, cmdline) is None, cmdline
+
+
+# ── Blocking vs. merely-running ──────────────────────────────────────────────
+# Detection and blocking are different questions. The embed server holds a CUDA
+# context, not a store, so it can never "release the DB": waiting on it burns
+# the whole quiesce timeout and then asks the operator to kill a process that
+# was never a hazard -- which is how people learn to reflex-dismiss the prompt.
+
+def test_embed_server_does_not_block(halt):
+    assert halt._role_blocks("embed-server") is False
+
+
+def test_scan_suffixed_embed_server_also_does_not_block(halt):
+    """scan_db_writer_processes appends "(elevated?)" when the cmdline is
+    unreadable. That variant must classify the same as the clean role."""
+    assert halt._role_blocks("embed-server(elevated?)") is False
+
+
+def test_real_writers_still_block(halt):
+    for role in ("cognitive-loop", "mcp", "m3?(elevated)"):
+        assert halt._role_blocks(role) is True, role
+
+
+def test_unknown_roles_block_by_default(halt):
+    """Fail SAFE: an unrecognized writer must be treated as a hazard, never
+    waved through."""
+    assert halt._role_blocks("something-new") is True
+    assert halt._role_blocks("") is True
+
+
+def test_blocking_list_is_a_subset_of_all(halt, monkeypatch):
+    from m3_core.registry_payload import ProcInfo
+
+    def fake_all(engine_root=None):
+        return [
+            ProcInfo(pid=1, role="cognitive-loop", started_at="", engine_root="", path=None),
+            ProcInfo(pid=2, role="embed-server(elevated?)", started_at="", engine_root="", path=None),
+            ProcInfo(pid=3, role="mcp", started_at="", engine_root="", path=None),
+        ]
+
+    monkeypatch.setattr(halt, "list_all_db_writers", fake_all)
+    blocking = halt.list_blocking_db_writers()
+    assert [p.pid for p in blocking] == [1, 3], [p.role for p in blocking]
+
+
+def test_wait_for_quiesce_ignores_non_blocking_roles(halt, monkeypatch):
+    """The regression that motivated the split: an embed server running during
+    an upgrade made wait_for_quiesce burn its full timeout and report stuck."""
+    from m3_core.registry_payload import ProcInfo
+
+    monkeypatch.setattr(halt, "list_all_db_writers", lambda engine_root=None: [
+        ProcInfo(pid=2, role="embed-server", started_at="", engine_root="", path=None),
+    ])
+    res = halt.wait_for_quiesce(timeout=0.5, poll=0.05)
+    assert res.ok is True, f"embed server wrongly blocked quiesce: {res.stuck}"
