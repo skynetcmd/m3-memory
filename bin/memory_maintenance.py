@@ -530,7 +530,7 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
     _d = _dialect()
     _p = _d.param()
     _age7 = _d.age_days_gt("created_at", "7")   # literal-day form (no bind)
-    from memory.db import savepoint as _savepoint, tolerant_schema as _tolerant
+    from memory.db import savepoint as _savepoint
     report = []
     with _db() as db:
         if decay:

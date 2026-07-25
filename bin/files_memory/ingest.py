@@ -585,6 +585,7 @@ def ingest_one_file(
 def _record_noop_run(conn, file_node_uuid: str, run_id: str, entry: WalkEntry) -> None:
     """Write an 'unchanged_skipped' ingestion_run for audit purposes."""
     import json as _json
+
     from memory.backends import dialect as _dialect
     _d = _dialect()
     conn.execute(

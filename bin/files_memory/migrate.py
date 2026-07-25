@@ -67,6 +67,7 @@ def _is_postgres() -> bool:
 def _schema_versions_ref() -> str:
     """The files-store schema_versions table, qualified for the active backend."""
     from memory.backends import dialect
+
     from .config import files_table  # local import: avoids cycle at module load
     del dialect  # files_table already routes through the active dialect
     return files_table("schema_versions")

@@ -28,6 +28,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from . import config
+
 # NOTE: schema.SCHEMA_V1/2/3 are no longer applied here — the schema now lives in
 # numbered migrations (files_memory/migrations/, run by files_memory.migrate). The
 # blobs remain in schema.py as the historical source those migrations were

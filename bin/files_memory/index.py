@@ -15,7 +15,6 @@ file-level summaries.
 from __future__ import annotations
 
 import logging
-import sqlite3
 from dataclasses import dataclass
 from typing import Optional
 

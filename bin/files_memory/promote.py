@@ -146,6 +146,7 @@ def _find_promoted_orphan(source_uuid: str) -> Optional[str]:
     Used by files_promote() for orphan recovery — see promote() docstring.
     """
     from memory.backends import dialect as _dialect
+
     from .entities import _memory_db  # reuse the same connection helper
     _d = _dialect()
     _p = _d.param()

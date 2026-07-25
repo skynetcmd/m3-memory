@@ -37,8 +37,6 @@ import uuid as _uuid
 from contextlib import contextmanager
 from typing import Iterator, Optional
 
-from . import config
-
 logger = logging.getLogger("files_memory.entities")
 
 

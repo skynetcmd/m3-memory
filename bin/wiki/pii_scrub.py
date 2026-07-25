@@ -73,7 +73,7 @@ def _self_names() -> "tuple[str, ...]":
     M3_CONFIG_ROOT/.wiki_pii.json  {"names": ["alice", "alice-laptop"]}. A code-resolved
     file, not an env var (§3: headless launchers inherit no shell env)."""
     import json
-    names = set(_DEFAULT_SELF_NAMES)
+    names: set[str] = set(_DEFAULT_SELF_NAMES)
     path = os.path.join(_config_root(), _CONFIG_BASENAME)
     try:
         if os.path.isfile(path):

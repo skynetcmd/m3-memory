@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from typing import Any
 
 _log = logging.getLogger("m3.wiki.ledger")
 
@@ -224,7 +225,7 @@ def scan_and_flush_on_erasure(db, dialect, erased_member_ids: "list[str]", *,
     raises to the caller — an un-flushed cache holding an erased id is a compliance
     gap the caller must surface, not swallow.
     """
-    summary = {"runs_flagged": 0, "members_flushed": 0, "run_ids": []}
+    summary: dict[str, Any] = {"runs_flagged": 0, "members_flushed": 0, "run_ids": []}
     if not erased_member_ids:
         return summary
     ph = dialect.placeholder(len(erased_member_ids))
@@ -244,7 +245,6 @@ def scan_and_flush_on_erasure(db, dialect, erased_member_ids: "list[str]", *,
         return summary
 
     p = dialect.param()
-    now_expr = dialect.now()
     for rid in run_ids:
         # Accumulate the erased ids on the run row (union with any prior record).
         cur = db.execute(

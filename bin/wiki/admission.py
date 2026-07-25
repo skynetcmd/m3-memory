@@ -243,7 +243,8 @@ def partition(clusters, edges, gate: "AdmissionGate | None" = None
     structurally-anchored clusters land in `admitted`; weakly-anchored multi-member
     clusters in `demoted` (they render as an orphan list, not a synthesis)."""
     gate = gate or load_gate()
-    admitted, demoted = [], []
+    admitted: list = []
+    demoted: list = []
     for c in clusters:
         (admitted if gate.admits(c, edges) else demoted).append(c)
     return admitted, demoted
