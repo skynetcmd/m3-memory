@@ -479,7 +479,7 @@ The agent executes `bin/chatlog_init.py` and configures execution triggers (see 
 &nbsp;
 [![GitHub Issues Badge](https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/github-issues.svg)](https://github.com/skynetcmd/m3-memory/issues)
 
-[How to Contribute](docs/CONTRIBUTING.md) · [Good First Issues](docs/GOOD_FIRST_ISSUES.md)
+[How to Contribute](docs/CONTRIBUTING.md) · [FAQ for Developers](docs/FAQ_FOR_DEVELOPERS.md) · [Good First Issues](docs/GOOD_FIRST_ISSUES.md)
 
 ---
 

@@ -2,6 +2,11 @@
 
 Thank you for your interest in contributing! M3 Memory is a local-first agentic memory layer for MCP agents. This guide covers how to get set up, run the tests, and submit changes.
 
+> 💡 Hit a "wait, how do I…?" while working on the code? Check the
+> **[FAQ for Developers](FAQ_FOR_DEVELOPERS.md)** — a thin index into the deep docs
+> for the common snags (domain-gated tools, PG tests skipping, adding a backend,
+> migration numbering, test pollution).
+
 ---
 
 ## Getting Started

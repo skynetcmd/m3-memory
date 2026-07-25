@@ -1,5 +1,9 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory FAQ
 
+> Working *on* m3 rather than using it? See the **[FAQ for
+> Developers](FAQ_FOR_DEVELOPERS.md)** instead — this page is for users and
+> operators.
+
 ## What is M3?
 
 ### Q: Is my data private?
