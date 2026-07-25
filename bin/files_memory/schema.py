@@ -1,9 +1,16 @@
-"""SQL DDL for files.db (schema version 1).
+"""SQL DDL for files.db — HISTORICAL SOURCE (no longer applied at runtime).
 
-Inline rather than file-based migrations because phase 1 is a clean slate
-— no legacy DB to migrate from. When schema evolves, add migrations as
-`files_memory/migrations/NNN_*.up.sql` and switch db._lazy_init to that
-pattern (mirroring `memory/migrations/`).
+DEPRECATED as the live schema path (2026-07-25). The files store is now built by
+NUMBERED MIGRATIONS in `files_memory/migrations/` (SQLite) and
+`files_memory/migrations/postgres/` (PostgreSQL, in the `files` schema), run by
+`files_memory.migrate`. `db.py` NO LONGER calls `executescript(SCHEMA_V1/2/3)`.
+
+The SCHEMA_V1/2/3 blobs below are retained ONLY as the byte-identical historical
+source the SQLite migrations were generated from (see the migration headers and
+`memory/migrations/README.md` for the numbering/backend-split conventions). Do NOT
+re-introduce `executescript(SCHEMA_*)` into the connection path, and when the schema
+evolves add a new numbered migration pair — do NOT edit these blobs expecting them
+to take effect.
 
 Tables:
   file_nodes          one row per file version (supersession chain)

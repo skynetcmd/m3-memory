@@ -33,11 +33,24 @@ changes — the backend registers itself and the readers discover it.
      *divergent* SQL fragments — the base `Dialect` in
      [`dialect.py`](../bin/memory/backends/dialect.py) leaves each one abstract
      (raising `NotImplementedError`) so a forgotten override fails loud rather
-     than inheriting another backend's SQL. The divergent surface is ~13 methods:
-     placeholders/params, `insert_or_ignore` + `on_conflict_*`, `now` /
-     `now_minus_days`, `returning_id_clause` / `last_insert_id`, the JSON
-     extracts, `ci_equals`, the temporal-open clauses, and the `table_exists` /
-     `columns_of` introspection probes.
+     than inheriting another backend's SQL. The divergent surface is ~17 methods
+     (the authoritative list is derived programmatically by
+     [`tests/test_backend_conformance.py`](../tests/test_backend_conformance.py)
+     `_divergent_methods()` — it probes the base and collects every method that
+     raises, so it never goes stale): placeholders/params, `insert_or_ignore` +
+     `on_conflict_*`, the time helpers (`now` / `now_minus_days` /
+     `now_minus_minutes` / `day_bucket`), `returning_id_clause` /
+     `last_insert_id`, `empty_json_default`, the JSON extracts (`json_extract_text`
+     / `json_extract_int`), the temporal-open clauses (`temporal_open_clause` /
+     `coalesce_open_timestamp`), the `table_exists` / `columns_of` introspection
+     probes, `qualified_table` (schema-namespaced stores), `glob_match`
+     (filename globbing), and the error classifiers `is_undefined_object_error`
+     / `is_integrity_error`. (A handful of dialect methods are instead *concrete*
+     on the base because their output is genuinely backend-uniform — `param` /
+     `placeholder`, `on_conflict_update`, `ci_equals`, the JSON value coercers
+     `json_column_to_dict` / `json_bind_value`, and `compact_storage`, which is a
+     self-reporting no-op default. Those you do NOT override unless your backend
+     truly differs.)
    - **A `StorageBackend` class** — the `name`, `capabilities()`, `connection()`
      / `open_readonly()`, `ensure_schema()` / `schema_version()`, and the two
      search methods `keyword_search` + `vector_search`. Both search methods MUST
