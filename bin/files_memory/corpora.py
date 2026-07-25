@@ -28,12 +28,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Optional
 
 from . import config
+from .config import files_table
 from .db import _db
 
 logger = logging.getLogger("files_memory.corpora")
@@ -73,15 +73,17 @@ def resolve_default_corpus(
     if env:
         return env
     try:
+        from memory.backends import dialect as _dialect
+        _d = _dialect()
         with _db(db_path) as conn:
             row = conn.execute(
-                "SELECT corpus_id, settings FROM corpus_settings "
-                "WHERE json_extract(settings, '$.default') = 1 "
-                "LIMIT 1"
+                f"SELECT corpus_id, settings FROM {files_table('corpus_settings')} "
+                f"WHERE {_d.json_extract_int('settings', 'default')} = 1 "
+                f"LIMIT 1"
             ).fetchone()
             if row:
                 return row["corpus_id"]
-    except sqlite3.Error as e:
+    except Exception as e:  # noqa: BLE001 — degrade to the configured default
         logger.debug("resolve_default_corpus: db lookup failed: %s", e)
     return config.FILES_DEFAULT_CORPUS
 
@@ -129,9 +131,11 @@ def corpus_create(
     if default:
         settings["default"] = True
 
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db(db_path) as conn:
         existing = conn.execute(
-            "SELECT corpus_id FROM corpus_settings WHERE corpus_id = ?",
+            f"SELECT corpus_id FROM {files_table('corpus_settings')} WHERE corpus_id = {_p}",
             (corpus_id,),
         ).fetchone()
         if existing:
@@ -142,7 +146,8 @@ def corpus_create(
             _clear_default_flag(conn)
 
         conn.execute(
-            "INSERT INTO corpus_settings(corpus_id, settings) VALUES (?, ?)",
+            f"INSERT INTO {files_table('corpus_settings')}(corpus_id, settings) "
+            f"VALUES ({_p}, {_p})",
             (corpus_id, json.dumps(settings)),
         )
 
@@ -153,19 +158,21 @@ def corpus_create(
 def corpus_list(*, db_path: Optional[str] = None) -> list[CorpusInfo]:
     """Enumerate corpora with row counts. Includes corpora that have
     file_nodes but no corpus_settings row (returned with empty settings)."""
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db(db_path) as conn:
         # Corpora that have settings rows
         settings_rows = {
             r["corpus_id"]: r["settings"]
             for r in conn.execute(
-                "SELECT corpus_id, settings FROM corpus_settings",
+                f"SELECT corpus_id, settings FROM {files_table('corpus_settings')}",
             ).fetchall()
         }
         # Also pick up corpora that have file_nodes but no settings row.
         ids_in_files = {
             r["corpus_id"] for r in conn.execute(
-                "SELECT DISTINCT corpus_id FROM file_nodes "
-                "WHERE corpus_id IS NOT NULL",
+                f"SELECT DISTINCT corpus_id FROM {files_table('file_nodes')} "
+                f"WHERE corpus_id IS NOT NULL",
             ).fetchall()
         }
         all_ids = set(settings_rows.keys()) | ids_in_files
@@ -174,15 +181,15 @@ def corpus_list(*, db_path: Optional[str] = None) -> list[CorpusInfo]:
         for cid in sorted(all_ids):
             settings = _safe_json(settings_rows.get(cid)) or {}
             file_n = conn.execute(
-                "SELECT COUNT(*) FROM file_nodes WHERE corpus_id = ? "
-                "AND superseded_by IS NULL",
+                f"SELECT COUNT(*) FROM {files_table('file_nodes')} WHERE corpus_id = {_p} "
+                f"AND superseded_by IS NULL",
                 (cid,),
             ).fetchone()[0]
             leaf_n = conn.execute(
-                "SELECT COUNT(*) FROM leaves l "
-                "JOIN file_nodes fn ON fn.uuid = l.file_node "
-                "WHERE fn.corpus_id = ? AND fn.superseded_by IS NULL "
-                "AND l.superseded_by IS NULL",
+                f"SELECT COUNT(*) FROM {files_table('leaves')} l "
+                f"JOIN {files_table('file_nodes')} fn ON fn.uuid = l.file_node "
+                f"WHERE fn.corpus_id = {_p} AND fn.superseded_by IS NULL "
+                f"AND l.superseded_by IS NULL",
                 (cid,),
             ).fetchone()[0]
             out.append(_build_corpus_info(
@@ -195,23 +202,25 @@ def corpus_list(*, db_path: Optional[str] = None) -> list[CorpusInfo]:
 
 def corpus_get(corpus_id: str, *, db_path: Optional[str] = None) -> Optional[CorpusInfo]:
     """Fetch a single corpus's info. None if no settings row AND no file_nodes."""
+    from memory.backends import dialect as _dialect
+    _p = _dialect().param()
     with _db(db_path) as conn:
         row = conn.execute(
-            "SELECT settings FROM corpus_settings WHERE corpus_id = ?",
+            f"SELECT settings FROM {files_table('corpus_settings')} WHERE corpus_id = {_p}",
             (corpus_id,),
         ).fetchone()
         settings = _safe_json(row["settings"]) if row else None
 
         file_n = conn.execute(
-            "SELECT COUNT(*) FROM file_nodes WHERE corpus_id = ? "
-            "AND superseded_by IS NULL",
+            f"SELECT COUNT(*) FROM {files_table('file_nodes')} WHERE corpus_id = {_p} "
+            f"AND superseded_by IS NULL",
             (corpus_id,),
         ).fetchone()[0]
         leaf_n = conn.execute(
-            "SELECT COUNT(*) FROM leaves l "
-            "JOIN file_nodes fn ON fn.uuid = l.file_node "
-            "WHERE fn.corpus_id = ? AND fn.superseded_by IS NULL "
-            "AND l.superseded_by IS NULL",
+            f"SELECT COUNT(*) FROM {files_table('leaves')} l "
+            f"JOIN {files_table('file_nodes')} fn ON fn.uuid = l.file_node "
+            f"WHERE fn.corpus_id = {_p} AND fn.superseded_by IS NULL "
+            f"AND l.superseded_by IS NULL",
             (corpus_id,),
         ).fetchone()[0]
 
@@ -247,9 +256,12 @@ def corpus_set(
             f"extract_mode must be 'none'|'inline'|'queue', got: {extract_mode!r}"
         )
 
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     with _db(db_path) as conn:
         row = conn.execute(
-            "SELECT settings FROM corpus_settings WHERE corpus_id = ?",
+            f"SELECT settings FROM {files_table('corpus_settings')} WHERE corpus_id = {_p}",
             (corpus_id,),
         ).fetchone()
         if row is None:
@@ -276,13 +288,14 @@ def corpus_set(
         settings_json = json.dumps(settings)
         if is_insert:
             conn.execute(
-                "INSERT INTO corpus_settings(corpus_id, settings) VALUES (?, ?)",
+                f"INSERT INTO {files_table('corpus_settings')}(corpus_id, settings) "
+                f"VALUES ({_p}, {_p})",
                 (corpus_id, settings_json),
             )
         else:
             conn.execute(
-                "UPDATE corpus_settings SET settings = ?, updated_at = datetime('now') "
-                "WHERE corpus_id = ?",
+                f"UPDATE {files_table('corpus_settings')} SET settings = {_p}, "
+                f"updated_at = {_d.now()} WHERE corpus_id = {_p}",
                 (settings_json, corpus_id),
             )
 
@@ -304,9 +317,12 @@ def corpus_delete(
     Cascade is DESTRUCTIVE — file_nodes, leaves, facts, embeddings,
     promotion_markers all go away.
     """
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
     with _db(db_path) as conn:
         file_n = conn.execute(
-            "SELECT COUNT(*) FROM file_nodes WHERE corpus_id = ?",
+            f"SELECT COUNT(*) FROM {files_table('file_nodes')} WHERE corpus_id = {_p}",
             (corpus_id,),
         ).fetchone()[0]
 
@@ -319,30 +335,31 @@ def corpus_delete(
         if cascade and file_n > 0:
             uuids = [
                 r["uuid"] for r in conn.execute(
-                    "SELECT uuid FROM file_nodes WHERE corpus_id = ?", (corpus_id,),
+                    f"SELECT uuid FROM {files_table('file_nodes')} WHERE corpus_id = {_p}",
+                    (corpus_id,),
                 ).fetchall()
             ]
             # ON DELETE CASCADE on leaves / facts / leaf_embeddings handles the rest.
             CHUNK = 500
             for start in range(0, len(uuids), CHUNK):
                 chunk = uuids[start:start + CHUNK]
-                placeholders = ",".join("?" * len(chunk))
+                placeholders = _d.placeholder(len(chunk))
                 # Count what's about to be cascaded.
                 deleted["leaves"] += conn.execute(
-                    f"SELECT COUNT(*) FROM leaves WHERE file_node IN ({placeholders})",
+                    f"SELECT COUNT(*) FROM {files_table('leaves')} WHERE file_node IN ({placeholders})",
                     chunk,
                 ).fetchone()[0]
                 deleted["facts"] += conn.execute(
-                    f"SELECT COUNT(*) FROM facts WHERE file_node IN ({placeholders})",
+                    f"SELECT COUNT(*) FROM {files_table('facts')} WHERE file_node IN ({placeholders})",
                     chunk,
                 ).fetchone()[0]
                 conn.execute(
-                    f"DELETE FROM file_nodes WHERE uuid IN ({placeholders})", chunk,
+                    f"DELETE FROM {files_table('file_nodes')} WHERE uuid IN ({placeholders})", chunk,
                 )
                 deleted["file_nodes"] += len(chunk)
 
         settings_n = conn.execute(
-            "DELETE FROM corpus_settings WHERE corpus_id = ?",
+            f"DELETE FROM {files_table('corpus_settings')} WHERE corpus_id = {_p}",
             (corpus_id,),
         ).rowcount or 0
         deleted["settings"] = settings_n
@@ -367,20 +384,35 @@ def _build_corpus_info(
     )
 
 
-def _clear_default_flag(conn: sqlite3.Connection, except_corpus_id: Optional[str] = None) -> None:
+def _clear_default_flag(conn, except_corpus_id: Optional[str] = None) -> None:
     """Drop the `default` key from every corpus_settings.settings row,
-    optionally skipping one."""
-    sql = (
-        "UPDATE corpus_settings "
-        "SET settings = json_remove(settings, '$.default'), "
-        "    updated_at = datetime('now') "
-        "WHERE json_extract(settings, '$.default') = 1"
+    optionally skipping one.
+
+    The JSON mutation is done in PYTHON (read → pop → write back) rather than via
+    SQLite's json_remove(): json_remove is a SQLite-only function with no portable
+    equivalent, and `settings` is a TEXT column on both backends, so decoding /
+    re-encoding here is correct and backend-uniform. json_extract_int() picks the
+    rows that actually carry a `default` flag so we only rewrite those."""
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    _p = _d.param()
+    sel = (
+        f"SELECT corpus_id, settings FROM {files_table('corpus_settings')} "
+        f"WHERE {_d.json_extract_int('settings', 'default')} = 1"
     )
     params: list = []
     if except_corpus_id is not None:
-        sql += " AND corpus_id != ?"
+        sel += f" AND corpus_id != {_p}"
         params.append(except_corpus_id)
-    conn.execute(sql, params)
+    rows = conn.execute(sel, params).fetchall()
+    for r in rows:
+        s = _safe_json(r["settings"]) or {}
+        s.pop("default", None)
+        conn.execute(
+            f"UPDATE {files_table('corpus_settings')} "
+            f"SET settings = {_p}, updated_at = {_d.now()} WHERE corpus_id = {_p}",
+            (json.dumps(s), r["corpus_id"]),
+        )
 
 
 def _safe_json(s: Optional[str]) -> Optional[dict]:
