@@ -22,6 +22,8 @@ from typing import Optional
 
 from embedding_utils import pack
 
+from .config import files_table
+
 logger = logging.getLogger("files_memory.embed")
 
 
@@ -61,14 +63,20 @@ def write_leaf_embedding(
     """Insert (or update) one row in leaf_embeddings. Returns True on success."""
     if vec is None:
         return False
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
     try:
+        # INSERT OR REPLACE → dialect upsert on the (leaf_uuid, kind) PK: overwrite
+        # the row's mutable columns when the pair already has an embedding.
+        _cols = ["embedding", "embed_model", "dim"]
         conn.execute(
-            "INSERT OR REPLACE INTO leaf_embeddings(leaf_uuid, kind, embedding, embed_model, dim) "
-            "VALUES (?, ?, ?, ?, ?)",
+            f"INSERT INTO {files_table('leaf_embeddings')}(leaf_uuid, kind, embedding, embed_model, dim) "
+            f"VALUES ({_d.placeholder(5)}) "
+            f"{_d.on_conflict_update('(leaf_uuid, kind)', _cols)}",
             (leaf_uuid, kind, pack(vec), model, len(vec)),
         )
         return True
-    except sqlite3.Error as e:
+    except Exception as e:  # noqa: BLE001 — best-effort embed write
         logger.warning("write_leaf_embedding failed for %s/%s: %s", leaf_uuid, kind, e)
         return False
 
@@ -82,14 +90,18 @@ def write_file_embedding(
 ) -> bool:
     if vec is None:
         return False
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
     try:
+        _cols = ["embedding", "embed_model", "dim"]
         conn.execute(
-            "INSERT OR REPLACE INTO file_embeddings(file_node_uuid, kind, embedding, embed_model, dim) "
-            "VALUES (?, ?, ?, ?, ?)",
+            f"INSERT INTO {files_table('file_embeddings')}(file_node_uuid, kind, embedding, embed_model, dim) "
+            f"VALUES ({_d.placeholder(5)}) "
+            f"{_d.on_conflict_update('(file_node_uuid, kind)', _cols)}",
             (file_node_uuid, kind, pack(vec), model, len(vec)),
         )
         return True
-    except sqlite3.Error as e:
+    except Exception as e:  # noqa: BLE001 — best-effort embed write
         logger.warning("write_file_embedding failed for %s: %s", file_node_uuid, e)
         return False
 
@@ -99,13 +111,15 @@ def mark_leaves_embedded(conn: sqlite3.Connection, leaf_uuids: list[str]) -> Non
     if not leaf_uuids:
         return
     # Chunk to stay under SQLITE_MAX_VARIABLE_NUMBER
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
     CHUNK = 500
     for start in range(0, len(leaf_uuids), CHUNK):
         chunk = leaf_uuids[start:start + CHUNK]
-        placeholders = ",".join("?" * len(chunk))
+        placeholders = _d.placeholder(len(chunk))
         conn.execute(
-            f"UPDATE leaves SET embedded = 1 "
+            f"UPDATE {files_table('leaves')} SET embedded = 1 "
             f"WHERE uuid IN ({placeholders}) "
-            f"  AND uuid IN (SELECT leaf_uuid FROM leaf_embeddings WHERE kind = 'text')",
+            f"  AND uuid IN (SELECT leaf_uuid FROM {files_table('leaf_embeddings')} WHERE kind = 'text')",
             chunk,
         )
