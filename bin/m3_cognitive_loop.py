@@ -571,20 +571,67 @@ async def run_enrich_pass(args):
         logger.error(f"Enrichment pass error: {type(e).__name__}: {e}")
 
 
+def _embed_target_dbs(core_db: Optional[str]) -> list[str]:
+    """Every store the embed pass must drain — main AND chatlog.
+
+    On a SPLIT topology the chat turns live in their own DB (agent_chatlog.db)
+    and the main DB is a different file. Gating and sweeping on core_db alone
+    means the chatlog store is NEVER embedded by the loop: its backlog grows
+    without bound while `has_embed_work` keeps reporting False because the main
+    DB is clean. Observed 2026-07-25 -- 6653 unembedded chat turns on a host
+    whose loop was running normally; those rows stayed FTS-searchable but were
+    invisible to semantic/vector search.
+
+    Returns de-duplicated existing paths, so a UNIFIED deployment (chatlog path
+    == main path) yields exactly one entry and behaves as before.
+    """
+    paths: list[str] = []
+    main = core_db or os.environ.get("M3_DATABASE")
+    if main:
+        paths.append(os.path.abspath(str(main)))
+    try:
+        import chatlog_config
+        # Do NOT use resolve_config().db_path here. With no explicit
+        # CHATLOG_DB_PATH it deliberately falls back to M3_DATABASE (the
+        # "one env var = unified DB" convenience), which this loop always
+        # sets — so it would hand back the MAIN db and the real chatlog
+        # store would silently never be swept. Prefer the explicit override,
+        # else the configured/default chatlog path from the config file.
+        chat = chatlog_config._path_from_env()
+        if not chat:
+            chat = chatlog_config._build_from_dict(chatlog_config._load_file()).db_path
+        if chat:
+            paths.append(os.path.abspath(str(chat)))
+    except Exception as e:  # noqa: BLE001 — chatlog is optional; never break the loop
+        logger.debug(f"Chatlog DB resolution failed (non-fatal): {e}")
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in paths:
+        if p not in seen and os.path.exists(p):
+            seen.add(p)
+            out.append(p)
+    return out
+
+
 def has_embed_work(core_db: Optional[str]) -> bool:
     """SQL check: are there memory_items rows with no embedding yet?
 
     These accumulate when memory_write deferred embedding (no fast embedder
     available at write time — the zero-lag path). embed_backfill's own
     _count_pending uses the same WHERE-NOT-EXISTS query, so this is an accurate,
-    cheap event-gate."""
+    cheap event-gate.
+
+    Checks EVERY store the pass would drain (see _embed_target_dbs) — gating on
+    the main DB alone let a split-topology chatlog backlog grow forever.
+    """
     try:
         import embed_backfill
-        db_path = core_db or os.environ.get("M3_DATABASE")
-        if not db_path:
-            return False
-        args = embed_backfill._parse_args(["--db", str(db_path), "--limit", "1"])
-        return embed_backfill._count_pending(args.db, args) > 0
+        for db_path in _embed_target_dbs(core_db):
+            args = embed_backfill._parse_args(["--db", str(db_path), "--limit", "1"])
+            if embed_backfill._count_pending(args.db, args) > 0:
+                return True
+        return False
     except Exception as e:
         logger.debug(f"Embed-backfill work check failed (non-fatal): {e}")
         return False  # conservative: don't spin the embedder unless we're sure
@@ -667,13 +714,31 @@ async def run_embed_pass(args):
     logger.info("Starting Embed-backfill pass...")
     try:
         import embed_backfill
-        bf_args = embed_backfill._parse_args(
-            ["--db", str(args.database), "--limit", str(args.limit_per_pass)]
-        )
-        counters = embed_backfill.Counters()
-        await embed_backfill._run_sweep(bf_args, counters)
     except Exception as e:
         logger.error(f"Embed-backfill pass error: {type(e).__name__}: {e}")
+        return
+
+    # Drain EVERY store, not just the main DB. On a split topology the chatlog
+    # is a separate file; sweeping args.database alone left it permanently
+    # unembedded. Each store is swept independently so a failure on one (a
+    # locked chatlog, say) still lets the other drain.
+    for db_path in _embed_target_dbs(args.database):
+        try:
+            bf_args = embed_backfill._parse_args(
+                ["--db", str(db_path), "--limit", str(args.limit_per_pass)]
+            )
+            counters = embed_backfill.Counters()
+            await embed_backfill._run_sweep(bf_args, counters)
+            if counters.embedded:
+                logger.info(
+                    f"Embed-backfill: {counters.embedded} rows embedded in "
+                    f"{os.path.basename(db_path)}"
+                )
+        except Exception as e:
+            logger.error(
+                f"Embed-backfill pass error on {os.path.basename(db_path)}: "
+                f"{type(e).__name__}: {e}"
+            )
 
 
 def has_classify_work(core_db: Optional[str]) -> bool:
