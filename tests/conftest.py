@@ -64,6 +64,41 @@ def embed_backend_reachable() -> bool:
         return False
 
 
+def _llm_chat_reachable() -> bool:
+    """True iff a local OpenAI-compatible CHAT endpoint answers a real completion.
+
+    Gates `requires_llm` tests (the citation-drift judge). A bare TCP probe is not
+    enough: LM Studio accepts the connection but returns 401 without the resolved
+    token, so we do the same authenticated round-trip the judge does (token via
+    auth_utils) and require a non-empty reply. Fast-fails on any error so the suite
+    stays hermetic when no model is loaded."""
+    url = (_os.environ.get("M3_WIKI_DRIFT_URL")
+           or _os.environ.get("M3_WIKI_SYNTH_URL")
+           or "http://127.0.0.1:1234/v1/chat/completions")
+    try:
+        import httpx
+
+        sys.path.insert(0, _BIN_DIR)
+        try:
+            from auth_utils import get_api_key  # type: ignore
+            token = get_api_key("LM_API_TOKEN")
+        except Exception:
+            token = None
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        r = httpx.post(
+            url,
+            json={"messages": [{"role": "user", "content": "reply with: ok"}],
+                  "max_tokens": 5, "temperature": 0, "stream": False},
+            headers=headers, timeout=5.0,
+        )
+        r.raise_for_status()
+        return bool(r.json()["choices"][0]["message"]["content"])
+    except Exception:
+        return False
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Capability probes + gating (docs/design/TEST_SUITE_DESIGN.md)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -154,6 +189,8 @@ _CAPABILITY_PROBES = {
                       "no GGUF model (set M3_TEST_GGUF)"),
     "requires_files_db": (_files_db_present,
                           "shipped files_database.db absent"),
+    "requires_llm": (_llm_chat_reachable,
+                     "no reachable local chat model (set M3_WIKI_DRIFT_URL / load a model in LM Studio)"),
 }
 
 

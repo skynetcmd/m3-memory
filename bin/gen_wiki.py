@@ -82,6 +82,15 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
         cache_dir = os.path.join(out_dir, ".synth-cache")
         synthesizer = Synthesizer(SynthConfig.from_env(cache_dir))
 
+    # Citation-drift judge (4b): model-backed, opt-in. Like --synthesize it is
+    # non-deterministic, so it is mutually exclusive with --check (enforced in
+    # main()) and never runs on the drift-tested vault. Off unless --check-drift.
+    drift_judge = None
+    if getattr(args, "check_drift", False):
+        from wiki.citation_drift import DriftConfig, ModelDriftJudge
+        drift_cache = os.path.join(out_dir, ".drift-cache")
+        drift_judge = ModelDriftJudge(DriftConfig.from_env(drift_cache))
+
     # Files corpus: always a local SQLite sidecar (files_database.db), on every
     # backend — open it read-only directly. Absent → memory-only vault.
     files_conn = None
@@ -101,7 +110,8 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
     try:
         if _memory_seam is not None:
             with _memory_seam() as mem_conn:
-                vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer)
+                vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer,
+                                  drift_judge=drift_judge)
         else:
             # Fallback (payload not importable): the legacy local-SQLite path.
             mem_path = _memory_db_path()
@@ -111,7 +121,8 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
                 raise SystemExit(2)
             mem_conn = _open_ro_sqlite(mem_path)
             try:
-                vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer)
+                vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer,
+                                  drift_judge=drift_judge)
             finally:
                 mem_conn.close()
     finally:
@@ -120,6 +131,8 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
 
     if synthesizer is not None:
         print(synthesizer.summary(), file=sys.stderr)
+    if drift_judge is not None:
+        print(drift_judge.summary(), file=sys.stderr)
     return vault
 
 
@@ -227,10 +240,12 @@ def _check_vault(vault: dict[str, str], out_dir: str) -> int:
 
 def _cmd_generate(args: argparse.Namespace) -> int:
     out_dir = args.out or _default_out()
-    if args.check and getattr(args, "synthesize", False):
-        print("--check and --synthesize are mutually exclusive: LLM ledes are not "
+    if args.check and (getattr(args, "synthesize", False)
+                       or getattr(args, "check_drift", False)):
+        offender = "--synthesize" if getattr(args, "synthesize", False) else "--check-drift"
+        print(f"--check and {offender} are mutually exclusive: model output is not "
               "bit-reproducible, so the drift check runs on the deterministic vault "
-              "only (drop --synthesize).", file=sys.stderr)
+              f"only (drop {offender}).", file=sys.stderr)
         return 2
     vault = _build_vault(args, out_dir)
     if args.check:
@@ -383,6 +398,11 @@ def _add_generate_args(p: argparse.ArgumentParser) -> None:
                    help="Write an LLM prose lede per topic via a local chat endpoint "
                         "(opt-in; cached; degrades to member-lists if no model). "
                         "Mutually exclusive with --check.")
+    p.add_argument("--check-drift", action="store_true",
+                   help="Add a citation-drift lint section: a local chat model audits "
+                        "each synthesis against the sources it was compiled from and "
+                        "flags claims that no longer match (report-only; opt-in; cached; "
+                        "fail-open if no model). Mutually exclusive with --check.")
     p.add_argument("--importance-threshold", type=float, default=None,
                    help="Min importance for a memory to count as 'core' (default 0.55).")
     p.add_argument("--exclude", default=None, metavar="REGEX",

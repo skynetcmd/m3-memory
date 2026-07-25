@@ -88,6 +88,68 @@ def test_default_build_is_byte_identical_with_and_without_the_param():
     assert a == b
 
 
+def test_injected_judge_emits_the_section_end_to_end():
+    """With a stub judge injected, a REAL build_wiki emits the drift section — the
+    full path (build_wiki -> render -> check_drift -> render_section) is wired, not
+    just the isolated check_drift() unit. The _db() fixture seeds a synthesis `s`
+    with a `consolidates` edge to source `x`, so the judge fires."""
+    conn = _db()
+    try:
+        pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6),
+                           drift_judge=_StubJudge(drifted=True))
+    finally:
+        conn.close()
+    assert "Citation drift" in pages["lint.md"]
+
+
+# ── CLI wiring: --check-drift is opt-in and mutually exclusive with --check ───
+
+def test_cli_check_drift_is_mutually_exclusive_with_check():
+    """`m3 wiki generate --check --check-drift` must refuse (exit 2): a model-backed
+    judge is non-deterministic, so it can't run on the byte-checked vault."""
+    import argparse
+
+    import gen_wiki
+    args = argparse.Namespace(out=None, check=True, check_drift=True,
+                              synthesize=False, no_files=True)
+    assert gen_wiki._cmd_generate(args) == 2
+
+
+def test_cli_check_drift_builds_a_judge_that_threads_into_build_wiki(monkeypatch):
+    """--check-drift builds a ModelDriftJudge and passes it to build_wiki; the flag
+    OFF passes None. Intercepts build_wiki (so no model is needed) and drives
+    _build_vault through the memory seam with an in-memory conn."""
+    import argparse
+    import contextlib
+
+    import gen_wiki
+    captured = {}
+
+    def _fake_build_wiki(mem_conn, files_conn, opts, synthesizer=None, drift_judge=None):
+        captured["drift_judge"] = drift_judge
+        return {"lint.md": ""}
+
+    @contextlib.contextmanager
+    def _fake_seam():
+        yield sqlite3.connect(":memory:")
+
+    monkeypatch.setattr(gen_wiki, "build_wiki", _fake_build_wiki)
+    monkeypatch.setattr("memory.db._db", _fake_seam)
+
+    def _run(check_drift):
+        args = argparse.Namespace(out=None, check=False, check_drift=check_drift,
+                                  synthesize=False, no_files=True,
+                                  importance_threshold=None, exclude=None,
+                                  obsidian=False, html=False)
+        gen_wiki._build_vault(args, ".")
+
+    from wiki.citation_drift import ModelDriftJudge
+    _run(check_drift=True)
+    assert isinstance(captured["drift_judge"], ModelDriftJudge)
+    _run(check_drift=False)
+    assert captured["drift_judge"] is None
+
+
 # ── plumbing (with a stub judge) ─────────────────────────────────────────────
 
 def test_pairs_synthesis_with_its_provenance_sources():

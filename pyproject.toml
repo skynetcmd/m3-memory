@@ -362,6 +362,7 @@ markers = [
     "requires_native: needs the m3_core_rs native wheel (not the pure-Python fallback)",
     "requires_gguf: needs a GGUF model file (M3_TEST_GGUF)",
     "requires_files_db: needs the shipped files_database.db present",
+    "requires_llm: needs a reachable local chat model (M3_WIKI_DRIFT_URL / LM Studio) for the citation-drift judge",
 ]
 # Warnings are ERRORS by default: a NEW, un-reviewed warning fails the suite, so it
 # can't slip in unnoticed. Every `ignore` below is a REVIEWED exception with its
