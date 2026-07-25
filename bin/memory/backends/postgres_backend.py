@@ -465,6 +465,19 @@ class PostgresDialect(Dialect):
         # regardless of search_path. Identifiers are pre-validated in the base.
         return f"{schema}.{name}"
 
+    def _glob_fragment(self, column: str, placeholder: str, pattern: str) -> "tuple[str, str]":
+        # PG has no GLOB; use case-sensitive LIKE and translate the glob wildcards
+        # to LIKE ones. Escape literal % and _ (LIKE wildcards) in the SOURCE first
+        # so they stay literal, THEN map glob * -> % and ? -> _.
+        translated = (
+            pattern.replace("\\", "\\\\")   # escape the escape char itself
+                   .replace("%", "\\%")
+                   .replace("_", "\\_")
+                   .replace("*", "%")
+                   .replace("?", "_")
+        )
+        return (f"{column} LIKE {placeholder}", translated)
+
     def compact_storage(self, *, sqlite_path: "str | None" = None,
                         max_bytes: int = 500 * 1024 * 1024) -> str:
         # No client-issued compaction: autovacuum reclaims dead tuples in the

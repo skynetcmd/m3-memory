@@ -104,6 +104,7 @@ def _divergent_methods() -> set[str]:
         # base MUST raise (proving each backend implements its own).
         "is_integrity_error": (Exception("x"),),
         "is_undefined_object_error": (Exception("x"),),
+        "glob_match": ("filename", "?", "*.md"),
     }
     divergent: set[str] = set()
     for name, args in probes.items():
@@ -167,6 +168,7 @@ def test_every_dialect_overrides_every_divergent_method():
                 "table_exists": "_table_exists_query",
                 "columns_of": "_columns_of_query",
                 "qualified_table": "_qualified_table_expr",
+                "glob_match": "_glob_fragment",
             }
             check = wrapper_to_fragment.get(meth, meth)
             assert getattr(type(d), check) is not getattr(Dialect, check), (

@@ -268,3 +268,41 @@ def test_files_table_helper_resolves_per_backend(monkeypatch):
     import memory.backends as _backends
     monkeypatch.setattr(_backends, "dialect", lambda: POSTGRES)
     assert files_table("leaves") == "files.leaves"
+
+
+# ── glob_match (shell-glob filename filter, SQLite GLOB vs PG LIKE) ────────────
+
+def test_glob_match_sqlite_uses_native_glob():
+    """SQLite has a native case-sensitive GLOB; the pattern passes through."""
+    frag, val = SQLITE.glob_match("filename", "?", "*.md")
+    assert frag == "filename GLOB ?"
+    assert val == "*.md"
+
+
+def test_glob_match_postgres_translates_to_like():
+    """PG has no GLOB → LIKE with glob wildcards mapped (* -> %, ? -> _)."""
+    frag, val = POSTGRES.glob_match("filename", "%s", "*.md")
+    assert frag == "filename LIKE %s"
+    assert val == "%.md"
+
+
+def test_glob_match_postgres_escapes_literal_like_wildcards():
+    """A literal % or _ in the glob source must be escaped so it stays literal on
+    PG (LIKE would otherwise treat them as wildcards)."""
+    _, val = POSTGRES.glob_match("filename", "%s", "a_b%c*.md")
+    # _ and % escaped (single backslash prefix); * -> %
+    assert val == r"a\_b\%c%.md"
+
+
+@pytest.mark.parametrize("dialect", [SQLITE, POSTGRES], ids=["sqlite", "postgres"])
+def test_glob_match_rejects_non_identifier_column(dialect):
+    with pytest.raises(ValueError):
+        dialect.glob_match("a.b", "?", "*.md")
+
+
+def test_glob_match_base_is_abstract():
+    """Base raises — the operator diverges, so each backend must state its own."""
+    from memory.backends.dialect import Dialect
+    base = Dialect(backend="sqlite", param_style="qmark")
+    with pytest.raises(NotImplementedError):
+        base.glob_match("filename", "?", "*.md")

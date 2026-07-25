@@ -118,6 +118,10 @@ class SqliteDialect(Dialect):
         # its `name` column is the column name. Caller reads row[0].
         return (f"SELECT name FROM pragma_table_info('{table}')", ())
 
+    def _glob_fragment(self, column: str, placeholder: str, pattern: str) -> "tuple[str, str]":
+        # SQLite has a native case-sensitive GLOB; the pattern passes through.
+        return (f"{column} GLOB {placeholder}", pattern)
+
     def _qualified_table_expr(self, name: str, schema: str) -> str:
         # A separate logical store is a separate DB FILE on SQLite — opened
         # directly — so there is no schema to qualify: the reference is bare.

@@ -464,6 +464,35 @@ class Dialect:
         """
         return f"LOWER({column}) = LOWER({placeholder})"
 
+    def glob_match(self, column: str, placeholder: str, pattern: str) -> "tuple[str, str]":
+        """A case-sensitive shell-glob filename match. Returns ``(sql_fragment,
+        bound_value)`` — because the two backends differ in BOTH the operator AND
+        the wildcard alphabet, so the VALUE may need rewriting too, not just the SQL.
+
+        SQLite has a native ``GLOB`` operator (``*`` any run, ``?`` one char,
+        case-sensitive) — the natural fit for a filename filter. PostgreSQL has no
+        ``GLOB``; the closest case-sensitive form is ``LIKE`` with its own wildcards
+        (``%`` any run, ``_`` one char). So on PG the fragment becomes ``LIKE`` and
+        the glob wildcards in the pattern are translated to LIKE wildcards (with any
+        literal ``%``/``_`` in the source pattern escaped first so they stay
+        literal). SQLite passes the pattern through unchanged.
+
+        ``glob_match("filename", param(), "*.md")`` →
+          SQLite:   (``"filename GLOB ?"``,   ``"*.md"``)
+          Postgres: (``"filename LIKE %s"``,   ``"%.md"``)
+
+        Concrete on the base as a validate-then-delegate wrapper: ``column`` must be
+        a bare identifier (single-sourced here); the backend supplies the operator +
+        value transform via :meth:`_glob_fragment`.
+        """
+        if not column.isidentifier():
+            raise ValueError(f"column must be a bare identifier: {column!r}")
+        return self._glob_fragment(column, placeholder, pattern)
+
+    def _glob_fragment(self, column: str, placeholder: str, pattern: str) -> "tuple[str, str]":
+        """Backend fragment for :meth:`glob_match` (post-validation)."""
+        raise NotImplementedError("subclass must implement _glob_fragment()")
+
     # -- temporal validity ---------------------------------------------------
     def temporal_open_clause(self, column: str, op: str) -> str:
         """A "validity bound is open OR satisfies `op`" WHERE fragment.
