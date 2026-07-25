@@ -68,37 +68,59 @@ def _cosine(a: list[float], b: list[float]) -> float:
 def _corpus_filter_clause(
     corpus_id: Optional[str],
     corpora: Optional[list[str]],
+    _d=None,
 ) -> tuple[str, list]:
     """Build the SQL fragment + params for corpus filtering.
 
-    - corpora (list) takes precedence: emits `fn.corpus_id IN (?,?,...)`.
-    - else corpus_id (single string): emits `fn.corpus_id = ?`.
+    - corpora (list) takes precedence: emits `fn.corpus_id IN (p,p,...)`.
+    - else corpus_id (single string): emits `fn.corpus_id = p`.
     - else: empty filter.
-    Returns ("", []) when no filter applies.
+    Returns ("", []) when no filter applies. ``_d`` is the active dialect
+    (placeholders); defaults to the active backend's dialect when omitted.
     """
+    if _d is None:
+        from memory.backends import dialect as _dialect
+        _d = _dialect()
     if corpora:
         clean = [c for c in corpora if c]
         if not clean:
             return ("", [])
-        placeholders = ",".join("?" * len(clean))
+        placeholders = _d.placeholder(len(clean))
         return (f" AND fn.corpus_id IN ({placeholders})", list(clean))
     if corpus_id:
-        return (" AND fn.corpus_id = ?", [corpus_id])
+        return (f" AND fn.corpus_id = {_d.param()}", [corpus_id])
     return ("", [])
 
 
-def _fts_query(conn: sqlite3.Connection, query: str, limit: int,
+def _fts_query(conn, query: str, limit: int,
                current_only: bool, corpus_id: Optional[str],
                filetype: Optional[str],
                corpora: Optional[list[str]] = None) -> list[tuple[str, float]]:
-    """FTS5 search. Returns [(leaf_uuid, bm25_score)] in rank order.
+    """Keyword full-text channel. Returns [(leaf_uuid, score)] in rank order,
+    score HIGHER = better (the fusion convention) on both backends.
 
-    Note: bm25() returns LOWER = better; we negate so higher = better
-    for consistent scoring with the vector channel.
+    Backend-routed via the storage seam (decision 2026-07-25 — native full-text
+    on both, NO pg_search dependency):
+      * SQLite: FTS5 ``leaves_fts MATCH ?`` ranked by ``bm25()`` (lower=better,
+        negated to higher=better).
+      * PostgreSQL: the generated ``leaves.search_vector`` tsvector matched with
+        ``@@ to_tsquery('english', ...)`` and ranked with ``ts_rank`` (higher=
+        better already). No FTS5, no pg_search — native tsvector/GIN (pg_004).
     """
-    # Sanitize query for FTS5: quote any column-name-like tokens. FTS5
-    # syntax is permissive but we avoid edge cases by treating the query
-    # as a prefix match phrase.
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
+    is_pg = _d.backend != "sqlite"
+    if is_pg:
+        return _fts_query_pg(conn, query, limit, current_only, corpus_id,
+                             filetype, corpora, _d)
+    return _fts_query_sqlite(conn, query, limit, current_only, corpus_id,
+                             filetype, corpora, _d)
+
+
+def _fts_query_sqlite(conn, query, limit, current_only, corpus_id, filetype,
+                      corpora, _d) -> list[tuple[str, float]]:
+    """SQLite FTS5 arm. bm25() is LOWER=better; negated so higher=better."""
+    # Sanitize query for FTS5: treat the query as a permissive token match.
     safe = " ".join(t for t in query.split() if t.replace("-", "").replace("_", "").isalnum())
     if not safe:
         return []
@@ -113,7 +135,7 @@ def _fts_query(conn: sqlite3.Connection, query: str, limit: int,
     params: list = [safe]
     if current_only:
         sql += " AND l.superseded_by IS NULL AND fn.superseded_by IS NULL"
-    corpus_clause, corpus_params = _corpus_filter_clause(corpus_id, corpora)
+    corpus_clause, corpus_params = _corpus_filter_clause(corpus_id, corpora, _d)
     sql += corpus_clause
     params.extend(corpus_params)
     if filetype:
@@ -131,6 +153,50 @@ def _fts_query(conn: sqlite3.Connection, query: str, limit: int,
     return [(r["uuid"], -r["rank"]) for r in rows]
 
 
+def _fts_query_pg(conn, query, limit, current_only, corpus_id, filetype,
+                  corpora, _d) -> list[tuple[str, float]]:
+    """PostgreSQL tsvector arm. Matches leaves.search_vector @@ to_tsquery and
+    ranks with ts_rank (already higher=better). Reuses the core query compiler
+    (_compile_tsquery) so query terms normalize identically to the FTS5 path."""
+    from memory.fts import _compile_tsquery
+
+    from .config import files_table
+
+    tsquery, ok = _compile_tsquery(query, "fts5")
+    if not ok or not tsquery:
+        return []
+    _p = _d.param()
+    _lv = files_table("leaves")
+    _fn = files_table("file_nodes")
+    sql = (
+        f"SELECT l.uuid AS uuid, "
+        f"       ts_rank(l.search_vector, to_tsquery('english', {_p})) AS rank "
+        f"FROM {_lv} l "
+        f"JOIN {_fn} fn ON fn.uuid = l.file_node "
+        f"WHERE l.search_vector @@ to_tsquery('english', {_p}) "
+    )
+    params: list = [tsquery, tsquery]
+    if current_only:
+        sql += " AND l.superseded_by IS NULL AND fn.superseded_by IS NULL"
+    corpus_clause, corpus_params = _corpus_filter_clause(corpus_id, corpora, _d)
+    sql += corpus_clause
+    params.extend(corpus_params)
+    if filetype:
+        sql += f" AND fn.filetype = {_p}"
+        params.append(filetype)
+    sql += f" ORDER BY rank DESC LIMIT {_p}"
+    params.append(limit)
+
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    except Exception as e:  # noqa: BLE001 — a tsquery error skips the channel
+        if not _d.is_undefined_object_error(e):
+            logger.debug("tsvector query failed (%s); skipping channel", e)
+        return []
+    # ts_rank is already higher=better; keep as-is for fusion.
+    return [(r["uuid"], float(r["rank"])) for r in rows]
+
+
 def _vec_query(conn: sqlite3.Connection, query: str, limit: int,
                current_only: bool, corpus_id: Optional[str],
                filetype: Optional[str],
@@ -146,21 +212,29 @@ def _vec_query(conn: sqlite3.Connection, query: str, limit: int,
         return []
     qvec, qmodel = vecs[0]
 
+    from memory.backends import dialect as _dialect
+
+    from .config import files_table
+    _d = _dialect()
+    _p = _d.param()
+    _le = files_table("leaf_embeddings")
+    _lv = files_table("leaves")
+    _fn = files_table("file_nodes")
     sql = (
-        "SELECT le.leaf_uuid, le.embedding "
-        "FROM leaf_embeddings le "
-        "JOIN leaves l ON l.uuid = le.leaf_uuid "
-        "JOIN file_nodes fn ON fn.uuid = l.file_node "
-        "WHERE le.kind = 'text' AND le.embed_model = ?"
+        f"SELECT le.leaf_uuid, le.embedding "
+        f"FROM {_le} le "
+        f"JOIN {_lv} l ON l.uuid = le.leaf_uuid "
+        f"JOIN {_fn} fn ON fn.uuid = l.file_node "
+        f"WHERE le.kind = 'text' AND le.embed_model = {_p}"
     )
     params: list = [qmodel]
     if current_only:
         sql += " AND l.superseded_by IS NULL AND fn.superseded_by IS NULL"
-    corpus_clause, corpus_params = _corpus_filter_clause(corpus_id, corpora)
+    corpus_clause, corpus_params = _corpus_filter_clause(corpus_id, corpora, _d)
     sql += corpus_clause
     params.extend(corpus_params)
     if filetype:
-        sql += " AND fn.filetype = ?"
+        sql += f" AND fn.filetype = {_p}"
         params.append(filetype)
 
     rows = conn.execute(sql, params).fetchall()
@@ -228,8 +302,15 @@ def files_search(
         return []
 
     current_only = not include_history
+    from memory.backends import dialect as _dialect
+
+    from .config import files_table
+    _d = _dialect()
     with _db(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+        # No forced conn.row_factory: the SQLite files connection already carries
+        # row_factory=Row (files_memory.db._new_connection) and the PG compat
+        # cursor yields dual name/position rows — so the name access below works on
+        # both; forcing sqlite3.Row would break PG.
         fts = _fts_query(conn, query, channel_limit, current_only, corpus_id, filetype, corpora=corpora)
         vec = _vec_query(conn, query, channel_limit, current_only, corpus_id, filetype, corpora=corpora)
         fused = _rrf_fuse(fts, vec)
@@ -242,14 +323,16 @@ def files_search(
         if not top:
             return []
         uuids = [u for u, _ in top]
-        placeholders = ",".join("?" * len(uuids))
+        placeholders = _d.placeholder(len(uuids))
+        _lv = files_table("leaves")
+        _fn = files_table("file_nodes")
         rows = conn.execute(
             f"SELECT l.uuid AS leaf_uuid, l.file_node, l.division_type, "
             f"  l.division_id, l.division_label, l.text, "
             f"  fn.filename, fn.path_absolute AS path, fn.metadata AS fn_metadata, "
             f"  fn.corpus_id AS corpus_id "
-            f"FROM leaves l "
-            f"JOIN file_nodes fn ON fn.uuid = l.file_node "
+            f"FROM {_lv} l "
+            f"JOIN {_fn} fn ON fn.uuid = l.file_node "
             f"WHERE l.uuid IN ({placeholders})",
             uuids,
         ).fetchall()

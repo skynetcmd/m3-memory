@@ -9,9 +9,10 @@
 -- Type mapping (SQLite -> PG): TEXT->TEXT, INTEGER->BIGINT, REAL->DOUBLE PRECISION,
 -- BLOB->BYTEA, datetime('now') default -> NOW()/TIMESTAMPTZ.
 --
--- FTS5 IS OMITTED. leaves_fts / file_summaries_fts + their six triggers are
--- SQLite-only; PG full-text search (GIN-indexed tsvector) lands in Phase 2. Until
--- then files_search on PG runs the vector channel only.
+-- FTS5 IS OMITTED here. leaves_fts / file_summaries_fts + their six triggers are
+-- SQLite-only. PG full-text search is the native GIN-indexed tsvector equivalent,
+-- added in pg_004_files_fts (a generated search_vector column on files.leaves /
+-- files.file_nodes). This baseline file intentionally leaves it out.
 --
 -- CREATE SCHEMA/TABLE/INDEX IF NOT EXISTS keep this idempotent; migrate_pg wraps
 -- the file in one transaction.

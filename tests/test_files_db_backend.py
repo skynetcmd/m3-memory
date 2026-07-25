@@ -42,6 +42,7 @@ def sqlite_files(tmp_path, monkeypatch):
     from memory.backends import selector
     selector._reset_for_tests()
     import importlib
+
     import files_memory.config as fc
     importlib.reload(fc)
     import files_memory.db as fdb
@@ -54,17 +55,17 @@ def sqlite_files(tmp_path, monkeypatch):
 
 def test_sqlite_init_applies_numbered_migrations(sqlite_files):
     """init_db builds the schema from migrations/ (not the inline blobs) and stamps
-    schema_versions with all three versions."""
+    schema_versions with every version (004 is a SQLite no-op FTS marker)."""
     fdb = sqlite_files
     fdb.init_db()
     with fdb._db() as db:
         versions = [r[0] for r in db.execute("SELECT version FROM schema_versions ORDER BY version")]
-    assert versions == [1, 2, 3]
+    assert versions == [1, 2, 3, 4]
 
 
 def test_sqlite_schema_has_expected_tables_and_fts(sqlite_files):
     """The migrated SQLite schema carries the core tables AND the FTS5 shadows
-    (FTS5 is SQLite-only; PG omits it until Phase 2)."""
+    (FTS5 is SQLite-only; PG uses a native tsvector column instead)."""
     fdb = sqlite_files
     fdb.init_db()
     path = os.environ["M3_FILES_DB_PATH"]
@@ -85,7 +86,7 @@ def test_sqlite_init_is_idempotent(sqlite_files):
     fdb._initialized_dbs.clear()   # force re-entry into init_db
     fdb.init_db()                  # must not raise or double-apply
     with fdb._db() as db:
-        assert [r[0] for r in db.execute("SELECT version FROM schema_versions ORDER BY version")] == [1, 2, 3]
+        assert [r[0] for r in db.execute("SELECT version FROM schema_versions ORDER BY version")] == [1, 2, 3, 4]
 
 
 def test_sqlite_read_write_through_db(sqlite_files):
@@ -123,6 +124,7 @@ def pg_files(monkeypatch, pg_url):
     from memory.backends import selector
     selector._reset_for_tests()
     import importlib
+
     import files_memory.config as fc
     importlib.reload(fc)
     import files_memory.db as fdb
@@ -145,10 +147,17 @@ def test_pg_init_creates_files_schema_and_applies_migrations(pg_files):
         tabs = {r[0] for r in cur.fetchall()}
         cur.execute("SELECT version FROM files.schema_versions ORDER BY version")
         versions = [r[0] for r in cur.fetchall()]
-    assert versions == [1, 2, 3]
+        # pg_004 adds the tsvector search_vector columns + GIN indexes.
+        cur.execute("SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema='files' AND table_name='leaves' "
+                    "AND column_name='search_vector'")
+        has_search_vector = cur.fetchone() is not None
+    assert versions == [1, 2, 3, 4]
+    assert has_search_vector, "pg_004 should add files.leaves.search_vector"
     for t in ("file_nodes", "leaves", "facts", "promotion_markers"):
         assert t in tabs
-    # FTS5 shadow tables must NOT exist on PG (deferred to Phase 2).
+    # FTS5 shadow tables never exist on PG: full-text there is the native
+    # tsvector search_vector column (asserted above), not FTS5 virtual tables.
     assert "leaves_fts" not in tabs and "file_summaries_fts" not in tabs
 
 
@@ -173,3 +182,60 @@ def test_pg_integrity_check_skips_cleanly(pg_files):
     out = fdb.integrity_check()
     assert "skipped" in out
     assert out["ok"] is True
+
+
+def _seed_leaf(db, *, fn_uuid, run_uuid, leaf_uuid, text, div_id):
+    """Seed the minimum file_node + ingestion_run + leaf needed for a keyword
+    search hit. Qualified files.* names (PG). The generated search_vector column
+    populates automatically on INSERT (no trigger)."""
+    db.execute(
+        "INSERT INTO files.file_nodes "
+        "(uuid,identity_key,filename,filetype,path_absolute,size_bytes,"
+        " content_sha256,date_modified,source_host,version_label) "
+        "VALUES (%s,'k',%s,'markdown',%s,10,'sha','2020','h','v1') "
+        "ON CONFLICT (uuid) DO NOTHING",
+        (fn_uuid, f"{fn_uuid}.md", f"/{fn_uuid}.md"),
+    )
+    db.execute(
+        "INSERT INTO files.ingestion_runs "
+        "(uuid,file_node,run_id,ingester_version,chunker_version,extract_mode) "
+        "VALUES (%s,%s,'r1','iv','cv','mode') ON CONFLICT (uuid) DO NOTHING",
+        (run_uuid, fn_uuid),
+    )
+    db.execute(
+        "INSERT INTO files.leaves "
+        "(uuid,file_node,ingestion_run,division_type,division_id,text,"
+        " text_sha256,char_range_start,char_range_end) "
+        "VALUES (%s,%s,%s,'heading',%s,%s,'lsha',0,10)",
+        (leaf_uuid, fn_uuid, run_uuid, div_id, text),
+    )
+
+
+@pg
+def test_pg_files_search_keyword_channel_tsvector(pg_files):
+    """files_search's keyword channel runs on PG via the generated tsvector
+    column (@@ to_tsquery / ts_rank), NOT FTS5 — the Phase-2 parity payoff. Seeds
+    two leaves with distinct text and asserts the query hits the right one. The
+    vector channel returns nothing (no embeddings seeded), so a hit here isolates
+    the tsvector keyword path."""
+    fdb = pg_files
+    fdb.init_db()
+    import uuid as _uuid
+    fn = f"fn-{_uuid.uuid4().hex[:8]}"
+    run = f"run-{_uuid.uuid4().hex[:8]}"
+    target = f"lf-{_uuid.uuid4().hex[:8]}"
+    other = f"lf-{_uuid.uuid4().hex[:8]}"
+    with fdb._db() as db:
+        _seed_leaf(db, fn_uuid=fn, run_uuid=run, leaf_uuid=target,
+                   text="the quick brown fox jumps over the lazy dog", div_id="h1")
+        _seed_leaf(db, fn_uuid=fn, run_uuid=run, leaf_uuid=other,
+                   text="completely unrelated content about umbrellas", div_id="h2")
+
+    from files_memory.search import files_search
+    hits = files_search("brown fox", limit=10)
+    hit_ids = {h.leaf_uuid for h in hits}
+    assert target in hit_ids, f"tsvector keyword channel should surface the fox leaf; got {hit_ids}"
+    assert other not in hit_ids, "the unrelated leaf must not match 'brown fox'"
+    # the matching hit carries an fts_rank (came through the keyword channel)
+    fox = next(h for h in hits if h.leaf_uuid == target)
+    assert fox.fts_rank is not None

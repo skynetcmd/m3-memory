@@ -100,16 +100,18 @@ files and primary stores safely. The schema is built by numbered migrations
 (`bin/files_memory/migrations/`, mirrored under `postgres/`), tracked in a
 `schema_versions` table inside the store.
 
-> **PostgreSQL caveat (in progress).** Two pieces of the SQLite feature set are not
-> yet at parity on PG and are being finished:
-> - **Full-text search.** FTS5 (the keyword channel) is SQLite-only. On PG,
->   `files_search` currently runs the **vector channel only**; the FTS5 → `tsvector`
->   / GIN port is underway. Ranking parity is the goal, not just "search works".
-> - **Entity coalescing.** The post-ingest entity-cleanup pass
->   (`entity_coalesce`) still has SQLite-specific paths being ported.
+> **PostgreSQL support.** The files store runs on both backends. Full-text search
+> is backend-native: FTS5 `bm25()` on SQLite, a generated `tsvector` column + GIN
+> index queried with `@@ to_tsquery` / `ts_rank` on PostgreSQL (`pg_004_files_fts`)
+> — `files_search`'s keyword channel is routed through the storage seam, so hybrid
+> (keyword + vector + RRF) search works identically on both. Native full-text only;
+> no ParadeDB/pg_search extension is required (that would break the vanilla,
+> air-gapped PG deployment floor — see `docs/COMPLIANCE.md`). The post-ingest
+> entity-coalescing pass (`entity_coalesce`) is likewise ported to both backends.
 >
-> Everything else — ingest, chunking, embeddings, facts, dedup, promotion,
-> version history, watch-mode staleness, and vector search — works on both backends.
+> Everything — ingest, chunking, embeddings, facts, dedup, promotion, version
+> history, watch-mode staleness, keyword search, and vector search — works on both
+> SQLite and PostgreSQL.
 
 ## Enabling fact extraction
 

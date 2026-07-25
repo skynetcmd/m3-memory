@@ -45,13 +45,18 @@ independent, same as the primary store):
 Type mapping (SQLite → PG): `TEXT`→`TEXT`, `INTEGER`→`BIGINT`, `REAL`→`DOUBLE
 PRECISION`, `BLOB`→`BYTEA`, `datetime('now')` default → `NOW()` / `TIMESTAMPTZ`.
 
-## FTS5 is SQLite-only (Phase 1)
+## Full-text: FTS5 on SQLite, tsvector on PostgreSQL
 
 `leaves_fts` / `file_summaries_fts` (FTS5 external-content virtual tables + their
-six sync triggers) exist **only in the SQLite migrations**. PostgreSQL has no FTS5;
-the PG migrations deliberately OMIT them. Until the FTS → `tsvector`/GIN port
-(Phase 2), `files_search` on PG runs the vector channel only. Do not add FTS5
-constructs to a `pg_` migration.
+six sync triggers) exist **only in the SQLite migrations** (001). PostgreSQL has
+no FTS5, so the PG side uses the native equivalent: a `search_vector tsvector`
+GENERATED column + GIN index on `files.leaves` and `files.file_nodes`, added in
+`pg_004_files_fts` (the SQLite `004` counterpart is a no-op marker — FTS5 already
+exists from 001). `files_search`'s keyword channel is backend-routed: FTS5
+`MATCH`/`bm25()` on SQLite, `@@ to_tsquery`/`ts_rank` on PG (see
+`files_memory/search.py`). Native full-text only — NO ParadeDB/pg_search
+dependency (that would break the vanilla/air-gapped-PG floor). Do NOT add FTS5
+constructs to a `pg_` migration; add tsvector/GIN instead.
 
 ## Provenance of 001/002/003
 
