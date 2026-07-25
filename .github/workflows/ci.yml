@@ -181,7 +181,7 @@ jobs:
   # platform-specific (Windows file locks, venv launcher stubs, POSIX-only
   # asyncio signal handlers), so a single-OS lane would have missed them.
   e2e-install:
-    name: E2E install on ${{ matrix.os }}
+    name: E2E install + upgrade on ${{ matrix.os }}
     needs: [lint, typecheck, matrix-setup]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -246,6 +246,58 @@ jobs:
         # The store must be writable and searchable end to end, not merely present.
         m3 memory memory_write --content "e2e canary" --type note
         m3 memory memory_search --query "e2e canary" --k 1 | grep -q "e2e canary"
+
+    # ── Upgrade over the install we just made ────────────────────────────────
+    # This is the path that actually breaks in the field: a reinstall on top of
+    # a POPULATED install, with the previous version's artifacts still on disk.
+    # A fresh install exercises none of it — no existing DBs to migrate or
+    # clobber, no already-registered schedules, no stale bytecode, no running
+    # writers. Every incident that motivated this job happened on an upgrade.
+    #
+    # Two things must hold, and they are different claims:
+    #   1. the upgrade completes AND verifies (exit 0, not 3)
+    #   2. the data written before it is still there afterwards
+    # (2) is the one that matters most and the one a "did it exit 0" check
+    # cannot see: a wipe-and-recreate would pass every other assertion here.
+    - name: Re-run setup over the existing install (upgrade path)
+      shell: bash
+      env:
+        M3_E2E_ROOT: ${{ runner.temp }}/m3-e2e
+      run: |
+        # Record the pre-upgrade state so a silent data loss is visible even if
+        # the canary search were to pass for the wrong reason.
+        export M3_CONFIG_ROOT="$M3_E2E_ROOT/config"
+        export M3_ENGINE_ROOT="$M3_E2E_ROOT/engine"
+        echo "engine root before upgrade:"
+        ls -la "$M3_E2E_ROOT/engine"
+        m3 setup \
+          --non-interactive --terminal \
+          --agents "" --capture-mode none \
+          --no-native-wheel --no-shared-embedder \
+          --no-dashboard --no-governor-migration \
+          --decouple-roots \
+          --config-root "$M3_E2E_ROOT/config" \
+          --engine-root "$M3_E2E_ROOT/engine"
+
+    - name: Verify the upgrade preserved data and left a working install
+      shell: bash
+      env:
+        M3_E2E_ROOT: ${{ runner.temp }}/m3-e2e
+      run: |
+        export M3_CONFIG_ROOT="$M3_E2E_ROOT/config"
+        export M3_ENGINE_ROOT="$M3_E2E_ROOT/engine"
+        set -x
+        # The memory written BEFORE the upgrade must still be searchable. This
+        # is the load-bearing assertion: it fails on a wipe-and-recreate, on a
+        # migration that drops rows, and on an engine root silently relocated
+        # out from under the data.
+        m3 memory memory_search --query "e2e canary" --k 1 | grep -q "e2e canary"
+        # And the install must still be healthy, not merely intact.
+        m3 doctor
+        # A second write must work too — a store that survived but is now
+        # read-only or schema-broken is still a broken upgrade.
+        m3 memory memory_write --content "post-upgrade canary" --type note
+        m3 memory memory_search --query "post-upgrade canary" --k 1 | grep -q "post-upgrade canary"
 
     - name: Show the engine root on failure
       if: failure()
