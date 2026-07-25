@@ -387,6 +387,11 @@ def scan_db_writer_processes(engine_root: Optional[str] = None) -> list[ProcInfo
                         matched = role
                         break
             if matched:
+                # Skip the venv launcher stub — it shares the real worker's
+                # cmdline but holds nothing and can never quiesce. See
+                # _is_venv_launcher_stub.
+                if _is_venv_launcher_stub(proc):
+                    continue
                 found.append(ProcInfo(pid=pid, role=matched, started_at="",
                                       engine_root=root, path=Path()))
                 continue
@@ -450,6 +455,48 @@ def elevated_kill_commands(pids: "list[int]") -> "list[str]":
 # upgrade for the full quiesce timeout and then asks the operator to kill an
 # irrelevant process — which is how people learn to reflex-dismiss the prompt.
 NON_BLOCKING_ROLES = ("embed-server",)
+
+
+def _is_venv_launcher_stub(proc) -> bool:
+    """Is this process a venv launcher stub rather than the real interpreter?
+
+    On Windows a venv's ``Scripts/python[w].exe`` is a ~250KB REDIRECTOR, not an
+    interpreter: it launches the base interpreter (``C:\\PythonXXX\\python[w].exe``)
+    as a CHILD and waits on it. So every venv-launched m3 daemon shows up as TWO
+    processes with the SAME cmdline — the stub and the real worker — and a
+    cmdline-signature scan matches both.
+
+    That double-count is not cosmetic for an exclusive op: the stub holds no DB,
+    never registers, and can never "release" anything, so the pre-flight would
+    wait out its whole timeout and then report it stuck, pushing the operator to
+    kill a process that was never a hazard.
+
+    Identified structurally (stub's exe lives under the venv AND it has a child
+    running the same script from a different exe), never by hardcoded path.
+    Verified 2026-07-25 on Windows; a no-op on macOS/Linux, where venv bin/python
+    is a symlink and exec'ing it replaces the process rather than spawning one.
+    """
+    if os.name != "nt":
+        return False
+    try:
+        import psutil
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        own_exe = (proc.exe() or "").lower()
+        # A stub sits in a venv's Scripts/ dir; the real interpreter it spawns
+        # lives in the base install.
+        if f"{os.sep}scripts{os.sep}".replace("\\", os.sep) not in own_exe:
+            return False
+        for child in proc.children():
+            try:
+                if (child.exe() or "").lower() != own_exe:
+                    return True
+            except (psutil.AccessDenied, psutil.NoSuchProcess):
+                continue
+    except Exception:  # noqa: BLE001 — never let this classification break a scan
+        return False
+    return False
 
 
 def _role_blocks(role: str) -> bool:

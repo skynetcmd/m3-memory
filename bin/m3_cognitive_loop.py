@@ -99,19 +99,22 @@ def daemonize_windows(args):
     # (or the asyncio runner if we got here late) can swallow, leaving the parent
     # ALIVE alongside the child. Two live loops each dispatch their own
     # Semaphore(2) of SLM calls = over-dispatch that storms the local LLM.
-    # NOTE: deliberately NOT `with child_out:`. Closing this handle is what
-    # hung the parent. child_out is duplicated into a DETACHED_PROCESS child as
-    # its stdout; on Windows the parent's close() of that duplicated handle
-    # blocks in a native wait (observed: 1 thread, ThreadWaitReason=UserRequest,
-    # 0.0s CPU) because the detached child holds the other end open and never
-    # exits. `with` runs that close BEFORE os._exit(0), so the exit was
-    # unreachable and the parent survived — the exact "two live loops" bug the
-    # comments below describe, still reproducing after the close_fds fix
-    # because close_fds does not cover the three std handles we pass on purpose.
+    # NOTE: deliberately NOT `with child_out:`. Nothing may run between the
+    # Popen and os._exit(0) that can raise or block — a close() of a handle
+    # duplicated into a detached child is exactly the kind of teardown that can
+    # stall, and os._exit skips flushing/closing anyway (the OS reclaims the
+    # handle on process death, so there is nothing to leak). Keep the exit
+    # reachable; do not "tidy" this back into a context manager.
     #
-    # os._exit(0) skips flushing and closing entirely, and the OS reclaims the
-    # handle on process death, so there is nothing to leak. Do not "tidy" this
-    # back into a context manager.
+    # NOT the cause of the "two pythonw processes" you will see on Windows.
+    # That pair is inherent to a venv: Scripts/pythonw.exe is a ~250KB
+    # REDIRECTOR STUB, not an interpreter. It launches the base interpreter
+    # (e.g. C:\PythonXXX\pythonw.exe) as a CHILD and waits on it. So every venv
+    # launch shows two processes — stub (≈0% CPU, 1 handle) + real worker — and
+    # `python.exe` behaves identically. Verified 2026-07-25 by process exe
+    # comparison: parent exe = <venv>/Scripts/pythonw.exe, child exe =
+    # C:\PythonXXX\pythonw.exe. The parent here DOES reach os._exit(0); the
+    # surviving stub belongs to the child's own launch, not to this function.
     try:
         subprocess.Popen(
             argv,

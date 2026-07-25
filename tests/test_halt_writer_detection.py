@@ -135,3 +135,54 @@ def test_wait_for_quiesce_ignores_non_blocking_roles(halt, monkeypatch):
     ])
     res = halt.wait_for_quiesce(timeout=0.5, poll=0.05)
     assert res.ok is True, f"embed server wrongly blocked quiesce: {res.stuck}"
+
+
+# ── venv launcher stubs must not be counted as writers ───────────────────────
+# On Windows a venv's Scripts/python[w].exe is a ~250KB REDIRECTOR: it launches
+# the base interpreter as a child and waits. Every venv-launched daemon is
+# therefore TWO processes with the SAME cmdline, and the signature scan matched
+# both -- so the pre-flight waited out its full timeout on a stub that holds no
+# DB and can never quiesce. (Diagnosed 2026-07-25: parent exe under the venv
+# Scripts dir, child exe C:\PythonXXX\pythonw.exe.)
+
+class _FakeProc:
+    def __init__(self, exe, children=()):
+        self._exe, self._children = exe, list(children)
+
+    def exe(self):
+        return self._exe
+
+    def children(self):
+        return self._children
+
+
+def test_venv_stub_is_identified_on_windows(halt, monkeypatch):
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(os, "sep", "\\")
+    stub = _FakeProc(r"C:\Users\u\pipx\venvs\m3-memory\Scripts\pythonw.exe",
+                     [_FakeProc(r"C:\Python314\pythonw.exe")])
+    assert halt._is_venv_launcher_stub(stub) is True
+
+
+def test_real_interpreter_is_not_a_stub(halt, monkeypatch):
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(os, "sep", "\\")
+    real = _FakeProc(r"C:\Python314\pythonw.exe", [])
+    assert halt._is_venv_launcher_stub(real) is False
+
+
+def test_stub_without_a_child_is_not_skipped(halt, monkeypatch):
+    """A Scripts/ exe with no child is a lone worker, not a redirector. Fail
+    SAFE: counting it is the conservative choice."""
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(os, "sep", "\\")
+    lone = _FakeProc(r"C:\Users\u\pipx\venvs\m3-memory\Scripts\pythonw.exe", [])
+    assert halt._is_venv_launcher_stub(lone) is False
+
+
+def test_stub_detection_is_a_noop_off_windows(halt, monkeypatch):
+    """macOS/Linux venv bin/python is a symlink -- exec replaces the process, so
+    there is no stub pair to filter."""
+    monkeypatch.setattr(os, "name", "posix")
+    stub = _FakeProc("/home/u/.venv/bin/python", [_FakeProc("/usr/bin/python3")])
+    assert halt._is_venv_launcher_stub(stub) is False

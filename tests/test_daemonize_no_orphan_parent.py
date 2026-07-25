@@ -1,20 +1,17 @@
-"""The Windows daemonize parent must reach os._exit(0).
+"""Nothing may stand between the daemonize Popen and os._exit(0).
 
-Symptom: two live cognitive-loop processes. The scheduled task spawns the loop
-with --background; daemonize_windows Popens a detached child and then hard-exits
-the parent. If the parent survives, BOTH run -- and the file's own comments
-explain the cost: "Two live loops each dispatch their own Semaphore(2) of SLM
-calls = over-dispatch that storms the local LLM."
+The parent spawns a detached child and must hard-exit. Any teardown in between
+-- a close() of a handle duplicated into that child, a print() to a dead
+pythonw stdout -- can raise or block and leave the parent running the loop
+alongside its child. The file's own comments record the cost: "Two live loops
+each dispatch their own Semaphore(2) of SLM calls = over-dispatch that storms
+the local LLM."
 
-Root cause found 2026-07-25: the Popen sat inside `with child_out:`. That close()
-runs BEFORE os._exit(0), and on Windows closing a handle that was duplicated into
-a DETACHED_PROCESS child blocks in a native wait -- the detached child holds the
-other end open and never exits. Observed on the stuck parent: 1 thread,
-ThreadWaitReason=UserRequest, 0.0s CPU, holding exactly one open file (the log
-it had passed as the child's stdout). os._exit was unreachable.
-
-The earlier close_fds=True fix did not cover this: close_fds excludes the three
-std handles, which are precisely the ones passed on purpose.
+NOTE on the "two pythonw processes" symptom: that pair is NOT this bug. A venv's
+Scripts/python[w].exe on Windows is a redirector stub that launches the base
+interpreter as a child and waits, so every venv launch shows two processes. See
+m3_halt._is_venv_launcher_stub. These tests guard the exit path itself, which is
+worth keeping regardless.
 """
 
 import ast
