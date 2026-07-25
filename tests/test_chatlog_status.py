@@ -556,3 +556,63 @@ def test_disabled_hook_never_warns_even_when_stale():
     state = {"hooks": {"gemini-cli": {"last_write_ms_ago": 90_000_000}}}
     warnings = _warnings_for(state, _warn_cfg(**{"claude-code": True}))
     assert not any("silent 24h+" in w for w in warnings), warnings
+
+
+# ── Actionable warnings ──────────────────────────────────────────────────────
+# Warnings state a problem AND name the command that fixes it. A bare
+# "embed backlog 13011" sent a user reading source to find embed_backfill.py;
+# the remedy after " -> " is what the renderer splits onto its own line.
+
+def test_embed_backlog_warning_names_the_drain_command():
+    row_counts = {"chatlog_without_embed": 50_000}
+    warnings = [
+        w for w in _warnings_for_counts(row_counts) if "embed backlog" in w
+    ]
+    assert warnings, "expected an embed-backlog warning"
+    w = warnings[0]
+    assert "embed_backfill.py" in w, w
+    # Must NOT point at memory_doctor_fix: it defaults to the MAIN db and
+    # silently no-ops against a split-topology chatlog backlog.
+    assert "memory_doctor_fix" not in w, w
+
+
+def test_embed_backlog_warning_names_the_root_cause():
+    """A standing backlog means the scheduled sweeper isn't firing. Draining by
+    hand without that hint fixes the symptom and it comes right back."""
+    row_counts = {"chatlog_without_embed": 50_000}
+    w = [x for x in _warnings_for_counts(row_counts) if "embed backlog" in x][0]
+    assert "AgentOS_ChatlogEmbedSweep" in w, w
+
+
+def test_redaction_off_is_surfaced_when_rows_exist():
+    """Redaction defaults off and nothing tells the user. Every turn -- including
+    pasted secrets -- is stored verbatim, so say so where they actually look."""
+    warnings = _warnings_for_counts({"chatlog_rows": 500})
+    hits = [w for w in warnings if "redaction is OFF" in w]
+    assert hits, warnings
+    assert "chatlog_set_redaction" in hits[0], hits[0]
+
+
+def test_redaction_off_is_silent_on_a_fresh_install():
+    """No rows yet -> nothing has been stored unredacted -> do not nag."""
+    warnings = _warnings_for_counts({"chatlog_rows": 0})
+    assert not any("redaction is OFF" in w for w in warnings), warnings
+
+
+def test_every_warning_carries_a_remedy():
+    """Guard the convention: any warning a user can act on names how."""
+    row_counts = {"chatlog_without_embed": 50_000, "chatlog_rows": 500}
+    for w in _warnings_for_counts(row_counts):
+        assert " -> " in w, f"warning without a remedy: {w!r}"
+
+
+def _warnings_for_counts(row_counts):
+    import chatlog_config
+    import chatlog_status
+
+    cfg = chatlog_config.ChatlogConfig()
+    for spec in cfg.host_agents.values():
+        spec.enabled = False
+    return chatlog_status._compute_warnings(
+        {}, cfg, row_counts, recent_writes=5, recent_window_min=15,
+    )

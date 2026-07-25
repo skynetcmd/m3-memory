@@ -124,10 +124,23 @@ def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, Any]:
                     ).fetchone()
                     counts["chatlog_rows"] = row["cnt"] if row else 0
 
+                    # Count only rows a sweeper could ACTUALLY embed. Without the
+                    # is_deleted / empty-content filters this counts tombstones
+                    # and blank turns that no backfill will ever touch, so the
+                    # number never drops to 0 and the "embed backlog N" warning
+                    # cannot clear. Keep this predicate in sync with
+                    # bin/embed_backfill.py::_build_query — a status count that
+                    # disagrees with the tool that drains it sends people hunting
+                    # for a backlog that isn't there. (Observed 2026-07-25: status
+                    # said 13011, the eligible figure was 6653; the rest were
+                    # soft-deleted.)
                     row = conn.execute(
                         "SELECT COUNT(*) as cnt FROM memory_items mi "
                         "WHERE mi.type='chat_log' "
-                        "AND mi.id NOT IN (SELECT memory_id FROM memory_embeddings)"
+                        "AND COALESCE(mi.is_deleted, 0) = 0 "
+                        "AND LENGTH(TRIM(COALESCE(mi.content, ''))) > 0 "
+                        "AND NOT EXISTS ("
+                        "SELECT 1 FROM memory_embeddings me WHERE me.memory_id = mi.id)"
                     ).fetchone()
                     counts["chatlog_without_embed"] = row["cnt"] if row else 0
                 finally:
@@ -343,19 +356,40 @@ def _compute_warnings(
     if config.redaction.enabled:
         regex_errors = state.get("redaction", {}).get("regex_errors", [])
         if regex_errors:
-            warnings.append("redaction regex compilation failed")
+            warnings.append(
+                "redaction regex compilation failed"
+                " -> fix: m3 chat chatlog_set_redaction --help (bad pattern; "
+                "turns are being stored UNREDACTED until fixed)"
+            )
+    elif row_counts.get("chatlog_rows"):
+        # Not an error, but users consistently do not know this is off: every
+        # turn -- including anything pasted into a session -- is stored verbatim.
+        # Surfacing it here is the only place they reliably look.
+        warnings.append(
+            "redaction is OFF (chat turns stored verbatim, secrets included)"
+            " -> fix: m3 chat chatlog_set_redaction --enabled true"
+            " ; retro-clean existing rows with m3 chat chatlog_rescrub"
+        )
 
     spill = state.get("spill", {})
     if spill.get("bytes", 0) > 0:
         oldest_ms = spill.get("oldest_ms_ago", 0)
         if oldest_ms > 3_600_000:
-            warnings.append("spill files older than 1h")
+            warnings.append(
+                "spill files older than 1h"
+                " -> fix: m3 chat chatlog_status (drains spill), or run "
+                "bin/chatlog_embed_sweeper.py --drain-spill"
+            )
 
     queue_state = state.get("queue", {})
     depth = queue_state.get("depth", 0)
     max_depth = queue_state.get("max", config.queue_max_depth)
     if max_depth > 0 and depth / max_depth > 0.8:
-        warnings.append(f"queue at {depth}/{max_depth}")
+        warnings.append(
+            f"queue at {depth}/{max_depth}"
+            " -> writes are backing up; check the embedder with "
+            "m3 diagnostics embedder_status"
+        )
 
     hooks = config.host_agents
     for hook_name, hook_spec in hooks.items():
@@ -375,7 +409,20 @@ def _compute_warnings(
     if "chatlog_without_embed" in row_counts:
         embed_backlog = row_counts["chatlog_without_embed"]
         if embed_backlog > 10_000:
-            warnings.append(f"embed backlog {embed_backlog}")
+            # Name the drain command AND the likely root cause. A standing
+            # backlog usually means the scheduled sweeper
+            # (AgentOS_ChatlogEmbedSweep, every 30min) is not registered or not
+            # firing -- draining by hand fixes the symptom and it silently
+            # returns. Do NOT point at `m3 diagnostics memory_doctor_fix`: it
+            # defaults to the MAIN db, so on a split topology it "succeeds"
+            # against the wrong store and leaves this backlog untouched.
+            warnings.append(
+                f"embed backlog {embed_backlog} rows unembedded "
+                "(searchable via FTS, but NOT via semantic/vector search)"
+                " -> drain: python bin/embed_backfill.py --db <chatlog-db>"
+                " ; root cause is usually the scheduled sweeper not running -- "
+                "check AgentOS_ChatlogEmbedSweep"
+            )
 
     return warnings
 
@@ -881,7 +928,13 @@ def _format_table(data: dict[str, Any]) -> str:
     if data["warnings"]:
         lines.append("Warnings:")
         for w in data["warnings"]:
-            lines.append(f"  - {w}")
+            # Warnings now carry a remedy after " -> ". Split it onto its own
+            # indented line so the problem and the fix are both readable at a
+            # glance instead of scrolling off the terminal as one long string.
+            problem, sep, remedy = w.partition(" -> ")
+            lines.append(f"  - {problem.strip()}")
+            if sep:
+                lines.append(f"      {remedy.strip()}")
     else:
         lines.append("Status: healthy")
     return "\n".join(lines)
