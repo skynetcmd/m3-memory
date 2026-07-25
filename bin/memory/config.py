@@ -79,6 +79,12 @@ _M3_ROOT = get_m3_root()
 from m3_core.paths import resolve_engine_file as _resolve_engine_file
 
 DB_PATH: str = os.environ.get("M3_DATABASE") or _resolve_engine_file("agent_memory.db")
+# DEPRECATED (2026-07-24): the archive is now the `memory_archive` table IN the
+# primary store (SQLite migration 042 / pg_047), written through the seam so it
+# works on both backends — see memory_maintenance._transfer_to_archive. The old
+# separate sidecar file this path points at was never given its table, so every
+# archive write silently no-opped. Retained only so external references and the
+# config-parity snapshot don't break; nothing in the codebase reads/writes it.
 ARCHIVE_DB_PATH: str = _resolve_engine_file("agent_memory_archive.db")
 
 # files.db (FILE_INGESTION_PLAN.md). Separate physical store with its own

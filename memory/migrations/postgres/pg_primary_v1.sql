@@ -244,6 +244,27 @@ CREATE TABLE IF NOT EXISTS agent_retention_policies (
 );
 
 -- =====================================================
+-- memory_archive (tombstone sink for maintenance-evicted items; SQLite migr. 042)
+-- =====================================================
+-- The maintenance pass records what left the live store (expiry/retention/
+-- low-importance) before soft-deleting the live row. Moved from a never-created
+-- SQLite sidecar file into the primary store so it works on both backends.
+
+CREATE TABLE IF NOT EXISTS memory_archive (
+    id              TEXT PRIMARY KEY,
+    type            TEXT,
+    title           TEXT,
+    content         TEXT,
+    agent_id        TEXT,
+    user_id         TEXT,
+    archive_reason  TEXT NOT NULL,
+    archived_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_memory_archive_user   ON memory_archive(user_id);
+CREATE INDEX IF NOT EXISTS idx_memory_archive_reason ON memory_archive(archive_reason);
+CREATE INDEX IF NOT EXISTS idx_memory_archive_at     ON memory_archive(archived_at);
+
+-- =====================================================
 -- memory_corroborations (trust/corroboration ledger)
 -- =====================================================
 

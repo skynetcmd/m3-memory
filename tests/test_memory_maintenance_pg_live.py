@@ -179,3 +179,32 @@ def test_reinforce_decay_on_pg(pg):
         if hasattr(db, "commit"):
             db.commit()
     assert decayed >= 1  # the un-reinforced belief decayed toward neutral
+
+
+def test_archive_and_gdpr_erasure_on_pg(pg):
+    """The archive (memory_archive, pg_047) is written through the seam and GDPR
+    erasure reaches it — on live PG. Regression against the old sidecar file that
+    had no PG path at all."""
+    import memory_maintenance as MM
+    from memory.backends import dialect
+    from memory.db import _db
+    p = dialect().param()
+    uid = f"arc-{uuid.uuid4().hex[:8]}"
+    mid = _write(uid, type="note", content="pg archived body")
+    with _db() as db:
+        assert MM._transfer_to_archive(mid, "expired", db) is True
+        # idempotent re-archive upserts, does not raise on the id PK
+        assert MM._transfer_to_archive(mid, "retention_limit", db) is True
+        if hasattr(db, "commit"):
+            db.commit()
+    with _db() as db:
+        rows = db.execute(f"SELECT * FROM memory_archive WHERE id = {p}", (mid,)).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["archive_reason"] == "retention_limit"
+    assert rows[0]["user_id"] == uid
+
+    # GDPR forget must purge the tombstone too.
+    MM.gdpr_forget_impl(uid)
+    with _db() as db:
+        after = db.execute(f"SELECT COUNT(*) AS c FROM memory_archive WHERE user_id = {p}", (uid,)).fetchone()
+    assert (after["c"] if hasattr(after, "keys") else after[0]) == 0

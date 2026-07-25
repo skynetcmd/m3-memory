@@ -10,7 +10,6 @@ DEFAULT_PROTECTED_TYPES = ("preference", "user_fact", "task", "plan")
 
 import memory_core
 from memory_core import (
-    ARCHIVE_DB_PATH,
     DEDUP_LIMIT,
     DEDUP_THRESHOLD,
     EMBED_DIM,
@@ -29,30 +28,55 @@ from memory_core import (
 
 logger = logging.getLogger("memory_maintenance")
 
-def _archive_conn():
-    conn = sqlite3.connect(ARCHIVE_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _row_get(row, key, default=None):
+    """Read a column from a seam row whether it exposes mapping access (both
+    backends do via the seam) or only positional — tolerating a column the row's
+    SELECT * didn't include on an older schema. Never raises."""
+    try:
+        if hasattr(row, "keys"):
+            return row[key] if key in row.keys() else default
+        return row[key]
+    except Exception:
+        return default
 
 def _transfer_to_archive(item_id, reason, db):
-    now = datetime.now(timezone.utc).isoformat()
-    # `db` is the seam connection (SQLite or PG) → dialect placeholder. The archive
-    # DB (`adb`) below is ALWAYS a direct local SQLite file (_archive_conn), so its
-    # '?'/INSERT OR REPLACE stay sqlite-native and are intentionally not dialected.
+    """Copy a memory into the archive tombstone table BEFORE the live row is
+    soft-deleted/deleted by the maintenance pass. Routed entirely through the seam
+    (`db`), so it writes to memory_archive in the PRIMARY store on both SQLite and
+    PostgreSQL — replacing the old separate SQLite sidecar file whose table was
+    never created (so every archive write silently no-opped). Idempotent: a
+    re-archive of the same id upserts on the id PK.
+
+    Wrapped in savepoint() so a failure here (e.g. pre-042 DB without the table)
+    is isolated and does NOT abort the maintenance transaction on PG — the caller
+    treats a False return as "not archived" and proceeds to delete anyway, matching
+    the historical best-effort contract."""
     from memory.backends import dialect as _dialect
-    _p = _dialect().param()
+    from memory.db import savepoint as _savepoint
+    _d = _dialect()
+    _p = _d.param()
+    now = datetime.now(timezone.utc).isoformat()
     row = db.execute(f"SELECT * FROM memory_items WHERE id = {_p}", (item_id,)).fetchone()
-    if not row: return False
-    adb = _archive_conn()
-    try:
-        adb.execute("INSERT OR REPLACE INTO archived_items (id, content, archive_reason, archived_at) VALUES (?,?,?,?)",
-                    (row["id"], row["content"], reason, now))
-        adb.commit()
-        return True
-    except Exception:
-        adb.rollback()
+    if not row:
         return False
-    finally: adb.close()
+    cols = ["id", "type", "title", "content", "agent_id", "user_id", "archive_reason", "archived_at"]
+    vals = (
+        _row_get(row, "id"), _row_get(row, "type"), _row_get(row, "title"),
+        _row_get(row, "content"), _row_get(row, "agent_id"), _row_get(row, "user_id"),
+        reason, now,
+    )
+    # Upsert on the id PK: re-archiving the same memory overwrites its tombstone
+    # rather than raising, so the pass is safe to re-run.
+    upsert = _d.on_conflict_update("(id)", [c for c in cols if c != "id"])
+    sql = (f"INSERT INTO memory_archive ({', '.join(cols)}) "
+           f"VALUES ({_d.placeholder(len(cols))}) {upsert}")
+    try:
+        with _savepoint(db):
+            db.execute(sql, vals)
+        return True
+    except Exception as e:  # noqa: BLE001 — best-effort tombstone; never block the purge
+        logger.debug(f"archive write skipped for {item_id}: {e}")
+        return False
 
 def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True, limit=0):
     import time
@@ -829,14 +853,27 @@ def gdpr_forget_impl(user_id: str, compliance: "dict | str | None" = None) -> st
             # cascades, but gdpr_forget purges by EXPLICIT enumeration and must not rely
             # on cascade firing — so delete here too. Guarded: table may not exist on a
             # DB migrated below v033. By memory_id (the surfaced pointer) AND user_id.
+            from memory.db import savepoint as _savepoint
             try:
-                db.execute(f"DELETE FROM bypass_surface WHERE memory_id IN ({placeholders})", item_ids)
-                db.execute(f"DELETE FROM bypass_surface WHERE user_id = {_p}", (user_id,))
+                with _savepoint(db):
+                    db.execute(f"DELETE FROM bypass_surface WHERE memory_id IN ({placeholders})", item_ids)
+                    db.execute(f"DELETE FROM bypass_surface WHERE user_id = {_p}", (user_id,))
             except Exception:
                 # table absent (pre-v033 SQLite, or not-yet-migrated PG) — nothing
                 # to purge. Broadened from sqlite3.OperationalError so a PG
-                # UndefinedTable doesn't abort the forget.
+                # UndefinedTable doesn't abort the forget. savepoint keeps the outer
+                # forget transaction usable on PG after the caught miss.
                 pass
+            # Erase archived tombstones too (migration 042). The archive keeps
+            # content + user_id, so an erased user's data would SURVIVE in the
+            # tombstone unless purged here — a compliance breach. By memory_id (the
+            # archived id, == the original) AND user_id. Guarded for a pre-042 DB.
+            try:
+                with _savepoint(db):
+                    db.execute(f"DELETE FROM memory_archive WHERE id IN ({placeholders})", item_ids)
+                    db.execute(f"DELETE FROM memory_archive WHERE user_id = {_p}", (user_id,))
+            except Exception:
+                pass  # memory_archive absent (pre-042) — nothing archived to erase
             # Hard-delete the items themselves
             db.execute(f"DELETE FROM memory_items WHERE user_id = {_p}", (user_id,))
 

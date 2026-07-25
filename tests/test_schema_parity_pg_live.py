@@ -55,6 +55,7 @@ _SHARED_CORE_TABLES = {
     "observation_queue",
     "gdpr_requests",
     "agent_retention_policies",
+    "memory_archive",
 }
 
 
