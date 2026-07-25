@@ -1,0 +1,57 @@
+{
+  "_doc": "Labelled derivability pairs for validating wiki.derivability_review.ModelDerivabilityJudge. Each case: a restricted SYNTHESIS + its SURVIVING sources (the GDPR-erased one removed) + ground-truth `derivable` (is the synthesis still fully supported by the surviving sources alone?). ASYMMETRIC by design: this is a GDPR fail-safe tool, so PRECISION on the 'derivable' class is the safety guard (the judge must NOT wrongly say derivable=true and suggest unrestricting content that leaned on the erased source), while recall is only a convenience (a missed-derivable page stays restricted until a human reviews it — the deterministic surviving-source floor already flags it as a candidate). Hence a HIGH precision floor and a LOOSE recall floor. Measured (2026-07-25, local model): precision 1.00, recall 0.67 (the one miss was a defensible conservative read of a generalizing paraphrase).",
+  "recall_floor": 0.5,
+  "precision_floor": 0.8,
+  "cases": [
+    {
+      "id": "fully-redundant-erased-source",
+      "derivable": true,
+      "synthesis": "The service signs JWTs with RS256.",
+      "surviving": [
+        "We chose RS256 for JWT signing so the public key verifies without sharing the secret.",
+        "The RS256 decision was recorded in the auth ADR."
+      ]
+    },
+    {
+      "id": "surviving-fully-supports",
+      "derivable": true,
+      "synthesis": "Memory is stored locally in SQLite by default.",
+      "surviving": [
+        "By default, memory lives in a local SQLite file on the user's hardware.",
+        "No cloud egress occurs in the default configuration."
+      ]
+    },
+    {
+      "id": "paraphrase-still-supported",
+      "derivable": true,
+      "synthesis": "Full-text search on PostgreSQL uses a tsvector column with a GIN index.",
+      "surviving": [
+        "On PostgreSQL, files_search uses a generated tsvector column indexed with GIN, queried via @@ to_tsquery."
+      ]
+    },
+    {
+      "id": "claim-lost-with-erased-source",
+      "derivable": false,
+      "synthesis": "Access tokens expire after 15 minutes and refresh tokens after 30 days.",
+      "surviving": [
+        "We chose RS256 for JWT signing."
+      ]
+    },
+    {
+      "id": "number-only-in-erased-source",
+      "derivable": false,
+      "synthesis": "Retrieval hits the correct session as the #1 result about 92% of the time.",
+      "surviving": [
+        "Hybrid FTS+vector search with RRF is used for retrieval."
+      ]
+    },
+    {
+      "id": "no-surviving-support-at-all",
+      "derivable": false,
+      "synthesis": "The Q3 incident was caused by a misconfigured connection pool.",
+      "surviving": [
+        "The team uses PostgreSQL with a pooled connection layer."
+      ]
+    }
+  ]
+}

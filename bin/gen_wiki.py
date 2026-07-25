@@ -91,6 +91,18 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
         drift_cache = os.path.join(out_dir, ".drift-cache")
         drift_judge = ModelDriftJudge(DriftConfig.from_env(drift_cache))
 
+    # GDPR derivability judge: model-backed refinement of the (always-on)
+    # deterministic review queue. Opt-in via --review-derivability; non-deterministic
+    # so also mutually exclusive with --check. The queue's deterministic floor
+    # (surviving-source count + 30-day SLA) renders regardless; the judge only
+    # refines the unrestrict-candidate signal.
+    derivability_judge = None
+    if getattr(args, "review_derivability", False):
+        from wiki.citation_drift import DriftConfig
+        from wiki.derivability_review import ModelDerivabilityJudge
+        deriv_cache = os.path.join(out_dir, ".deriv-cache")
+        derivability_judge = ModelDerivabilityJudge(DriftConfig.from_env(deriv_cache))
+
     # Files corpus: always a local SQLite sidecar (files_database.db), on every
     # backend — open it read-only directly. Absent → memory-only vault.
     files_conn = None
@@ -111,7 +123,8 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
         if _memory_seam is not None:
             with _memory_seam() as mem_conn:
                 vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer,
-                                  drift_judge=drift_judge)
+                                  drift_judge=drift_judge,
+                                  derivability_judge=derivability_judge)
         else:
             # Fallback (payload not importable): the legacy local-SQLite path.
             mem_path = _memory_db_path()
@@ -122,7 +135,8 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
             mem_conn = _open_ro_sqlite(mem_path)
             try:
                 vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer,
-                                  drift_judge=drift_judge)
+                                  drift_judge=drift_judge,
+                                  derivability_judge=derivability_judge)
             finally:
                 mem_conn.close()
     finally:
@@ -133,6 +147,8 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
         print(synthesizer.summary(), file=sys.stderr)
     if drift_judge is not None:
         print(drift_judge.summary(), file=sys.stderr)
+    if derivability_judge is not None:
+        print(derivability_judge.summary(), file=sys.stderr)
     return vault
 
 
@@ -240,9 +256,12 @@ def _check_vault(vault: dict[str, str], out_dir: str) -> int:
 
 def _cmd_generate(args: argparse.Namespace) -> int:
     out_dir = args.out or _default_out()
-    if args.check and (getattr(args, "synthesize", False)
-                       or getattr(args, "check_drift", False)):
-        offender = "--synthesize" if getattr(args, "synthesize", False) else "--check-drift"
+    _model_flags = [("--synthesize", getattr(args, "synthesize", False)),
+                    ("--check-drift", getattr(args, "check_drift", False)),
+                    ("--review-derivability", getattr(args, "review_derivability", False))]
+    _active = [name for name, on in _model_flags if on]
+    if args.check and _active:
+        offender = _active[0]
         print(f"--check and {offender} are mutually exclusive: model output is not "
               "bit-reproducible, so the drift check runs on the deterministic vault "
               f"only (drop {offender}).", file=sys.stderr)
@@ -403,6 +422,12 @@ def _add_generate_args(p: argparse.ArgumentParser) -> None:
                         "each synthesis against the sources it was compiled from and "
                         "flags claims that no longer match (report-only; opt-in; cached; "
                         "fail-open if no model). Mutually exclusive with --check.")
+    p.add_argument("--review-derivability", action="store_true",
+                   help="Refine the GDPR derivability review queue with a local chat "
+                        "model: for each synthesis restricted by an erasure, judge "
+                        "whether it is still derivable from its surviving sources "
+                        "(report-only; the deterministic queue renders regardless; "
+                        "fail-safe if no model). Mutually exclusive with --check.")
     p.add_argument("--importance-threshold", type=float, default=None,
                    help="Min importance for a memory to count as 'core' (default 0.55).")
     p.add_argument("--exclude", default=None, metavar="REGEX",

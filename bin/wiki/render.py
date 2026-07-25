@@ -16,6 +16,7 @@ from . import anchor as _anchor
 from . import authority as _authority
 from . import blast_radius as _blast
 from . import citation_drift as _citation_drift
+from . import derivability_review as _derivability
 from .cluster import Cluster
 from .files_layer import FileNode, FilesLayer
 from .select import Edge, Mem, Promo
@@ -193,6 +194,7 @@ def render_pages(
     ledes: Optional[dict[str, str]] = None,
     obsidian: bool = False,
     drift_judge=None,
+    derivability_judge=None,
 ) -> dict[str, str]:
     """Build the full vault as {relpath: markdown}.
 
@@ -268,7 +270,8 @@ def render_pages(
     pages["index.md"] = _render_index(topic_clusters, topic_slugs, files, source_slugs, links, bool(orphan_members))
     pages["overview.md"] = _render_overview(clusters, files, links)
     pages["lint.md"] = _render_lint(clusters, edges, mem_to_topic, topic_slugs,
-                                    links, drift_judge=drift_judge)
+                                    links, drift_judge=drift_judge,
+                                    derivability_judge=derivability_judge)
     pages["about.md"] = _render_about(links)
 
     return pages
@@ -755,7 +758,7 @@ Full guide: the `docs/WIKI.md` file in the m3-memory repository."""
 
 
 def _render_lint(clusters, edges, mem_to_topic, topic_slugs, links: "LinkResolver",
-                 drift_judge=None) -> str:
+                 drift_judge=None, derivability_judge=None) -> str:
     SELF = "lint.md"
     orphans = [m for c in clusters if c.is_orphan for m in c.members]
     # Dangling: edges pointing at a memory not in the core set were already
@@ -796,31 +799,17 @@ def _render_lint(clusters, edges, mem_to_topic, topic_slugs, links: "LinkResolve
     # no new query. A file-based wiki can't compute this; m3's provenance edges
     # can. Section is always emitted (count 0 when clean) so its absence never
     # reads as "not checked".
-    # Restricted (GDPR Art. 17): syntheses whose source was erased. `restricted`
-    # already halts rendering per topic; this section surfaces the full review
-    # queue in one place (plan G3.5 — "never only a column") so a reviewer can
-    # find every page awaiting a derivability decision. Deterministic metadata
-    # scan, no model, no query.
-    restricted = []
-    for c in clusters:
-        for m in c.members:
-            if m.type == "synthesis" and _authority.is_restricted(m.metadata):
-                recs = (m.metadata.get("review") or {}).get("erasure_records") or []
-                restricted.append((m, len(recs)))
-    lines.append(f"## Restricted — GDPR review ({len(restricted)})")
-    lines.append("")
-    if restricted:
-        lines.append("_Source memories were erased (Art. 17). These pages are "
-                     "withheld from rendering pending a derivability review — the "
-                     "prose may be unaffected if the erased member was redundant._")
-        lines.append("")
-        for m, nrec in sorted(restricted, key=lambda t: t[0].rank_key()):
-            plural = "erasure" if nrec == 1 else "erasures"
-            lines.append(f"- {m.display_title} · `id:{m.id[:8]}` · "
-                         f"{nrec} {plural}")
-    else:
-        lines.append("_No synthesis is restricted; no erased sources to review._")
-    lines.append("")
+    # GDPR derivability review (Art. 17): syntheses whose source was erased.
+    # `restricted` already halts rendering per topic; this section is the full
+    # review QUEUE in one place (plan G3.5 — "never only a column") with the
+    # derivability signal a reviewer needs: whether surviving provenance sources
+    # remain (unrestrict candidate vs orphaned) and whether the 30-day review SLA
+    # is breached. Deterministic floor (surviving-source count + age), no model;
+    # the optional `derivability_judge` refines it when injected. Always emitted
+    # (count 0 when clean) so its absence never reads as "not reviewed".
+    review_report = _derivability.build_queue(clusters, edges,
+                                              judge=derivability_judge)
+    lines.extend(_derivability.render_section(review_report))
 
     wrong = sorted(_blast.wrong_ids(clusters))
     tainted = sorted(_blast.contaminated(clusters, edges))

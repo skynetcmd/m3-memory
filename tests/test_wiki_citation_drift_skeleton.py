@@ -125,7 +125,8 @@ def test_cli_check_drift_builds_a_judge_that_threads_into_build_wiki(monkeypatch
     import gen_wiki
     captured = {}
 
-    def _fake_build_wiki(mem_conn, files_conn, opts, synthesizer=None, drift_judge=None):
+    def _fake_build_wiki(mem_conn, files_conn, opts, synthesizer=None,
+                         drift_judge=None, derivability_judge=None):
         captured["drift_judge"] = drift_judge
         return {"lint.md": ""}
 
