@@ -314,8 +314,17 @@ def _reap(path: Path) -> None:
 # cmdline substrings that identify each writer (the precise, preferred match).
 _WRITER_CMDLINE_SIGNATURES = {
     "cognitive-loop": ("m3_cognitive_loop.py",),
-    "embed-server": ("embed_server_inproc.py",),
-    "mcp": ("mcp-memory", "mcp_proxy.py"),
+    # Both the in-process Python server and the Rust binary hold the embedding
+    # path open; the Rust one is what `m3 embedder install` registers as a
+    # service, so it is the copy actually running on most installs.
+    "embed-server": ("embed_server_inproc.py", "m3-embed-server"),
+    # `mcp-memory` is the legacy console script, but the Claude Code plugin
+    # launches the server as bare `m3` (mcp_config.json -> command: "m3"), which
+    # matched NOTHING here: the MCP server — the longest-lived DB writer on a
+    # normal desktop — was invisible to every pre-flight scan. Match the m3
+    # launcher too, anchored on a path separator so it cannot match an unrelated
+    # process that merely contains "m3".
+    "mcp": ("mcp-memory", "mcp_proxy.py", "/m3.exe", "\\m3.exe", "/m3 ", "\\m3 "),
 }
 # Fallback process-NAME substrings, used when a process's cmdline is unreadable —
 # which happens for an ELEVATED process when the installer runs unprivileged
@@ -324,7 +333,13 @@ _WRITER_CMDLINE_SIGNATURES = {
 # reported as the ambiguous "m3?(elevated)" role: enough to STOP and prompt,
 # never enough to silently proceed. mcp-memory(.exe) is unambiguous by name.
 _WRITER_NAME_SIGNATURES = {
-    "mcp": ("mcp-memory",),
+    "mcp": ("mcp-memory", "m3.exe"),
+    # The Rust embed server runs with an EMPTY cmdline on Windows even
+    # unprivileged, so the cmdline pass never sees it and only the name
+    # fallback can. It was matching nothing at all: a running embed server was
+    # invisible to the pre-flight, and a migration would proceed with it
+    # holding the embedding DB open.
+    "embed-server": ("m3-embed-server",),
 }
 _INTERPRETER_NAMES = ("python", "pythonw", "python3")
 

@@ -1078,13 +1078,31 @@ async def main_loop(args):
     # were ported/guarded and verified on PG, so the gate was removed.)
     logger.info(f"Cognitive Loop heartbeat started. Interval: {args.interval}s")
 
-    # Register signal handlers for graceful shutdown
+    # Register signal handlers for graceful shutdown.
+    #
+    # asyncio's add_signal_handler is POSIX-only: on Windows it raises
+    # NotImplementedError for BOTH SIGINT and SIGTERM, so the bare `pass` below
+    # left the loop with NO graceful-shutdown path on the platform where m3 runs
+    # as a scheduled task. A SIGTERM (or `taskkill`) then killed it mid-write
+    # instead of letting it checkpoint and deregister — exactly the torn-WAL
+    # outcome the HALT protocol exists to avoid, and it also orphaned its PID
+    # registry entry so the next pre-flight saw a phantom writer.
+    #
+    # signal.signal() DOES work on Windows for SIGINT/SIGTERM. It fires on the
+    # main thread rather than the event loop, so the handler only flips the
+    # shutdown flag (never touches loop state) — the loop notices on its next
+    # tick and unwinds through the normal path.
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, _signal_handler)
-        except NotImplementedError:
-            pass
+        except (NotImplementedError, AttributeError, ValueError):
+            try:
+                signal.signal(sig, lambda _s, _f: _signal_handler())
+            except (OSError, ValueError, AttributeError):
+                # Genuinely unavailable (e.g. non-main thread). The atexit
+                # deregister below is the last net.
+                logger.debug(f"No handler installable for {sig!r}")
 
     # Register as a live DB-holder so an exclusive op (migration/backup) can
     # discover us and wait for us to quiesce. Deregistered on clean exit; also
