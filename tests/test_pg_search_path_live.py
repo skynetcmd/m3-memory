@@ -102,9 +102,22 @@ def pg_seeded(monkeypatch):
                 (mid, _blob(vec), dim, model),
             )
     yield qvec, [i[0] for i in items]
+    # Teardown must restore the SCHEMA, not just delete the rows. This fixture
+    # deliberately drops memory_items and rebuilds a MINIMAL shape (no agent_id,
+    # no updated_at) to own the search_vector column. Deleting rows leaves that
+    # stripped table in place for the whole session, so the next test whose
+    # ensure_schema() applies a migration touching agent_id fails with
+    # `UndefinedColumn: column "agent_id" does not exist`.
+    #
+    # Observed 2026-07-26: passing alone and in the file pair, this file poisoned
+    # test_run_observer_pg_live.py (2 errors) in the full `-m requires_pg` run.
+    # Dropping the tables and clearing _schema_ready makes the NEXT
+    # ensure_schema() rebuild the full shape.
     with b.connection() as c:
-        c.cursor().execute("DELETE FROM memory_embeddings WHERE memory_id LIKE 'sp_%'")
-        c.cursor().execute("DELETE FROM memory_items WHERE id LIKE 'sp_%'")
+        c.cursor().execute(
+            "DROP TABLE IF EXISTS memory_embeddings, memory_items CASCADE"
+        )
+    b._schema_ready = False
     b.close()
 
 
