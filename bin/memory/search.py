@@ -423,6 +423,47 @@ def _mc_callable(mc, name: str, default):
     return val if callable(val) else default
 
 
+def _fts_candidate_rows(conn, fts_query, *, limit, scope_sql, scope_params,
+                        extra_cols_sql=""):
+    """Run THE bm25-ranked FTS candidate query. One definition, two callers.
+
+    This query existed twice, byte-identical apart from the row limit: once in
+    ``_fts_only_results`` (the embedder-down fallback, limit=k) and once in the
+    exact-substring short-circuit inside ``memory_search_scored_impl``
+    (limit=max(k*4, 20)). Duplicated query assembly is what let the row-scoping
+    predicates drift between paths on 2026-07-26 — three copies got a tenancy
+    fix, only one got type_filter/agent_filter, and filtered searches silently
+    returned unfiltered rows. Extracting it means there is one place for a
+    predicate to be missing from, and it cannot be missing from only one caller.
+
+    SQLITE-ONLY BY CONSTRUCTION, and that is not an oversight:
+    ``memory_items_fts`` / ``bm25()`` are FTS5, a SQLite virtual-table feature
+    with no PostgreSQL equivalent. Both callers already sit behind a
+    ``backend.name == "sqlite"`` gate — PG reaches the same queries through
+    ``search_pg.fetch_candidates_pg`` (tsvector), which is the portable path.
+    So the literal ``?`` placeholders here are correct rather than a seam
+    violation; ``scope_sql``/``scope_params`` still arrive from
+    ``Dialect.scope_predicates`` so the predicates themselves stay singular.
+    Do not "fix" the placeholders — fix the caller if it ever runs off SQLite.
+
+    Returns raw ``sqlite3.Row`` objects, bm25-ascending. Callers own their own
+    post-filtering (the short-circuit applies an exact-substring gate) and their
+    own scoring, because those genuinely differ.
+    """
+    return conn.execute(
+        f"""
+        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance{extra_cols_sql},
+               bm25(memory_items_fts) AS _bm25
+        FROM memory_items_fts fts
+        JOIN memory_items mi ON fts.rowid = mi.rowid
+        WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0{scope_sql}
+        ORDER BY _bm25 ASC
+        LIMIT ?
+        """,
+        (fts_query, *scope_params, limit),
+    ).fetchall()
+
+
 def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns,
                       type_filter="", agent_filter=""):
     """Bm25-ranked FTS keyword results, in the memory_search_scored_impl row shape.
@@ -473,18 +514,11 @@ def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns,
             type_filter=type_filter, agent_filter=agent_filter,
         )
         with _db() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT mi.id, mi.content, mi.title, mi.type, mi.importance{extra_cols_sql},
-                       bm25(memory_items_fts) AS _bm25
-                FROM memory_items_fts fts
-                JOIN memory_items mi ON fts.rowid = mi.rowid
-                WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0{tenancy_sql}
-                ORDER BY _bm25 ASC
-                LIMIT ?
-                """,
-                (fts_query, *tenancy_params, k),
-            ).fetchall()
+            rows = _fts_candidate_rows(
+                conn, fts_query, limit=k,
+                scope_sql=tenancy_sql, scope_params=tenancy_params,
+                extra_cols_sql=extra_cols_sql,
+            )
         out = []
         for row in rows:
             hit = dict(row)
@@ -679,18 +713,13 @@ async def memory_search_scored_impl(
                     # down — so a purely lexical, FTS-satisfiable query silently
                     # yielded nothing. Now: keep ALL top-N rows whose content or
                     # title contains the exact query substring, bm25-ranked.
-                    fts_rows = conn.execute(
-                        f"""
-                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance{extra_cols_sql},
-                               bm25(memory_items_fts) AS _bm25
-                        FROM memory_items_fts fts
-                        JOIN memory_items mi ON fts.rowid = mi.rowid
-                        WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0{_tenancy_sql}
-                        ORDER BY _bm25 ASC
-                        LIMIT ?
-                        """,
-                        (fts_query, *_tenancy_params, max(k * 4, 20)),
-                    ).fetchall()
+                    # Over-fetch (k*4, floor 20): the exact-substring gate
+                    # below discards most rows, so a bare `k` would starve it.
+                    fts_rows = _fts_candidate_rows(
+                        conn, fts_query, limit=max(k * 4, 20),
+                        scope_sql=_tenancy_sql, scope_params=_tenancy_params,
+                        extra_cols_sql=extra_cols_sql,
+                    )
                     query_lower = query.lower()
                     exact_hits = []
                     for row in fts_rows:
