@@ -132,6 +132,65 @@ class TestSqliteKeywordSearch:
         assert {h.memory_id for h in hits} == {"u1"}
 
 
+class TestTsqueryModeMirrorsFts5:
+    """`search_mode` must change the tsquery, mirroring FTS5's own operators.
+
+    REGRESSION (2026-07-26). _compile_tsquery's unquoted multi-token path fell
+    through to `" | ".join(toks)` in BOTH modes — the same OR as fts5 mode — so
+    search_mode was accepted and SILENTLY IGNORED on PostgreSQL while SQLite
+    honoured it. Verified live against PG 16.14 before and after.
+
+    These assert the OPERATOR each mode compiles to, and thus set MEMBERSHIP
+    (which documents match). They deliberately do NOT assert cross-backend row
+    order or scores: PG has no bm25, so ts_rank + m3's fuzzy bm25-like handling
+    ranks differently BY DESIGN. Order is not the contract; the matched set is.
+    """
+
+    @pytest.mark.parametrize(
+        "query,mode,fts5_op,ts_op",
+        [
+            # fts5 mode: OR / |
+            ("portable m3 command", "fts5", " OR ", " | "),
+            ("core tenets", "fts5", " OR ", " | "),
+            # hybrid: FTS5 leaves tokens space-separated == IMPLICIT AND; the
+            # tsquery analogue is & (NOT <->, which is stricter adjacency).
+            ("portable m3 command", "hybrid", " ", " & "),
+            ("core tenets", "hybrid", " ", " & "),
+        ],
+    )
+    def test_operator_per_mode(self, query, mode, fts5_op, ts_op):
+        fts, ok_f = _compile_fts_query(query, mode)
+        ts, ok_t = _compile_tsquery(query, mode)
+        assert ok_f is ok_t is True
+        assert fts_op_present(fts, fts5_op), f"fts5 {mode}: {fts!r}"
+        assert ts_op in ts, f"tsquery {mode}: {ts!r}"
+
+    def test_modes_actually_differ_on_postgres(self):
+        """The bug in one line: hybrid and fts5 must NOT compile identically."""
+        q = "portable m3 command"
+        assert _compile_tsquery(q, "hybrid")[0] != _compile_tsquery(q, "fts5")[0]
+
+    def test_quoted_phrase_uses_adjacency_not_and(self):
+        """Adjacency stays reserved for the explicitly quoted branch."""
+        ts, ok = _compile_tsquery('"portable m3 command"', "hybrid")
+        assert ok and ts == "portable <-> m3 <-> command"
+        # ...and FTS5 likewise keeps the quotes, rather than AND-ing.
+        assert _compile_fts_query('"portable m3 command"', "hybrid")[0].startswith('"')
+
+    def test_single_token_wildcards_in_both_modes(self):
+        """Single-token behaviour is mode-independent and must stay so."""
+        for mode in ("fts5", "hybrid"):
+            assert _compile_tsquery("solo", mode)[0] == "solo:*"
+            assert _compile_fts_query("solo", mode)[0] == "solo*"
+
+
+def fts_op_present(compiled: str, op: str) -> bool:
+    """FTS5 hybrid mode joins with a bare space, so ' ' means 'no OR/AND word'."""
+    if op == " ":
+        return " " in compiled and " OR " not in compiled
+    return op in compiled
+
+
 class TestKeywordSearchWithRowDataMatchMode:
     """``search_mode`` must reach the compiler — the phrase/OR distinction.
 

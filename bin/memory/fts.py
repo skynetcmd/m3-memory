@@ -280,7 +280,22 @@ def _compile_tsquery(query: str, mode: str) -> tuple[str, bool]:
     # hybrid / semantic fallback: single alnum token gets a prefix wildcard
     if len(toks) == 1 and toks[0].isalnum():
         return f"{toks[0]}:*", True
-    return " | ".join(toks), True
+    # Multi-token: AND (`&`), mirroring FTS5's IMPLICIT AND for an unquoted
+    # multi-token query. _compile_fts_query's hybrid branch returns the bare
+    # `clean` string, and FTS5 treats space-separated tokens as AND — verified
+    # 2026-07-26: `portable m3 command` matches docs containing all three in
+    # ANY order, and does NOT match a doc with only one.
+    #
+    # This previously fell through to `" | ".join(toks)` — the SAME OR as fts5
+    # mode — so `search_mode` was accepted and SILENTLY IGNORED on PostgreSQL
+    # for unquoted multi-token queries, while SQLite honoured it.
+    #
+    # `&` and NOT `<->` (FOLLOWED BY): <-> is adjacency, which is STRICTER than
+    # FTS5's implicit AND and would reject the scrambled-order document SQLite
+    # accepts — trading one parity break for its mirror image. Adjacency is
+    # reserved for the EXPLICITLY QUOTED branch above, which is where FTS5 puts
+    # it too.
+    return " & ".join(toks), True
 
 
 # ──────────────────────────────────────────────────────────────────────────────

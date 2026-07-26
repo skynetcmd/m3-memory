@@ -258,28 +258,37 @@ class StorageBackend(Protocol):
         recall — because that is the safe default for a caller that ranks
         afterwards; the early-returning caller opts in explicitly.
 
-        HONOURED ON SQLITE; ADVISORY ON POSTGRES — verified live against PG
-        16.14 on 2026-07-26. ``_compile_tsquery`` only emits a phrase (``<->``)
-        for an EXPLICITLY QUOTED query; an unquoted multi-token query falls
-        through to ``a | b`` in BOTH modes, so "hybrid" and "fts5" compile
-        identically. PG therefore ignores this argument for unquoted queries.
+        HONOURED ON BOTH BACKENDS — verified live against PG 16.14 on
+        2026-07-26. Each mode compiles to the operator its backend uses for that
+        semantic, so the MATCHED SET agrees:
 
-        That is currently harmless, and the reason is worth stating because it
-        is NOT luck: the non-monotonicity above is a BM25 artifact. bm25's
-        length normalisation scores short single-token filler docs ABOVE a
-        longer document containing the phrase, so the substring gate starves.
-        PostgreSQL has no bm25 — ``ts_rank`` plus m3's fuzzy bm25-like handling
-        ranks the 3-of-3-token match above 1-of-3 filler, so phrase recall stays
-        monotonic under the OR compile (verified: 1 phrase hit at every limit
-        from 2 to 60 where SQLite gave 0 at 20 and 1 at 160).
+          fts5   -> FTS5 ``a OR b``      / tsquery ``a | b``   (any token)
+          hybrid -> FTS5 ``a b``         / tsquery ``a & b``   (all tokens)
+          quoted -> FTS5 ``"a b"``       / tsquery ``a <-> b`` (adjacent)
 
-        Do NOT "fix" this by asserting cross-backend result identity. Wherever
-        bm25 intersects, SQLite and PG results are NOT byte-identical BY DESIGN
-        — different rankers, different scales (see the score note above and
-        §8.2). The contract is the SHAPE and the ordering CONVENTION, not the
-        row order. What SHOULD be tightened is _compile_tsquery growing a real
-        unquoted-phrase form, so the parameter stops being silently advisory on
-        one backend; tracked as an m3 to-do.
+        Note hybrid maps to AND, not adjacency: an unquoted multi-token FTS5
+        query is an IMPLICIT AND (order-insensitive), so ``&`` is the mirror and
+        ``<->`` would be stricter than SQLite. Adjacency stays reserved for the
+        explicitly quoted branch, which is where FTS5 puts it too.
+
+        This was broken until 2026-07-26: ``_compile_tsquery`` fell through to
+        ``a | b`` in BOTH modes, so PG accepted this argument and silently
+        ignored it while SQLite honoured it.
+
+        MATCHED SET, NOT ROW ORDER. Wherever bm25 intersects, SQLite and PG
+        results are NOT byte-identical BY DESIGN — PG has no bm25, and ts_rank
+        plus m3's fuzzy bm25-like handling ranks differently (see the score note
+        above and §8.2). Do not write a test asserting cross-backend row order
+        or score equality; assert the matched SET and the lower-is-better
+        ordering CONVENTION.
+
+        A live consequence of that difference: the NON-MONOTONICITY above is a
+        bm25 artifact. bm25's length normalisation scores short single-token
+        filler docs ABOVE a longer document containing the phrase, starving an
+        exact-substring gate (SQLite: 0 hits at limit=20, 1 at limit=160). PG's
+        ts_rank ranks a 3-of-3-token match above 1-of-3 filler, so it stayed
+        monotonic even before this fix — its safety came from the ranker, not
+        from the compile. Now it comes from both.
 
         WHY THIS EXISTS: the SQLite search path had TWO inline copies of a
         rank-then-hydrate FTS query (the exact-substring short-circuit and the
