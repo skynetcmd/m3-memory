@@ -76,6 +76,12 @@ def _strip_comments_and_docstrings(src: str) -> str:
     Both are legitimate places to NAME the removed literal (this change
     documents what it removed and why). Only a live default is the defect, so
     drop comments and docstrings before grepping.
+
+    CAUTION: ast.unparse normalises string QUOTES to single quotes, so a
+    double-quoted needle will never match the output. Callers must search
+    quote-agnostically — see _contains_literal. A guard that cannot fail is
+    worse than no guard, and this one silently passed against a deliberately
+    reverted call site until that was found.
     """
     import ast
 
@@ -95,6 +101,16 @@ def _strip_comments_and_docstrings(src: str) -> str:
             body[0].value.value = ""
     # ast.unparse drops comments for free — they are not in the tree.
     return ast.unparse(tree)
+
+
+def _contains_literal(code: str, needle: str) -> bool:
+    """Quote-agnostic substring search over ast.unparse output.
+
+    ast.unparse re-emits every string with SINGLE quotes, so searching for
+    '"/v1/chat/completions"' against it always fails. Normalise both sides.
+    """
+    return needle.replace('"', "'") in code.replace('"', "'")
+
 
 
 class TestDiscoverModelSync:
@@ -212,7 +228,7 @@ class TestCallersDoNotHardcodeNames:
         """
         src = (Path(_BIN) / module).read_text(encoding="utf-8")
         code = _strip_comments_and_docstrings(src)
-        assert literal not in code, (
+        assert not _contains_literal(code, literal), (
             f"{module} still names {literal!r} outside a comment — "
             "model names belong in an override, never a fallback"
         )
@@ -303,3 +319,221 @@ class TestAuthHeaderOmittedWhenTokenless:
         src = inspect.getsource(getattr(L, fn))
         assert "_auth_headers(token)" in src, f"{fn} builds its own auth header"
         assert 'f"Bearer {token}"' not in src, f"{fn} still inlines the header"
+
+
+class TestPrewarm:
+    """Pay the model load cost once, before a batch — not on the first file.
+
+    MEASURED 2026-07-26 against a live Ollama: a generative model's first
+    request after idle took 27.05s versus 0.13s warm (209x), against a 30.0s
+    per-call timeout in summarize._llm_call — a ~3 second margin. On timeout
+    _llm_call returns None, so the file is silently summarised WITHOUT the LLM
+    and nothing explains why.
+
+    Ollama makes this reachable in normal use: /v1/models lists INSTALLED
+    models, not LOADED ones (verified: 0 loaded while 2 listed), so discovery
+    selects a model that is not resident. LM Studio serves what is already
+    loaded, which is why this never bit there.
+
+    Verified end-to-end against live Ollama 0.32.4: 0 models loaded ->
+    prewarm() 12.67s -> 1 loaded -> first real call 0.34s.
+    """
+
+    def _env(self, monkeypatch):
+        monkeypatch.setenv("M3_FILES_SUMMARY_URL", "http://x")
+        monkeypatch.setenv("M3_FILES_SUMMARY_MODEL", "m")
+
+    def test_returns_false_without_an_endpoint(self, monkeypatch):
+        from files_memory import summarize
+
+        monkeypatch.delenv("M3_FILES_SUMMARY_URL", raising=False)
+        monkeypatch.delenv("M3_LMSTUDIO_URL", raising=False)
+        assert summarize.prewarm() is False
+
+    def test_returns_false_when_no_model_resolves(self, monkeypatch):
+        """No model => nothing to warm. Must not POST {"model": null}."""
+        from files_memory import summarize
+
+        monkeypatch.setenv("M3_FILES_SUMMARY_URL", "http://x")
+        monkeypatch.delenv("M3_FILES_SUMMARY_MODEL", raising=False)
+        _fake_httpx(monkeypatch, {"data": []})  # discovery finds nothing
+        assert summarize.prewarm() is False
+
+    def test_posts_max_tokens_one_to_the_resolved_model(self, monkeypatch):
+        """The cost being paid is the LOAD, not the decode."""
+        from files_memory import summarize
+
+        self._env(monkeypatch)
+        cap: dict = {}
+
+        class _C:
+            def __init__(self, *a, **k):
+                cap["timeout"] = k.get("timeout")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def post(self, url, headers=None, json=None):
+                cap["url"], cap["json"] = url, json
+                return _Resp({"choices": [{"message": {"content": "x"}}]})
+
+        import httpx
+
+        monkeypatch.setattr(httpx, "Client", _C)
+        assert summarize.prewarm() is True
+        assert cap["json"]["model"] == "m"
+        assert cap["json"]["max_tokens"] == 1
+        # Endpoint convention in files_memory: the base does NOT carry /v1,
+        # the caller appends it. Getting this wrong yields /v1/v1/... and a 404.
+        assert cap["url"] == "http://x/v1/chat/completions"
+
+    def test_uses_a_generous_separate_timeout(self, monkeypatch):
+        """Pre-warm is EXPECTED to be slow; it must not inherit the 30s
+        per-call timeout it exists to protect."""
+        from files_memory import summarize
+
+        self._env(monkeypatch)
+        cap: dict = {}
+
+        class _C:
+            def __init__(self, *a, **k):
+                cap["timeout"] = k.get("timeout")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def post(self, *a, **k):
+                return _Resp({"ok": 1})
+
+        import httpx
+
+        monkeypatch.setattr(httpx, "Client", _C)
+        summarize.prewarm()
+        assert cap["timeout"] >= 60, "must exceed the 30s per-call timeout"
+
+    def test_never_raises_so_a_batch_is_never_gated_on_it(self, monkeypatch):
+        """Non-fatal by contract: an unwarmed batch still runs, exactly as it
+        did before pre-warming existed."""
+        from files_memory import summarize
+
+        self._env(monkeypatch)
+
+        class _Boom:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def post(self, *a, **k):
+                raise RuntimeError("server on fire")
+
+        import httpx
+
+        monkeypatch.setattr(httpx, "Client", _Boom)
+        assert summarize.prewarm() is False  # not an exception
+
+    def test_non_200_is_false_not_an_exception(self, monkeypatch):
+        from files_memory import summarize
+
+        self._env(monkeypatch)
+
+        class _C:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def post(self, *a, **k):
+                return _Resp({"error": "nope"}, status=503)
+
+        import httpx
+
+        monkeypatch.setattr(httpx, "Client", _C)
+        assert summarize.prewarm() is False
+
+
+class TestChatCompletionsUrl:
+    """One URL convention, tolerant of both forms users actually have.
+
+    BUG (fixed 2026-07-26). files_memory built its URL as
+    ``endpoint.rstrip("/") + "/v1/chat/completions"``, so its base had to OMIT
+    /v1 — while everywhere ELSE in the codebase the base INCLUDES it
+    (llm_failover._LMSTUDIO_ENDPOINT / _OLLAMA_ENDPOINT,
+    m3_core.runtime.LM_STUDIO_BASE, mcp_proxy.LMSTUDIO_BASE, and the documented
+    M3_LLM_URL examples). Pasting the same base URL you give LM Studio or
+    Ollama into M3_FILES_SUMMARY_URL yielded /v1/v1/chat/completions and a 404.
+
+    The failure was QUIET: _llm_call returns None on any error, so the file was
+    simply summarised without the LLM and nothing said why. Hit while testing
+    pre-warm — the 404 only became visible because the pre-warm logs it.
+
+    Fixed by accepting BOTH rather than picking a winner and breaking whichever
+    config a user already has. Verified live against Ollama: all three base
+    forms return a real summary.
+    """
+
+    @pytest.mark.parametrize(
+        "base",
+        [
+            "http://localhost:1234",
+            "http://localhost:1234/",
+            "http://localhost:1234/v1",
+            "http://localhost:1234/v1/",
+        ],
+    )
+    def test_all_base_forms_normalise_identically(self, base):
+        from files_memory.config import chat_completions_url
+
+        assert chat_completions_url(base) == "http://localhost:1234/v1/chat/completions"
+
+    def test_never_doubles_the_v1_segment(self):
+        """The actual defect, stated directly."""
+        from files_memory.config import chat_completions_url
+
+        for base in ("http://h/v1", "http://h/v1/", "http://h"):
+            assert "/v1/v1/" not in chat_completions_url(base)
+
+    def test_preserves_a_path_prefix(self):
+        """A reverse-proxied deployment may live under a subpath; only a
+        TRAILING /v1 is the version segment we own."""
+        from files_memory.config import chat_completions_url
+
+        assert (
+            chat_completions_url("http://h/openai/v1")
+            == "http://h/openai/v1/chat/completions"
+        )
+        # ...and a path segment that merely CONTAINS v1 is not stripped.
+        assert (
+            chat_completions_url("http://h/v1beta")
+            == "http://h/v1beta/v1/chat/completions"
+        )
+
+    @pytest.mark.parametrize(
+        "module", ["summarize", "extract", "carry_forward"],
+    )
+    def test_no_caller_hand_builds_the_url(self, module):
+        """All three LLM callers must route through the one builder.
+
+        Textual because the bug was four hand-maintained copies of the same
+        concatenation; a behavioural test on one would not catch the others.
+        """
+        src = (Path(_BIN) / "files_memory" / f"{module}.py").read_text(encoding="utf-8")
+        code = _strip_comments_and_docstrings(src)
+        assert not _contains_literal(code, '"/v1/chat/completions"'), (
+            f"{module}.py still hand-builds the chat URL; use "
+            "config.chat_completions_url so both base forms work"
+        )

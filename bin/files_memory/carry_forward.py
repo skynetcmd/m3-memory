@@ -269,10 +269,10 @@ def judge_material_change(old_text: str, new_text: str) -> tuple[Optional[bool],
 
     import httpx
 
-    from .config import llm_auth_headers
+    from .config import chat_completions_url, llm_auth_headers
 
     user_content = f"OLD VERSION:\n{old_text[:3000]}\n\nNEW VERSION:\n{new_text[:3000]}"
-    url = endpoint.rstrip("/") + "/v1/chat/completions"
+    url = chat_completions_url(endpoint)
     try:
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(

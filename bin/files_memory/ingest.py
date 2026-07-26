@@ -716,6 +716,21 @@ def ingest_path(
                             force_size=force_size, stats=walk_stats,
                             repo_root=repo_root)
 
+    # Pay the model load cost ONCE, before the loop, instead of letting the
+    # first file pay it against a 30s per-call timeout. Measured 2026-07-26
+    # against a live Ollama: 27.05s cold vs 0.13s warm (209x) — a ~3s margin,
+    # and on timeout _llm_call just returns None so the file is silently
+    # summarised without the LLM. Deliberately AFTER the dry-run early return
+    # (a dry run must not touch the network) and OUTSIDE the loop.
+    #
+    # Non-fatal by contract: a False here means the batch runs unwarmed exactly
+    # as it did before, so nothing is gated on the pre-warm succeeding.
+    if not dry_run:
+        from .summarize import llm_available, prewarm
+
+        if llm_available():
+            prewarm()
+
     idx = 0
     for entry in entries_iter:
         idx += 1

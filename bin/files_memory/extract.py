@@ -138,7 +138,7 @@ def _llm_call(content: str, max_tokens: int = 1024) -> Optional[str]:
         return None
     import httpx
 
-    from .config import llm_auth_headers
+    from .config import chat_completions_url, llm_auth_headers
 
     # Resolve the model BEFORE the request: a discovery miss must skip the call,
     # not POST {"model": null}.
@@ -151,7 +151,7 @@ def _llm_call(content: str, max_tokens: int = 1024) -> Optional[str]:
         )
         return None
 
-    url = endpoint.rstrip("/") + "/v1/chat/completions"
+    url = chat_completions_url(endpoint)
     try:
         with httpx.Client(timeout=60.0) as client:
             resp = client.post(

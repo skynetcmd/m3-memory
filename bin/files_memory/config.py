@@ -223,6 +223,38 @@ BUILTIN_EXT_IGNORES: frozenset[str] = frozenset({
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# OpenAI-compatible URL building — tolerant of a base with OR without /v1
+# ──────────────────────────────────────────────────────────────────────────────
+def chat_completions_url(endpoint: str) -> str:
+    """Build the /v1/chat/completions URL from a user-supplied base.
+
+    THE INCONSISTENCY THIS FIXES (2026-07-26). Two conventions coexisted:
+
+      * files_memory (summarize / extract / carry_forward) did
+        ``endpoint.rstrip("/") + "/v1/chat/completions"`` — so its base had to
+        OMIT /v1.
+      * Everywhere else the base INCLUDES it: llm_failover's _LMSTUDIO_ENDPOINT
+        and _OLLAMA_ENDPOINT, m3_core.runtime.LM_STUDIO_BASE, mcp_proxy's
+        LMSTUDIO_BASE, and the documented M3_LLM_URL examples.
+
+    The second is the majority AND matches what every provider calls a "base
+    URL", so a user copying their LM Studio/Ollama base into
+    M3_FILES_SUMMARY_URL got ``/v1/v1/chat/completions`` and a 404. The failure
+    is quiet: _llm_call returns None on any error, so the file is simply
+    summarised without the LLM and nothing says why. I hit this myself while
+    testing pre-warm.
+
+    Rather than pick a winner and break whichever config users already have,
+    ACCEPT BOTH: strip a trailing /v1 (with or without a slash) and re-append
+    exactly one. Tolerant input, canonical output.
+    """
+    base = (endpoint or "").rstrip("/")
+    if base.endswith("/v1"):
+        base = base[: -len("/v1")]
+    return base + "/v1/chat/completions"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # LLM auth headers (extract / summarize / carry-forward share one resolver)
 # ──────────────────────────────────────────────────────────────────────────────
 def llm_auth_headers() -> dict[str, str]:

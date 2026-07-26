@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Optional
 
 logger = logging.getLogger("files_memory.summarize")
@@ -61,6 +62,12 @@ def _llm_available() -> bool:
     `M3_FILES_SUMMARY_URL` is set we use that; else if M3_LMSTUDIO_URL is
     set we use it; else we treat the summarizer as unavailable and fall
     back to first-N-chars.
+
+    Either URL form works: the base may include a trailing ``/v1`` or omit it.
+    ``config.chat_completions_url`` normalises both, so pasting the same base
+    URL you give LM Studio or Ollama does the right thing. It used not to —
+    a ``/v1``-suffixed base produced ``/v1/v1/chat/completions`` and a 404,
+    which surfaced only as "no summary" because _llm_call swallows errors.
     """
     return bool(_summary_endpoint())
 
@@ -101,6 +108,88 @@ def _summary_model() -> Optional[str]:
     return discover_model_sync(endpoint)
 
 
+# Pre-warm timeout. Deliberately generous and SEPARATE from the per-call
+# timeout: this call is expected to be slow — it is paying the model load cost
+# up front so the real calls do not.
+_PREWARM_TIMEOUT_S = float(os.environ.get("M3_FILES_PREWARM_TIMEOUT_S", "180"))
+
+
+def prewarm(timeout: float | None = None) -> bool:
+    """Load the summariser's model BEFORE a batch, so no real call pays for it.
+
+    MEASURED 2026-07-26 against a live Ollama: a generative model's FIRST
+    request after idle took 27.05s (model load) versus 0.13s warm — 209x. The
+    per-call timeout in ``_llm_call`` is 30.0s, so the cold call had a
+    ~3-SECOND margin; a larger model, a busier disk, or a colder page cache
+    turns the first file of every batch into a timeout. Worse, the failure is
+    silent-ish: ``_llm_call`` returns None on any exception, so the file is
+    simply summarised without the LLM and nothing says why.
+
+    Ollama makes this reachable in normal use: ``/v1/models`` lists INSTALLED
+    models, not LOADED ones (verified: 0 loaded while 2 listed), so discovery
+    happily selects a model that is not resident. LM Studio serves what is
+    already loaded, which is why this never bit there.
+
+    Best-effort and non-fatal by contract: returns True if the endpoint
+    answered, False otherwise. A False is NOT a reason to skip the batch — the
+    per-call path still works, it just pays the load cost on its first call, as
+    it did before this existed.
+
+    ``max_tokens=1`` keeps generation trivial; the cost being paid here is the
+    load, not the decode.
+    """
+    endpoint = _summary_endpoint()
+    if not endpoint:
+        return False
+    model = _summary_model()
+    if not model:
+        return False
+
+    import httpx
+
+    from .config import chat_completions_url, llm_auth_headers
+
+    t0 = time.perf_counter()
+    try:
+        with httpx.Client(timeout=timeout or _PREWARM_TIMEOUT_S) as client:
+            resp = client.post(
+                chat_completions_url(endpoint),
+                headers=llm_auth_headers(),
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "ok"}],
+                    "max_tokens": 1,
+                },
+            )
+        elapsed = time.perf_counter() - t0
+        if resp.status_code != 200:
+            logger.warning(
+                "files summarize: pre-warm got HTTP %s for %s after %.1fs — "
+                "batch continues, first real call will pay the load cost",
+                resp.status_code, model, elapsed,
+            )
+            return False
+        # Log at INFO when the load was slow enough to have threatened the
+        # per-call timeout, so the value of pre-warming is visible rather than
+        # inferred.
+        if elapsed > 5.0:
+            logger.info(
+                "files summarize: pre-warmed %s in %.1fs (a cold call would have "
+                "spent this against the %.0fs per-call timeout)",
+                model, elapsed, 30.0,
+            )
+        else:
+            logger.debug("files summarize: pre-warmed %s in %.1fs", model, elapsed)
+        return True
+    except Exception as exc:  # noqa: BLE001 — pre-warm must never fail a batch
+        logger.warning(
+            "files summarize: pre-warm failed for %s after %.1fs (%s: %s) — "
+            "batch continues unwarmed",
+            model, time.perf_counter() - t0, type(exc).__name__, exc,
+        )
+        return False
+
+
 def _llm_call(prompt: str, content: str, max_tokens: int = 256) -> Optional[str]:
     """Issue a chat completion. Returns None on any failure.
 
@@ -114,7 +203,7 @@ def _llm_call(prompt: str, content: str, max_tokens: int = 256) -> Optional[str]
 
     import httpx
 
-    from .config import llm_auth_headers
+    from .config import chat_completions_url, llm_auth_headers
 
     # Model is resolved BEFORE the request so a discovery miss skips the call
     # rather than POSTing {"model": null} and getting an opaque server error.
@@ -126,7 +215,7 @@ def _llm_call(prompt: str, content: str, max_tokens: int = 256) -> Optional[str]
         )
         return None
 
-    url = endpoint.rstrip("/") + "/v1/chat/completions"
+    url = chat_completions_url(endpoint)
     try:
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(
