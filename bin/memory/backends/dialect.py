@@ -189,6 +189,75 @@ class Dialect:
         """
         raise NotImplementedError("subclass must implement all_rows_after_offset()")
 
+    # -- row scoping ---------------------------------------------------------
+    def scope_predicates(
+        self,
+        *,
+        table_alias: str = "mi",
+        user_id: str = "",
+        scope: str = "",
+        type_filter: str = "",
+        agent_filter: str = "",
+    ) -> "tuple[str, list]":
+        """Render the standard row-narrowing WHERE fragment + its bind params.
+
+        Returns ``(" AND a = ? AND b = ?", [a, b])`` — a fragment that APPENDS to
+        an existing WHERE, plus positional params in matching order. Empty
+        arguments are skipped, so ``scope_predicates()`` with no filters returns
+        ``("", [])`` and callers stay byte-identical to the unfiltered case.
+
+        WHY THIS IS A SEAM PRIMITIVE, not a helper next to one call site: these
+        four predicates are the tenancy + narrowing contract for every
+        candidate-fetch path, and they had been hand-copied into three places in
+        memory/search.py alone. They then DRIFTED — a 2026-07-14 tenancy fix
+        added user_id/scope to all three copies, but type_filter/agent_filter
+        were only ever wired into one. The visible symptom was
+        ``memory_search(query="runbook", type_filter="procedure")`` returning
+        chat_log and belief rows on BOTH SQLite and PostgreSQL, silently, at
+        score 1.0. Duplicated predicate logic was the defect; centralising it
+        here is the fix, and it means a future MariaDB/Mongo backend inherits
+        correct scoping by subclassing rather than by remembering to patch N
+        call sites.
+
+        Placeholders come from :meth:`param`, so no call site hardcodes ``?``
+        or ``%s``.
+
+        Quoting convention (preserved from the original call sites): a quoted
+        value (``'"procedure"'``) means exact equality; bare means ``LIKE``.
+        Bare LIKE without wildcards IS equality, so a plain type name behaves
+        identically either way, while a caller relying on LIKE patterns keeps
+        working. ``agent_filter`` is matched case-insensitively when bare.
+        """
+        ph = self.param()
+        a = table_alias
+        sql = ""
+        params: list = []
+
+        def _quoted(v: str) -> bool:
+            return (v.startswith('"') and v.endswith('"')) or (
+                v.startswith("'") and v.endswith("'")
+            )
+
+        if user_id:
+            sql += f" AND {a}.user_id = {ph}"
+            params.append(user_id)
+        if scope:
+            sql += f" AND {a}.scope = {ph}"
+            params.append(scope)
+        if type_filter:
+            exact = _quoted(type_filter)
+            sql += f" AND {a}.type = {ph}" if exact else f" AND {a}.type LIKE {ph}"
+            params.append(type_filter[1:-1] if exact else type_filter)
+        if agent_filter:
+            exact = _quoted(agent_filter)
+            sql += (
+                f" AND {a}.agent_id = {ph}" if exact
+                else f" AND LOWER({a}.agent_id) = LOWER({ph})"
+            )
+            params.append(agent_filter[1:-1] if exact else agent_filter)
+
+        return sql, params
+
     def group_concat(self, expr: str, separator: str = ",") -> str:
         """Aggregate ``expr`` across a GROUP BY into a single separator-joined
         string. ``expr`` is a trusted column/identifier; ``separator`` is a trusted

@@ -168,3 +168,125 @@ def test_shortcircuit_absent_phrase_falls_through_when_embedder_down(
     # any id came back it would mean the short-circuit fabricated an exact hit
     # from token overlap, which is the bug in the opposite direction.
     assert ids == []
+
+
+# ---------------------------------------------------------------------------
+# Regression: the short-circuit must honour the NARROWING filters, not just
+# tenancy.
+#
+# Bug (fixed 2026-07-26): the short-circuit built its WHERE from user_id/scope
+# only. type_filter and agent_filter were implemented in exactly ONE of the
+# three candidate-fetch paths (the SQLite main branch), so any query that took
+# the short-circuit — i.e. any query whose text appears verbatim in some row,
+# which a one-word query almost always does — returned UNFILTERED rows.
+#
+# It surfaced as `memory_search(query="runbook", type_filter="procedure")`
+# coming back with chat_log and belief rows, every one at score 1.0. Flat 1.0
+# reads as "perfect matches", not as "your filter was dropped", which is why it
+# went unnoticed. The tenancy fix of 2026-07-14 had patched user_id/scope into
+# all three copies and missed these two.
+#
+# The fix routes every copy through Dialect.scope_predicates (the seam), so the
+# three paths cannot drift again. These tests pin the behaviour, not the
+# implementation: they assert the RESULT is narrowed.
+# ---------------------------------------------------------------------------
+
+def _build_typed(tmp_path, monkeypatch):
+    """Rows that all contain the exact phrase, spread across several types.
+
+    Every row matches the query verbatim, so the short-circuit fires for all of
+    them — which is precisely the condition under which the filter was dropped.
+    """
+    from memory.config import EMBED_DIM, EMBED_MODEL
+
+    db = tmp_path / "typed.db"
+    _full_db(db)
+    conn = sqlite3.connect(str(db))
+    rows = [
+        ("11111111-0000-0000-0000-000000000001", "procedure", "agent-a", "P one"),
+        ("22222222-0000-0000-0000-000000000002", "procedure", "agent-a", "P two"),
+        ("33333333-0000-0000-0000-000000000003", "belief", "agent-a", "B one"),
+        ("44444444-0000-0000-0000-000000000004", "chat_log", "agent-b", "C one"),
+        ("55555555-0000-0000-0000-000000000005", "reference", "agent-b", "R one"),
+    ]
+    vec = [0.0] * EMBED_DIM
+    vec[0] = 1.0
+    for mid, typ, agent, title in rows:
+        conn.execute(
+            "INSERT INTO memory_items (id, type, title, content, source, "
+            "change_agent, created_at, importance, confidence, is_deleted, "
+            "scope, agent_id) VALUES (?,?,?,?,?,?,?,?,?,0,?,?)",
+            (mid, typ, title, "the widget runbook lives here", "agent",
+             "claude", "2026-01-01T00:00:00Z", 0.5, 0.9, "user", agent),
+        )
+        conn.execute(
+            "INSERT INTO memory_embeddings (memory_id, embedding, embed_model, dim) "
+            "VALUES (?,?,?,?)",
+            (mid, _pack(vec), EMBED_MODEL, EMBED_DIM),
+        )
+    conn.commit()
+    conn.close()
+    return _patch(monkeypatch, db)
+
+
+async def _typed(mc, query, **kw):
+    res = await mc.memory_search_scored_impl(query=query, k=20, mmr=False, **kw)
+    return [(r[1]["id"], r[1].get("type"), r[1].get("agent_id")) for r in (res or [])]
+
+
+@pytest.mark.asyncio
+async def test_short_circuit_honours_type_filter(tmp_path, monkeypatch):
+    """The load-bearing assertion: a filtered search returns ONLY that type."""
+    mc = _build_typed(tmp_path, monkeypatch)
+    hits = await _typed(mc, "widget runbook", type_filter="procedure")
+
+    assert hits, "short-circuit returned nothing; the fixture should match"
+    wrong = [(i, t) for i, t, _ in hits if t != "procedure"]
+    assert not wrong, (
+        f"type_filter was dropped — got non-procedure rows: {wrong}. "
+        "The short-circuit returned before the filtered SQL ran."
+    )
+    assert len(hits) == 2, f"expected both procedure rows, got {len(hits)}"
+
+
+@pytest.mark.asyncio
+async def test_short_circuit_honours_agent_filter(tmp_path, monkeypatch):
+    """agent_filter shares the same code path — and the same original defect."""
+    mc = _build_typed(tmp_path, monkeypatch)
+    hits = await _typed(mc, "widget runbook", agent_filter="agent-b")
+
+    # Assert on IDs, not on the returned agent_id: the short-circuit's SELECT
+    # projection does not include mi.agent_id, so it reads back as None even
+    # when the WHERE correctly filtered on it. Asserting on the field the API
+    # does not return would fail against a WORKING fix (it did, first run).
+    agent_b_ids = {
+        "44444444-0000-0000-0000-000000000004",
+        "55555555-0000-0000-0000-000000000005",
+    }
+    got = {i for i, _, _ in hits}
+    assert got == agent_b_ids, (
+        f"agent_filter was dropped or over-narrowed — expected exactly the "
+        f"agent-b rows, got {got}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_short_circuit_unfiltered_still_returns_every_type(tmp_path, monkeypatch):
+    """Guard the other direction: the fix must not over-narrow."""
+    mc = _build_typed(tmp_path, monkeypatch)
+    hits = await _typed(mc, "widget runbook")
+
+    assert len(hits) == 5, f"expected all 5 rows unfiltered, got {len(hits)}"
+    assert {t for _, t, _ in hits} == {"procedure", "belief", "chat_log", "reference"}
+
+
+@pytest.mark.asyncio
+async def test_short_circuit_type_and_agent_filters_compose(tmp_path, monkeypatch):
+    """Both predicates AND together, not last-one-wins."""
+    mc = _build_typed(tmp_path, monkeypatch)
+    hits = await _typed(mc, "widget runbook",
+                        type_filter="procedure", agent_filter="agent-b")
+    assert hits == [], (
+        "no row is both procedure AND agent-b; a non-empty result means the "
+        f"predicates did not compose: {hits}"
+    )

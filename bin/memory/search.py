@@ -627,7 +627,8 @@ async def memory_search_scored_impl(
     # gate the whole short-circuit on the SQLite backend and let PG fall through.
     from memory.backends import active_backend as _active_backend_sc
 
-    _sc_is_sqlite = _active_backend_sc().name == "sqlite"
+    _sc_backend = _active_backend_sc()
+    _sc_is_sqlite = _sc_backend.name == "sqlite"
     if _sc_is_sqlite and len(query.strip()) > 3 and not intent_hint and search_mode in ("hybrid", "fts5"):
         try:
             # Gating: Reject generic conversational queries from short-circuiting
@@ -657,14 +658,10 @@ async def memory_search_scored_impl(
                 # early-return path never reaches the filtered branch. Parameterized
                 # + empty-string-passes-through so callers that omit tenancy (the
                 # legacy shared "agent" path) behave byte-identically.
-                _tenancy_sql = ""
-                _tenancy_params: list = []
-                if user_id:
-                    _tenancy_sql += " AND mi.user_id = ?"
-                    _tenancy_params.append(user_id)
-                if scope:
-                    _tenancy_sql += " AND mi.scope = ?"
-                    _tenancy_params.append(scope)
+                _tenancy_sql, _tenancy_params = _sc_backend.dialect().scope_predicates(
+                    user_id=user_id, scope=scope,
+                    type_filter=type_filter, agent_filter=agent_filter,
+                )
                 with _db() as conn:
                     # Fetch the top-N bm25-ranked FTS matches, not LIMIT 1.
                     # The old LIMIT 1 + substring gate was lossy: FTS routinely
@@ -767,30 +764,20 @@ async def memory_search_scored_impl(
     where_clauses = ["mi.is_deleted = 0"]
     params = []
 
-    if type_filter:
-        is_exact = (type_filter.startswith('"') and type_filter.endswith('"')) or (type_filter.startswith("'") and type_filter.endswith("'"))
-        actual_type = type_filter[1:-1] if is_exact else type_filter
-        if is_exact:
-            where_clauses.append("mi.type = ?")
-        else:
-            where_clauses.append("mi.type LIKE ?")
-        params.append(actual_type)
+    # All four narrowing predicates come from the seam (Dialect.scope_predicates)
+    # so this path cannot drift from the FTS short-circuit or the PG branch --
+    # which is exactly how type_filter/agent_filter went missing from those two.
+    # scope_predicates returns a leading-" AND " fragment; where_clauses holds
+    # bare conditions, so strip the first joiner and split back out.
+    from memory.backends import dialect as _dialect_scope
 
-    if agent_filter:
-        is_exact = (agent_filter.startswith('"') and agent_filter.endswith('"')) or (agent_filter.startswith("'") and agent_filter.endswith("'"))
-        actual_agent = agent_filter[1:-1] if is_exact else agent_filter
-        if is_exact:
-            where_clauses.append("mi.agent_id = ?")
-        else:
-            where_clauses.append("LOWER(mi.agent_id) = LOWER(?)")
-        params.append(actual_agent)
-
-    if user_id:
-        where_clauses.append("mi.user_id = ?")
-        params.append(user_id)
-    if scope:
-        where_clauses.append("mi.scope = ?")
-        params.append(scope)
+    _scope_sql, _scope_params = _dialect_scope().scope_predicates(
+        user_id=user_id, scope=scope,
+        type_filter=type_filter, agent_filter=agent_filter,
+    )
+    if _scope_sql:
+        where_clauses.append(_scope_sql.removeprefix(" AND ").strip())
+        params.extend(_scope_params)
     # Cross-agent isolation (SQL-layer enforcement of the scope model). Opt-in:
     # when the caller passes `requesting_agent`, restrict private (scope='agent')
     # rows to that agent's own — shared scopes (org/user/session) stay visible.
@@ -922,15 +909,12 @@ async def memory_search_scored_impl(
         if _backend.name == "postgres":
             from memory.search_pg import fetch_candidates_pg
 
-            # Build tenancy in %s form (the _tenancy_sql above is ?-style/SQLite).
-            _pg_tenancy_sql = ""
-            _pg_tenancy_params: list = []
-            if user_id:
-                _pg_tenancy_sql += " AND mi.user_id = %s"
-                _pg_tenancy_params.append(user_id)
-            if scope:
-                _pg_tenancy_sql += " AND mi.scope = %s"
-                _pg_tenancy_params.append(scope)
+            # Same builder as the SQLite paths — one implementation, so the
+            # backends cannot drift apart again (see Dialect.scope_predicates).
+            _pg_tenancy_sql, _pg_tenancy_params = _backend.dialect().scope_predicates(
+                user_id=user_id, scope=scope,
+                type_filter=type_filter, agent_filter=agent_filter,
+            )
             try:
                 with _backend.connection() as _pgconn:
                     return fetch_candidates_pg(
