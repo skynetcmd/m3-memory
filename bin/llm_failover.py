@@ -100,12 +100,18 @@ _EMBED_ENDPOINT_CACHE: Optional[tuple[str, str]] = None
 _EMBED_NEG_CACHE_TS: float = 0.0
 _EMBED_NEG_TTL: float = float(os.environ.get("M3_EMBED_DISCOVERY_NEG_TTL", "60"))
 
+# Sync discovery cache, keyed by ENDPOINT (not process-global): sync callers
+# resolve their own endpoint first, so a model picked for another endpoint
+# would be the wrong answer. See discover_model_sync.
+_SYNC_MODEL_CACHE: dict = {}
+
 
 def clear_failover_caches() -> None:
     """Forget all cached endpoints. Call after a persistent failure
     so the next discovery attempt probes the network."""
     global _LLM_ENDPOINT_CACHE, _SMALL_LLM_ENDPOINT_CACHE, _EMBED_ENDPOINT_CACHE
     global _EMBED_NEG_CACHE_TS
+    _SYNC_MODEL_CACHE.clear()
     _LLM_ENDPOINT_CACHE = None
     _SMALL_LLM_ENDPOINT_CACHE = None
     _EMBED_ENDPOINT_CACHE = None
@@ -117,6 +123,91 @@ def clear_embed_cache() -> None:
     global _EMBED_ENDPOINT_CACHE, _EMBED_NEG_CACHE_TS
     _EMBED_ENDPOINT_CACHE = None
     _EMBED_NEG_CACHE_TS = 0.0
+
+
+def discover_model_sync(
+    endpoint: str,
+    token: Optional[str] = None,
+    *,
+    timeout: float = 5.0,
+) -> Optional[str]:
+    """Pick a model on ``endpoint`` by asking it, SYNCHRONOUSLY. No name needed.
+
+    The sync sibling of :func:`get_best_llm`, for callers that are not async and
+    cannot drive an httpx.AsyncClient — e.g. the files-store summarizer and
+    extractor, which run a serial per-file loop.
+
+    Exists so "which model?" has ONE answer per process shape rather than a
+    hardcoded literal per call site. Before this, several callers defaulted to a
+    specific model NAME (``qwen3-4b-instruct``, ``qwen/qwen3-coder-next``, …),
+    which meant a box without that exact model got a 404 from the server rather
+    than a graceful fall-through. The name should be an OVERRIDE, never the
+    fallback.
+
+    Differs from get_best_llm deliberately:
+      * takes ONE endpoint the caller already resolved — it does NOT walk
+        LLM_ENDPOINTS. The callers here have their own endpoint precedence
+        (M3_FILES_SUMMARY_URL > M3_LMSTUDIO_URL > …) and picking a model for a
+        DIFFERENT endpoint than the one they will POST to would be a bug.
+      * caches per-endpoint rather than process-globally, for the same reason.
+
+    ``token`` defaults to ``LM_API_TOKEN`` from the environment. When there is
+    no token the Authorization header is OMITTED ENTIRELY rather than sent with
+    a placeholder — mirroring files_memory.config.llm_auth_headers. A junk
+    bearer token is not equivalent to no token: an auth-enabled LM Studio
+    answers a missing header differently from a wrong one, and sending
+    "not-needed" earns a 401 (observed 2026-07-26 against the live server).
+
+    Returns the largest usable model id by :func:`parse_model_size`, or None if
+    the endpoint is unreachable / lists nothing usable. None means "caller
+    decides" — it must NOT be turned back into a hardcoded name.
+
+    NOT FOR EMBEDDERS. This picks a GENERATIVE model and filters embedders out
+    (EMBED_EXCLUSIONS). The store's embedder is deliberately a FIXED name
+    (memory.config.EMBED_MODEL, default text-embedding-bge-m3): vectors from
+    different models are not semantically comparable, so discovering an
+    embedder at runtime would silently corrupt the vector space. Naming the
+    model IS the correctness requirement there — the opposite of here.
+    """
+    cached = _SYNC_MODEL_CACHE.get(endpoint)
+    if cached is not None:
+        return cached
+    try:
+        import httpx
+
+        tok = token if token is not None else (os.environ.get("LM_API_TOKEN") or "").strip()
+        headers = {"Authorization": f"Bearer {tok}"} if tok else {}
+        r = httpx.get(
+            f"{endpoint.rstrip('/')}/models",
+            headers=headers,
+            timeout=timeout,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:  # noqa: BLE001 — discovery is best-effort by contract
+        logger.warning(f"[llm_failover] sync discovery {endpoint}: {type(e).__name__}: {e}")
+        return None
+    # Both OpenAI-shaped servers and Ollama return {"data": [...]}; Ollama's
+    # native (non-/v1) listing uses {"models": [...]}. Accept either rather than
+    # asserting a shape we have not verified against every server.
+    models = data.get("data", data.get("models", [])) or []
+    usable = []
+    for m in models:
+        mid = (m.get("id") or m.get("model", "")) if isinstance(m, dict) else str(m)
+        if not mid:
+            continue
+        if any(x in mid.lower() for x in EMBED_EXCLUSIONS):
+            continue
+        if LLM_EXCLUSIONS and any(x in mid.lower() for x in LLM_EXCLUSIONS):
+            continue
+        usable.append(mid)
+    if not usable:
+        logger.warning(f"[llm_failover] sync discovery {endpoint}: no usable models")
+        return None
+    best = max(usable, key=parse_model_size)
+    _SYNC_MODEL_CACHE[endpoint] = best
+    logger.info(f"[llm_failover] sync discovery {endpoint} -> {best}")
+    return best
 
 
 def parse_model_size(model_id: str) -> float:

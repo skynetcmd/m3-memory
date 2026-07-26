@@ -74,18 +74,25 @@ def _conn():
 _ACTIVE_EMBED_MODEL = None
 _EMBED_MODEL_LOCK = asyncio.Lock()
 
-async def _select_embedding_model(models: list[str]) -> str:
-    """Select embedding model: prefer dedicated embedding models, fallback to LLMs."""
+async def _select_embedding_model(models: list[str]) -> str | None:
+    """Select an embedding model from what the SERVER reports. No hardcoded name.
+
+    Prefers a dedicated embedder, else the first listed model. Returns None on an
+    empty list — previously this tailed to the literal
+    "text-embedding-nomic-embed-text-v1.5", which 404s on any box without that
+    exact model. The name belongs in an override, never the fallback.
+    """
     dedicated = [m for m in models if any(k in m.lower() for k in ("nomic", "e5", "gte", "bge", "minilm"))]
     if dedicated:
         return min(dedicated, key=_parse_model_size)
-    return models[0] if models else "text-embedding-nomic-embed-text-v1.5"
+    return models[0] if models else None
 
 async def _embed(text: str) -> tuple[list[float] | None, str]:
     """Generate embedding via LM Studio with dynamic model selection (Architecture #1)."""
     global _ACTIVE_EMBED_MODEL
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
-    model_to_use = _ACTIVE_EMBED_MODEL or "text-embedding-nomic-embed-text-v1.5"
+    # Explicit override > discovery (below) > fail loud. NOT a hardcoded name.
+    model_to_use = _ACTIVE_EMBED_MODEL or os.environ.get("M3_DEBUG_EMBED_MODEL") or None
 
     try:
         if not _ACTIVE_EMBED_MODEL:
@@ -104,8 +111,13 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                             _ACTIVE_EMBED_MODEL = model_to_use
                             logger.info(f"Embedding model selected: {model_to_use}")
                     except Exception as exc:
-                        logger.debug(f"Model auto-detect failed: {type(exc).__name__}")
+                        # WARNING, not debug: this is the step that decides which
+                        # model gets used. Swallowing it at debug level is how a
+                        # discovery failure silently became a hardcoded guess.
+                        logger.warning(f"Embed model auto-detect failed: {type(exc).__name__}: {exc}")
             model_to_use = _ACTIVE_EMBED_MODEL or model_to_use
+        if not model_to_use:
+            return None, "no embedding model resolved (discovery found none; set M3_DEBUG_EMBED_MODEL to pin one)"
 
         resp = await ctx.request_with_retry(
             "POST",

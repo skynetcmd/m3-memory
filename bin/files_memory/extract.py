@@ -101,12 +101,30 @@ def _llm_endpoint() -> Optional[str]:
     )
 
 
-def _llm_model() -> str:
-    return (
+def _llm_model() -> Optional[str]:
+    """Model for the extractor: explicit override, else ASK THE SERVER.
+
+    Same precedence as summarize._summary_model — explicit > discovery > None.
+    The old "qwen3-4b-instruct" tail made a specific model NAME the fallback,
+    which 404s on any box that does not have it loaded.
+    """
+    explicit = (
         os.environ.get("M3_FILES_EXTRACT_MODEL")
         or os.environ.get("M3_FILES_SUMMARY_MODEL")
-        or "qwen3-4b-instruct"
     )
+    if explicit:
+        return explicit
+    endpoint = _llm_endpoint()
+    if not endpoint:
+        return None
+    import sys as _sys
+
+    _bin = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _bin not in _sys.path:
+        _sys.path.insert(0, _bin)
+    from llm_failover import discover_model_sync
+
+    return discover_model_sync(endpoint)
 
 
 def llm_available() -> bool:
@@ -122,6 +140,17 @@ def _llm_call(content: str, max_tokens: int = 1024) -> Optional[str]:
 
     from .config import llm_auth_headers
 
+    # Resolve the model BEFORE the request: a discovery miss must skip the call,
+    # not POST {"model": null}.
+    model = _llm_model()
+    if not model:
+        logger.warning(
+            "files extract: no model resolved for %s (discovery found none and "
+            "M3_FILES_EXTRACT_MODEL/M3_FILES_SUMMARY_MODEL are unset) — skipping",
+            endpoint,
+        )
+        return None
+
     url = endpoint.rstrip("/") + "/v1/chat/completions"
     try:
         with httpx.Client(timeout=60.0) as client:
@@ -129,7 +158,7 @@ def _llm_call(content: str, max_tokens: int = 1024) -> Optional[str]:
                 url,
                 headers=llm_auth_headers(),
                 json={
-                    "model": _llm_model(),
+                    "model": model,
                     "messages": [
                         {"role": "system", "content": _EXTRACT_PROMPT},
                         {"role": "user", "content": content},

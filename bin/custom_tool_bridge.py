@@ -30,7 +30,10 @@ PERPLEXITY_MODEL = "sonar-pro"
 GROK_URL        = "https://api.x.ai/v1/chat/completions"
 GROK_MODEL      = "grok-3-latest"
 
-# LM_MODEL is a fallback when dynamic model selection unavailable
+# DISPLAY ONLY — not a request fallback. query_local_model() resolves the model
+# via get_best_llm() (discovery) and returns a loud error if nothing is
+# reachable; it never falls back to this name. Used solely in the capability
+# banner below. Do not reintroduce it as a request default.
 LM_MODEL        = "qwen/qwen3-coder-next"
 
 # DeepSeek-R1 emits a <think> chain before its answer. At ~7.5 tok/s on M3 Max,

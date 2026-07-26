@@ -73,8 +73,32 @@ def _summary_endpoint() -> Optional[str]:
     )
 
 
-def _summary_model() -> str:
-    return os.environ.get("M3_FILES_SUMMARY_MODEL", "qwen3-4b-instruct")
+def _summary_model() -> Optional[str]:
+    """Model for the summarizer: explicit override, else ASK THE SERVER.
+
+    Precedence is deliberate — explicit name > discovery > None (fail loud):
+    a hardcoded literal must never be the FALLBACK. It used to default to
+    "qwen3-4b-instruct", so a box without that exact model got a 404 from the
+    server instead of using whatever it actually had loaded.
+
+    Returns None when discovery fails; the caller skips the LLM call rather
+    than POSTing a guessed name (DESIGN_PHILOSOPHIES §3 — fail loud, not
+    silently wrong).
+    """
+    explicit = os.environ.get("M3_FILES_SUMMARY_MODEL")
+    if explicit:
+        return explicit
+    endpoint = _summary_endpoint()
+    if not endpoint:
+        return None
+    import sys as _sys
+
+    _bin = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _bin not in _sys.path:
+        _sys.path.insert(0, _bin)
+    from llm_failover import discover_model_sync
+
+    return discover_model_sync(endpoint)
 
 
 def _llm_call(prompt: str, content: str, max_tokens: int = 256) -> Optional[str]:
@@ -92,6 +116,16 @@ def _llm_call(prompt: str, content: str, max_tokens: int = 256) -> Optional[str]
 
     from .config import llm_auth_headers
 
+    # Model is resolved BEFORE the request so a discovery miss skips the call
+    # rather than POSTing {"model": null} and getting an opaque server error.
+    model = _summary_model()
+    if not model:
+        logger.warning(
+            "files summarize: no model resolved for %s (discovery found none and "
+            "M3_FILES_SUMMARY_MODEL is unset) — skipping summary", endpoint,
+        )
+        return None
+
     url = endpoint.rstrip("/") + "/v1/chat/completions"
     try:
         with httpx.Client(timeout=30.0) as client:
@@ -99,7 +133,7 @@ def _llm_call(prompt: str, content: str, max_tokens: int = 256) -> Optional[str]
                 url,
                 headers=llm_auth_headers(),
                 json={
-                    "model": _summary_model(),
+                    "model": model,
                     "messages": [
                         {"role": "system", "content": prompt},
                         {"role": "user", "content": content},
