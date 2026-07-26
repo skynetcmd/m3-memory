@@ -89,6 +89,15 @@ def _patch(monkeypatch, db_path, *, embed_ok=True):
 
     monkeypatch.setattr(memory_core, "_db", fake_db)
     monkeypatch.setattr(memory_core, "_embed", fake_embed)
+    # memory.search holds its OWN module-level `_db`. The healthy/short-circuit
+    # paths re-resolve it from memory_core via _mc_callable, but the
+    # embedder-down fallback (_fts_only_results) uses the module global
+    # directly — leaving it unpatched pointed that path at the REAL store and
+    # produced "Backfill failed: no such table: memory_items", which is where
+    # the 4th earlier attempt at this test died.
+    from memory import search as _search_mod
+
+    monkeypatch.setattr(_search_mod, "_db", fake_db)
     return memory_core
 
 
@@ -151,23 +160,59 @@ def test_shortcircuit_works_when_embedder_down(tmp_path, monkeypatch):
     assert len(ids) >= 4
 
 
-def test_shortcircuit_absent_phrase_falls_through_when_embedder_down(
+def test_shortcircuit_absent_phrase_does_not_fabricate_an_exact_hit(
     tmp_path, monkeypatch
 ):
-    """When NO row contains the exact query phrase, the short-circuit must not
-    fire (no fabricated exact hit). With the embedder also down, the whole search
-    then legitimately returns nothing — proving the short-circuit isn't inventing
-    a match from a mere FTS token overlap."""
+    """No row contains the exact phrase => the short-circuit must not fire.
+
+    UPDATED 2026-07-26. This asserted `ids == []` — "embedder down and no exact
+    phrase means the whole search returns nothing". That assertion was written
+    before the embedder-down FTS fallback existed (this test came with 21ae00cf;
+    the fallback with a28acf04), and it was passing for the WRONG REASON: the
+    harness left `memory.search._db` pointing at the real store, so the fallback
+    queried a database with none of these fixture rows and returned empty. Once
+    the harness patched that binding too, the fixture became visible and the
+    fallback correctly returned its keyword matches.
+
+    Returning [] here would now be the BUG (a lexical, FTS-satisfiable query
+    silently yielding nothing during an embedder outage — §1 offline-capable).
+    What this test still pins is the original property, stated directly rather
+    than inferred from emptiness: the short-circuit does not FABRICATE an exact
+    hit from mere token overlap. Its signature is score 1.0 on every row; the
+    fallback's rows are keyword-ranked instead.
+    """
     import asyncio
 
     mc = _build(tmp_path, monkeypatch, embed_ok=False)
     # "widgets tenets" never appears as a contiguous phrase in any row, though
     # "tenets" and "widgets" each appear separately (FTS would token-match).
-    ids = asyncio.run(_ids(mc, "widgets tenets", search_mode="hybrid"))
-    # No exact-phrase => short-circuit yields nothing => embedder-down => []. If
-    # any id came back it would mean the short-circuit fabricated an exact hit
-    # from token overlap, which is the bug in the opposite direction.
-    assert ids == []
+    from memory import search as S
+
+    ran = {"n": 0}
+    original = S._fts_only_results
+
+    def spy(*a, **k):
+        ran["n"] += 1
+        return original(*a, **k)
+
+    S._fts_only_results = spy
+    try:
+        res = asyncio.run(
+            mc.memory_search_scored_impl(
+                query="widgets tenets", k=20, mmr=False, search_mode="hybrid"
+            )
+        )
+    finally:
+        S._fts_only_results = original
+
+    assert ran["n"] > 0, (
+        "the FALLBACK should have served this query — the short-circuit must "
+        "decline when no row contains the exact phrase"
+    )
+    assert res, (
+        "a lexical query that FTS can satisfy must not return [] just because "
+        "the embedder is down"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -191,8 +236,11 @@ def test_shortcircuit_absent_phrase_falls_through_when_embedder_down(
 # implementation: they assert the RESULT is narrowed.
 # ---------------------------------------------------------------------------
 
-def _build_typed(tmp_path, monkeypatch):
+def _build_typed(tmp_path, monkeypatch, *, embed_ok=True):
     """Rows that all contain the exact phrase, spread across several types.
+
+    ``embed_ok=False`` simulates an embedder outage, which routes the query to
+    the `_fts_only_results` degrade path instead of the vector path.
 
     Every row matches the query verbatim, so the short-circuit fires for all of
     them — which is precisely the condition under which the filter was dropped.
@@ -226,7 +274,7 @@ def _build_typed(tmp_path, monkeypatch):
         )
     conn.commit()
     conn.close()
-    return _patch(monkeypatch, db)
+    return _patch(monkeypatch, db, embed_ok=embed_ok)
 
 
 async def _typed(mc, query, **kw):
@@ -289,4 +337,121 @@ async def test_short_circuit_type_and_agent_filters_compose(tmp_path, monkeypatc
     assert hits == [], (
         "no row is both procedure AND agent-b; a non-empty result means the "
         f"predicates did not compose: {hits}"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# The EMBEDDER-DOWN FALLBACK (_fts_only_results) — a different path from the
+# short-circuit above, and the one that shipped unguarded.
+#
+# Bug (fixed 2026-07-26, a28acf04): `_fts_only_results` did not ACCEPT
+# type_filter/agent_filter at all, so a filtered search returned UNFILTERED rows
+# whenever the query embedder was unavailable.
+#
+# FOUR earlier attempts at this test each passed for the WRONG reason. The trap:
+# the exact-substring SHORT-CIRCUIT fires FIRST and returns before the embedder
+# is ever consulted, so a test that looks like it exercises the fallback is
+# often exercising the short-circuit — and passes against broken code.
+#
+# `_fallback_hits` closes that hole by SPYING on _fts_only_results and asserting
+# it actually ran. The query matters too: "runbook widget" is REVERSED relative
+# to the fixture content ("the widget runbook lives here"), so FTS matches it
+# but it is not an exact substring — the short-circuit declines and the fallback
+# gets it. "widget runbook" (in-order) is served by the short-circuit; verified
+# both ways before writing these.
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def _fallback_hits(mc, query, **kw):
+    """Drive a search and PROVE the embedder-down fallback served it.
+
+    Returns (hits, fallback_ran). Callers must assert fallback_ran — otherwise
+    "empty because filtered" and "empty because the path never ran" are
+    indistinguishable, which is how earlier attempts passed against broken code.
+    """
+    from memory import search as S
+
+    ran = {"n": 0}
+    original = S._fts_only_results
+
+    def spy(*a, **k):
+        ran["n"] += 1
+        return original(*a, **k)
+
+    S._fts_only_results = spy
+    try:
+        res = await mc.memory_search_scored_impl(query=query, k=20, mmr=False, **kw)
+    finally:
+        S._fts_only_results = original
+    hits = [(r[1]["id"], r[1].get("type"), r[1].get("agent_id")) for r in (res or [])]
+    return hits, ran["n"] > 0
+
+
+@pytest.mark.asyncio
+async def test_fallback_path_is_actually_reached(tmp_path, monkeypatch):
+    """Control. Everything below is meaningless if this does not hold."""
+    mc = _build_typed(tmp_path, monkeypatch, embed_ok=False)
+    hits, ran = await _fallback_hits(mc, "runbook widget")
+
+    assert ran, (
+        "the embedder-down fallback did NOT run — the short-circuit or the "
+        "embedding path served this query, so any assertion below would be "
+        "testing the wrong code path (this is how 4 earlier attempts failed)"
+    )
+    assert len(hits) == 5, f"unfiltered fallback should return all 5 rows, got {len(hits)}"
+
+
+@pytest.mark.asyncio
+async def test_fallback_honours_type_filter(tmp_path, monkeypatch):
+    """The load-bearing assertion: filtered search stays filtered when the
+    embedder is down."""
+    mc = _build_typed(tmp_path, monkeypatch, embed_ok=False)
+    hits, ran = await _fallback_hits(mc, "runbook widget", type_filter="procedure")
+
+    assert ran, "fallback did not run; assertion below would be vacuous"
+    assert hits, "fixture has 2 procedure rows — an empty result is a false pass"
+    wrong = [(i, t) for i, t, _ in hits if t != "procedure"]
+    assert not wrong, (
+        f"type_filter was DROPPED on the embedder-down path — got {wrong}. "
+        "This is the a28acf04 regression."
+    )
+    assert len(hits) == 2, f"expected both procedure rows, got {len(hits)}"
+
+
+@pytest.mark.asyncio
+async def test_fallback_honours_agent_filter(tmp_path, monkeypatch):
+    """Asserted by ID, not by reading agent_id off the row.
+
+    The fallback projects only the 5 base columns (id, content, title, type,
+    importance) — `agent_id` is an opt-in `extra_columns` field and is absent
+    here, so `row["agent_id"]` is None for EVERY row and an assertion on it
+    passes vacuously whether or not the filter works. The fixture's agent-b
+    rows are ids ...004 and ...005; membership is the real check.
+    """
+    mc = _build_typed(tmp_path, monkeypatch, embed_ok=False)
+    hits, ran = await _fallback_hits(mc, "runbook widget", agent_filter="agent-b")
+
+    assert ran, "fallback did not run; assertion below would be vacuous"
+    assert hits, "fixture has agent-b rows — an empty result is a false pass"
+    agent_b_ids = {
+        "44444444-0000-0000-0000-000000000004",
+        "55555555-0000-0000-0000-000000000005",
+    }
+    got = {i for i, _, _ in hits}
+    assert got == agent_b_ids, (
+        f"agent_filter was dropped or over-narrowed on the embedder-down path — "
+        f"expected exactly the agent-b rows, got {got}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fallback_filters_compose(tmp_path, monkeypatch):
+    """Both predicates AND together on the degrade path too."""
+    mc = _build_typed(tmp_path, monkeypatch, embed_ok=False)
+    hits, ran = await _fallback_hits(
+        mc, "runbook widget", type_filter="procedure", agent_filter="agent-b"
+    )
+    assert ran, "fallback did not run; assertion below would be vacuous"
+    assert hits == [], (
+        "no fixture row is both procedure AND agent-b; a non-empty result means "
+        f"the predicates did not compose on the degrade path: {hits}"
     )
