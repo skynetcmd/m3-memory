@@ -28,6 +28,20 @@ global-exclude __pycache__/*
 global-exclude *.py[cod]
 global-exclude *.pdb
 
+# Node build artifacts from the example frontends. These are GITIGNORED, but
+# setuptools packages by DIRECTORY, not by git status — so a developer who has
+# run `npm install` in examples/ ships their entire node_modules tree.
+# Regression 2026-07-26: the 2026.7.26.1 wheel came out at 35 MB (6,075
+# node_modules files, 106 MB uncompressed, including Windows-only .node
+# binaries) against 4.1 MB for every prior release. Platform-specific native
+# code has no business in a `py3-none-any` wheel.
+# `prune` alone is not enough — `graft examples` above re-adds anything not
+# excluded at every level, so the recursive-exclude patterns are the belt.
+prune examples/*/frontend/node_modules
+global-exclude node_modules/*
+recursive-exclude examples *.node
+recursive-exclude examples *.tsbuildinfo
+
 # Prune colocated hermetic tests (e.g. integrations/langchain/test_provider_logic.py)
 # from BOTH the sdist and the wheel. Verified against an ISOLATED release build
 # (`python -m build`, which fetches the pinned setuptools>=77,<82): the resulting
