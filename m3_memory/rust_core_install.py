@@ -31,12 +31,20 @@ from m3_memory._platform import os_name as _os_name
 
 # Release this m3-memory build expects. Bump in lockstep with the m3-core-rs
 # release. The wheel VERSION and the GitHub release TAG are independent: the tag
-# follows the date-based v2026.MM.DD convention (v2026.7.4), while the wheels are
-# semver-versioned (3.7.4). Used as the version pin for both the prebuilt PyPI
-# install (by version) and the GitHub-release asset fetch (by tag).
-# 3.7.4 is the first release whose wheels bundle the m3-embed-server binary.
-M3_CORE_RS_VERSION = "3.7.4"
-M3_CORE_RS_GIT_TAG = "v2026.7.4"
+# follows the date-based v2026.MM.DD convention (v2026.7.25), while the wheels
+# are semver-versioned (3.7.25). Used as the version pin for both the prebuilt
+# PyPI install (by version) and the GitHub-release asset fetch (by tag).
+# 3.7.4 was the first release whose wheels bundle the m3-embed-server binary.
+#
+# ⚠ 3.7.25 / v2026.7.25 IS NOT PUBLISHED YET. The m3-core-rs workspace is
+# bumped and its commits are on main, but no tag has been pushed, so
+# release.yml has not built the wheels. Until that tag exists, a prebuilt
+# fetch for this version 404s and `m3 setup` falls back to a source build (or
+# to pure-Python if no toolchain is present). Do not ship an m3-memory release
+# pinned here until the m3-core-rs release is live — verify with:
+#   gh release view v2026.7.25 --repo skynetcmd/m3-core-rs
+M3_CORE_RS_VERSION = "3.7.25"
+M3_CORE_RS_GIT_TAG = "v2026.7.25"
 
 # Cargo features per backend, mirroring build_wheel.py's _MATRIX (the source
 # fallback passes these to maturin via pip's config-settings).
