@@ -297,3 +297,114 @@ def _detect_sqlite_vec(db) -> bool:
         return True
     except Exception:
         return False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SQLite fused candidate-fetch SQL — ONE builder, four variants.
+#
+# `memory/search.py` assembled this SQL inline in FOUR places: semantic and
+# hybrid, each × sqlite-vec present/absent. That duplication is the same shape
+# that produced the 2026-07-26 filter bug — row-scoping predicates lived in four
+# hand-maintained copies, a tenancy fix reached all four, type_filter/
+# agent_filter reached one, and filtered searches silently returned unfiltered
+# rows. Sharing a PREDICATE is not the same as having one code path.
+#
+# Kept a PURE function (str in, str out — no connection, no execution) so the
+# extraction is provable: tests assert it reproduces the previous strings
+# byte-for-byte. A builder that needs a live DB to test is a builder whose
+# output nobody checks.
+#
+# SQLITE-ONLY BY CONSTRUCTION. FTS5 (`memory_items_fts`, `bm25()`) and
+# sqlite-vec (`vec_distance_cosine`) are SQLite features; PostgreSQL reaches the
+# same candidates through search_pg.fetch_candidates_pg (tsvector + pgvector).
+# The literal `?` placeholders are therefore correct here rather than a seam
+# violation — but `where_sql` still arrives from Dialect.scope_predicates so the
+# predicates themselves stay singular. Do not "fix" the placeholders; fix the
+# caller if this is ever reached off SQLite.
+# ──────────────────────────────────────────────────────────────────────────────
+
+_BASE_COLS = "mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding"
+
+
+def build_candidate_sql(
+    *,
+    search_mode: str,
+    has_vec: bool,
+    where_sql: str,
+    extra_sql: str = "",
+    row_limit: int | None = None,
+) -> str:
+    """Build the SQLite fused candidate-fetch query. Pure; returns SQL text.
+
+    ``search_mode`` "semantic" selects the vector-only shape (a ``LIMIT 50``
+    CTE then a join, with no FTS); anything else selects the hybrid shape
+    (FTS5 MATCH joined inline, bm25-ordered, capped at ``row_limit``).
+
+    ``has_vec`` selects whether the cosine distance is computed IN SQL by
+    sqlite-vec. It is an ACCELERATOR, not the vector engine: when False the same
+    similarity is computed by the Rust core (`cosine_batch_packed`) from the raw
+    blobs this query returns either way — verified equal to a reference cosine
+    to ~3e-09. So the two variants differ in WHERE the arithmetic happens and
+    how rows are ordered/limited in SQL, not in what similarity means.
+
+    Parameter ORDER is part of this contract, since callers bind positionally:
+      semantic + has_vec : (q_blob, *where_params)
+      semantic           : (*where_params,)
+      hybrid   + has_vec : (q_blob, *where_params, fts_query)
+      hybrid             : (*where_params, fts_query)
+    """
+    if search_mode == "semantic":
+        # Vector-only: narrow to 50 candidates by the scoping predicates FIRST,
+        # then join embeddings. The CTE exists so the LIMIT applies to items,
+        # not to the item×embedding fan-out.
+        if has_vec:
+            return f"""
+                            WITH limited AS (
+                                SELECT mi.id FROM memory_items mi
+                                WHERE {where_sql}
+                                LIMIT 50
+                            )
+                            SELECT {_BASE_COLS}, 0.0 as bm25_score,
+                                   (1.0 - vec_distance_cosine(me.embedding, ?)) as vec_score{extra_sql}
+                            FROM memory_items mi
+                            JOIN memory_embeddings me ON mi.id = me.memory_id
+                            WHERE mi.id IN (SELECT id FROM limited)
+                            ORDER BY vec_score DESC
+                        """
+        # No sqlite-vec: SQL cannot rank by similarity, so order by recency and
+        # let the Rust cosine score them downstream.
+        return f"""
+                            WITH limited AS (
+                                SELECT mi.id FROM memory_items mi
+                                WHERE {where_sql}
+                                LIMIT 50
+                            )
+                            SELECT {_BASE_COLS}, 0.0 as bm25_score{extra_sql}
+                            FROM memory_items mi
+                            JOIN memory_embeddings me ON mi.id = me.memory_id
+                            WHERE mi.id IN (SELECT id FROM limited)
+                            ORDER BY mi.created_at DESC
+                        """
+    # Hybrid/fts5: FTS5 MATCH joined inline, bm25-ordered (lower is better).
+    if has_vec:
+        return f"""
+                        SELECT {_BASE_COLS},
+                               bm25(memory_items_fts) as bm25_score,
+                               (1.0 - vec_distance_cosine(me.embedding, ?)) as vec_score{extra_sql}
+                        FROM memory_items mi
+                        JOIN memory_embeddings me ON mi.id = me.memory_id
+                        JOIN memory_items_fts fts ON mi.rowid = fts.rowid
+                        WHERE {where_sql} AND memory_items_fts MATCH ?
+                        ORDER BY bm25_score ASC
+                        LIMIT {row_limit}
+                    """
+    return f"""
+                        SELECT {_BASE_COLS},
+                               bm25(memory_items_fts) as bm25_score{extra_sql}
+                        FROM memory_items mi
+                        JOIN memory_embeddings me ON mi.id = me.memory_id
+                        JOIN memory_items_fts fts ON mi.rowid = fts.rowid
+                        WHERE {where_sql} AND memory_items_fts MATCH ?
+                        ORDER BY bm25_score ASC
+                        LIMIT {row_limit}
+                    """

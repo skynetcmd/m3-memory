@@ -139,6 +139,7 @@ from .search_routing import (  # noqa: F401 — re-exported for callers + memory
     _extract_caller_overrides,
     _maybe_route_query,
     _pull_predecessor_turns,
+    build_candidate_sql,
     is_temporal_query,
 )
 
@@ -954,40 +955,18 @@ async def memory_search_scored_impl(
             with _db() as db:
                 _has_vec = _detect_sqlite_vec(db)
                 if search_mode == "semantic":
+                    sql = build_candidate_sql(
+                        search_mode="semantic", has_vec=_has_vec,
+                        where_sql=where_sql, extra_sql=extra_sql,
+                    )
+                    if os.environ.get("M3_DEBUG"):
+                        _lbl = "sqlite-vec" if _has_vec else "standard"
+                        print(f"DEBUG SQL (semantic {_lbl}):\n{sql}")
                     if _has_vec:
                         import struct
                         q_blob = struct.pack(f"{len(q_vec)}f", *q_vec)
-                        sql = f"""
-                            WITH limited AS (
-                                SELECT mi.id FROM memory_items mi
-                                WHERE {where_sql}
-                                LIMIT 50
-                            )
-                            SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score,
-                                   (1.0 - vec_distance_cosine(me.embedding, ?)) as vec_score{extra_sql}
-                            FROM memory_items mi
-                            JOIN memory_embeddings me ON mi.id = me.memory_id
-                            WHERE mi.id IN (SELECT id FROM limited)
-                            ORDER BY vec_score DESC
-                        """
-                        if os.environ.get("M3_DEBUG"):
-                            print(f"DEBUG SQL (semantic sqlite-vec):\n{sql}")
                         _rows = db.execute(sql, (q_blob, *params)).fetchall()
                     else:
-                        sql = f"""
-                            WITH limited AS (
-                                SELECT mi.id FROM memory_items mi
-                                WHERE {where_sql}
-                                LIMIT 50
-                            )
-                            SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score{extra_sql}
-                            FROM memory_items mi
-                            JOIN memory_embeddings me ON mi.id = me.memory_id
-                            WHERE mi.id IN (SELECT id FROM limited)
-                            ORDER BY mi.created_at DESC
-                        """
-                        if os.environ.get("M3_DEBUG"):
-                            print(f"DEBUG SQL (semantic standard):\n{sql}")
                         _rows = db.execute(sql, params).fetchall()
                     if os.environ.get("M3_DEBUG"):
                         print(f"DEBUG SQL HITS (semantic): {len(_rows)}")
@@ -997,36 +976,19 @@ async def memory_search_scored_impl(
                 if not ok:
                     return (_RECURSE if search_mode != "fts5" else _EMPTY), _has_vec
 
+                sql = build_candidate_sql(
+                    search_mode=search_mode, has_vec=_has_vec,
+                    where_sql=where_sql, extra_sql=extra_sql,
+                    row_limit=sql_row_limit,
+                )
+                if os.environ.get("M3_DEBUG"):
+                    _lbl = "sqlite-vec" if _has_vec else "standard"
+                    print(f"DEBUG SQL (hybrid {_lbl}):\n{sql}")
                 if _has_vec:
                     import struct
                     q_blob = struct.pack(f"{len(q_vec)}f", *q_vec)
-                    sql = f"""
-                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding,
-                               bm25(memory_items_fts) as bm25_score,
-                               (1.0 - vec_distance_cosine(me.embedding, ?)) as vec_score{extra_sql}
-                        FROM memory_items mi
-                        JOIN memory_embeddings me ON mi.id = me.memory_id
-                        JOIN memory_items_fts fts ON mi.rowid = fts.rowid
-                        WHERE {where_sql} AND memory_items_fts MATCH ?
-                        ORDER BY bm25_score ASC
-                        LIMIT {sql_row_limit}
-                    """
-                    if os.environ.get("M3_DEBUG"):
-                        print(f"DEBUG SQL (hybrid sqlite-vec):\n{sql}")
                     _rows = db.execute(sql, (q_blob, *params, fts_query)).fetchall()
                 else:
-                    sql = f"""
-                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding,
-                               bm25(memory_items_fts) as bm25_score{extra_sql}
-                        FROM memory_items mi
-                        JOIN memory_embeddings me ON mi.id = me.memory_id
-                        JOIN memory_items_fts fts ON mi.rowid = fts.rowid
-                        WHERE {where_sql} AND memory_items_fts MATCH ?
-                        ORDER BY bm25_score ASC
-                        LIMIT {sql_row_limit}
-                    """
-                    if os.environ.get("M3_DEBUG"):
-                        print(f"DEBUG SQL (hybrid standard):\n{sql}")
                     _rows = db.execute(sql, (*params, fts_query)).fetchall()
 
                 if os.environ.get("M3_DEBUG"):
