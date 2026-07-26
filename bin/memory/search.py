@@ -423,47 +423,6 @@ def _mc_callable(mc, name: str, default):
     return val if callable(val) else default
 
 
-def _fts_candidate_rows(conn, fts_query, *, limit, scope_sql, scope_params,
-                        extra_cols_sql=""):
-    """Run THE bm25-ranked FTS candidate query. One definition, two callers.
-
-    This query existed twice, byte-identical apart from the row limit: once in
-    ``_fts_only_results`` (the embedder-down fallback, limit=k) and once in the
-    exact-substring short-circuit inside ``memory_search_scored_impl``
-    (limit=max(k*4, 20)). Duplicated query assembly is what let the row-scoping
-    predicates drift between paths on 2026-07-26 — three copies got a tenancy
-    fix, only one got type_filter/agent_filter, and filtered searches silently
-    returned unfiltered rows. Extracting it means there is one place for a
-    predicate to be missing from, and it cannot be missing from only one caller.
-
-    SQLITE-ONLY BY CONSTRUCTION, and that is not an oversight:
-    ``memory_items_fts`` / ``bm25()`` are FTS5, a SQLite virtual-table feature
-    with no PostgreSQL equivalent. Both callers already sit behind a
-    ``backend.name == "sqlite"`` gate — PG reaches the same queries through
-    ``search_pg.fetch_candidates_pg`` (tsvector), which is the portable path.
-    So the literal ``?`` placeholders here are correct rather than a seam
-    violation; ``scope_sql``/``scope_params`` still arrive from
-    ``Dialect.scope_predicates`` so the predicates themselves stay singular.
-    Do not "fix" the placeholders — fix the caller if it ever runs off SQLite.
-
-    Returns raw ``sqlite3.Row`` objects, bm25-ascending. Callers own their own
-    post-filtering (the short-circuit applies an exact-substring gate) and their
-    own scoring, because those genuinely differ.
-    """
-    return conn.execute(
-        f"""
-        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance{extra_cols_sql},
-               bm25(memory_items_fts) AS _bm25
-        FROM memory_items_fts fts
-        JOIN memory_items mi ON fts.rowid = mi.rowid
-        WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0{scope_sql}
-        ORDER BY _bm25 ASC
-        LIMIT ?
-        """,
-        (fts_query, *scope_params, limit),
-    ).fetchall()
-
-
 def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns,
                       type_filter="", agent_filter=""):
     """Bm25-ranked FTS keyword results, in the memory_search_scored_impl row shape.
@@ -604,12 +563,14 @@ async def memory_search_scored_impl(
     _embed = globals()["_embed"]  # noqa: F811 — floor-bind module global as local
     _db = globals()["_db"]
     _batch_cosine = globals()["_batch_cosine"]  # noqa: F811 — floor-bind module global
-    # `_compile_fts_query` is used in two branches below (the FTS short-circuit
-    # ~L957 and the keyword/FTS cascade ~L1152). A `from memory.fts import
-    # _compile_fts_query` inside only the first branch makes the name a function
-    # LOCAL for the whole body — so the second branch raised UnboundLocalError
-    # when the first branch didn't run. Floor-bind it here, same as the globals
-    # above, so both branches resolve it unconditionally.
+    # `_compile_fts_query` now has ONE caller below (the SQLite keyword/FTS
+    # cascade) — the FTS short-circuit stopped compiling its own query when it
+    # moved onto `keyword_search_with_row_data`, which compiles inside the seam.
+    # Keep the floor-bind anyway: a `from memory.fts import _compile_fts_query`
+    # inside a branch makes the name a function LOCAL for the WHOLE body, so any
+    # later branch that also used it raised UnboundLocalError when the first
+    # branch didn't run. Binding here is what makes that class of bug
+    # impossible, so it must stay even at one caller.
     from memory.fts import _compile_fts_query
 
     # Best-effort: callback resolution + test-shim rebinding. Any failure
@@ -663,20 +624,22 @@ async def memory_search_scored_impl(
 
     vector_weight = _maybe_route_query(query, vector_weight, intent_hint=intent_hint)
 
-    # Pre-emptive FTS short-circuit check for high-specificity lookup queries
-    # to bypass embedding entirely.
+    # Pre-emptive FTS short-circuit for high-specificity lookup queries: an
+    # exact-substring hit needs no embedding, so skip straight to the answer.
     #
-    # SQLite-only: this block uses `_db()`, the FTS5 `memory_items_fts` virtual
-    # table and `bm25()`, none of which exist on PostgreSQL. On PG the equivalent
-    # exact-lookup fast path is not implemented as a separate short-circuit; the
-    # normal candidate fetch (search_pg.fetch_candidates_pg, keyword_search +
-    # vector_search) handles the same queries with the same tenancy isolation. So
-    # gate the whole short-circuit on the SQLite backend and let PG fall through.
+    # BACKEND-AGNOSTIC as of 2026-07-26. This block used to be gated on
+    # `backend.name == "sqlite"` because it inlined FTS5 (`memory_items_fts`,
+    # `bm25()`), and PG was left to fall through to the full candidate fetch —
+    # meaning a PostgreSQL user paid an embed round-trip for a query whose exact
+    # answer was one keyword lookup away. That was an artefact of the SQL living
+    # here, not a capability difference: the ranked-keyword query is now a seam
+    # primitive (keyword_search_with_row_data), so BOTH backends short-circuit.
+    # The exact-substring gate below is pure Python over returned rows and was
+    # always portable.
     from memory.backends import active_backend as _active_backend_sc
 
     _sc_backend = _active_backend_sc()
-    _sc_is_sqlite = _sc_backend.name == "sqlite"
-    if _sc_is_sqlite and len(query.strip()) > 3 and not intent_hint and search_mode in ("hybrid", "fts5"):
+    if len(query.strip()) > 3 and not intent_hint and search_mode in ("hybrid", "fts5"):
         try:
             # Gating: Reject generic conversational queries from short-circuiting
             conversational_stops = {"show", "get", "find", "tell", "me", "the", "about", "what", "who", "when", "where", "why", "how", "list"}
@@ -684,68 +647,71 @@ async def memory_search_scored_impl(
             if query_words.issubset(conversational_stops):
                 raise ValueError("Generic conversational query; skipping short-circuit.")
 
-            fts_query, ok = _compile_fts_query(query, search_mode)
-            if ok:
-                extra_columns = list(extra_columns or [])
-                _BASE_COLS = ["id", "content", "title", "type", "importance"]
-                _allowed_extra = {
-                    "metadata_json", "conversation_id", "valid_from", "valid_to",
-                    "user_id", "scope", "agent_id", "created_at", "source",
-                    "confidence", "corroboration_count", "contradiction_count",
-                }
-                safe_extra = [c for c in extra_columns if c in _allowed_extra and c not in _BASE_COLS]
-                extra_cols_sql = ""
-                if safe_extra:
-                    extra_cols_sql = ", " + ", ".join(f"mi.{c}" for c in safe_extra)
+            extra_columns = list(extra_columns or [])
+            _BASE_COLS = ["id", "content", "title", "type", "importance"]
+            _allowed_extra = {
+                "metadata_json", "conversation_id", "valid_from", "valid_to",
+                "user_id", "scope", "agent_id", "created_at", "source",
+                "confidence", "corroboration_count", "contradiction_count",
+            }
+            safe_extra = [c for c in extra_columns if c in _allowed_extra and c not in _BASE_COLS]
 
-                # TENANCY (SECURITY, 2026-07-14): the short-circuit MUST apply the
-                # SAME user_id/scope isolation the main branch does at ~L681, or it
-                # leaks cross-tenant. Without these predicates a specific query
-                # (>3 chars, non-stopword) returns ANOTHER user's rows because the
-                # early-return path never reaches the filtered branch. Parameterized
-                # + empty-string-passes-through so callers that omit tenancy (the
-                # legacy shared "agent" path) behave byte-identically.
-                _tenancy_sql, _tenancy_params = _sc_backend.dialect().scope_predicates(
-                    user_id=user_id, scope=scope,
-                    type_filter=type_filter, agent_filter=agent_filter,
+            # TENANCY (SECURITY, 2026-07-14): the short-circuit MUST apply the
+            # SAME user_id/scope isolation the main branch does at ~L681, or it
+            # leaks cross-tenant. Without these predicates a specific query
+            # (>3 chars, non-stopword) returns ANOTHER user's rows because the
+            # early-return path never reaches the filtered branch. Parameterized
+            # + empty-string-passes-through so callers that omit tenancy (the
+            # legacy shared "agent" path) behave byte-identically.
+            _tenancy_sql, _tenancy_params = _sc_backend.dialect().scope_predicates(
+                user_id=user_id, scope=scope,
+                type_filter=type_filter, agent_filter=agent_filter,
+            )
+            with _db() as conn:
+                # Fetch the top-N bm25-ranked FTS matches, not LIMIT 1.
+                # The old LIMIT 1 + substring gate was lossy: FTS routinely
+                # matches many rows, but only the single best-bm25 row was
+                # examined. If THAT row contained the exact query substring,
+                # the function returned it ALONE and discarded every other
+                # match (e.g. query "core tenets" matched 6 rows but returned
+                # 1); if it did NOT, the short-circuit fell through to the
+                # embedding path, which returns [] when the embed backend is
+                # down — so a purely lexical, FTS-satisfiable query silently
+                # yielded nothing. Now: keep ALL top-N rows whose content or
+                # title contains the exact query substring, bm25-ranked.
+                # Over-fetch (k*4, floor 20): the exact-substring gate
+                # below discards most rows, so a bare `k` would starve it.
+                fts_rows = _sc_backend.keyword_search_with_row_data(
+                    conn, query, limit=max(k * 4, 20),
+                    tenancy_sql=_tenancy_sql,
+                    tenancy_params=tuple(_tenancy_params),
+                    extra_columns=tuple(safe_extra),
+                    # Phrase compile, NOT the seam's default OR form. This
+                    # branch RETURNS EARLY on an exact-substring gate with no
+                    # ranking downstream, so OR-compiled candidates bury phrase
+                    # hits under single-token ones and the result goes
+                    # NON-MONOTONIC in k (0 exact hits at limit=20, 1 at 160).
+                    # See the base contract's note on ``search_mode``.
+                    search_mode=search_mode,
                 )
-                with _db() as conn:
-                    # Fetch the top-N bm25-ranked FTS matches, not LIMIT 1.
-                    # The old LIMIT 1 + substring gate was lossy: FTS routinely
-                    # matches many rows, but only the single best-bm25 row was
-                    # examined. If THAT row contained the exact query substring,
-                    # the function returned it ALONE and discarded every other
-                    # match (e.g. query "core tenets" matched 6 rows but returned
-                    # 1); if it did NOT, the short-circuit fell through to the
-                    # embedding path, which returns [] when the embed backend is
-                    # down — so a purely lexical, FTS-satisfiable query silently
-                    # yielded nothing. Now: keep ALL top-N rows whose content or
-                    # title contains the exact query substring, bm25-ranked.
-                    # Over-fetch (k*4, floor 20): the exact-substring gate
-                    # below discards most rows, so a bare `k` would starve it.
-                    fts_rows = _fts_candidate_rows(
-                        conn, fts_query, limit=max(k * 4, 20),
-                        scope_sql=_tenancy_sql, scope_params=_tenancy_params,
-                        extra_cols_sql=extra_cols_sql,
+                query_lower = query.lower()
+                exact_hits = []
+                for row in fts_rows:
+                    hit = dict(row)
+                    hit.pop("_bm25", None)  # internal ranking col, not part of the item shape
+                    content_lower = (hit["content"] or "").lower()
+                    title_lower = (hit["title"] or "").lower()
+                    # Direct specific hit: exact query phrase in content or title.
+                    if query_lower in content_lower or query_lower in title_lower:
+                        exact_hits.append((1.0, hit))
+                if exact_hits:
+                    logger.info(
+                        "FTS Short-Circuit early exit for query %r: %d exact match(es)",
+                        query, len(exact_hits),
                     )
-                    query_lower = query.lower()
-                    exact_hits = []
-                    for row in fts_rows:
-                        hit = dict(row)
-                        hit.pop("_bm25", None)  # internal ranking col, not part of the item shape
-                        content_lower = (hit["content"] or "").lower()
-                        title_lower = (hit["title"] or "").lower()
-                        # Direct specific hit: exact query phrase in content or title.
-                        if query_lower in content_lower or query_lower in title_lower:
-                            exact_hits.append((1.0, hit))
-                    if exact_hits:
-                        logger.info(
-                            "FTS Short-Circuit early exit for query %r: %d exact match(es)",
-                            query, len(exact_hits),
-                        )
-                        # bm25 order preserved (rows came back ORDER BY _bm25 ASC);
-                        # all share score 1.0 as exact-substring hits. Cap at k.
-                        return exact_hits[:k]
+                    # bm25 order preserved (rows came back ORDER BY _bm25 ASC);
+                    # all share score 1.0 as exact-substring hits. Cap at k.
+                    return exact_hits[:k]
         except Exception as exc:
             logger.debug("FTS Short-circuit check failed (non-fatal): %s", exc)
 

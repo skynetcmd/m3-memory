@@ -222,6 +222,7 @@ class StorageBackend(Protocol):
         tenancy_params: "tuple[object, ...]" = (),
         table: str = "memory_items",
         extra_columns: "tuple[str, ...]" = (),
+        search_mode: str = "fts5",
     ) -> "list[dict]":
         """Keyword search returning FULL ROWS, ranked, in a backend-identical shape.
 
@@ -243,6 +244,21 @@ class StorageBackend(Protocol):
         column is NOT part of the returned shape — it is an internal ranking
         artifact, and leaking it would make the two backends' opaque, non-
         comparable scales look interchangeable (see :class:`KeywordHit`).
+
+        ``search_mode`` selects the query COMPILATION, not the SQL: "fts5" is
+        the broad OR form (``a OR b OR c``) and "hybrid" the stricter phrase
+        form. It matters because callers differ in what a candidate set is FOR.
+        A ranked-recall caller wants the OR form and lets downstream ranking
+        narrow it. An exact-phrase caller that returns early — the search.py
+        short-circuit — must use the phrase form: fed OR-compiled candidates,
+        its substring gate finds phrase matches buried under thousands of
+        single-token hits and silently returns fewer results as the fetch
+        window shrinks (verified: 0 exact hits at limit=20, 1 at limit=160,
+        i.e. NON-MONOTONIC in the caller's k). Both backends honour it via
+        their own compiler (_compile_fts_query / _compile_tsquery), so the
+        semantics are the seam's, not the dialect's. It defaults to "fts5" —
+        ranked recall — because that is the safe default for a caller that
+        ranks afterwards; the early-returning caller opts in explicitly.
 
         WHY THIS EXISTS: the SQLite search path had TWO inline copies of a
         rank-then-hydrate FTS query (the exact-substring short-circuit and the

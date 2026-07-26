@@ -132,6 +132,109 @@ class TestSqliteKeywordSearch:
         assert {h.memory_id for h in hits} == {"u1"}
 
 
+class TestKeywordSearchWithRowDataMatchMode:
+    """``search_mode`` must reach the compiler — the phrase/OR distinction.
+
+    REGRESSION (2026-07-26). ``keyword_search_with_row_data`` originally
+    hardcoded the "fts5" (OR) compile. The search.py exact-substring
+    short-circuit, which RETURNS EARLY with no ranking downstream, then had its
+    phrase hits buried under single-token matches: a parity sweep showed 0 exact
+    hits at limit=20 but 1 at limit=160 — NON-MONOTONIC in the caller's k, so a
+    user asking for MORE results got FEWER. The mode is now a parameter.
+
+    Asserted at the seam rather than through search.py because the failure is a
+    property of candidate ORDER under a limit, which needs a controlled corpus:
+    filler rows that match single tokens must outrank the phrase row.
+    """
+
+    def _corpus(self):
+        # Local schema, not TestSqliteKeywordSearch._make_fts_db: that fixture
+        # predates this method and has no `importance` column, which
+        # keyword_search_with_row_data projects as a base column.
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE memory_items (
+                id TEXT PRIMARY KEY, type TEXT, title TEXT, content TEXT,
+                importance REAL DEFAULT 0.5, is_deleted INTEGER DEFAULT 0,
+                user_id TEXT DEFAULT '', scope TEXT DEFAULT 'agent'
+            );
+            CREATE VIRTUAL TABLE memory_items_fts USING fts5(
+                title, content, content='memory_items', content_rowid='rowid'
+            );
+            """
+        )
+
+        def ins(conn, _id, title, content):
+            cur = conn.execute(
+                "INSERT INTO memory_items (id, title, content) VALUES (?,?,?)",
+                (_id, title, content),
+            )
+            conn.execute(
+                "INSERT INTO memory_items_fts (rowid, title, content) VALUES (?,?,?)",
+                (cur.lastrowid, title, content),
+            )
+            conn.commit()
+
+        # The one row containing the exact phrase.
+        ins(conn, "phrase", "notes", "the portable m3 command runs anywhere")
+        # Filler matching individual tokens only. Short docs score BETTER under
+        # bm25, so these crowd out the phrase row when compiled as OR.
+        for n in range(30):
+            ins(conn, f"f{n}", "portable", "portable")
+        return conn
+
+    def test_fts5_mode_admits_rows_without_the_phrase(self):
+        """OR compile returns single-token matches; phrase compile must not.
+
+        This is the property that makes "fts5" wrong for an early-returning
+        exact-substring caller: the candidate list it competes in is padded
+        with rows that do not contain the phrase at all.
+        """
+        conn = self._corpus()
+        rows = active_backend().keyword_search_with_row_data(
+            conn, "portable m3 command", limit=5, search_mode="fts5",
+        )
+        assert len(rows) == 5, "OR compile should fill the limit with filler"
+        non_phrase = [r["id"] for r in rows if "portable m3 command" not in r["content"]]
+        assert non_phrase, "OR compile must admit rows lacking the phrase"
+
+    def test_hybrid_mode_keeps_the_phrase_row_first(self):
+        conn = self._corpus()
+        rows = active_backend().keyword_search_with_row_data(
+            conn, "portable m3 command", limit=5, search_mode="hybrid",
+        )
+        assert [r["id"] for r in rows] == ["phrase"], (
+            "phrase compile must match ONLY the row containing the phrase"
+        )
+
+    def test_phrase_recall_is_monotonic_in_limit(self):
+        """The actual defect: more budget must never yield fewer phrase hits."""
+        conn = self._corpus()
+        backend = active_backend()
+        counts = []
+        for limit in (2, 5, 20, 50):
+            rows = backend.keyword_search_with_row_data(
+                conn, "portable m3 command", limit=limit, search_mode="hybrid",
+            )
+            counts.append(sum(1 for r in rows if "portable m3 command" in r["content"]))
+        assert counts == sorted(counts), f"non-monotonic phrase recall: {counts}"
+        assert counts[-1] >= 1
+
+    def test_default_mode_is_the_broad_or_form(self):
+        """Callers that don't pass search_mode keep ranked-recall semantics."""
+        conn = self._corpus()
+        backend = active_backend()
+        default = backend.keyword_search_with_row_data(
+            conn, "portable m3 command", limit=5,
+        )
+        explicit = backend.keyword_search_with_row_data(
+            conn, "portable m3 command", limit=5, search_mode="fts5",
+        )
+        assert [r["id"] for r in default] == [r["id"] for r in explicit]
+
+
 class TestSqliteVectorSearch:
     DIM = 4
 

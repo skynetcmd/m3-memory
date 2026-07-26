@@ -349,6 +349,7 @@ class SqliteBackend:
         tenancy_params: tuple = (),
         table: str = "memory_items",
         extra_columns: tuple = (),
+        search_mode: str = "fts5",
     ) -> "list[dict]":
         """FTS5 keyword search projecting the row body (see the base contract).
 
@@ -366,7 +367,7 @@ class SqliteBackend:
         del table  # SQLite: same names, right file via conn (see keyword_search)
         from ..fts import _compile_fts_query
 
-        fts_query, ok = _compile_fts_query(query, "fts5")
+        fts_query, ok = _compile_fts_query(query, search_mode)
         if not ok or not fts_query:
             return []
         extra_sql = "".join(f", mi.{c}" for c in extra_columns)

@@ -725,6 +725,7 @@ class PostgresBackend:
         tenancy_params: tuple = (),
         table: str = "memory_items",
         extra_columns: tuple = (),
+        search_mode: str = "fts5",
     ) -> "list[dict]":
         """tsvector keyword search projecting the row body (see base contract).
 
@@ -746,7 +747,7 @@ class PostgresBackend:
             raise ValueError(f"table must be a bare identifier: {table!r}")
         from ..fts import _compile_tsquery
 
-        tsquery, ok = _compile_tsquery(query, "fts5")
+        tsquery, ok = _compile_tsquery(query, search_mode)
         if not ok or not tsquery:
             return []
         safe_extra = [c for c in extra_columns if str(c).isidentifier()]
