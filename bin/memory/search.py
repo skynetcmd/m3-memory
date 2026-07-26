@@ -423,7 +423,8 @@ def _mc_callable(mc, name: str, default):
     return val if callable(val) else default
 
 
-def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns):
+def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns,
+                      type_filter="", agent_filter=""):
     """Bm25-ranked FTS keyword results, in the memory_search_scored_impl row shape.
 
     The degrade path used when NO query vector is available (embedder down/slow):
@@ -460,13 +461,17 @@ def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns):
         safe_extra = [c for c in (extra_columns or [])
                       if c in _allowed_extra and c not in _BASE_COLS]
         extra_cols_sql = (", " + ", ".join(f"mi.{c}" for c in safe_extra)) if safe_extra else ""
-        tenancy_sql, tenancy_params = "", []
-        if user_id:
-            tenancy_sql += " AND mi.user_id = ?"
-            tenancy_params.append(user_id)
-        if scope:
-            tenancy_sql += " AND mi.scope = ?"
-            tenancy_params.append(scope)
+        # Seam, not a hand-rolled copy: this is the FOURTH place these
+        # predicates lived. It took no type_filter/agent_filter at all, so an
+        # embedder outage silently returned UNFILTERED rows — the worst moment
+        # for it, since the user cannot tell degraded output from correct
+        # output. See Dialect.scope_predicates and DESIGN_PHILOSOPHIES 10a.
+        from memory.backends import dialect as _dialect_fts
+
+        tenancy_sql, tenancy_params = _dialect_fts().scope_predicates(
+            user_id=user_id, scope=scope,
+            type_filter=type_filter, agent_filter=agent_filter,
+        )
         with _db() as conn:
             rows = conn.execute(
                 f"""
@@ -729,7 +734,8 @@ async def memory_search_scored_impl(
         # short/token-boundary queries fell through to here and vanished. This
         # keeps the <=8s degrade contract (one bounded FTS query, no cascade).
         fts_fallback = _fts_only_results(
-            query, search_mode, k, user_id, scope, extra_columns
+            query, search_mode, k, user_id, scope, extra_columns,
+            type_filter=type_filter, agent_filter=agent_filter,
         )
         if fts_fallback:
             logger.info("FTS-only fallback (no query vector) for %r: %d match(es)",
