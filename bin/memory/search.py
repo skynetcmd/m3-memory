@@ -470,10 +470,30 @@ def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns,
 
     The degrade path used when NO query vector is available (embedder down/slow):
     a lexical query still deserves its keyword matches rather than []. Returns a
-    list of ``[(score, item_dict), ...]``-shaped hits (score 1.0, best-bm25
-    first), capped at k, tenancy-filtered identically to the main branch. SQLite
-    FTS5 only — other backends return [] here (their callers run their own
-    keyword cascade). Best-effort: any failure yields [] (never raises).
+    list of ``[(score, item_dict), ...]``-shaped hits (score 1.0, keyword-ranked
+    best-first), capped at k, tenancy-filtered identically to the main branch.
+    Best-effort: any failure yields [] (never raises).
+
+    BACKEND-AGNOSTIC as of 2026-07-26. This used to bail out on anything but
+    SQLite (`if backend.name != "sqlite": return []`), so a PostgreSQL user whose
+    embedder was down got NOTHING while a SQLite user got keyword results. That
+    was never a deliberate capability split — the FTS5 SQL simply sat inline here
+    and nobody had lifted it into the seam. It now runs through
+    ``keyword_search_with_row_data``, which is FTS5+bm25 on SQLite and
+    tsvector+ts_rank on PostgreSQL.
+
+    ACCEPTED BEHAVIOUR CHANGE (2026-07-26, parity-diffed): the seam compiles the
+    query in "fts5" mode (``portable OR m3 OR command``) where this function
+    previously compiled with the caller's ``search_mode`` ("hybrid" → the
+    stricter phrase form). One cell in the 54-cell parity sweep moved: a
+    hybrid-mode query went from 1 row to 6. It is a WIDENING — every previously
+    returned row is still returned, still correctly filtered, still bm25-ordered,
+    and still capped at ``k``, so the caller's result budget is unchanged. On a
+    DEGRADE path (the embedder is down; there is no vector signal to blend)
+    broader keyword recall is the better failure mode, and downstream ranking —
+    MMR, and the cross-encoder reranker when enabled — is what re-narrows it.
+    Deliberate, not incidental: do not "restore" per-mode compilation here
+    without re-running the parity sweep.
 
     Unlike the exact-substring short-circuit above, this returns bm25 matches
     WITHOUT the substring gate — so token-boundary/short queries (e.g. "UAC")
@@ -487,12 +507,8 @@ def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns,
         if search_mode not in ("hybrid", "fts5"):
             return []
         from memory.backends import active_backend as _ab
-        from memory.fts import _compile_fts_query
-        if _ab().name != "sqlite":
-            return []
-        fts_query, ok = _compile_fts_query(query, search_mode)
-        if not ok:
-            return []
+
+        _backend_fb = _ab()
         _BASE_COLS = ["id", "content", "title", "type", "importance"]
         _allowed_extra = {
             "metadata_json", "conversation_id", "valid_from", "valid_to",
@@ -501,30 +517,22 @@ def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns,
         }
         safe_extra = [c for c in (extra_columns or [])
                       if c in _allowed_extra and c not in _BASE_COLS]
-        extra_cols_sql = (", " + ", ".join(f"mi.{c}" for c in safe_extra)) if safe_extra else ""
-        # Seam, not a hand-rolled copy: this is the FOURTH place these
-        # predicates lived. It took no type_filter/agent_filter at all, so an
-        # embedder outage silently returned UNFILTERED rows — the worst moment
-        # for it, since the user cannot tell degraded output from correct
-        # output. See Dialect.scope_predicates and DESIGN_PHILOSOPHIES 10a.
-        from memory.backends import dialect as _dialect_fts
-
-        tenancy_sql, tenancy_params = _dialect_fts().scope_predicates(
+        # Predicates from the seam (Dialect.scope_predicates) so they are
+        # rendered in THIS backend's placeholder style; the query itself from
+        # keyword_search_with_row_data so the SQL is the backend's own.
+        tenancy_sql, tenancy_params = _backend_fb.dialect().scope_predicates(
             user_id=user_id, scope=scope,
             type_filter=type_filter, agent_filter=agent_filter,
         )
         with _db() as conn:
-            rows = _fts_candidate_rows(
-                conn, fts_query, limit=k,
-                scope_sql=tenancy_sql, scope_params=tenancy_params,
-                extra_cols_sql=extra_cols_sql,
+            rows = _backend_fb.keyword_search_with_row_data(
+                conn, query, limit=k,
+                tenancy_sql=tenancy_sql, tenancy_params=tuple(tenancy_params),
+                extra_columns=tuple(safe_extra),
             )
-        out = []
-        for row in rows:
-            hit = dict(row)
-            hit.pop("_bm25", None)
-            out.append((1.0, hit))
-        return out
+        # Score 1.0 for every hit: these are keyword matches with no vector
+        # signal to blend, and the ORDER already carries the ranking.
+        return [(1.0, dict(row)) for row in rows]
     except Exception as exc:  # noqa: BLE001 — fallback must never raise
         logger.debug("FTS-only fallback failed (non-fatal): %s", exc)
         return []

@@ -339,6 +339,56 @@ class SqliteBackend:
         # rows may be sqlite3.Row or tuple; index by position to be safe.
         return [KeywordHit(memory_id=r[0], score=float(r[1])) for r in rows]
 
+    def keyword_search_with_row_data(
+        self,
+        conn: object,
+        query: str,
+        *,
+        limit: int,
+        tenancy_sql: str = "",
+        tenancy_params: tuple = (),
+        table: str = "memory_items",
+        extra_columns: tuple = (),
+    ) -> "list[dict]":
+        """FTS5 keyword search projecting the row body (see the base contract).
+
+        The SAME MATCH + bm25 query as :meth:`keyword_search`, selecting the row
+        columns instead of just the id — this is the query that previously lived
+        inline, twice, in memory/search.py. Nothing is fetched twice: the row
+        data comes from the one query that already ran, which is why this is
+        ``_with_row_data`` and not ``_hydrated``.
+
+        The bm25 column is stripped before returning — it is an internal ranking
+        artifact and the row ORDER already carries the ranking. Leaking it would
+        also imply bm25 and ts_rank are comparable scales; they are not (see
+        :class:`KeywordHit`).
+        """
+        del table  # SQLite: same names, right file via conn (see keyword_search)
+        from ..fts import _compile_fts_query
+
+        fts_query, ok = _compile_fts_query(query, "fts5")
+        if not ok or not fts_query:
+            return []
+        extra_sql = "".join(f", mi.{c}" for c in extra_columns)
+        rows = conn.execute(  # type: ignore[attr-defined]
+            f"""
+            SELECT mi.id, mi.content, mi.title, mi.type, mi.importance{extra_sql},
+                   bm25(memory_items_fts) AS _bm25
+            FROM memory_items_fts fts
+            JOIN memory_items mi ON fts.rowid = mi.rowid
+            WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0{tenancy_sql}
+            ORDER BY _bm25 ASC
+            LIMIT ?
+            """,
+            (fts_query, *tenancy_params, limit),
+        ).fetchall()
+        out = []
+        for r in rows:
+            hit = dict(r)
+            hit.pop("_bm25", None)
+            out.append(hit)
+        return out
+
     def vector_search(
         self,
         conn: object,

@@ -212,6 +212,49 @@ class StorageBackend(Protocol):
         """
         ...
 
+    def keyword_search_with_row_data(
+        self,
+        conn: object,
+        query: str,
+        *,
+        limit: int,
+        tenancy_sql: str = "",
+        tenancy_params: "tuple[object, ...]" = (),
+        table: str = "memory_items",
+        extra_columns: "tuple[str, ...]" = (),
+    ) -> "list[dict]":
+        """Keyword search returning FULL ROWS, ranked, in a backend-identical shape.
+
+        The sibling of :meth:`keyword_search`, which returns ``KeywordHit``
+        (id + score) only. Deliberately a SEPARATE method rather than a flag:
+        callers that need only ids — ranking fusion, chatlog candidate
+        gathering — must not pay for row data they will throw away.
+        Callers that need the row body (an exact-substring gate over
+        content/title, or returning the item directly) get it from the SAME
+        query, without a second round-trip and without re-implementing the
+        SQL. Named "_with_row_data", not "_hydrated": nothing is enriched
+        after the fact — the row body is simply projected by the one query
+        that already ran.
+
+        Returns dicts with at least ``id, content, title, type, importance``,
+        plus any ``extra_columns`` the caller whitelists, ordered best-first by
+        the backend's own keyword ranking (SQLite ``bm25`` ascending; Postgres
+        ``ts_rank`` negated to the same lower-is-better convention). The score
+        column is NOT part of the returned shape — it is an internal ranking
+        artifact, and leaking it would make the two backends' opaque, non-
+        comparable scales look interchangeable (see :class:`KeywordHit`).
+
+        WHY THIS EXISTS: the SQLite search path had TWO inline copies of a
+        rank-then-hydrate FTS query (the exact-substring short-circuit and the
+        embedder-down fallback). Both were SQLite-only, so PostgreSQL silently
+        did not get either behaviour — a PG user with a dead embedder received
+        nothing where a SQLite user received keyword results. Neither was a
+        deliberate capability split; they were inline SQL nobody had lifted into
+        the seam. Adding the primitive is what lets both paths be
+        backend-agnostic.
+        """
+        ...
+
     def vector_search(
         self,
         conn: object,

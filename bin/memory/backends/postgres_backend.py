@@ -715,6 +715,68 @@ class PostgresBackend:
         )
         return [KeywordHit(memory_id=r[0], score=float(r[1])) for r in cur.fetchall()]
 
+    def keyword_search_with_row_data(
+        self,
+        conn: object,
+        query: str,
+        *,
+        limit: int,
+        tenancy_sql: str = "",
+        tenancy_params: tuple = (),
+        table: str = "memory_items",
+        extra_columns: tuple = (),
+    ) -> "list[dict]":
+        """tsvector keyword search projecting the row body (see base contract).
+
+        The SAME tsquery + ts_rank query as :meth:`keyword_search`, selecting the
+        row columns instead of just the id. Gives PostgreSQL the behaviours that
+        were previously SQLite-only because their SQL sat inline in
+        memory/search.py: the exact-substring short-circuit and the
+        embedder-down keyword fallback. A PG user with a dead embedder now gets
+        keyword results instead of nothing.
+
+        ``metadata_json`` is re-serialised to TEXT when present: psycopg returns
+        JSONB as a dict, while the SQLite path holds a string and downstream code
+        does substring checks on it. Normalising here keeps the CALLER identical
+        on both backends, which is the whole point of the seam. The ts_rank score
+        is not returned — row ORDER carries the ranking, and bm25/ts_rank are not
+        comparable scales (see :class:`KeywordHit`).
+        """
+        if not table.isidentifier():
+            raise ValueError(f"table must be a bare identifier: {table!r}")
+        from ..fts import _compile_tsquery
+
+        tsquery, ok = _compile_tsquery(query, "fts5")
+        if not ok or not tsquery:
+            return []
+        safe_extra = [c for c in extra_columns if str(c).isidentifier()]
+        extra_sql = "".join(f", mi.{c}" for c in safe_extra)
+        cur = conn.cursor()  # type: ignore[attr-defined]
+        cur.execute(
+            f"""
+            SELECT mi.id, mi.content, mi.title, mi.type, mi.importance{extra_sql},
+                   -ts_rank(mi.search_vector, to_tsquery('english', %s)) AS _rank
+            FROM {table} mi
+            WHERE mi.search_vector @@ to_tsquery('english', %s)
+              AND mi.is_deleted = 0{tenancy_sql}
+            ORDER BY _rank ASC
+            LIMIT %s
+            """,
+            (tsquery, tsquery, *tenancy_params, limit),
+        )
+        colnames = [d[0] for d in cur.description]
+        out = []
+        for raw in cur.fetchall():
+            row = dict(zip(colnames, raw))
+            row.pop("_rank", None)
+            meta = row.get("metadata_json")
+            if meta is not None and not isinstance(meta, str):
+                import json
+
+                row["metadata_json"] = json.dumps(meta)
+            out.append(row)
+        return out
+
     def vector_search(
         self,
         conn: object,
