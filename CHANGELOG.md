@@ -21,6 +21,29 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.26.1] — 2026-07-26 — Search seam parity, model discovery, and PostgreSQL reach
+
+### Fixed
+- `type_filter` and `agent_filter` were silently dropped on both backends whenever a query took the FTS short-circuit, returning unfiltered rows at score 1.0.
+- The embedder-down keyword fallback also ignored both filters, so a degraded search returned unfiltered rows.
+- PostgreSQL users got nothing from the embedder-down keyword fallback; it was SQLite-only by accident, not by design.
+- PostgreSQL never took the exact-substring short-circuit, paying a full embed round-trip for lookups one keyword query away.
+- `search_mode` was accepted and silently ignored on PostgreSQL for unquoted multi-token queries; hybrid now compiles to AND, mirroring FTS5.
+- An empty auth token produced the illegal header `Bearer `, which made every tokenless LLM endpoint silently undiscoverable.
+- Several LLM callers defaulted to a hardcoded model name, so a machine without that exact model got a 404 instead of using what it had.
+- The files-store LLM base URL required omitting `/v1` while the rest of the codebase included it; both forms now work.
+- A PostgreSQL test left a stripped `memory_items` behind, breaking later tests that migrate against `agent_id`.
+
+### Added
+- `keyword_search_with_row_data` backend primitive: ranked keyword search returning full rows, identical in shape on SQLite and PostgreSQL.
+- `Dialect.scope_predicates`: one builder for row-scoping predicates, replacing four hand-maintained copies.
+- `build_candidate_sql`: one pure builder for the four SQLite candidate-fetch query variants.
+- `discover_model_sync`: synchronous model discovery, so callers need not name a model.
+- Summariser pre-warm before an ingest batch, so the first file does not pay a cold model load against the per-call timeout.
+
+### Changed
+- Model selection precedence is now uniform: explicit override, then discovery, then fail loud — never a hardcoded name.
+
 ## [2026.7.26.0] — 2026-07-26 — Silent-failure fixes across chatlog, doctor, and install
 
 ### Fixed
