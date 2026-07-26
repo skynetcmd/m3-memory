@@ -21,6 +21,27 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.26.0] — 2026-07-26 — Silent-failure fixes across chatlog, doctor, and install
+
+### Fixed
+- `m3 chatlog doctor` no longer reports `<hook> silent 24h+` permanently; the check treated an absent per-hook timestamp as infinitely stale.
+- Chatlog unembedded count excluded soft-deleted and empty rows, so it disagreed with the tool that drains it and could never reach zero.
+- Cognitive loop's embed pass only swept the main DB; on a split topology the chatlog backlog grew unbounded.
+- `m3 doctor --fix` repaired only the main DB and reported success while the real backlog went untouched.
+- MCP server now registers with the HALT protocol, so an exclusive op can see it.
+- HALT writer detection missed the plugin-launched `m3` server and the Rust embed server, and counted the Windows venv launcher stub as a writer.
+- Cognitive loop honors SIGTERM on Windows, where asyncio's handler is unavailable.
+- `m3 setup` reported success regardless of the post-install doctor result; exit 3 now means installed-but-unverified.
+
+### Added
+- Doctor probe: does `m3` on PATH run this install (stale, shadowed, or orphaned launchers).
+- Doctor probe: chatlog hook wiring verified against disk; repair behind `--fix --fix-hooks`.
+- Warnings now name the command that fixes them, and redaction-off is surfaced.
+- CI: end-to-end install and upgrade tests on all three OSes.
+
+### Changed
+- Pinned `m3-core-rs` to 3.7.25 / v2026.7.25.
+
 ## [2026.7.25.0] — 2026-07-25 — PostgreSQL portability & wiki synthesis
 
 - **Full parity for PostgreSQL and SQLite, including the testing harness.** The
