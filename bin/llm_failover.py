@@ -125,6 +125,27 @@ def clear_embed_cache() -> None:
     _EMBED_NEG_CACHE_TS = 0.0
 
 
+def _auth_headers(token: str | None) -> dict:
+    """Authorization header, OMITTED ENTIRELY when there is no token.
+
+    A junk or empty bearer is NOT equivalent to no bearer:
+
+      * `Bearer ` (empty token) is an ILLEGAL HTTP header value — httpx raises
+        LocalProtocolError before the request leaves the process. The callers
+        below wrap discovery in a broad `except Exception`, so that surfaced as
+        "endpoint unusable" and get_best_llm returned None against a perfectly
+        healthy server. Observed 2026-07-26 against a live Ollama: every
+        tokenless endpoint was silently undiscoverable.
+      * A placeholder like "not-needed" earns a 401 from an auth-enabled
+        LM Studio, which answers a MISSING header differently from a WRONG one.
+
+    Mirrors files_memory.config.llm_auth_headers. One helper, three callers, so
+    the three cannot drift apart again.
+    """
+    tok = (token or "").strip()
+    return {"Authorization": f"Bearer {tok}"} if tok else {}
+
+
 def discover_model_sync(
     endpoint: str,
     token: Optional[str] = None,
@@ -175,8 +196,8 @@ def discover_model_sync(
     try:
         import httpx
 
-        tok = token if token is not None else (os.environ.get("LM_API_TOKEN") or "").strip()
-        headers = {"Authorization": f"Bearer {tok}"} if tok else {}
+        tok = token if token is not None else os.environ.get("LM_API_TOKEN")
+        headers = _auth_headers(tok)
         r = httpx.get(
             f"{endpoint.rstrip('/')}/models",
             headers=headers,
@@ -269,7 +290,7 @@ async def get_best_llm(client: httpx.AsyncClient, token: str) -> Optional[tuple[
         try:
             response = await client.get(
                 f"{endpoint}/models",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=_auth_headers(token),
                 timeout=httpx.Timeout(CONNECT_TIMEOUT, read=READ_TIMEOUT),
             )
             response.raise_for_status()
@@ -291,7 +312,10 @@ async def get_best_llm(client: httpx.AsyncClient, token: str) -> Optional[tuple[
             logger.warning(f"[llm_failover] {endpoint}: Failed to parse JSON: {e}")
             continue
 
-        # Both OpenAI and Ollama /v1/models return {"data": [...]}
+        # VERIFIED 2026-07-26 against live Ollama 0.31.2: its /v1/models does
+        # return {"data": [...]} with an "id" field, same as OpenAI/LM Studio.
+        # The "models" fallback covers Ollama's NATIVE /api/tags shape, which we
+        # do not call — kept as cheap insurance for a non-/v1 endpoint.
         models = data.get("data", data.get("models", []))
 
         if not models:
@@ -351,7 +375,7 @@ async def get_smallest_llm(
         try:
             response = await client.get(
                 f"{endpoint}/models",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=_auth_headers(token),
                 timeout=httpx.Timeout(CONNECT_TIMEOUT, read=READ_TIMEOUT),
             )
             response.raise_for_status()
@@ -429,7 +453,7 @@ async def get_best_embed(client: httpx.AsyncClient, token: str) -> Optional[tupl
         try:
             response = await client.get(
                 f"{endpoint}/models",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=_auth_headers(token),
                 timeout=httpx.Timeout(CONNECT_TIMEOUT, read=READ_TIMEOUT),
             )
             response.raise_for_status()

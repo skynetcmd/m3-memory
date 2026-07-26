@@ -216,3 +216,90 @@ class TestCallersDoNotHardcodeNames:
             f"{module} still names {literal!r} outside a comment — "
             "model names belong in an override, never a fallback"
         )
+
+
+class TestAuthHeaderOmittedWhenTokenless:
+    """`Bearer ` with an empty token is an ILLEGAL HTTP header value.
+
+    REGRESSION (found 2026-07-26 against a live Ollama). get_best_llm,
+    get_smallest_llm and get_best_embed each built
+    `headers={"Authorization": f"Bearer {token}"}` unconditionally. With no
+    token that is the literal string "Bearer ", which httpx rejects with
+    LocalProtocolError BEFORE the request leaves the process. All three wrap
+    discovery in a broad `except Exception`, so the failure surfaced as
+    "endpoint unusable" — get_best_llm returned None against a perfectly
+    healthy server, and EVERY tokenless endpoint (Ollama's default, an
+    auth-disabled LM Studio) was silently undiscoverable.
+
+    Not a hypothetical: this is why the first live-Ollama run of the async
+    failover path returned None for all three functions while the sync
+    discover_model_sync succeeded on the same endpoint.
+    """
+
+    def test_empty_token_omits_the_header(self):
+        assert L._auth_headers("") == {}
+        assert L._auth_headers(None) == {}
+        assert L._auth_headers("   ") == {}, "whitespace-only is still no token"
+
+    def test_real_token_is_sent(self):
+        assert L._auth_headers("tok") == {"Authorization": "Bearer tok"}
+        assert L._auth_headers("  tok  ") == {"Authorization": "Bearer tok"}
+
+    def test_empty_bearer_is_rejected_by_the_transport(self):
+        """Pin WHY the empty header must be omitted rather than sent blank.
+
+        `Bearer ` is an illegal HTTP header VALUE. Crucially the rejection is
+        late: httpx.Request(...) and httpx.Headers(...) both accept it without
+        complaint, and only the transport raises LocalProtocolError once a
+        request is actually sent. That lateness is what made the bug invisible
+        — nothing fails until a real request goes out, and there the callers'
+        broad `except Exception` reinterprets it as "endpoint unreachable".
+
+        Driven through a local socket so the assertion does not depend on any
+        service being up.
+        """
+        import socket
+        import threading
+
+        import httpx
+
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+
+        def _accept():
+            try:
+                c, _ = srv.accept()
+                c.close()
+            except OSError:
+                pass
+
+        t = threading.Thread(target=_accept, daemon=True)
+        t.start()
+        try:
+            with pytest.raises(httpx.LocalProtocolError):
+                httpx.get(
+                    f"http://127.0.0.1:{port}/v1/models",
+                    headers={"Authorization": "Bearer "},
+                    timeout=5,
+                )
+        finally:
+            srv.close()
+            t.join(timeout=2)
+
+    @pytest.mark.parametrize(
+        "fn", ["get_best_llm", "get_smallest_llm", "get_best_embed"],
+    )
+    def test_async_discovery_uses_the_helper(self, fn):
+        """All three async paths must route through _auth_headers.
+
+        Textual because the bug was three hand-maintained copies of the same
+        header expression; a behavioural test on one would not have caught the
+        other two.
+        """
+        import inspect
+
+        src = inspect.getsource(getattr(L, fn))
+        assert "_auth_headers(token)" in src, f"{fn} builds its own auth header"
+        assert 'f"Bearer {token}"' not in src, f"{fn} still inlines the header"
