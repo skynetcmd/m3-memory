@@ -254,11 +254,32 @@ class StorageBackend(Protocol):
         its substring gate finds phrase matches buried under thousands of
         single-token hits and silently returns fewer results as the fetch
         window shrinks (verified: 0 exact hits at limit=20, 1 at limit=160,
-        i.e. NON-MONOTONIC in the caller's k). Both backends honour it via
-        their own compiler (_compile_fts_query / _compile_tsquery), so the
-        semantics are the seam's, not the dialect's. It defaults to "fts5" —
-        ranked recall — because that is the safe default for a caller that
-        ranks afterwards; the early-returning caller opts in explicitly.
+        i.e. NON-MONOTONIC in the caller's k). It defaults to "fts5" — ranked
+        recall — because that is the safe default for a caller that ranks
+        afterwards; the early-returning caller opts in explicitly.
+
+        HONOURED ON SQLITE; ADVISORY ON POSTGRES — verified live against PG
+        16.14 on 2026-07-26. ``_compile_tsquery`` only emits a phrase (``<->``)
+        for an EXPLICITLY QUOTED query; an unquoted multi-token query falls
+        through to ``a | b`` in BOTH modes, so "hybrid" and "fts5" compile
+        identically. PG therefore ignores this argument for unquoted queries.
+
+        That is currently harmless, and the reason is worth stating because it
+        is NOT luck: the non-monotonicity above is a BM25 artifact. bm25's
+        length normalisation scores short single-token filler docs ABOVE a
+        longer document containing the phrase, so the substring gate starves.
+        PostgreSQL has no bm25 — ``ts_rank`` plus m3's fuzzy bm25-like handling
+        ranks the 3-of-3-token match above 1-of-3 filler, so phrase recall stays
+        monotonic under the OR compile (verified: 1 phrase hit at every limit
+        from 2 to 60 where SQLite gave 0 at 20 and 1 at 160).
+
+        Do NOT "fix" this by asserting cross-backend result identity. Wherever
+        bm25 intersects, SQLite and PG results are NOT byte-identical BY DESIGN
+        — different rankers, different scales (see the score note above and
+        §8.2). The contract is the SHAPE and the ordering CONVENTION, not the
+        row order. What SHOULD be tightened is _compile_tsquery growing a real
+        unquoted-phrase form, so the parameter stops being silently advisory on
+        one backend; tracked as an m3 to-do.
 
         WHY THIS EXISTS: the SQLite search path had TWO inline copies of a
         rank-then-hydrate FTS query (the exact-substring short-circuit and the
