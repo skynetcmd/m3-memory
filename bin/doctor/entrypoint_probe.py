@@ -35,9 +35,7 @@ Cross-platform, network-free, never raises.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
-import sys
 
 # Console scripts m3 declares. `m3` is the primary CLI; `mcp-memory` is the
 # backwards-compat MCP entrypoint some client configs still launch directly, so

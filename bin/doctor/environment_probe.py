@@ -47,7 +47,6 @@ import json
 import os
 import re
 import shutil
-import sys
 import time
 
 # The installer marks its own settings.json entries by this substring appearing
