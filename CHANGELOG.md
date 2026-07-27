@@ -21,6 +21,13 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.26.10] — 2026-07-27 — Sovereignty for upgraders, not just fresh installs
+
+### Fixed
+- The embedder kept using a third-party model path (LM Studio, Ollama, llama.cpp) even when m3 owned a copy in `~/.m3/models`, because a config written before that directory existed outranked it forever — so only fresh installs became sovereign. m3's own copy now wins and the config is repointed, with the switch announced rather than made silently.
+- Deleting the configured model (the reason `~/.m3/models` exists) broke `m3 embedder install` while a usable model sat unused. Resolution now falls back to m3's own copy. A third-party path is still honoured when m3 owns no copy — sovereignty is the preference, not a requirement.
+- The stale-binary check couldn't see the process it exists to catch: the embed server runs as a Windows service, and an unelevated query can't read another user's image path, so the check found nothing and an upgraded install kept serving old code. It now falls back to matching on process name when the path is unreadable.
+
 ## [2026.7.26.9] — 2026-07-27 — Keeps its own model, and restarts the embedder you just upgraded
 
 ### Fixed

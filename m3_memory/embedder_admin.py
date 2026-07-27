@@ -42,14 +42,89 @@ def _m3_root() -> Path:
 BGE_M3_FILENAME = "bge-m3-Q4_K_M.gguf"
 
 
+def _is_sovereign_path(p: Path) -> bool:
+    """True if `p` lives under a model root m3 owns (~/.m3/models by default).
+
+    "Sovereign" means the file survives the user uninstalling LM Studio, Ollama,
+    or llama.cpp — the whole point of M3_MODELS_ROOT. A configured path already
+    inside it needs no migration.
+    """
+    roots: list[Path] = []
+    fn = _import_model_fetch("m3_models_dir")
+    if fn is not None:
+        try:
+            roots.append(Path(fn()))
+        except Exception:  # noqa: BLE001 — advisory
+            pass
+    if not roots:  # model_fetch unimportable (bare install): resolve inline.
+        env = os.environ.get("M3_MODELS_ROOT")
+        mem = os.environ.get("M3_MEMORY_ROOT")
+        if env:
+            roots.append(Path(os.path.expanduser(env)))
+        elif mem:
+            roots.append(Path(os.path.expanduser(mem)) / "models")
+        else:
+            roots.append(Path.home() / ".m3" / "models")
+    for root in roots:
+        try:
+            p.resolve().relative_to(root.resolve())
+            return True
+        except (ValueError, OSError):
+            continue
+    return False
+
+
+def _migrate_embed_config_gguf(new: Path, *, previous: Path) -> None:
+    """Repoint the shared embedder config from `previous` to `new`, preserving
+    every other key.
+
+    Only called when a config already names a NON-sovereign model, so it never
+    creates a config from nothing (that is seed_shared_config's job) and never
+    fires under M3_EMBED_GGUF_AUTODETECT=0.
+
+    Advisory and never fatal: resolution already has its answer by the time this
+    runs, so a read-only or malformed config must not break `install`. Silent
+    when there is nothing to change; announces a real switch, because quietly
+    repointing a user's configured model would be a surprise (§3 fail loud).
+    """
+    if previous == new:
+        return
+    try:
+        import json
+
+        path = Path(_embed_config_path())
+        data: dict = {}
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8")) or {}
+        if (data.get("gguf_path") or "").strip() == str(new):
+            return
+        data["gguf_path"] = str(new)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(path)
+        print(f"[~] embedder model migrated to m3's own copy: {new}")
+        print(f"    (was: {previous} — a third-party path that could vanish)")
+    except Exception:  # noqa: BLE001 — config is advisory; resolution stands
+        pass
+
+
 def _find_bundled_gguf() -> Optional[Path]:
     """Locate the LFS-bundled GGUF inside the m3-memory payload.
 
     Resolution order:
-      1. $M3_EMBED_GGUF (explicit override — still honored for advanced users)
-      2. <payload>/_assets/models/bge-m3-Q4_K_M.gguf  (LFS-tracked, the new default)
-      3. Walk up from this file looking for `_assets/models/<filename>`
-         (developer case: `pip install -e .` from a clone)
+      1.  $M3_EMBED_GGUF (explicit override — still honored for advanced users)
+      1b. The shared embedder config's `gguf_path`, IF it is already sovereign
+          (under ~/.m3/models). A third-party path is remembered but does not
+          win outright — see 2.
+      2.  m3's OWN model dir (~/.m3/models). Beats a third-party configured
+          path and rewrites the config to match, so ditching LM Studio / Ollama
+          / llama.cpp cannot strand the installer.
+      2b. Otherwise the third-party configured path from 1b — preferred over
+          failing when m3 owns no copy.
+      3.  <payload>/_assets/models/bge-m3-Q4_K_M.gguf  (LFS-tracked)
+      4.  Walk up from this file looking for `_assets/models/<filename>`
+          (developer case: `pip install -e .` from a clone)
     """
     env_path = os.environ.get("M3_EMBED_GGUF")
     if env_path and Path(env_path).is_file():
@@ -72,6 +147,21 @@ def _find_bundled_gguf() -> Optional[Path]:
     # memory/embed.py): M3_EMBED_GGUF_AUTODETECT=0 means "use only what I named
     # explicitly", so a discovered-and-configured model must not sneak in.
     # Without this the flag silently stopped meaning what it says.
+    #
+    # SOVEREIGNTY MIGRATION (2026-07-27, .10). Two defects showed up on a real
+    # `.9` upgrade, both because a config written BEFORE ~/.m3/models existed
+    # outranked m3's own copy forever:
+    #   (a) If the configured path is deleted (the user ditches LM Studio — the
+    #       exact scenario ~/.m3/models was built for), this returned nothing
+    #       useful and install broke, while a perfectly good model sat unused.
+    #   (b) A `.8`-era config pinned to a third-party path meant only FRESH
+    #       installs ever got sovereignty; every upgrader silently kept
+    #       depending on a tool they may uninstall tomorrow.
+    # So: an m3-owned copy wins over a third-party configured path, and the
+    # config is rewritten to match. An explicitly configured path that lives
+    # UNDER a model root we own is already sovereign and is left alone, as is
+    # $M3_EMBED_GGUF (handled above) and autodetect=0.
+    configured: Optional[Path] = None
     try:
         import json
 
@@ -79,12 +169,14 @@ def _find_bundled_gguf() -> Optional[Path]:
             raise RuntimeError("autodetect disabled")
         cfg = Path(_embed_config_path())
         if cfg.is_file():
-            configured = (json.loads(cfg.read_text(encoding="utf-8"))
-                          .get("gguf_path") or "").strip()
-            if configured and Path(configured).is_file():
-                return Path(configured)
+            raw = (json.loads(cfg.read_text(encoding="utf-8"))
+                   .get("gguf_path") or "").strip()
+            if raw and Path(raw).is_file():
+                configured = Path(raw)
+                if _is_sovereign_path(configured):
+                    return configured
     except Exception:  # noqa: BLE001 — config is advisory; fall through
-        pass
+        configured = None
 
     # 2. m3's OWN model dir (~/.m3/models) — the copy that survives the user
     # uninstalling LM Studio / Ollama / llama.cpp, and where fetch-model writes.
@@ -93,9 +185,23 @@ def _find_bundled_gguf() -> Optional[Path]:
         try:
             found = own()
             if found:
+                # Prefer it over a third-party configured path, and record the
+                # switch so every later resolver agrees (doctor, embed, setup).
+                # Only when something WAS configured: with no config there is
+                # nothing to migrate away from, and writing one here would fire
+                # even under M3_EMBED_GGUF_AUTODETECT=0 — which skips the read
+                # above and so leaves `configured` None. Seeding the config is
+                # seed_shared_config's job, not a resolver's side effect.
+                if configured is not None and Path(found) != configured:
+                    _migrate_embed_config_gguf(found, previous=configured)
                 return found
         except Exception:  # noqa: BLE001 — advisory; fall through
             pass
+
+    # 2b. No m3-owned copy: honour the third-party configured path rather than
+    # failing. Sovereignty is the preference, not a hard requirement.
+    if configured is not None:
+        return configured
 
     # 3. Resolve via the install-m3 payload root.
     try:
@@ -228,6 +334,16 @@ def _service_binary_is_stale(binary: Path) -> bool:
     Comparing process start time to the binary mtime is the portable signal.
     Returns False when psutil is unavailable or nothing matches — never guess
     'stale' and trigger a needless restart.
+
+    Windows caveat (2026-07-27): the embed server runs as a LocalSystem service,
+    and an *unelevated* query cannot read another user's image path — psutil's
+    `exe` comes back empty (so does WMI's ExecutablePath). Matching only on the
+    resolved path therefore found nothing and returned False on the exact
+    machine state this check exists to catch: a `.9` upgrade left the pre-upgrade
+    process serving stale code and the restart never fired. `create_time` IS
+    readable unelevated, so when `exe` is blank we fall back to matching on the
+    process NAME. That is a weaker identity check, so it is used only as a
+    fallback — a readable, non-matching `exe` still disqualifies the process.
     """
     try:
         import psutil  # type: ignore
@@ -238,14 +354,23 @@ def _service_binary_is_stale(binary: Path) -> bool:
         target = binary.resolve()
     except OSError:
         return False
+    # "m3-embed-server.exe" -> "m3-embed-server"; Linux/macOS already match.
+    target_stem = target.stem.lower()
     for proc in psutil.process_iter(["name", "exe", "create_time"]):
         try:
             exe = proc.info.get("exe")
-            if not exe or Path(exe).resolve() != target:
-                continue
+            if exe:
+                if Path(exe).resolve() != target:
+                    continue
+            else:
+                # Unreadable image path — fall back to name identity.
+                name = (proc.info.get("name") or "").strip().lower()
+                if not name or Path(name).stem != target_stem:
+                    continue
             # 5s grace: mtime and start time can land within the same tick of a
             # legitimate fresh start.
-            if proc.info["create_time"] < bin_mtime - 5:
+            create_time = proc.info.get("create_time")
+            if create_time is not None and create_time < bin_mtime - 5:
                 return True
         except (psutil.Error, OSError):
             continue
