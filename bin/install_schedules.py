@@ -686,6 +686,36 @@ def _render_task_xml(task: dict, python_exe: str, user_id: str) -> str:
     )
 
 
+def _start_longlived_tasks(tasks: list) -> None:
+    """Kick the ONSTART services so they run now, not at next boot/logon.
+
+    Only the long-lived ones in _SELF_HEAL_TASKS: the periodic jobs (hourly
+    sync, maintenance) have time triggers that will fire on their own, and
+    running them early would be a surprise side effect of a repair.
+
+    Best-effort by contract — a task that fails to start is reported, never
+    fatal, because the registration itself already succeeded.
+    """
+    for task in tasks:
+        name = task["name"]
+        if name not in _SELF_HEAL_TASKS:
+            continue
+        try:
+            res = subprocess.run(
+                ["schtasks", "/Run", "/TN", name],
+                capture_output=True, text=True,
+            )
+        except Exception as e:  # noqa: BLE001 — starting is best-effort
+            _safe_print(f"{WARN} Could not start {name}: {type(e).__name__}: {e}")
+            continue
+        if res.returncode == 0:
+            _safe_print(f"{OK} Started {name}")
+        else:
+            err = (res.stderr or res.stdout).strip()
+            _safe_print(f"{WARN} Registered {name} but could not start it: {err}")
+            _safe_print(f"        start it with: schtasks /Run /TN {name}")
+
+
 def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard_port: int = 8088):
     # pythonw.exe (GUI subsystem) — avoids the console window python.exe
     # (console subsystem) flashes every fire, even without a cmd.exe wrapper.
@@ -761,6 +791,19 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard
                 denied_any = True
                 denied_tasks.append(task["name"])
             success = False
+
+    # START the long-lived services we just recreated.
+    #
+    # A <Repetition> only repeats AFTER its trigger fires. These tasks carry
+    # Boot + Logon triggers, both of which already fired for this session, so a
+    # task recreated mid-session sits at NextRun=<empty> and never runs until
+    # the next reboot or re-login. Meanwhile the pre-install reap has already
+    # STOPPED the running daemon — so a repair leaves the service down and the
+    # self-heal dormant, which is exactly the state it was supposed to cure.
+    # Observed 2026-07-27: an elevated --repair reported 9/9 [OK] and left the
+    # dashboard dead; it did not come back after 7 minutes despite a healthy
+    # PT5M repetition.
+    _start_longlived_tasks(tasks)
 
     if success:
         _safe_print(f"{OK} Finished installing {len(tasks)} Windows scheduled task(s).")
