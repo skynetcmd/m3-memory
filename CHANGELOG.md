@@ -21,6 +21,18 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.26.9] — 2026-07-27 — Keeps its own model, and restarts the embedder you just upgraded
+
+### Fixed
+- An upgrade replaced the embed server's binary on disk but left the old one running, so a new payload talked to a stale server. The service is now restarted when its binary is newer than the running process.
+- `m3 embedder install` failed when the service was already registered, and setup reported the embedder "skipped (not installed)" while it was running and serving.
+- The install failure hint printed systemd, `nohup`, and `crontab` advice on Windows, where the embedder registers as a Windows Service.
+- The quiesce step could block for 30 seconds with no output, right before prompting; it now shows a spinner on one redrawn line.
+
+### Added
+- m3 keeps its own model directory (`~/.m3/models`, overridable with `M3_MODELS_ROOT`) and checks it first, so uninstalling LM Studio, Ollama, or llama.cpp no longer takes the embedder with it.
+- `m3 embedder fetch-model` downloads the BGE-M3 GGUF when none is found, offered by default during setup. Set `M3_NO_MODEL_DOWNLOAD=1` to decline.
+
 ## [2026.7.26.8] — 2026-07-27 — Finds your existing embedder model, and stops losing the admin prompt
 
 ### Fixed
