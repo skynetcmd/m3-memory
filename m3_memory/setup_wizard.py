@@ -40,10 +40,34 @@ from .wizard.ui import (  # noqa: F401 — re-exported for setup_wizard.<name> a
 )
 
 
+def _prompt(text: str) -> "str | None":
+    """input() that survives a non-interactive stdin. None means EOF.
+
+    setup used bare input(), so running it with stdin closed or piped -- a CI
+    job, a wrapper script, an agent shell -- died with an UNHANDLED EOFError and
+    a raw traceback. No message, no partial work, no hint that --non-interactive
+    exists. Observed repeatedly on 2026-07-27; I misread it as my own mistake
+    each time rather than a defect, which is exactly how a rough edge survives.
+
+    EOF means "no human is here to answer", so the caller takes its default --
+    the same thing an empty line already does.
+    """
+    try:
+        return input(text)
+    except EOFError:
+        print()  # close the dangling prompt line
+        return None
+
+
 def _ask_yes_no(question: str, default: bool) -> bool:
     suffix = " [Y/n]" if default else " [y/N]"
     while True:
-        ans = input(question + suffix + " ").strip().lower()
+        raw = _prompt(question + suffix + " ")
+        if raw is None:
+            print(f"  (no input available — using default: "
+                  f"{'yes' if default else 'no'})")
+            return default
+        ans = raw.strip().lower()
         if not ans:
             return default
         if ans in ("y", "yes"):
@@ -56,7 +80,11 @@ def _ask_yes_no(question: str, default: bool) -> bool:
 def _ask_choice(question: str, choices: list[str], default: str) -> str:
     pretty = "/".join(c if c != default else c.upper() for c in choices)
     while True:
-        ans = input(f"{question} [{pretty}] ").strip().lower()
+        raw = _prompt(f"{question} [{pretty}] ")
+        if raw is None:
+            print(f"  (no input available — using default: {default})")
+            return default
+        ans = raw.strip().lower()
         if not ans:
             return default
         if ans in choices:
@@ -474,8 +502,26 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
     print("             license); the open-source build the wizard makes will NOT satisfy")
     print("             strict — it's for testing the plumbing until you swap in the")
     print("             validated module. Choose this only if you specifically need CMVP.")
+    # Default to 'mode' ONLY when a usable wolfSSL is already on this machine.
+    #
+    # The blocker for 'mode' is not risk appetite, it is the library: FIPS mode
+    # fails CLOSED, so enabling it without wolfSSL stops M3 starting. When the
+    # library is already present that objection is gone -- the user has paid the
+    # build cost, and leaving the hardened provider switched off wastes it.
+    #
+    # Deliberately NOT defaulted on when the library is absent: that would turn
+    # accepting the default into "install a C toolchain and compile wolfSSL, or
+    # M3 will not start". 'strict' is never a default -- it requires the
+    # COMMERCIAL CMVP-validated module, which no wizard can install.
+    _wolfssl_path = _existing_wolfssl()
+    if _wolfssl_path:
+        print()
+        print(f"    Detected wolfSSL: {_wolfssl_path}")
+        print("    'mode' is offered as the default because the library is already")
+        print("    installed — the build cost is paid and the hardened provider works.")
     fips_choice = _ask_choice(
-        "  FIPS mode?", choices=["off", "mode", "strict"], default="off",
+        "  FIPS mode?", choices=["off", "mode", "strict"],
+        default="mode" if _wolfssl_path else "off",
     )
     plan.fips_mode = fips_choice in ("mode", "strict")
     plan.fips_strict = fips_choice == "strict"
@@ -488,10 +534,25 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
             _warn("  (commercial). The build below produces the OPEN-SOURCE build,")
             _warn("  which STRICT will refuse — use it to test, then swap in the")
             _warn("  validated module. See docs/FIPS_MODULE_BOUNDARY.md.")
-        plan.install_wolfssl = _ask_yes_no(
-            "  Build + install open-source wolfSSL now (so FIPS mode works)?",
-            default=True,
-        )
+        # Do not offer to rebuild something the user already has. Building
+        # wolfSSL downloads official source and compiles it -- minutes of work
+        # and a C toolchain requirement. Re-running it on a machine that already
+        # has a usable library is pure cost, and defaulting that prompt to YES
+        # made accepting the default the expensive choice. Detect first; when a
+        # library is present the default flips to NO and we say where it is, so
+        # rebuilding becomes a deliberate act.
+        _have = _existing_wolfssl()
+        if _have:
+            _ok(f"  wolfSSL already installed: {_have}")
+            plan.install_wolfssl = _ask_yes_no(
+                "  Rebuild it anyway (only if it is broken or you want a fresh build)?",
+                default=False,
+            )
+        else:
+            plan.install_wolfssl = _ask_yes_no(
+                "  Build + install open-source wolfSSL now (so FIPS mode works)?",
+                default=True,
+            )
 
     # Offer to replace legacy scheduled tasks with the governor — but only if
     # any governor-eligible scheduler entries are actually installed, so we
@@ -1623,6 +1684,23 @@ def _verify_and_report_schedules(script: str, *, non_interactive: bool) -> None:
                 print("    [!] Some tasks still do not match spec (see above).")
 
 
+def _existing_wolfssl() -> "str | None":
+    """Path to an already-installed wolfSSL, or None.
+
+    Reuses crypto_provider's own resolver so detection cannot drift from what
+    M3 will actually LOAD at runtime -- a second, hand-rolled search would be
+    free to disagree with the thing it is meant to predict.
+    """
+    try:
+        _bin = str(Path(__file__).resolve().parent.parent / "bin")
+        if _bin not in sys.path:
+            sys.path.insert(0, _bin)
+        from crypto_provider import _resolve_wolfssl_path
+        return _resolve_wolfssl_path()
+    except Exception:  # noqa: BLE001 -- detection is advisory; absent == unknown
+        return None
+
+
 def _step_install_wolfssl(plan: "SetupPlan") -> bool:
     """Build + install the open-source wolfSSL so FIPS mode actually works.
 
@@ -1632,6 +1710,17 @@ def _step_install_wolfssl(plan: "SetupPlan") -> bool:
     build failure just means we DON'T enable FIPS (and say so), rather than
     leaving the user with a fail-closed crash.
     """
+    # Belt to the prompt's braces: even if the caller asked for a build, skip it
+    # when a usable library is already present. The prompt can be bypassed
+    # (--non-interactive, a saved plan, EOF taking a default), and a rebuild
+    # costs minutes plus a C toolchain. Re-run explicitly with
+    # `m3 fips install-wolfssl` to force one.
+    _have = _existing_wolfssl()
+    if _have:
+        _ok(f"wolfSSL already present ({_have}) — skipping rebuild")
+        print("  Force a fresh build with: m3 fips install-wolfssl")
+        return True
+
     _say("FIPS: building + installing open-source wolfSSL (from official source)")
     cmd = [sys.executable, "-m", "m3_memory.cli", "fips", "install-wolfssl"]
     try:
