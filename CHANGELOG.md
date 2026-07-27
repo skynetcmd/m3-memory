@@ -21,6 +21,15 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.26.7] — 2026-07-27 — Setup survives a closed stdin and stops rebuilding wolfSSL
+
+### Fixed
+- `m3 setup` died with an unhandled `EOFError` and a raw traceback when stdin was closed or piped; prompts now take their default instead.
+- Setup rebuilt wolfSSL from source even when a usable library was already installed, and offered it with a default of yes — so accepting the default was the expensive choice.
+
+### Changed
+- FIPS mode defaults to `mode` when wolfSSL is already present, and stays `off` otherwise; `strict` is never a default because it needs the commercial CMVP module.
+
 ## [2026.7.26.6] — 2026-07-27 — Setup restarts every service it stopped
 
 ### Fixed
