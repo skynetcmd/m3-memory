@@ -21,6 +21,19 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.26.3] — 2026-07-27 — Upgrade actually repairs and restarts what it touches
+
+### Fixed
+- `m3 setup` verified only the task it registered, so an upgrade completed cleanly while leaving drifted task definitions broken.
+- `--repair` recreated scheduled tasks but never started them; because a repetition only repeats after its trigger fires, a mid-session repair left the service stopped and its self-heal dormant until the next reboot.
+- A stuck DB-writer prompt defaulted to `wait`, which re-entered the same wait loop — an unresponsive writer stalled setup indefinitely.
+- The Rust core download printed a new line every 10 MiB, scrolling roughly 95 lines on the CUDA wheels.
+
+### Changed
+- Setup now verifies every scheduled task, prints only failures, names the repair command, and offers elevation on Windows.
+- A stuck DB-writer now defaults to KILL; `wait` and `abort` remain available.
+- Download progress redraws a single line with a percentage bar on a terminal, and keeps discrete lines when redirected to a log.
+
 ## [2026.7.26.2] — 2026-07-27 — Wiki links, dashboard search, and a self-heal check that lied
 
 ### Fixed
