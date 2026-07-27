@@ -21,6 +21,15 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.26.4] — 2026-07-27 — Schedule repair is findable, and says what it does
+
+### Added
+- `m3 schedules verify|repair|list|add|remove` — the schedule tooling was previously reachable only by running a script inside the installed payload by absolute path. `verify` exits nonzero on drift.
+
+### Fixed
+- The elevated-repair banner claimed `--repair` "only adds the missing tasks; the ones already created are untouched". It deletes and recreates every selected task, and unelevated it stops a running service it cannot then re-register.
+- Setup's drift message pointed at an absolute payload path instead of `m3 schedules repair`.
+
 ## [2026.7.26.3] — 2026-07-27 — Upgrade actually repairs and restarts what it touches
 
 ### Fixed
