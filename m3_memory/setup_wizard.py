@@ -1606,7 +1606,9 @@ def _verify_and_report_schedules(script: str, *, non_interactive: bool) -> None:
             print(f"    {line.strip()}")
     print("    [!] Some scheduled tasks do not match spec — they will NOT self-heal")
     print("        if they die. Repair them with:")
-    print(f'            "{sys.executable}" "{script}" --repair')
+    # Name the CLI command, not the script path: a user who has to copy an
+    # absolute path into a payload directory will not find it again later.
+    print("            m3 schedules repair")
     if sys.platform == "win32":
         print("        (Windows: boot-triggered tasks need an ADMIN shell.)")
         if _offer_elevated_schedule_repair(script, non_interactive=non_interactive):

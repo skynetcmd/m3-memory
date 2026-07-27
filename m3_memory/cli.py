@@ -284,6 +284,38 @@ def _cmd_governor(args: argparse.Namespace) -> int:
     return _run_bin_script("governor_cli.py", argv)
 
 
+def _cmd_schedules(args: argparse.Namespace) -> int:
+    """Dispatch `m3 schedules <verify|repair|list|add|remove>` to bin/install_schedules.py.
+
+    The verify/repair tooling existed but was reachable ONLY by invoking the
+    script by absolute path inside the installed payload — so the command a
+    stuck user needs was, in practice, undiscoverable. A repair tool nobody can
+    find is a repair tool that does not exist (observed 2026-07-27, when a
+    drifted schedule survived an upgrade because nothing surfaced it).
+    """
+    if not _resolve_bin_script("install_schedules.py"):
+        print("schedules command requires the project payload (run `m3 install`).")
+        return 1
+    sub = getattr(args, "schedules_cmd", None) or "verify"
+    name = getattr(args, "name", None)
+    if sub == "verify":
+        argv = ["--verify", name] if name else ["--verify"]
+    elif sub == "repair":
+        argv = ["--repair"]
+    elif sub == "list":
+        argv = ["--list"]
+    elif sub == "add":
+        argv = ["--add", name or "all"]
+    elif sub == "remove":
+        argv = ["--remove", name or "all"]
+    else:
+        argv = ["--verify"]
+    port = getattr(args, "port", None)
+    if port:
+        argv += ["--port", str(port)]
+    return _run_bin_script("install_schedules.py", argv)
+
+
 def _cmd_wiki(args: argparse.Namespace) -> int:
     """Dispatch `m3 wiki <generate|compile|status>` to bin/gen_wiki.py."""
     if not _resolve_bin_script("gen_wiki.py"):
@@ -1069,6 +1101,30 @@ Examples:
     p_gov_mig.add_argument("--yes", "-y", action="store_true",
                            help="Skip the confirmation prompt (headless use).")
     p_governor.set_defaults(func=_cmd_governor)
+
+    p_schedules = subparsers.add_parser(
+        "schedules",
+        help="Verify / repair the background scheduled tasks (dashboard, embed server, "
+             "cognitive loop, maintenance).",
+    )
+    sched_sub = p_schedules.add_subparsers(
+        dest="schedules_cmd", metavar="<verify|repair|list|add|remove>")
+    p_sched_ver = sched_sub.add_parser(
+        "verify", help="Check every registered task matches spec. Exits nonzero on drift.")
+    p_sched_ver.add_argument("name", nargs="?", default=None,
+                             help="Verify one task by name or alias (default: all).")
+    sched_sub.add_parser(
+        "repair",
+        help="Re-register every task. REPLACES existing definitions (delete + recreate) "
+             "and restarts the long-lived services. Windows: needs an ADMIN shell.")
+    sched_sub.add_parser("list", help="List the configured schedules and exit.")
+    p_sched_add = sched_sub.add_parser("add", help="Install one schedule by name, or 'all'.")
+    p_sched_add.add_argument("name", nargs="?", default="all")
+    p_sched_rm = sched_sub.add_parser("remove", help="Remove one schedule by name, or 'all'.")
+    p_sched_rm.add_argument("name", nargs="?", default="all")
+    p_schedules.add_argument("--port", type=int, default=None,
+                             help="Dashboard port (default 8088).")
+    p_schedules.set_defaults(func=_cmd_schedules)
 
     p_wiki = subparsers.add_parser(
         "wiki",

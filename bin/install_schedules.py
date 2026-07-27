@@ -839,8 +839,17 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard
             _safe_print("")
             _safe_print(f'      "{py}" "{script}" --repair')
             _safe_print("")
-            _safe_print("  (--repair is idempotent — it only adds the missing tasks; the ones")
-            _safe_print("  already created above are untouched.)")
+            # Describe what --repair ACTUALLY does. The old text claimed it
+            # "only adds the missing tasks; the ones already created are
+            # untouched" — false: it DELETES then recreates every selected
+            # task. That mattered twice on 2026-07-27: a user reading this
+            # banner would not expect a repair to replace working definitions,
+            # and an UNELEVATED run stops the running daemon while failing to
+            # re-register it, destroying a service instead of fixing it.
+            _safe_print("  (--repair REPLACES each task: it deletes and recreates them, then")
+            _safe_print("  restarts the long-lived services. Safe to re-run — but run it")
+            _safe_print("  ELEVATED: unelevated, the delete stops a running service that the")
+            _safe_print("  re-register then cannot recreate.)")
             _safe_print(bar)
             _safe_print("")
 
