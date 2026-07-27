@@ -59,6 +59,30 @@ def _prompt(text: str) -> "str | None":
         return None
 
 
+def _bin_dir() -> Path:
+    """Directory holding the payload scripts, for BOTH layouts.
+
+    A dev checkout puts bin/ BESIDE the package (repo/bin, repo/m3_memory), so
+    parent.parent/"bin" resolves. An installed wheel puts it INSIDE the package
+    (m3_memory/bin), where that same expression points one level too high and
+    silently misses.
+
+    That is not theoretical: on 2026-07-27 a real install printed
+        [!] boot task not registered (install_schedules.py not found)
+    while the script sat in m3_memory/bin and the scheduled task already
+    existed. The dashboard was left stopped, and the message blamed a missing
+    file rather than a wrong path.
+
+    Checks the installed location first (the common case for users), then the
+    dev sibling.
+    """
+    here = Path(__file__).resolve().parent          # .../m3_memory
+    for cand in (here / "bin", here.parent / "bin"):
+        if (cand / "install_schedules.py").is_file():
+            return cand
+    return here.parent / "bin"                      # legacy default
+
+
 def _ask_yes_no(question: str, default: bool) -> bool:
     suffix = " [Y/n]" if default else " [y/N]"
     while True:
@@ -611,7 +635,7 @@ def _detect_governor_eligible_tasks() -> list[str]:
     """Read-only probe for installed governor-eligible scheduled tasks. Never
     raises — a missing scheduler tool or import yields an empty list."""
     try:
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        sys.path.insert(0, str(_bin_dir()))
         import governor_migration
         return governor_migration.detect_scheduled_tasks().get("eligible", [])
     except Exception:
@@ -1326,7 +1350,7 @@ def _discover_bge_m3_gguf() -> str | None:
     already on sys.path here (added at wizard entry); fall back to the inline
     cascade only if that import is somehow unavailable."""
     try:
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        sys.path.insert(0, str(_bin_dir()))
         from memory.embed import discover_bge_m3_gguf as _discover
         return _discover()
     except Exception:  # noqa: BLE001 — keep setup resilient if bin/ isn't importable
@@ -1594,7 +1618,7 @@ def _register_embed_server_task(*, non_interactive: bool = False) -> None:
     # a sibling of the m3_memory package (parent.parent/bin, the same idiom the
     # GGUF-discovery step uses); a pipx install fetches the payload to the same
     # relative spot. Guard on existence and degrade to a manual hint otherwise.
-    script = str(Path(__file__).resolve().parent.parent / "bin" / "install_schedules.py")
+    script = str(_bin_dir() / "install_schedules.py")
     if not os.path.exists(script):
         print("    [!] embed-server task not registered (install_schedules.py not found);")
         print("        run `python bin/install_schedules.py --add embed-server` from the payload.")
@@ -1692,7 +1716,7 @@ def _existing_wolfssl() -> "str | None":
     free to disagree with the thing it is meant to predict.
     """
     try:
-        _bin = str(Path(__file__).resolve().parent.parent / "bin")
+        _bin = str(_bin_dir())
         if _bin not in sys.path:
             sys.path.insert(0, _bin)
         from crypto_provider import _resolve_wolfssl_path
@@ -2044,7 +2068,7 @@ def _register_dashboard_task(port: int = 8088) -> None:
     still runs on demand via `m3 dashboard`. On Windows an ONSTART task may need
     an admin shell; we surface the manual command rather than fail.
     """
-    script = str(Path(__file__).resolve().parent.parent / "bin" / "install_schedules.py")
+    script = str(_bin_dir() / "install_schedules.py")
     if not os.path.exists(script):
         print("    [!] boot task not registered (install_schedules.py not found);")
         print(f'        add it later with `python bin/install_schedules.py --add dashboard --port {port}`.')
@@ -2107,7 +2131,7 @@ def _step_governor_migration(plan: SetupPlan, *, non_interactive: bool = False,
     if not plan.migrate_to_governor:
         return result
     try:
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        sys.path.insert(0, str(_bin_dir()))
         import governor_migration as gm
     except Exception as e:
         _warn(f"governor migration unavailable: {e}")
