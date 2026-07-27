@@ -21,6 +21,16 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.26.5] — 2026-07-27 — A dead dashboard can no longer look like a successful install
+
+### Fixed
+- The dashboard could fail at startup and leave nothing behind: logging was configured after the module-scope imports, so an import-time crash exited 1 with an empty log and no console under `pythonw.exe`.
+- Setup reported a task as started when the process had already exited — `schtasks /Run` succeeds as soon as it launches, so a dead service still printed `[OK]`.
+
+### Added
+- Startup tracebacks are written to the task log, with argv and interpreter path, by a handler installed before any heavy import.
+- Post-start health probe: the dashboard and embed server must actually answer before the installer reports `(serving)`; a service with no endpoint is reported as started, never as verified.
+
 ## [2026.7.26.4] — 2026-07-27 — Schedule repair is findable, and says what it does
 
 ### Added
