@@ -1731,6 +1731,63 @@ async def search_memories(request: Request, q: str = "", ignore_case: int = 1):
         return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning indices: {_h(str(e))}</p>'
 
 
+
+def _row_get(row, key, default=None):
+    """Read a column that may be absent on an older schema. Never raises.
+
+    The dashboard is read-only and best-effort: a store that predates a column
+    must render a card, not a 500. sqlite3.Row raises IndexError on a missing
+    key and psycopg2 rows differ again, so probe rather than assume.
+    """
+    try:
+        val = row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if val is None else val
+
+
+def _provenance_html(row) -> str:
+    """The 'git blame on every fact' strip for one memory card.
+
+    m3 already RECORDS confidence, pinning, bitemporal validity and
+    corroboration/contradiction counts — the browse card simply never showed
+    them, so the store's strongest answer to "why should I trust this row?" was
+    invisible in the UI. Rendered as a compact single line so the card keeps its
+    density; only non-default values appear, so a plain memory adds nothing.
+    """
+    bits = []
+    conf = _row_get(row, "confidence")
+    if conf is not None:
+        bits.append(f"conf {float(conf):.2f}")
+    if _row_get(row, "pinned"):
+        bits.append('<span style="color: var(--m3-neon-amber);">PINNED</span>')
+    src = _row_get(row, "source")
+    if src:
+        bits.append(f"src {_h(str(src))}")
+    # Bitemporal: valid_to set means the row has been superseded/closed, which
+    # is the single most important trust signal on the card — call it out.
+    vt = _row_get(row, "valid_to")
+    if vt:
+        bits.append(
+            '<span style="color: var(--m3-neon-amber);">superseded '
+            f'{_h(str(vt)[:19])}</span>'
+        )
+    corr = int(_row_get(row, "corroboration_count", 0) or 0)
+    cont = int(_row_get(row, "contradiction_count", 0) or 0)
+    if corr:
+        bits.append(f'<span style="color: var(--m3-neon-emerald);">+{corr} corroborated</span>')
+    if cont:
+        bits.append(f'<span style="color: #ff5c6c;">-{cont} contradicted</span>')
+    if not bits:
+        return ""
+    return (
+        "<div style=\"font-family: 'Fira Code', monospace; font-size: 0.7rem; "
+        "color: hsl(210, 15%, 55%); margin-bottom: 0.75rem;\">"
+        + " &middot; ".join(bits)
+        + "</div>"
+    )
+
+
 @app.get("/api/kb", response_class=HTMLResponse)
 async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int = 50):
     """Replicates cli_kb_browse.py rank search or dynamic file logs into high-fidelity web cards."""
@@ -1785,28 +1842,57 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
     try:
         query = """
             SELECT id, type, title, content, metadata_json, importance,
-                   origin_device, change_agent, created_at, updated_at
+                   origin_device, change_agent, created_at, updated_at,
+                   confidence, pinned, source, valid_from, valid_to,
+                   corroboration_count, contradiction_count
             FROM memory_items
             WHERE is_deleted = 0
         """
         params = []
-        ph = _active_backend().dialect().placeholder  # ?/%s, backend-agnostic
+        _backend = _active_backend()
+        ph = _backend.dialect().placeholder  # ?/%s, backend-agnostic
 
-        if type:
-            query += f" AND type = {ph()}"
-            params.append(type)
+        # Row-scoping predicates come from the seam, never hand-built here, so
+        # the dashboard cannot drift from the search path the way the four
+        # hand-maintained copies in memory/search.py did (2026-07-26: a
+        # type_filter fix reached one of them and filtered searches silently
+        # returned unfiltered rows).
+        _tenancy_sql, _tenancy_params = _backend.dialect().scope_predicates(
+            type_filter=type or "",
+        )
 
-        if q.strip():
-            query += f" AND (LOWER(title) LIKE LOWER({ph()}) OR LOWER(content) LIKE LOWER({ph()}))"
-            params += [f"%{q}%", f"%{q}%"]
-
-        query += " ORDER BY importance DESC, updated_at DESC"
-        query += f" LIMIT {int(limit)}"
+        _PROV_COLS = (
+            "metadata_json", "origin_device", "change_agent", "created_at",
+            "updated_at", "confidence", "pinned", "source", "valid_from",
+            "valid_to", "corroboration_count", "contradiction_count",
+        )
 
         from m3_sdk import active_database
         with active_database(selected_db_path):
             with _db() as db:
-                rows = db.execute(query, params).fetchall()
+                if q.strip():
+                    # RANKED keyword search through the seam: FTS5+bm25 on
+                    # SQLite, tsvector+ts_rank on PostgreSQL. This replaced a
+                    # hand-rolled `LOWER(title) LIKE LOWER('%q%')`, which was a
+                    # full table scan with NO ranking — every match equally
+                    # "relevant", ordered only by importance. The seam is both
+                    # faster and actually relevance-ordered, and it is the same
+                    # primitive memory_search uses, so browse and search agree.
+                    rows = _backend.keyword_search_with_row_data(
+                        db, q, limit=int(limit),
+                        tenancy_sql=_tenancy_sql,
+                        tenancy_params=tuple(_tenancy_params),
+                        extra_columns=_PROV_COLS,
+                    )
+                else:
+                    # No query: this is a BROWSE, not a search. Keyword ranking
+                    # has nothing to rank, so keep the importance ordering that
+                    # makes an unfiltered card list useful.
+                    query += _tenancy_sql
+                    params.extend(_tenancy_params)
+                    query += " ORDER BY importance DESC, updated_at DESC"
+                    query += f" LIMIT {int(limit)}"
+                    rows = db.execute(query, params).fetchall()
 
         total = len(rows)
         if total == 0:
@@ -1860,6 +1946,7 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
                 <div style="font-family: 'Fira Code', monospace; font-size: 0.7rem; color: hsl(210, 15%, 55%); margin-bottom: 0.75rem;">
                     id: {_h(row['id'])} &middot; created: {_h((row['created_at'] or '')[:19])} &middot; updated: {_h((row['updated_at'] or '')[:19])}
                 </div>
+                {_provenance_html(row)}
                 <div class="memory-content" style="white-space: pre-wrap;">{_h(row['content'] or '')}</div>
                 {tag_html}
                 {extras_html}
