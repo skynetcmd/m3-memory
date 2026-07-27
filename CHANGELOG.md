@@ -21,6 +21,23 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.26.2] — 2026-07-27 — Wiki links, dashboard search, and a self-heal check that lied
+
+### Fixed
+- `m3 schedules --verify` passed a self-heal repetition carrying a `<Duration>`, which stops repeating and cannot self-heal; two long-lived services were being certified healthy while dead.
+- Wiki snippets truncated through `[[wikilinks]]`, emitting unresolvable fragments.
+- Dashboard browse searched with `LIKE '%q%'` — a full table scan with no relevance ranking.
+
+### Added
+- `[[wikilinks]]` written inside memories now resolve to real links when their target is in the vault.
+- Wiki footer stating what the vault omits — snippets rather than full text, and filtered memories — with the command for each.
+- Browse cards show confidence, pinned, source, supersession, and corroboration/contradiction counts.
+- `memory_update` and `memory_update_bulk` accept `type`, validated against the same list `memory_write` uses.
+
+### Changed
+- Wiki excludes private and benchmark memories by default; `--no-default-exclude` opts out for a local-only build.
+- Dashboard browse search routes through the backend keyword seam, so it ranks results and matches what `memory_search` returns.
+
 ## [2026.7.26.1] — 2026-07-26 — Search seam parity, model discovery, and PostgreSQL reach
 
 ### Fixed
