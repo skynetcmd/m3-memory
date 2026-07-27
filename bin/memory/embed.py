@@ -505,6 +505,13 @@ def discover_bge_m3_gguf(budget_s: float = _EMBED_GGUF_WALK_BUDGET_S) -> str | N
         home / ".cache" / "m3" / "models",
         home / ".m3-memory" / "_assets" / "embedder",
         home / "models",
+        # llama.cpp: no single official model dir, but these are the layouts its
+        # docs and packaging actually produce. All three OSes use the same
+        # home-relative paths.
+        home / ".cache" / "llama.cpp",
+        home / "llama.cpp" / "models",
+        home / ".llama.cpp" / "models",
+        home / ".local" / "share" / "llama.cpp",
     ]
     deadline = time.monotonic() + max(0.1, budget_s)
     for d in candidate_dirs:
@@ -525,6 +532,68 @@ def discover_bge_m3_gguf(budget_s: float = _EMBED_GGUF_WALK_BUDGET_S) -> str | N
                     return str(path)
         except OSError:
             continue
+
+    # Ollama last: its store needs a DIFFERENT strategy, so it cannot join the
+    # rglob loop above. Blobs are content-addressed -- named `sha256-<digest>`
+    # with NO .gguf extension -- so both the `*.gguf` glob and the "is 'bge-m3'
+    # in the filename" test miss them entirely, even though the files ARE GGUF
+    # (verified: magic bytes b"GGUF"). The model NAME lives only in the JSON
+    # manifest tree, which maps name -> blob digest.
+    return _discover_ollama_bge_m3(deadline)
+
+
+# Ollama's manifest layer type for model WEIGHTS (GGUF/Safetensors). Siblings:
+# .projector (vision), .adapter (LoRA), .template, .params.
+_OLLAMA_MODEL_MEDIATYPE = "application/vnd.ollama.image.model"
+
+
+def _discover_ollama_bge_m3(deadline: float) -> str | None:
+    """Find a bge-m3 GGUF in Ollama's content-addressed blob store, or None.
+
+    Reads manifests/<registry>/<ns>/<model>/<tag> (JSON) and returns the blob
+    backing the first model whose NAME looks like bge-m3. Honours OLLAMA_MODELS,
+    which relocates the whole store. Same layout on Windows/macOS/Linux.
+    """
+    import json
+    import os
+    import time
+    from pathlib import Path
+
+    root_env = os.environ.get("OLLAMA_MODELS", "").strip()
+    root = Path(root_env) if root_env else Path.home() / ".ollama" / "models"
+    manifests = root / "manifests"
+    if not manifests.is_dir():
+        return None
+    try:
+        for mf in manifests.rglob("*"):
+            if time.monotonic() > deadline:
+                logger.debug("bge-m3 GGUF auto-detect: walk budget exceeded (ollama)")
+                return None
+            if not mf.is_file():
+                continue
+            # The model name is the PATH (…/library/bge-m3/latest), not the file.
+            name = "/".join(mf.parts[-3:]).lower()
+            if "bge-m3" not in name and "bge_m3" not in name:
+                continue
+            try:
+                data = json.loads(mf.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            for layer in data.get("layers", []):
+                # Match the DOCUMENTED weights type exactly. The sibling types
+                # are projector / adapter / template / params (none of which is
+                # the GGUF we want), so a loose "model" substring happens to
+                # work today -- but only by luck: any future
+                # *.image.model-config would silently match and hand back a
+                # JSON blob instead of a model. Pin the exact string.
+                if str(layer.get("mediaType", "")) != _OLLAMA_MODEL_MEDIATYPE:
+                    continue
+                digest = str(layer.get("digest", "")).replace(":", "-")
+                blob = root / "blobs" / digest
+                if blob.is_file():
+                    return str(blob)
+    except OSError:
+        return None
     return None
 
 

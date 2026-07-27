@@ -1386,6 +1386,10 @@ def _discover_bge_m3_gguf() -> str | None:
         return _discover()
     except Exception:  # noqa: BLE001 — keep setup resilient if bin/ isn't importable
         home = Path.home()
+        # Mirror of memory.embed.discover_bge_m3_gguf's list (that helper is the
+        # source of truth; this runs only if bin/ is unimportable). Ollama is
+        # NOT covered here: its blobs are content-addressed with no .gguf
+        # extension, so finding one needs the manifest walk that lives there.
         candidate_dirs = [
             home / ".lmstudio" / "models",
             home / "Library" / "Application Support" / "LM Studio" / "models",
@@ -1393,6 +1397,10 @@ def _discover_bge_m3_gguf() -> str | None:
             home / ".cache" / "m3" / "models",
             home / ".m3-memory" / "_assets" / "embedder",
             home / "models",
+            home / ".cache" / "llama.cpp",
+            home / "llama.cpp" / "models",
+            home / ".llama.cpp" / "models",
+            home / ".local" / "share" / "llama.cpp",
         ]
         for d in candidate_dirs:
             if not d.is_dir():
