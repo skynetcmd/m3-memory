@@ -567,6 +567,42 @@ def _print_manual_build_recommendation(
 M3_CORE_RS_GH_REPO = "skynetcmd/m3-core-rs"
 
 
+def _emit_download_progress(downloaded: int, total: int, *, tty: bool) -> None:
+    """One heartbeat of wheel-download progress.
+
+    On a TTY this REWRITES A SINGLE LINE via carriage return. These wheels run
+    244 MB (windows-cuda) to 949 MB (linux-cuda) and the old code printed a
+    fresh line every 10 MiB — roughly 95 lines of scroll for one download,
+    which buries whatever setup said before it.
+
+    Off a TTY (CI, a redirected log) it prints discrete lines instead: a
+    carriage return in a log file collapses the whole download into one
+    unreadable smear.
+
+    Never raises — progress reporting must not be able to break a download.
+    """
+    mib = downloaded / (1024 * 1024)
+    if total > 0:
+        pct = min(100.0, downloaded * 100.0 / total)
+        filled = int(pct // 5)  # 20-cell bar
+        bar = "#" * filled + "-" * (20 - filled)
+        msg = (f"[rust-core]   [{bar}] {pct:5.1f}%  "
+               f"{mib:,.0f}/{total / (1024 * 1024):,.0f} MiB")
+    else:
+        # No Content-Length: report what is known rather than a fake percentage.
+        msg = f"[rust-core]   {mib:,.0f} MiB"
+    try:
+        if tty:
+            # Pad to a fixed width: the previous line may have been longer
+            # (1,000 -> 999 MiB), and its tail would otherwise linger.
+            sys.stderr.write("\r" + msg.ljust(78))
+            sys.stderr.flush()
+        else:
+            print(msg, file=sys.stderr)
+    except Exception:  # noqa: BLE001 — never fail a download writing to stderr
+        pass
+
+
 def install_from_github_release(
     choice: BackendChoice, *,
     version: str = M3_CORE_RS_VERSION,
@@ -672,6 +708,22 @@ def install_from_github_release(
             with resp, open(wheel_path, "wb") as out:
                 chunk_size = 1024 * 1024            # 1 MiB
                 next_progress = 10 * 1024 * 1024    # heartbeat every 10 MiB
+                # Total, when the server sends it — enables a percentage and a
+                # bar rather than a bare byte count.
+                # getattr, not resp.headers: not every response object exposes
+                # headers (urllib's do; wrappers and test doubles may not), and
+                # a missing Content-Length is already a supported case — we fall
+                # back to a byte count with no percentage. Progress reporting
+                # must never be able to fail the download it is describing.
+                try:
+                    _hdrs = getattr(resp, "headers", None)
+                    total_bytes = int((_hdrs.get("Content-Length") if _hdrs else 0) or 0)
+                except (AttributeError, TypeError, ValueError):
+                    total_bytes = 0
+                try:
+                    _tty = sys.stderr.isatty()
+                except Exception:  # noqa: BLE001 — an odd stream is "not a tty"
+                    _tty = False
                 while True:
                     chunk = resp.read(chunk_size)
                     if not chunk:
@@ -679,10 +731,11 @@ def install_from_github_release(
                     out.write(chunk)
                     downloaded += len(chunk)
                     if downloaded >= next_progress:
-                        print(f"[rust-core]   ... "
-                              f"{downloaded / (1024*1024):.0f} MiB",
-                              file=sys.stderr)
+                        _emit_download_progress(downloaded, total_bytes, tty=_tty)
                         next_progress += 10 * 1024 * 1024
+                if _tty and downloaded:
+                    # Close the in-place line so later output starts clean.
+                    print(file=sys.stderr)
         except (urllib.error.URLError, OSError) as e:
             print(f"[rust-core] wheel download failed "
                   f"({type(e).__name__}: {e})", file=sys.stderr)
