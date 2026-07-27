@@ -86,7 +86,18 @@ def _find_bundled_gguf() -> Optional[Path]:
     except Exception:  # noqa: BLE001 — config is advisory; fall through
         pass
 
-    # 2. Resolve via the install-m3 payload root.
+    # 2. m3's OWN model dir (~/.m3/models) — the copy that survives the user
+    # uninstalling LM Studio / Ollama / llama.cpp, and where fetch-model writes.
+    own = _import_model_fetch("existing_m3_gguf")
+    if own is not None:
+        try:
+            found = own()
+            if found:
+                return found
+        except Exception:  # noqa: BLE001 — advisory; fall through
+            pass
+
+    # 3. Resolve via the install-m3 payload root.
     try:
         from m3_memory.installer import assets_dir
         assets = assets_dir()
@@ -97,7 +108,7 @@ def _find_bundled_gguf() -> Optional[Path]:
     except Exception:
         pass
 
-    # 3. Developer fallback — walk up from this file.
+    # 4. Developer fallback — walk up from this file.
     here = Path(__file__).resolve()
     for parent in (here.parent, *here.parents):
         candidate = parent / "_assets" / "models" / BGE_M3_FILENAME
@@ -187,6 +198,87 @@ def _port_in_use(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bo
         return False
 
 
+def _service_reports_installed(binary: Path, gguf: Path) -> bool:
+    """True if the service manager says the service exists. `status` prints
+    'running'/'stopped' when registered and 'not installed' otherwise, so parse
+    its stdout rather than trusting the exit code alone."""
+    env = os.environ.copy()
+    env.setdefault("M3_EMBED_GGUF", str(gguf))
+    env.setdefault("M3_EMBED_SERVER_PORT", "8082")
+    try:
+        out = subprocess.run(
+            [str(binary), "status"], env=env, check=False,
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    blob = f"{out.stdout}\n{out.stderr}".lower()
+    if "not installed" in blob:
+        return False
+    return "running" in blob or "stopped" in blob
+
+
+def _service_binary_is_stale(binary: Path) -> bool:
+    """True if a running embed-server process started BEFORE its own binary was
+    last written — i.e. an upgrade replaced the executable on disk while the
+    service kept executing the old image.
+
+    Windows keeps the original file mapped after a replace, so the SCM path and
+    the wheel path can be the same file yet the process still runs old code.
+    Comparing process start time to the binary mtime is the portable signal.
+    Returns False when psutil is unavailable or nothing matches — never guess
+    'stale' and trigger a needless restart.
+    """
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        return False
+    try:
+        bin_mtime = binary.stat().st_mtime
+        target = binary.resolve()
+    except OSError:
+        return False
+    for proc in psutil.process_iter(["name", "exe", "create_time"]):
+        try:
+            exe = proc.info.get("exe")
+            if not exe or Path(exe).resolve() != target:
+                continue
+            # 5s grace: mtime and start time can land within the same tick of a
+            # legitimate fresh start.
+            if proc.info["create_time"] < bin_mtime - 5:
+                return True
+        except (psutil.Error, OSError):
+            continue
+    return False
+
+
+def _install_failure_hint(gguf: Path) -> str:
+    """OS-correct recovery advice. The previous text printed systemd/nohup/
+    crontab unconditionally — none of which exist on Windows, where the
+    embedder registers as a Windows Service instead."""
+    if sys.platform == "win32":
+        return (
+            "  Registering the Windows Service needs Administrator rights.\n"
+            "  Open an *Administrator* terminal and run:\n"
+            "    m3 embedder install\n"
+            "  Check what SCM currently thinks:  m3 embedder status"
+        )
+    if sys.platform == "darwin":
+        return (
+            "  This usually means the launchd user domain is unavailable (SSH session\n"
+            "  with no GUI login). Run the server directly instead:\n"
+            f"    M3_EMBED_GGUF={gguf} nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &"
+        )
+    return (
+        "  This usually means systemd --user is unavailable (container, SSH session,\n"
+        "  or system without a D-Bus user session).\n"
+        "  You can run the embed server directly instead:\n"
+        f"    M3_EMBED_GGUF={gguf} nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &\n"
+        "  To start it automatically on boot, add to crontab (crontab -e):\n"
+        f"    @reboot M3_EMBED_GGUF={gguf} m3-embed-server >> ~/.m3/engine/embed-server.log 2>&1 &"
+    )
+
+
 def _warn_if_port_busy(action: str) -> None:
     """Print a heads-up if the embed-server port is already in use. Non-fatal —
     the underlying service manager owns the real start/stop; this just makes an
@@ -212,22 +304,73 @@ def _locate_gguf_or_explain() -> Optional[Path]:
             file=sys.stderr,
         )
         return None
+    # No GGUF anywhere — offer to fetch m3's own copy into ~/.m3/models. This is
+    # the only model location that survives the user dropping LM Studio/Ollama,
+    # so it is where a downloaded model belongs.
+    fetched = _offer_model_download()
+    if fetched:
+        return fetched
+
     print(
         f"Note: the optional CPU-embedder GGUF ({BGE_M3_FILENAME}) isn't present, so\n"
-        "  the always-on :8082 server can't be installed. This is expected on a\n"
-        "  `pip install m3-memory` (the ~300MB model isn't bundled in the wheel) and\n"
-        "  is NOT a failure — m3 embeds via its in-process / HTTP tiers regardless.\n"
-        "  To add the shared CPU server, first fetch the model:\n"
-        "    • pip install:  m3 install-m3            (downloads the GGUF)\n"
-        "    • from source:  git lfs install; git lfs pull\n"
-        "  or point M3_EMBED_GGUF at a hand-downloaded bge-m3 GGUF, then re-run\n"
-        "  `m3 embedder install`.",
+        "  the always-on :8082 server can't be installed. This is NOT a failure —\n"
+        "  m3 embeds via its in-process / HTTP tiers regardless.\n"
+        "  To add it later:\n"
+        "    • m3 embedder fetch-model     (downloads ~418 MB into ~/.m3/models)\n"
+        "    • or point M3_EMBED_GGUF at a hand-downloaded bge-m3 GGUF,\n"
+        "  then re-run `m3 embedder install`.",
         file=sys.stderr,
     )
     return None
 
 
+def _offer_model_download() -> Optional[Path]:
+    """Ask (default YES) then download BGE-M3 into ~/.m3/models.
+
+    Non-interactive runs download without prompting: the user asked for the
+    model to be the default outcome, and a headless install that silently ends
+    up with no embedder is the worse failure. M3_NO_MODEL_DOWNLOAD=1 opts out.
+    """
+    fetch_bge_m3 = _import_model_fetch("fetch_bge_m3")
+    if fetch_bge_m3 is None:
+        return None
+
+    if os.environ.get("M3_NO_MODEL_DOWNLOAD", "") == "1":
+        return None
+
+    prompt = ("  No BGE-M3 model found on this machine.\n"
+              "  Download it (~418 MB) into ~/.m3/models so m3 owns its own copy? [Y/n] ")
+    try:
+        if sys.stdin is not None and sys.stdin.isatty():
+            answer = input(prompt).strip().lower()
+            if answer in ("n", "no"):
+                return None
+    except (EOFError, KeyboardInterrupt, ValueError):
+        pass  # no console: fall through and fetch (the default outcome)
+
+    return fetch_bge_m3()
+
+
 # ── subcommands ───────────────────────────────────────────────────────────────
+
+def cmd_fetch_model(args: argparse.Namespace) -> int:
+    """Download the BGE-M3 GGUF into m3's own model directory."""
+    fetch_bge_m3 = _import_model_fetch("fetch_bge_m3")
+    m3_models_dir = _import_model_fetch("m3_models_dir")
+    if fetch_bge_m3 is None or m3_models_dir is None:
+        print("Error: could not load the model fetcher (bin/memory/model_fetch.py).",
+              file=sys.stderr)
+        return 1
+
+    dest = Path(args.dest).expanduser() if getattr(args, "dest", None) else m3_models_dir()
+    path = fetch_bge_m3(dest)
+    if not path:
+        return 1
+    print(f"[OK] {path}")
+    print("  Next: `m3 embedder install` to register the shared :8082 server.")
+    return 0
+
+
 
 def cmd_install(args: argparse.Namespace) -> int:
     """End-to-end CPU embedder install: locate GGUF + register service + start."""
@@ -283,14 +426,38 @@ def cmd_install(args: argparse.Namespace) -> int:
         extra += ["--concurrency", str(args.concurrency)]
     rc = _service_cmd(binary, gguf, "install", *extra)
     if rc != 0:
+        # An already-registered service is NOT a failure. Older embed-server
+        # builds error out of `install` with an opaque winapi/IO message when
+        # the service exists, so ask the service manager what is actually true
+        # before reporting anything. (2026-07-27: setup declared the embedder
+        # "SKIPPED (not installed)" while it was Automatic, running, and
+        # serving :8082.)
+        if _service_reports_installed(binary, gguf):
+            print("[OK] m3-embed-server already registered — install is a no-op")
+            # An upgrade REPLACES the binary on disk, but the running service
+            # keeps executing the old image until it is restarted. Leaving it
+            # alone silently pairs a new payload with a stale embed server, so
+            # bounce it whenever the on-disk binary is newer than the process.
+            if _service_binary_is_stale(binary):
+                print("[~] on-disk binary is newer than the running service — restarting it")
+                _service_cmd(binary, gguf, "stop")
+                if _service_cmd(binary, gguf, "start") == 0:
+                    print(f"[OK] sovereign CPU embedder restarted on the new binary "
+                          f"(port {_embed_server_port()})")
+                    return 0
+                print("[!] restart failed — the service is still on the OLD binary.\n"
+                      f"{_install_failure_hint(gguf)}", file=sys.stderr)
+                return rc
+            if _port_in_use(_embed_server_port()):
+                print(f"[OK] sovereign CPU embedder already serving on port {_embed_server_port()}")
+                return 0
+            print("[~] starting the existing service")
+            if _service_cmd(binary, gguf, "start") == 0:
+                print(f"[OK] sovereign CPU embedder running on port {_embed_server_port()}")
+                return 0
         print(
             f"[!] `m3-embed-server install` exited {rc}\n"
-            "  This usually means systemd --user is unavailable (container, SSH session,\n"
-            "  or system without a D-Bus user session).\n"
-            "  You can run the embed server directly instead:\n"
-            f"    M3_EMBED_GGUF={gguf} nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &\n"
-            "  To start it automatically on boot, add to crontab (crontab -e):\n"
-            f"    @reboot M3_EMBED_GGUF={gguf} m3-embed-server >> ~/.m3/engine/embed-server.log 2>&1 &\n"
+            f"{_install_failure_hint(gguf)}\n"
             "  Tier-1 in-process GGUF is active and sufficient — this step is optional.",
             file=sys.stderr,
         )
@@ -393,6 +560,31 @@ def _print_stop_proc_hint(script_name: str) -> None:
               f"'*{script_name}*' }} | ForEach {{ Stop-Process -Id $_.ProcessId -Force }}")
     else:
         print(f"           pkill -f {script_name}   # find + stop it")
+
+
+def _import_model_fetch(name: str):
+    """Pull `name` out of bin/memory/model_fetch.py, or None.
+
+    Two on-disk layouts must both work (the bug that kept the dashboard down for
+    three releases): DEV has `repo/bin` BESIDE `repo/m3_memory`, while an
+    INSTALLED payload has `m3_memory/bin` INSIDE the package. Probe both instead
+    of assuming either. Returns None rather than raising — a missing fetcher
+    must degrade to "no download offered", never abort setup.
+    """
+    import importlib
+
+    here = Path(__file__).resolve().parent
+    for bin_dir in (here / "bin", here.parent / "bin"):
+        if not (bin_dir / "memory" / "model_fetch.py").is_file():
+            continue
+        if str(bin_dir) not in sys.path:
+            sys.path.insert(0, str(bin_dir))
+        try:
+            mod = importlib.import_module("memory.model_fetch")
+            return getattr(mod, name, None)
+        except Exception:  # noqa: BLE001 - optional path, never fatal
+            return None
+    return None
 
 
 def _embed_config_path() -> str:
@@ -614,6 +806,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
     p_uninstall = sub.add_parser("uninstall", help="Remove the CPU embedder service registration.")
     p_uninstall.set_defaults(func=cmd_uninstall)
+
+    p_fetch = sub.add_parser(
+        "fetch-model",
+        help="Download the BGE-M3 GGUF (~418 MB) into m3's own model dir (~/.m3/models).",
+    )
+    p_fetch.add_argument("--dest", default=None,
+                         help="Override the destination dir (default: ~/.m3/models).")
+    p_fetch.set_defaults(func=cmd_fetch_model)
 
     p_shared = sub.add_parser(
         "shared",
