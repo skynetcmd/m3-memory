@@ -676,10 +676,21 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
                  "--force-quiesce (kills stuck writers) or stop them first.")
             halt.clear_halt()  # abort: no exclusive step to protect
             return False
-        # Interactive: the human has context we don't (a task finishing).
+        # Interactive: the human has context we don't (a task finishing) — but
+        # DEFAULT TO KILL. A writer that ignored a cooperative HALT for the full
+        # timeout has already failed to honour the protocol; treating it as
+        # "probably busy" and waiting again is how an install stalls forever on
+        # a wedged process. `wait` re-enters this loop with the SAME timeout, so
+        # defaulting to it means an unresponsive writer blocks setup
+        # indefinitely and the user just sees a hang.
+        #
+        # Kill is recoverable (writers are restartable services and HALT_m3 is
+        # cleared on every exit path); an indefinite stall is not. The human can
+        # still choose wait or abort explicitly when they know a real task is
+        # finishing.
         choice = _ask_choice(
             "  A writer hasn't paused — it may have a task finishing.",
-            ["kill", "wait", "abort"], default="wait")
+            ["kill", "wait", "abort"], default="kill")
         if choice == "kill":
             # Interactive → allow a sudo retry (sudo prompts inline) for an
             # elevated writer, auto-elevating the cleanup during the install.
@@ -1553,6 +1564,61 @@ def _register_embed_server_task(*, non_interactive: bool = False) -> None:
     except Exception as e:  # noqa: BLE001 — never fail setup on the task step
         print(f"    [!] could not register the embed-server task ({e}); do it later with")
         print(f'        "{sys.executable}" "{script}" --add embed-server')
+
+    # VERIFY EVERY TASK, not just the one we registered above.
+    #
+    # `--add embed-server` creates a MISSING task; it does not touch tasks that
+    # already exist but whose definition has DRIFTED from the spec. An upgrade
+    # therefore reported success while leaving a broken definition in place —
+    # observed 2026-07-27: setup ran clean on a box whose AgentOS_Dashboard and
+    # AgentOS_CognitiveLoop both carried <Duration>PT10M</Duration>, capping
+    # their self-heal repetition. The dashboard had been dead for four days and
+    # the upgrade a user ran specifically to fix it changed nothing, silently.
+    #
+    # A check that exists but is not wired into the path users actually run is a
+    # check nobody runs (§3). Verification is advisory here — never fail setup —
+    # but the drift must be VISIBLE and must name the fix.
+    _verify_and_report_schedules(script, non_interactive=non_interactive)
+
+
+def _verify_and_report_schedules(script: str, *, non_interactive: bool) -> None:
+    """Run install_schedules --verify and surface drift with the repair command.
+
+    Advisory by contract: a failed verification never fails setup, because a
+    drifted schedule does not stop m3 working — it stops it RECOVERING. But it
+    must not pass silently, which is exactly how a four-day outage survived an
+    upgrade.
+    """
+    try:
+        proc = subprocess.run(
+            [sys.executable, script, "--verify"],
+            check=False, capture_output=True, text=True,
+        )
+    except Exception as e:  # noqa: BLE001 — verification must never fail setup
+        print(f"    [!] could not verify scheduled tasks ({e})")
+        return
+    if proc.returncode == 0:
+        print("    Scheduled tasks verified against spec.")
+        return
+    # Show only the failures; the OK lines are noise at this point.
+    for line in (proc.stdout + proc.stderr).splitlines():
+        if line.strip().startswith(("[FAIL]", "[WARN]")):
+            print(f"    {line.strip()}")
+    print("    [!] Some scheduled tasks do not match spec — they will NOT self-heal")
+    print("        if they die. Repair them with:")
+    print(f'            "{sys.executable}" "{script}" --repair')
+    if sys.platform == "win32":
+        print("        (Windows: boot-triggered tasks need an ADMIN shell.)")
+        if _offer_elevated_schedule_repair(script, non_interactive=non_interactive):
+            print("    Repaired elevated; re-verifying...")
+            re_proc = subprocess.run(
+                [sys.executable, script, "--verify"],
+                check=False, capture_output=True, text=True,
+            )
+            if re_proc.returncode == 0:
+                print("    Scheduled tasks now match spec.")
+            else:
+                print("    [!] Some tasks still do not match spec (see above).")
 
 
 def _step_install_wolfssl(plan: "SetupPlan") -> bool:
