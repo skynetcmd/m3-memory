@@ -36,13 +36,17 @@ from m3_memory._platform import os_name as _os_name
 # PyPI install (by version) and the GitHub-release asset fetch (by tag).
 # 3.7.4 was the first release whose wheels bundle the m3-embed-server binary.
 #
-# ⚠ 3.7.25 / v2026.7.25 IS NOT PUBLISHED YET. The m3-core-rs workspace is
-# bumped and its commits are on main, but no tag has been pushed, so
-# release.yml has not built the wheels. Until that tag exists, a prebuilt
-# fetch for this version 404s and `m3 setup` falls back to a source build (or
-# to pure-Python if no toolchain is present). Do not ship an m3-memory release
-# pinned here until the m3-core-rs release is live — verify with:
+# 3.7.25 / v2026.7.25 IS published (2026-07-26): all 24 wheels are on the
+# GitHub Release. Verify with:
 #   gh release view v2026.7.25 --repo skynetcmd/m3-core-rs
+#
+# WHERE EACH WHEEL LIVES — not every backend can go to PyPI. The CUDA wheels
+# exceed PyPI's per-file size limit (windows-cuda ~256MB, linux-cuda ~950MB),
+# so they are published ONLY to the GitHub Release; `m3-core-rs-windows-cuda`
+# is a 404 on PyPI BY DESIGN, not a publishing failure. The small backends
+# (cpu / macos-metal / vulkan) do go to PyPI. This is exactly why the resolver
+# cascades PyPI -> GitHub Release -> source: on a CUDA box the GitHub hop is
+# the normal path, not a fallback from something broken.
 M3_CORE_RS_VERSION = "3.7.25"
 M3_CORE_RS_GIT_TAG = "v2026.7.25"
 
