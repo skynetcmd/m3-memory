@@ -729,6 +729,50 @@ def _confirm_service_live(name: str, *, deadline_s: float = 25.0):
     return f"{last} after {deadline_s:.0f}s at {url}"
 
 
+# Roles the pre-install reap stopped, so we can restart them even when the
+# task selector does not include their task (see the reap block in main()).
+_reaped_roles: set = set()
+
+# role (as reported by kill_stale_daemons) -> scheduled task that runs it.
+_ROLE_TO_TASK = {
+    "dashboard": "AgentOS_Dashboard",
+    "embed-server": "AgentOS_EmbedServer",
+    "embed_server": "AgentOS_EmbedServer",
+    "cognitive-loop": "AgentOS_CognitiveLoop",
+    "cognitive_loop": "AgentOS_CognitiveLoop",
+}
+
+
+def restart_reaped_services(covered: set) -> None:
+    """Restart daemons the reap stopped that the task selector did not cover.
+
+    Whatever we stop, we start. The reap is fleet-wide; the registration below
+    it is selector-scoped, and that asymmetry silently left services down.
+    """
+    for role in sorted(_reaped_roles):
+        name = _ROLE_TO_TASK.get(role)
+        if not name or name in covered:
+            continue  # unknown role, or already handled by the task loop
+        try:
+            res = subprocess.run(["schtasks", "/Run", "/TN", name],
+                                 capture_output=True, text=True)
+        except Exception as e:  # noqa: BLE001 — restart is best-effort
+            _safe_print(f"{WARN} Could not restart {name}: {type(e).__name__}: {e}")
+            continue
+        if res.returncode != 0:
+            err = (res.stderr or res.stdout).strip()
+            _safe_print(f"{WARN} Stopped {role} but could not restart {name}: {err}")
+            _safe_print(f"        start it with: schtasks /Run /TN {name}")
+            continue
+        detail = _confirm_service_live(name, deadline_s=25.0)
+        if detail is True:
+            _safe_print(f"{OK} Restarted {name} (serving)")
+        elif detail is None:
+            _safe_print(f"{OK} Restarted {name}")
+        else:
+            _safe_print(f"{WARN} Restarted {name} but it is NOT serving: {detail}")
+
+
 def _start_longlived_tasks(tasks: list) -> None:
     """Kick the ONSTART services so they run now, not at next boot/logon.
 
@@ -1161,6 +1205,15 @@ def main():
             if killed:
                 _safe_print(f"  Stopped {len(killed)} running m3 daemon(s) before "
                             f"install: {', '.join(sorted({r['role'] for r in killed}))}")
+                # Remember what we stopped. The reap is fleet-wide but the task
+                # work below is SELECTOR-SCOPED: `m3 setup` passes
+                # --add embed-server, so only AgentOS_EmbedServer is registered
+                # and restarted. The dashboard was killed here and nothing ever
+                # brought it back — it stayed down until the next reboot, and
+                # the Task Scheduler recorded LastResult=1 for the KILL, which
+                # looked exactly like a startup crash. Diagnosed 2026-07-27
+                # after three upgrades each left the dashboard dead.
+                _reaped_roles.update(r["role"] for r in killed)
             for r in stuck:
                 _safe_print(f"{WARN} Could not stop {r['role']} (pid {r['pid']}): "
                             f"{r['error']} — re-run elevated or stop it manually, "
@@ -1170,7 +1223,16 @@ def main():
 
     if args.add:
         if os_name == "Windows":
+            _specs = get_schedule_specs(m3_memory_root, getattr(args, "port", 8088) or 8088)
+            _covered = {t["name"] for t in _filter_tasks(_specs, selector)}
             install_windows_tasks(m3_memory_root, selector, dashboard_port=getattr(args, "port", 8088) or 8088)
+            # Whatever the reap stopped, restart — even when the selector did not
+            # cover its task. `m3 setup` passes --add embed-server, so the reap
+            # killed the dashboard while only AgentOS_EmbedServer was registered
+            # and started. Nothing brought the dashboard back, and Task Scheduler
+            # logged LastResult=1 for the KILL, which reads exactly like a
+            # startup crash. Three consecutive upgrades left it dead this way.
+            restart_reaped_services(_covered)
         elif os_name in ("Darwin", "Linux"):
             if selector:
                 _sel = selector.lower().replace("-", "").replace("_", "")
