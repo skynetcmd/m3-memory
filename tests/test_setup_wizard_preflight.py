@@ -912,7 +912,12 @@ class _FakeHalt:
     def clear_halt(self):
         self.cleared += 1
 
-    def wait_for_quiesce(self, timeout):
+    def wait_for_quiesce(self, timeout, on_tick=None):
+        # on_tick is the progress-spinner callback the wizard passes; exercise it
+        # once so a raising renderer would surface here rather than mid-install.
+        if on_tick is not None:
+            result = self._results[0] if self._results else None
+            on_tick(0.5, timeout, list(getattr(result, "stuck", []) or []))
         return self._results.pop(0)
 
 

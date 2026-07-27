@@ -40,7 +40,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, List, Optional
 
 # The coordination-file schema is a shared contract in m3_core (so writers,
 # readers, and a future dashboard lock panel can't drift). m3_halt owns the
@@ -694,7 +694,9 @@ class QuiesceResult:
 
 
 def wait_for_quiesce(engine_root: Optional[str] = None, timeout: float = 30.0,
-                     poll: float = 0.5) -> QuiesceResult:
+                     poll: float = 0.5,
+                     on_tick: Optional[Callable[[float, float, List["ProcInfo"]], None]] = None
+                     ) -> QuiesceResult:
     """Wait up to ``timeout`` s for the PID registry to empty.
 
     Invariant (see the writer contract in HALT_PROTOCOL.md): a writer that honors
@@ -714,8 +716,16 @@ def wait_for_quiesce(engine_root: Optional[str] = None, timeout: float = 30.0,
     NOTE: the caller must have already called ``set_halt``. This only waits and
     reports; it never kills. The kill decision (prompt a human / --force-quiesce)
     stays with the caller so policy lives at the installer boundary.
+
+    ``on_tick(elapsed, timeout, live)`` is invoked once per poll so a caller can
+    render progress — this wait is up to 30s of otherwise-silent blocking, which
+    reads as a hang right before the kill/wait/abort prompt. RENDERING stays with
+    the caller for the same reason the kill decision does: this module must stay
+    usable from a GUI child and a headless run, neither of which wants a spinner
+    on stdout. A raising callback must never break the wait.
     """
-    deadline = time.monotonic() + max(0.0, timeout)
+    started = time.monotonic()
+    deadline = started + max(0.0, timeout)
     while True:
         # BLOCKING writers only. A role that holds no store (the embed server —
         # a stateless HTTP embedder holding a CUDA context, not a WAL handle)
@@ -727,6 +737,11 @@ def wait_for_quiesce(engine_root: Optional[str] = None, timeout: float = 30.0,
             return QuiesceResult(ok=True, stuck=[])
         if time.monotonic() >= deadline:
             return QuiesceResult(ok=False, stuck=live)
+        if on_tick is not None:
+            try:
+                on_tick(time.monotonic() - started, timeout, live)
+            except Exception:  # progress rendering must never break the wait
+                pass
         time.sleep(poll)
 
 
