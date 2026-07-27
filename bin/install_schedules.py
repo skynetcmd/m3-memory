@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 
 
 def _os_name() -> str:
@@ -686,6 +687,48 @@ def _render_task_xml(task: dict, python_exe: str, user_id: str) -> str:
     )
 
 
+# Health probes for the services we start. A service that binds a port can be
+# CHECKED; one that does not (the cognitive loop) cannot, and we must not invent
+# a check that always passes -- that is how a green tick over a dead service
+# happens in the first place.
+_SERVICE_HEALTH_URLS = {
+    "AgentOS_Dashboard": "http://127.0.0.1:{port}/",
+    "AgentOS_EmbedServer": "http://127.0.0.1:8082/health",
+}
+
+
+def _confirm_service_live(name: str, *, deadline_s: float = 25.0):
+    """Poll a started service until it answers.
+
+    Returns True when it responded, None when this service has no health
+    endpoint (nothing to check -- say nothing rather than imply a pass), or a
+    short reason string when the deadline expired.
+    """
+    url_tpl = _SERVICE_HEALTH_URLS.get(name)
+    if not url_tpl:
+        return None
+    port = int(os.environ.get("M3_DASHBOARD_PORT") or 8088)
+    url = url_tpl.format(port=port)
+    import urllib.error
+    import urllib.request
+
+    deadline = time.time() + deadline_s
+    last = "no response"
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=3) as r:  # nosec B310 - localhost
+                if 200 <= r.status < 500:
+                    return True
+                last = f"HTTP {r.status}"
+        except urllib.error.HTTPError as e:
+            # Any HTTP status means something is listening and answering.
+            return True if e.code < 500 else f"HTTP {e.code}"
+        except Exception as e:  # noqa: BLE001 - not up yet, keep waiting
+            last = type(e).__name__
+        time.sleep(1.5)
+    return f"{last} after {deadline_s:.0f}s at {url}"
+
+
 def _start_longlived_tasks(tasks: list) -> None:
     """Kick the ONSTART services so they run now, not at next boot/logon.
 
@@ -709,7 +752,19 @@ def _start_longlived_tasks(tasks: list) -> None:
             _safe_print(f"{WARN} Could not start {name}: {type(e).__name__}: {e}")
             continue
         if res.returncode == 0:
-            _safe_print(f"{OK} Started {name}")
+            # schtasks /Run reports success as soon as it LAUNCHES the task -- it
+            # cannot know the process then died. On 2026-07-27 that produced a
+            # clean "9/9 [OK]" while the dashboard had already exited 1, so the
+            # install reported success over a dead service. Confirm the thing is
+            # actually SERVING before claiming it started.
+            detail = _confirm_service_live(name, deadline_s=25.0)
+            if detail is None:
+                _safe_print(f"{OK} Started {name}")
+            elif detail is True:
+                _safe_print(f"{OK} Started {name} (serving)")
+            else:
+                _safe_print(f"{WARN} Started {name} but it is NOT serving: {detail}")
+                _safe_print(f"        check its log, then: schtasks /Run /TN {name}")
         else:
             err = (res.stderr or res.stdout).strip()
             _safe_print(f"{WARN} Registered {name} but could not start it: {err}")

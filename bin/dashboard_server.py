@@ -54,6 +54,59 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 
+# ── Crash visibility, installed BEFORE any heavy import ───────────────────────
+#
+# Everything below this point — fastapi, uvicorn, the m3 stack — is imported at
+# module scope. Logging used to be configured inside `if __name__ == "__main__"`,
+# which runs AFTER all of that. So an exception raised while IMPORTING exited
+# the process with status 1 and wrote nothing anywhere: under pythonw.exe there
+# is no console, and the --log-file handler did not exist yet.
+#
+# That is not hypothetical. On 2026-07-27 the dashboard scheduled task recorded
+# LastResult=1 with a completely empty log, and the only evidence a service had
+# failed at all was a Task Scheduler result code. A background service that can
+# die invisibly on startup is worse than no service — the user sees a dead
+# dashboard and has nothing to act on.
+#
+# So: parse --log-file here, ahead of the imports, and write any import-time
+# traceback into it. Deliberately minimal and dependency-free (stdlib only) —
+# this code must not be able to fail for the same reason it exists.
+def _early_crash_log() -> "str | None":
+    """Bind sys.excepthook to append tracebacks to --log-file. Returns the path."""
+    path = None
+    argv = sys.argv
+    for i, a in enumerate(argv):
+        if a == "--log-file" and i + 1 < len(argv):
+            path = argv[i + 1]
+            break
+        if a.startswith("--log-file="):
+            path = a.split("=", 1)[1]
+            break
+    if not path:
+        return None
+
+    def _hook(exc_type, exc, tb):
+        try:
+            import traceback
+            from datetime import datetime, timezone
+            with open(path, "a", encoding="utf-8", errors="replace") as fh:
+                fh.write(f"\n=== dashboard STARTUP FAILURE "
+                         f"{datetime.now(timezone.utc).isoformat()} ===\n")
+                fh.write(f"argv: {argv}\n")
+                fh.write(f"executable: {sys.executable}\n")
+                traceback.print_exception(exc_type, exc, tb, file=fh)
+                fh.flush()
+        except Exception:  # noqa: BLE001 — a failing crash-logger must stay quiet
+            pass
+        sys.__excepthook__(exc_type, exc, tb)
+
+    sys.excepthook = _hook
+    return path
+
+
+_EARLY_LOG = _early_crash_log()
+
+
 def _h(s: object) -> str:
     """HTML-escape any DB-derived / user-supplied value before it lands in an
     f-string HTML template. quote=True so it is safe in an attribute context too
