@@ -8,6 +8,7 @@ Uses project virtual environment paths and ensures log directories exist.
 import argparse
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -861,13 +862,35 @@ def _verify_windows_task(name: str) -> bool:
         _safe_print(f"{WARN} {name}: Hidden is not true (task will flash a window on each fire)")
         ok = False
     # Self-heal Repetition — only the tasks in _SELF_HEAL_TASKS must have it.
+    #
+    # BOTH halves are checked, and the second is the one that matters. A
+    # <Repetition> carrying a <Duration> STOPS repeating after that duration,
+    # so the task self-heals only inside a short window after its trigger and
+    # is dead thereafter. Checking the Interval alone certifies such a task as
+    # healthy — which is exactly what happened: AgentOS_Dashboard was
+    # registered by an older installer as
+    #     <Repetition><Interval>PT5M</Interval><Duration>PT10M</Duration></Repetition>
+    # so it retried twice after logon and then never again. It died on
+    # 2026-07-22 and stayed down for four days while `--verify` reported
+    # "[OK] self-heal Repetition PT5M present". A check that reports safety it
+    # is not verifying is worse than no check (DESIGN §3).
     expected_rep = _SELF_HEAL_TASKS.get(name)
     if expected_rep:
-        if f"<Interval>{expected_rep}</Interval>" in xml:
-            _safe_print(f"{OK} {name}: self-heal Repetition {expected_rep} present")
-        else:
+        if f"<Interval>{expected_rep}</Interval>" not in xml:
             _safe_print(f"{FAIL} {name}: expected self-heal Repetition {expected_rep} is MISSING")
             ok = False
+        elif "<Duration>" in xml:
+            _dur = re.search(r"<Duration>([^<]+)</Duration>", xml)
+            _dur = _dur.group(1) if _dur else "?"
+            _safe_print(
+                f"{FAIL} {name}: self-heal Repetition is BOUNDED "
+                f"(<Duration>{_dur}</Duration>) — it stops repeating after "
+                f"{_dur} and cannot self-heal afterwards. Re-register with "
+                f"--repair (needs an elevated shell on Windows)."
+            )
+            ok = False
+        else:
+            _safe_print(f"{OK} {name}: self-heal Repetition {expected_rep} present (unbounded)")
     if ok:
         _safe_print(f"{OK} {name}: registered and matches spec")
     return ok

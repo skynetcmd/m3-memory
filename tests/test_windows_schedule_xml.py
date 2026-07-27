@@ -325,3 +325,86 @@ def test_verify_schedules_reports_all_not_short_circuit(monkeypatch, capsys):
     assert ok is False                          # one failure -> overall False
     assert "WeeklyAuditor" in out               # the failure is reported
     assert "CognitiveLoop" in out               # AND later tasks still checked
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# --verify must reject a BOUNDED self-heal repetition.
+#
+# A <Repetition> carrying a <Duration> stops repeating after that duration, so
+# the task self-heals only inside a short window after its trigger and is dead
+# afterwards. The original check tested for the <Interval> substring alone and
+# therefore PASSED such a task.
+#
+# Not hypothetical: AgentOS_Dashboard and AgentOS_CognitiveLoop were both
+# registered by an older installer as
+#     <Repetition><Interval>PT5M</Interval><Duration>PT10M</Duration></Repetition>
+# The dashboard died on 2026-07-22 and stayed down for four days while
+# `--verify` reported "[OK] self-heal Repetition PT5M present". A check that
+# reports safety it is not verifying is worse than no check (DESIGN §3).
+# ──────────────────────────────────────────────────────────────────────────────
+
+_UNBOUNDED = (
+    "<Task><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
+    "<Hidden>true</Hidden></Settings><Triggers><LogonTrigger>"
+    "<Repetition><Interval>PT5M</Interval>"
+    "<StopAtDurationEnd>false</StopAtDurationEnd></Repetition>"
+    "</LogonTrigger></Triggers></Task>"
+)
+_BOUNDED = _UNBOUNDED.replace(
+    "<StopAtDurationEnd>false</StopAtDurationEnd>",
+    "<Duration>PT10M</Duration><StopAtDurationEnd>false</StopAtDurationEnd>",
+)
+
+
+def _run_verify(monkeypatch, xml_doc, name="AgentOS_Dashboard"):
+    """Drive _verify_windows_task against a canned schtasks /XML response."""
+    class _R:
+        returncode = 0
+        stdout = xml_doc
+        stderr = ""
+
+    monkeypatch.setattr(isch.subprocess, "run", lambda *a, **k: _R())
+    return isch._verify_windows_task(name)
+
+
+def test_verify_accepts_an_unbounded_self_heal_repetition(monkeypatch):
+    assert _run_verify(monkeypatch, _UNBOUNDED) is True
+
+
+def test_verify_rejects_a_bounded_self_heal_repetition(monkeypatch):
+    """The regression. This XML has the right Interval and is still broken."""
+    assert _run_verify(monkeypatch, _BOUNDED) is False
+
+
+def test_verify_still_rejects_a_missing_repetition(monkeypatch):
+    no_rep = _UNBOUNDED.replace(
+        "<Repetition><Interval>PT5M</Interval>"
+        "<StopAtDurationEnd>false</StopAtDurationEnd></Repetition>",
+        "",
+    )
+    assert _run_verify(monkeypatch, no_rep) is False
+
+
+def test_generated_xml_has_no_duration_for_self_heal_tasks():
+    """The generator side of the same contract: what we WRITE must be unbounded.
+
+    Guards the other direction — a future edit to _xml_repetition that
+    reintroduces a <Duration> would recreate the stale-task bug for every new
+    install, and the --verify fix above would only catch it after the fact.
+    """
+    specs = isch.get_schedule_specs(os.getcwd(), 8088)
+    checked = 0
+    for task in specs:
+        if task["name"] not in isch._SELF_HEAL_TASKS:
+            continue
+        xml_doc = isch._render_task_xml(task, r"C:\python.exe", r"DOMAIN\user")
+        root = ET.fromstring(xml_doc)
+        for rep in root.iter():
+            if rep.tag.endswith("Repetition"):
+                kids = [c.tag.rsplit("}", 1)[-1] for c in rep]
+                assert "Duration" not in kids, (
+                    f"{task['name']}: self-heal Repetition must be UNBOUNDED; "
+                    f"a <Duration> stops it repeating. Got {kids}"
+                )
+                checked += 1
+    assert checked, "no self-heal task rendered — the guard tested nothing"
