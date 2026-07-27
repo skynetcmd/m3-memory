@@ -952,12 +952,45 @@ def _offer_elevated_task_delete(task_names: list[str], *, non_interactive: bool,
             "  Remove them now? (opens a Windows admin prompt)", default=True,
         ):
             return False
-    _say("  Requesting administrator access (approve the Windows UAC dialog)...")
-    if _runas_delete_tasks_windows(task_names):
+    if _retry_elevated(lambda: _runas_delete_tasks_windows(task_names),
+                       what="elevated removal"):
         _ok("  legacy scheduled task(s) removed (elevated).")
         return True
-    _warn("  elevated removal was cancelled or failed — see the commands above "
-          "to run them yourself from an admin shell.")
+    return False
+
+
+def _retry_elevated(action, *, what: str, max_attempts: int = 5) -> bool:
+    """Run an elevating `action` until it succeeds or the user truly declines.
+
+    A UAC prompt is easy to lose: it can open behind the terminal, appear on
+    another monitor, or be dismissed by a reflexive Enter. One shot then meant
+    a permanent, silent downgrade -- setup carried on and the service simply
+    never got registered, with the reason scrolled off the screen.
+
+    So: retry, but never trap. Each failure re-asks, and the user can stop with
+    'quit' / 'q' / 'no'. `action` returns True on success.
+    """
+    for attempt in range(1, max_attempts + 1):
+        _say(f"  Requesting administrator access (approve the Windows UAC dialog)"
+             f"{'' if attempt == 1 else f' — attempt {attempt}/{max_attempts}'}...")
+        if action():
+            return True
+        _warn(f"  {what} was cancelled or failed"
+              f"{' (UAC declined, or the dialog was missed)' if attempt == 1 else ''}.")
+        if attempt >= max_attempts:
+            _warn(f"  giving up after {max_attempts} attempts — run the command "
+                  "above yourself from an admin shell.")
+            return False
+        # Explicit opt-out: anything other than 'retry' stops. The prompt names
+        # the quit words so declining never requires guessing.
+        ans = _prompt("  Try again? [RETRY/quit] ")
+        if ans is None:  # EOF -- no human to re-approve; stop rather than spin
+            _warn("  no input available — not retrying.")
+            return False
+        ans = ans.strip().lower()
+        if ans in ("q", "quit", "n", "no", "abort", "cancel", "skip"):
+            _warn(f"  skipping {what}; run the command above when convenient.")
+            return False
     return False
 
 
@@ -974,12 +1007,10 @@ def _offer_elevated_schedule_repair(script: str, *, non_interactive: bool) -> bo
         default=True,
     ):
         return False
-    _say("  Requesting administrator access (approve the Windows UAC dialog)...")
-    if _runas_schedule_repair_windows(script):
+    if _retry_elevated(lambda: _runas_schedule_repair_windows(script),
+                       what="elevated registration"):
         _ok("  boot-start services registered (elevated).")
         return True
-    _warn("  elevated registration was cancelled or failed — see the command above "
-          "to run it yourself from an admin shell.")
     return False
 
 

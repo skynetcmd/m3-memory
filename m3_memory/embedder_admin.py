@@ -55,6 +55,37 @@ def _find_bundled_gguf() -> Optional[Path]:
     if env_path and Path(env_path).is_file():
         return Path(env_path)
 
+    # 1b. The SHARED embedder config. Setup's GGUF auto-discovery finds any
+    # bge-m3 GGUF on the machine (an LM Studio download, a hand-placed file)
+    # and writes its path here — but this resolver used to check only the
+    # BUNDLED filename in the payload's _assets dir, so a perfectly good,
+    # already-configured model was reported missing.
+    #
+    # The user-visible contradiction, in ONE setup run (2026-07-27):
+    #     discovered BGE-M3 GGUF: .../bge-m3-GGUF-Q4_K_M.gguf
+    #     Use this GGUF for the shared embedder? [Y/n]      -> yes, config written
+    #     ...
+    #     the optional CPU-embedder GGUF (bge-m3-Q4_K_M.gguf) isn't present
+    # It accepted the model, then skipped the embedder install as if none
+    # existed. Two resolvers with different filenames and no shared state.
+    # Honour the same opt-out the other resolvers use (memory/doctor.py,
+    # memory/embed.py): M3_EMBED_GGUF_AUTODETECT=0 means "use only what I named
+    # explicitly", so a discovered-and-configured model must not sneak in.
+    # Without this the flag silently stopped meaning what it says.
+    try:
+        import json
+
+        if os.environ.get("M3_EMBED_GGUF_AUTODETECT", "1") == "0":
+            raise RuntimeError("autodetect disabled")
+        cfg = Path(_embed_config_path())
+        if cfg.is_file():
+            configured = (json.loads(cfg.read_text(encoding="utf-8"))
+                          .get("gguf_path") or "").strip()
+            if configured and Path(configured).is_file():
+                return Path(configured)
+    except Exception:  # noqa: BLE001 — config is advisory; fall through
+        pass
+
     # 2. Resolve via the install-m3 payload root.
     try:
         from m3_memory.installer import assets_dir
