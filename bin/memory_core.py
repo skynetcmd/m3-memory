@@ -808,7 +808,7 @@ def memory_cost_report_impl() -> str:
         lines.append(f"  {key}: {val}")
     return "\n".join(lines)
 
-async def memory_update_impl(id, content="", title="", metadata="", importance=-1.0, reembed=False, refresh_on="", refresh_reason="", conversation_id=""):
+async def memory_update_impl(id, content="", title="", metadata="", importance=-1.0, reembed=False, refresh_on="", refresh_reason="", conversation_id="", type=""):
     if isinstance(metadata, dict):
         metadata = json.dumps(metadata)
     elif not isinstance(metadata, str):
@@ -823,7 +823,7 @@ async def memory_update_impl(id, content="", title="", metadata="", importance=-
     with _db() as db:
         # Read old values for audit trail
         old = db.execute(
-            f"SELECT content, title, refresh_on, refresh_reason, conversation_id FROM memory_items WHERE id = {_p}",
+            f"SELECT content, title, type, refresh_on, refresh_reason, conversation_id FROM memory_items WHERE id = {_p}",
             (id,)
         ).fetchone()
         if content:
@@ -832,6 +832,24 @@ async def memory_update_impl(id, content="", title="", metadata="", importance=-
         if title:
             _record_history(id, "update", old["title"] if old else None, title, "title", db=db)
             db.execute(f"UPDATE memory_items SET title = {_p} WHERE id = {_p}", (title, id))
+        if type:
+            # `type` is NOT free text like content/title — it drives routing, the
+            # served allow-list, decay policy and type_filter, so a typo would
+            # silently make a memory unreachable rather than merely mislabelled.
+            # Validate against the SAME frozenset memory_write uses, so the two
+            # paths cannot drift apart.
+            from catalog.spec import VALID_MEMORY_TYPES
+
+            if type not in VALID_MEMORY_TYPES:
+                raise ValueError(
+                    f"invalid memory type {type!r}. Valid types: "
+                    + ", ".join(sorted(VALID_MEMORY_TYPES))
+                )
+            # History row like content/title (not silent like importance): a type
+            # change alters which searches can reach the row, so it must be
+            # auditable.
+            _record_history(id, "update", old["type"] if old else None, type, "type", db=db)
+            db.execute(f"UPDATE memory_items SET type = {_p} WHERE id = {_p}", (type, id))
         if importance >= 0: db.execute(f"UPDATE memory_items SET importance = {_p} WHERE id = {_p}", (importance, id))
         if metadata: db.execute(f"UPDATE memory_items SET metadata_json = {_p} WHERE id = {_p}", (metadata, id))
         # Refresh lifecycle: empty string leaves unchanged, "clear" clears, anything
@@ -1123,7 +1141,7 @@ def memory_update_bulk_impl(updates):
             chunk_ids = id_list[start : start + _MEMORY_UPDATE_BULK_CHUNK]
             placeholders = _d.placeholder(len(chunk_ids))
             rows = db.execute(
-                f"SELECT id, content, title, refresh_on, refresh_reason, conversation_id "
+                f"SELECT id, content, title, type, refresh_on, refresh_reason, conversation_id "
                 f"FROM memory_items WHERE id IN ({placeholders})",
                 chunk_ids,
             ).fetchall()
@@ -1147,6 +1165,24 @@ def memory_update_bulk_impl(updates):
                 if title:
                     _record_history(mid, "update", old["title"], title, "title", db=db)
                     db.execute(f"UPDATE memory_items SET title = {p} WHERE id = {p}", (title, mid))
+                    changed_any = True
+
+                new_type = u.get("type", "")
+                if new_type:
+                    # Validated against the same frozenset as memory_write and the
+                    # singleton update — see memory_update_impl for why `type` is
+                    # not treated as free text. An invalid type in ONE entry must
+                    # not silently retype the rest, so raise rather than skip.
+                    from catalog.spec import VALID_MEMORY_TYPES
+
+                    if new_type not in VALID_MEMORY_TYPES:
+                        raise ValueError(
+                            f"invalid memory type {new_type!r} for id {mid}. "
+                            "Valid types: " + ", ".join(sorted(VALID_MEMORY_TYPES))
+                        )
+                    _record_history(mid, "update", old["type"], new_type, "type", db=db)
+                    db.execute(f"UPDATE memory_items SET type = {p} WHERE id = {p}", (new_type, mid))
+                    changed_any = True
                     changed_any = True
 
                 importance = u.get("importance", -1.0)
