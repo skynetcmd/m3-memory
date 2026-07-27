@@ -21,6 +21,11 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.26.6] — 2026-07-27 — Setup restarts every service it stopped
+
+### Fixed
+- Setup killed all running m3 daemons before registering tasks, but only restarted the one task its selector covered — so `m3 setup` left the dashboard stopped until the next reboot. Task Scheduler recorded the kill as result code 1, which was indistinguishable from a startup crash.
+
 ## [2026.7.26.5] — 2026-07-27 — A dead dashboard can no longer look like a successful install
 
 ### Fixed
