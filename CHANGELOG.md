@@ -21,6 +21,16 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.26.8] — 2026-07-27 — Finds your existing embedder model, and stops losing the admin prompt
+
+### Fixed
+- Setup looked for its helper scripts beside the package rather than inside it, so on a real install it reported `install_schedules.py not found` and left the dashboard boot task unregistered.
+- Setup discovered a GGUF, wrote it to the shared config, then reported in the same run that no GGUF was present and skipped the embedder install.
+- A missed or mis-clicked Windows admin prompt permanently downgraded the install; elevation is now re-offered, bounded at five attempts, and quits on `quit`.
+
+### Added
+- The embedder now finds a bge-m3 GGUF in Ollama and llama.cpp as well as LM Studio. Ollama's models are content-addressed blobs with no file extension, so they are resolved through its manifests; `OLLAMA_MODELS` is honoured.
+
 ## [2026.7.26.7] — 2026-07-27 — Setup survives a closed stdin and stops rebuilding wolfSSL
 
 ### Fixed
