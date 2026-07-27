@@ -488,6 +488,28 @@ def _sample_is_unit(vecs) -> bool:
     return True
 
 
+def _m3_models_dir():
+    """m3's own model dir, via the canonical resolver. Falls back to the
+    documented default if m3_core isn't importable (this helper runs from the
+    setup wizard and the installed payload alike)."""
+    from pathlib import Path
+
+    try:
+        from m3_core.paths import get_m3_models_root
+
+        return Path(get_m3_models_root())
+    except Exception:
+        import os
+
+        root = os.environ.get("M3_MODELS_ROOT")
+        if root:
+            return Path(root).expanduser()
+        mem = os.environ.get("M3_MEMORY_ROOT")
+        if mem:
+            return Path(mem).expanduser() / "models"
+        return Path.home() / ".m3" / "models"
+
+
 def discover_bge_m3_gguf(budget_s: float = _EMBED_GGUF_WALK_BUDGET_S) -> str | None:
     """Probe the canonical model directories for a bge-m3 GGUF and return its
     path, or None. Bounded: at most `budget_s` wall-clock and depth ~4 per dir,
@@ -499,6 +521,10 @@ def discover_bge_m3_gguf(budget_s: float = _EMBED_GGUF_WALK_BUDGET_S) -> str | N
 
     home = Path.home()
     candidate_dirs = [
+        # m3's OWN model dir, first: the only location that survives the user
+        # uninstalling LM Studio / Ollama / llama.cpp. Everything below is a
+        # third-party store we merely borrow from.
+        _m3_models_dir(),
         home / ".lmstudio" / "models",
         home / "Library" / "Application Support" / "LM Studio" / "models",
         home / ".cache" / "lm-studio" / "models",   # Linux LM Studio default (XDG)

@@ -45,6 +45,14 @@ def _isolate_env(monkeypatch, tmp_path):
     _cfg_root = tmp_path / "config"
     _cfg_root.mkdir(exist_ok=True)
     monkeypatch.setenv("M3_CONFIG_ROOT", str(_cfg_root))
+    # Same hermetic treatment for m3's OWN model dir. Discovery probes
+    # ~/.m3/models FIRST (ahead of LM Studio/Ollama/llama.cpp) so a dev box with
+    # a real GGUF there would make these host-independent classification tests
+    # pass/fail by machine — exactly what the config-root isolation above
+    # prevents. Point it at an empty tmp dir (§3: hermetic, host-independent).
+    _models_root = tmp_path / "models"
+    _models_root.mkdir(exist_ok=True)
+    monkeypatch.setenv("M3_MODELS_ROOT", str(_models_root))
     # Force fresh module load so each doctor test re-reads the env above.
     # CRITICAL: snapshot and RESTORE the purged modules on teardown. Without
     # restore, the whole rest of the pytest session runs with memory.* modules

@@ -299,6 +299,23 @@ def get_m3_engine_root() -> str:
     return os.path.join(os.path.expanduser("~"), ".m3", "engine")
 
 
+def get_m3_models_root() -> str:
+    """Returns the M3 model directory (GGUF weights m3 owns itself).
+    Precedence: M3_MODELS_ROOT > M3_MEMORY_ROOT/models > ~/.m3/models
+
+    This is the one model location that does not belong to a third party, so
+    it is probed FIRST — a user who drops LM Studio, Ollama, or llama.cpp
+    keeps a working embedder.
+    """
+    root = os.getenv("M3_MODELS_ROOT")
+    if root:
+        return os.path.abspath(os.path.expanduser(root))
+    m3_mem_root = os.getenv("M3_MEMORY_ROOT")
+    if m3_mem_root:
+        return os.path.join(os.path.abspath(os.path.expanduser(m3_mem_root)), "models")
+    return os.path.join(os.path.expanduser("~"), ".m3", "models")
+
+
 def resolve_engine_file(filename: str) -> str:
     """Resolve a path under the engine root, honoring the legacy fallback.
 

@@ -669,6 +669,50 @@ def _import_m3_halt():
         return None
 
 
+_SPINNER_FRAMES = "|/-\\"
+
+
+def _quiesce_progress_enabled(args: argparse.Namespace) -> bool:
+    """Only animate on a real console. A GUI child has no console, and a piped
+    or redirected stdout would accumulate one line per tick in a log file."""
+    if getattr(args, "gui_child", False):
+        return False
+    try:
+        return bool(sys.stdout.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
+def _quiesce_tick(args: argparse.Namespace):
+    """Build the wait_for_quiesce progress callback, or None when not a console.
+
+    Redraws ONE line in place with \\r — never reprints the whole line as new
+    output — so a 30s wait shows motion instead of looking hung.
+    """
+    if not _quiesce_progress_enabled(args):
+        return None
+
+    def _tick(elapsed: float, timeout: float, live) -> None:
+        frame = _SPINNER_FRAMES[int(elapsed * 4) % len(_SPINNER_FRAMES)]
+        remain = max(0.0, timeout - elapsed)
+        names = ", ".join(p.role for p in live[:2])
+        if len(live) > 2:
+            names += f" +{len(live) - 2}"
+        line = f"  {frame} waiting for {names} to pause… {remain:4.1f}s left"
+        # Pad to clear a previously-longer line, then \r back to column 0.
+        sys.stdout.write(f"\r{line:<72}\r{line}")
+        sys.stdout.flush()
+
+    return _tick
+
+
+def _quiesce_tick_done(args: argparse.Namespace) -> None:
+    """Erase the spinner line so the next message starts clean."""
+    if _quiesce_progress_enabled(args):
+        sys.stdout.write("\r" + " " * 72 + "\r")
+        sys.stdout.flush()
+
+
 def _quiesce_db_writers(args: argparse.Namespace) -> bool:
     """Cooperatively quiesce autonomous m3 DB-writers before a DB-exclusive
     install/upgrade step, via the HALT_m3 protocol (docs/design/HALT_PROTOCOL.md).
@@ -704,6 +748,13 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
     if informational:
         noted = ", ".join(f"{p.role}(pid {p.pid})" for p in informational)
         _say(f"  note: {noted} running but holds no DB — not a quiesce blocker")
+        # "Not a quiesce blocker" answers only the DB question. An upgrade also
+        # REPLACES these processes' binaries on disk, and they keep running the
+        # old image until restarted — so say so rather than letting the note
+        # read as "nothing to do here". The embedder step restarts a stale
+        # service itself; this makes the situation visible if it doesn't.
+        _say("        (these keep running their OLD binary until restarted — "
+             "the embedder step below handles that)")
 
     if not live:
         _ok("  no autonomous m3 DB-writers running (nothing to quiesce)")
@@ -726,7 +777,8 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
     # depend on that net.) atexit fires on normal exit AND sys.exit, closing the
     # window. Idempotent with the finally + the abort-path clears.
     atexit.register(halt.clear_halt)
-    result = halt.wait_for_quiesce(timeout=timeout)
+    result = halt.wait_for_quiesce(timeout=timeout, on_tick=_quiesce_tick(args))
+    _quiesce_tick_done(args)
     while not result.ok:
         stuck = ", ".join(f"{p.role}(pid {p.pid})" for p in result.stuck)
         _warn(f"  {len(result.stuck)} writer(s) still holding the DB after "
@@ -755,7 +807,8 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
                     _surface_elevated_kill_help(halt, result.stuck)
                     halt.clear_halt()
                     return False
-                result = halt.wait_for_quiesce(timeout=5.0)
+                result = halt.wait_for_quiesce(timeout=5.0, on_tick=_quiesce_tick(args))
+                _quiesce_tick_done(args)
                 continue
             _err("  refusing to migrate with live DB-writers. Re-run with "
                  "--force-quiesce (kills stuck writers) or stop them first.")
@@ -783,13 +836,15 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
                 _surface_elevated_kill_help(halt, result.stuck)
                 halt.clear_halt()
                 return False
-            result = halt.wait_for_quiesce(timeout=5.0)
+            result = halt.wait_for_quiesce(timeout=5.0, on_tick=_quiesce_tick(args))
+            _quiesce_tick_done(args)
         elif choice == "abort":
             _warn("  install aborted by user (DB-writers still active)")
             halt.clear_halt()  # abort: no exclusive step to protect
             return False
         else:  # wait
-            result = halt.wait_for_quiesce(timeout=timeout)
+            result = halt.wait_for_quiesce(timeout=timeout, on_tick=_quiesce_tick(args))
+            _quiesce_tick_done(args)
     _ok("  all m3 DB-writers quiesced (HALT_m3 held through install)")
     return True
 
@@ -1391,6 +1446,13 @@ def _discover_bge_m3_gguf() -> str | None:
         # NOT covered here: its blobs are content-addressed with no .gguf
         # extension, so finding one needs the manifest walk that lives there.
         candidate_dirs = [
+            # m3's OWN dir first — the only one that survives the user dropping
+            # LM Studio / Ollama / llama.cpp. Mirrors get_m3_models_root()'s
+            # precedence without importing it (bin/ is unavailable on this path).
+            Path(os.environ.get("M3_MODELS_ROOT")
+                 or (Path(os.environ["M3_MEMORY_ROOT"]).expanduser() / "models"
+                     if os.environ.get("M3_MEMORY_ROOT")
+                     else home / ".m3" / "models")).expanduser(),
             home / ".lmstudio" / "models",
             home / "Library" / "Application Support" / "LM Studio" / "models",
             home / ".cache" / "lm-studio" / "models",
