@@ -1457,7 +1457,7 @@
     },
     "memory_update_impl": {
       "kind": "async_function",
-      "signature": "(id, content='', title='', metadata='', importance=-1.0, reembed=False, refresh_on='', refresh_reason='', conversation_id='')",
+      "signature": "(id, content='', title='', metadata='', importance=-1.0, reembed=False, refresh_on='', refresh_reason='', conversation_id='', type='')",
       "value_repr": null
     },
     "memory_verify_impl": {
