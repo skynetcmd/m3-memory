@@ -240,6 +240,29 @@ def render_pages(
         slug = source_slugs.get(fn.uuid)
         links.register(slug, f"sources/{slug}.md", fn.filename)  # type: ignore[arg-type]
 
+    # Map a memory's TITLE-slug to the topic page that contains it, so a
+    # [[some-memory-title]] written inside another memory resolves to where that
+    # memory is actually rendered. Authors write the target MEMORY's slug (they
+    # cannot know a topic slug at write time), so this indirection is what makes
+    # the authored graph navigable. First writer wins for a duplicate slug —
+    # deterministic because clusters and members are already ordered.
+    slug_by_ref: dict[str, str] = {}
+    for c in topic_clusters:
+        tslug = topic_slugs.get(c.key)
+        for m in c.members:
+            key = slugify(m.display_title).lower()
+            if key and key not in slug_by_ref:
+                slug_by_ref[key] = tslug  # type: ignore[assignment]
+    # A memory may also be referenced by the slug it was SAVED under (m3 titles
+    # like "runbook-wsl-postgres-..." are already slugs).
+    for c in topic_clusters:
+        tslug = topic_slugs.get(c.key)
+        for m in c.members:
+            t = (m.title or "").strip().lower()
+            if t and t not in slug_by_ref:
+                slug_by_ref[t] = tslug  # type: ignore[assignment]
+    dangling_wikilinks: list[str] = []
+
     # promotions grouped by target memory id.
     promo_by_mem: dict[str, list[Promo]] = {}
     for p in promotions:
@@ -257,7 +280,9 @@ def render_pages(
     for c in topic_clusters:
         slug = topic_slugs.get(c.key)
         pages[f"topics/{slug}.md"] = _render_topic(
-            c, edges, mem_to_topic, promo_by_mem, backlinks, files, links, ledes.get(c.key)
+            c, edges, mem_to_topic, promo_by_mem, backlinks, files, links,
+            ledes.get(c.key),
+            slug_by_ref=slug_by_ref, dangling=dangling_wikilinks,
         )
 
     if orphan_members:
@@ -267,7 +292,9 @@ def render_pages(
         slug = source_slugs.get(fn.uuid)
         pages[f"sources/{slug}.md"] = _render_source(fn, promotions, mem_to_topic, links)
 
-    pages["index.md"] = _render_index(topic_clusters, topic_slugs, files, source_slugs, links, bool(orphan_members))
+    pages["index.md"] = _render_index(topic_clusters, topic_slugs, files, source_slugs, links,
+                                      bool(orphan_members),
+                                      dangling_count=len(set(dangling_wikilinks)))
     pages["overview.md"] = _render_overview(clusters, files, links)
     pages["lint.md"] = _render_lint(clusters, edges, mem_to_topic, topic_slugs,
                                     links, drift_judge=drift_judge,
@@ -301,6 +328,8 @@ def _render_topic(
     files: FilesLayer,
     links: "LinkResolver",
     lede: Optional[str] = None,
+    slug_by_ref: Optional[dict] = None,
+    dangling: Optional[list] = None,
 ) -> str:
     top = c.members[0]
     slug = mem_to_topic.get(top.id, c.key)
@@ -381,8 +410,21 @@ def _render_topic(
                 lines.append(f"  {marker}")
             continue
         head = m.content.strip().splitlines()[0].strip() if m.content.strip() else ""
-        snippet = (head[:200] + "…") if len(head) > 200 else head
+        # Truncate on a [[wikilink]] BOUNDARY, never through one. Cutting at a
+        # raw character offset produced fragments like "[[access-b…" — a broken
+        # link that can never resolve, and visible garbage in the snippet. So
+        # trim to the last boundary at or before the budget when the naive cut
+        # would land inside a link.
+        snippet = _truncate_outside_wikilinks(head, 200)
         if snippet:
+            # Resolve AFTER truncation, on a snippet guaranteed to hold only
+            # whole links. The resolved form is longer than the [[slug]] it
+            # replaces, so the 200-char budget deliberately measures PROSE.
+            if slug_by_ref is not None:
+                snippet = _resolve_wikilinks(
+                    snippet, links, self_path, slug_by_ref,
+                    dangling if dangling is not None else [],
+                )
             lines.append(f"  {snippet}")
     lines.append("")
 
@@ -554,10 +596,92 @@ _TYPE_ORDER = {t: i for i, (t, _) in enumerate(_TYPE_SECTIONS)}
 _TYPE_LABEL = dict(_TYPE_SECTIONS)
 
 
+# A memory whose TITLE announces it is a runbook is procedural regardless of the
+# `type` column. Types are assigned at write time, often by auto-classification,
+# and on the real corpus only 7 of 26 runbook-titled memories carried
+# type='procedure' — the rest were reference/belief/knowledge. Sectioning purely
+# on the stored type put ONE runbook under "Runbooks & procedures" and scattered
+# the other 25 elsewhere, which is precisely the section a reader goes to first.
+#
+# This is a DISPLAY-layer correction, deliberately narrow: it decides which
+# section a topic is filed under and nothing else. It does not rewrite the
+# stored type (that is a curation concern, done through memory_update's `type`
+# field), and it does not affect clustering, ranking, or admission.
+_RUNBOOK_TITLE_RE = re.compile(r"runbook|playbook", re.I)
+
+
+def _is_runbook_titled(m) -> bool:
+    """True when the title announces a runbook/playbook, whatever its type."""
+    return bool(_RUNBOOK_TITLE_RE.search(getattr(m, "display_title", "") or ""))
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# [[wikilinks]] written INSIDE memory content.
+#
+# m3 memories cross-reference each other with [[slug]] by convention — the
+# author writes them deliberately, and they form a real graph in the store. The
+# wiki used to emit that graph as literal text, so a link authored on purpose
+# died at the render boundary. This resolves it at BUILD time, not query time:
+# a cross-reference should already exist when a question is asked, not be
+# inferred on demand.
+#
+# Resolution order is title-slug first, then any registered ref (topic/source/
+# index page), because memory authors write the TARGET MEMORY's slug, not a
+# topic slug they cannot know at write time.
+#
+# Unknown targets fall back to the literal text via LinkResolver.link(), which
+# already guarantees a dangling ref never emits a broken link. The count is
+# surfaced in lint.md rather than swallowed.
+_WIKILINK_RE = re.compile(r"\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]")
+
+
+def _truncate_outside_wikilinks(text: str, budget: int) -> str:
+    """Trim `text` to ~`budget` chars without ever cutting inside a [[link]].
+
+    A naive text[:200] can land between the brackets and emit "[[access-b…",
+    which is both unresolvable and ugly. If the cut point falls inside a link,
+    back up to just before that link opens.
+    """
+    if len(text) <= budget:
+        return text
+    cut = budget
+    for m in _WIKILINK_RE.finditer(text):
+        if m.start() < cut < m.end():
+            cut = m.start()
+            break
+    return text[:cut].rstrip() + "…"
+
+
+def _resolve_wikilinks(text: str, links: "LinkResolver", src_path: str,
+                       slug_by_ref: dict, dangling: list) -> str:
+    """Rewrite [[target]] / [[target|label]] in `text` into real links.
+
+    IDEMPOTENT IN OBSIDIAN MODE. With obsidian=True the resolver's own output is
+    itself [[...]], so a naive re-run would double-wrap. We only substitute when
+    the target RESOLVES; an already-correct wikilink resolves to itself and the
+    replacement is a no-op.
+    """
+    def _sub(m):
+        raw = (m.group(1) or "").strip()
+        label = (m.group(2) or "").strip() or None
+        ref = slug_by_ref.get(raw.lower())
+        if ref is None and links.has(raw):
+            ref = raw
+        if ref is None:
+            dangling.append(raw)
+            return m.group(0)  # leave the literal alone; lint.md reports it
+        return links.link(ref, src_path, text=label)
+
+    return _WIKILINK_RE.sub(_sub, text)
+
+
 def _dominant_type(c: Cluster) -> str:
     counts: dict[str, int] = {}
     for m in c.members:
-        counts[m.type] = counts.get(m.type, 0) + 1
+        # Count a runbook-titled member as procedural for SECTIONING purposes.
+        t = "procedure" if _is_runbook_titled(m) else m.type
+        counts[t] = counts.get(t, 0) + 1
     # Deterministic: highest count, then _TYPE_ORDER, then name.
     return sorted(counts, key=lambda t: (-counts[t], _TYPE_ORDER.get(t, 99), t))[0]
 
@@ -566,7 +690,57 @@ def _pin_count(c: Cluster) -> int:
     return sum(1 for m in c.members if m.pinned)
 
 
-def _render_index(topic_clusters, topic_slugs, files, source_slugs, links, has_orphans: bool) -> str:
+def _index_footer(dangling_count: int = 0) -> list[str]:
+    """Tell the reader what this vault deliberately does NOT contain, and how.
+
+    Two omissions are invisible unless stated, and a reader who cannot see them
+    will mistake absence for non-existence:
+
+      * Memory bodies are SNIPPETS. A member line shows the opening ~200 chars
+        and the `id:`; the full record lives in m3. The vault is an index, kept
+        compact on purpose -- a flat wiki degrades badly past ~1k pages, so
+        growing it with the corpus would cost more than it returns.
+      * Private/benchmark material is filtered OUT by default. Someone diffing
+        the vault against m3 will find memories missing; that is the filter
+        working, not a bug.
+    """
+    out = [
+        "---",
+        "",
+        "### What is not here",
+        "",
+        "**Memory bodies are snippets, not full text.** Each member line shows "
+        "the opening of a memory and its `id:` -- the full record lives in m3. "
+        "This vault is a compact index by design; it does not grow with the "
+        "corpus. To read one in full:",
+        "",
+        "```",
+        "m3 memory memory_get --id <id>",
+        "```",
+        "",
+        "**Private and benchmark memories are excluded by default.** If you are "
+        "diffing this vault against m3 and something is missing, that filter is "
+        "why. To build without it (local use only -- the result is not "
+        "shareable):",
+        "",
+        "```",
+        "m3 wiki generate --no-default-exclude",
+        "```",
+        "",
+        "**Double-bracket links written inside memories are resolved** when "
+        "their target is also in this vault. A link left as literal text "
+        "points at a memory that was filtered out or did not clear the "
+        "importance threshold.",
+    ]
+    if dangling_count:
+        noun = "link" if dangling_count == 1 else "links"
+        out += ["", f"This build left **{dangling_count} unresolved {noun}** -- see Lint."]
+    out += ["", "For Obsidian graph view and backlinks, regenerate with `--obsidian`."]
+    return out
+
+
+def _render_index(topic_clusters, topic_slugs, files, source_slugs, links, has_orphans: bool,
+                  dangling_count: int = 0) -> str:
     SELF = "index.md"
     total_mem = sum(len(c.members) for c in topic_clusters)
 
@@ -642,6 +816,7 @@ def _render_index(topic_clusters, topic_slugs, files, source_slugs, links, has_o
         lines.append(f"- {links.link('orphans', SELF, 'Orphans')} — core memories with no links yet")
     lines.append(f"- {links.link('lint', SELF, 'Lint')} — orphans, dangling links, contradictions")
     lines.append("")
+    lines.extend(_index_footer(dangling_count))
     return "\n".join(lines).rstrip() + "\n"
 
 

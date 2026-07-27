@@ -72,7 +72,7 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
                               if args.importance_threshold is not None
                               else DEFAULT_IMPORTANCE_THRESHOLD),
         include_files=not args.no_files,
-        exclude_regex=getattr(args, "exclude", None),
+        exclude_regex=_resolve_exclude(args),
         obsidian=getattr(args, "obsidian", False),
     )
 
@@ -444,8 +444,12 @@ def _add_generate_args(p: argparse.ArgumentParser) -> None:
                    help="Min importance for a memory to count as 'core' (default 0.55).")
     p.add_argument("--exclude", default=None, metavar="REGEX",
                    help="Drop any memory whose title/content matches this regex "
-                        "(case-insensitive) — e.g. to keep private/bench notes out "
-                        "of a shareable vault.")
+                        "(case-insensitive). REPLACES the default private/bench "
+                        "filter — pass --no-default-exclude to drop it instead.")
+    p.add_argument("--no-default-exclude", action="store_true",
+                   help="Do NOT apply the built-in private/bench exclusion. The "
+                        "vault will then contain benchmark and private-project "
+                        "material verbatim — only for a local, unshared build.")
     p.add_argument("--html", action="store_true",
                    help="Also write a single self-contained wiki.html viewer — open "
                         "it in any browser to click through the vault offline "
@@ -454,6 +458,30 @@ def _add_generate_args(p: argparse.ArgumentParser) -> None:
                    help="Emit [[wikilinks]] instead of standard Markdown links so "
                         "Obsidian's graph view and backlinks work. (Wikilinks show "
                         "as literal text outside Obsidian, so this is opt-in.)")
+
+
+
+# Built-in exclusion, ON BY DEFAULT (2026-07-26).
+#
+# The vault renders memory CONTENT, not just titles, so a build is a disclosure
+# surface. A scan of the pre-default vault found benchmark material rendered as
+# a topic page ("canon-lme-s-implementation-plan-v3..."). Opt-IN protection is
+# the wrong default once content ships: the person who most needs the filter is
+# the one who does not know to ask for it.
+#
+# --exclude REPLACES this (the caller has stated their policy); --no-default-exclude
+# removes it explicitly, so an unfiltered vault is always a deliberate act.
+_DEFAULT_EXCLUDE = r"\blme[-_ ]?[a-z0-9]*\b|longmemeval|locomo|\bbench(mark|marking)?\b|private/lme|gold[-_ ]turn"
+
+
+def _resolve_exclude(args) -> str | None:
+    """Caller regex > built-in default > None (only when explicitly disabled)."""
+    explicit = getattr(args, "exclude", None)
+    if explicit:
+        return explicit
+    if getattr(args, "no_default_exclude", False):
+        return None
+    return _DEFAULT_EXCLUDE
 
 
 def main(argv: list[str] | None = None) -> int:

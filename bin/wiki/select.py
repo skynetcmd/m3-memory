@@ -12,6 +12,7 @@ The "core set" is m3's three overlapping notions of a canonical memory:
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Optional
@@ -110,6 +111,11 @@ def _self_ref_names() -> "frozenset[str]":
     return frozenset(n.lower() for n in names)
 
 
+# [[target]] / [[target|label]] -> the human-readable part. Used by
+# display_title, which is a LABEL and must never carry link markup.
+_WIKILINK_STRIP = re.compile(r"\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]")
+
+
 @dataclass
 class Mem:
     """A core memory row, trimmed to what the wiki renders."""
@@ -138,6 +144,11 @@ class Mem:
         body = (self.content or "").strip().splitlines()
         if body:
             first = body[0].strip()
+            # Strip [[wikilink]] MARKUP before truncating. A title is a label,
+            # not a place for links, and a 60-char cut through one produced
+            # fragments like "[[homelab-access-…" — visible garbage that can
+            # never resolve. Keep the link TEXT, drop the brackets.
+            first = _WIKILINK_STRIP.sub(lambda m: m.group(2) or m.group(1), first)
             return (first[:60] + "…") if len(first) > 60 else first
         return f"memory {self.id[:8]}"
 
