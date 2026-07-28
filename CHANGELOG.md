@@ -21,6 +21,20 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.28.0] — 2026-07-28 — `m3 setup` stops killing itself halfway through
+
+### Fixed
+- `m3 setup` could stop silently partway through and exit 1 while reporting no error, leaving agent wiring done but the dashboard and governor steps never run. It killed itself: the boot-task step tree-kills stale m3 daemons, and the protection covered only the process and its direct parent — but launched from the `m3` command, setup is five processes deep, so a daemon registered further up took the whole branch down with it. Run as `python -m m3_memory.cli setup` there were two fewer processes, the protection happened to cover everything, and it exited 0 — which is why this only ever reproduced from the command users actually run.
+- Spawning a helper script used `sys.executable`, which under a `pip`/`pipx` command shim is the shim, not Python — so the child re-entered the m3 CLI with a script path as its subcommand and exited 2. This also left stray `m3` processes holding the install open, which is what broke `pipx upgrade` with a file-in-use error.
+- `m3 setup` exited 1 when the Claude Code MCP entry already existed, because `claude mcp add` reports that no-op as a failure. A successful re-run now exits 0.
+- The embedder start step reported failure for a server that was already running, and offered `systemd`/`nohup` advice on Windows, where the embedder is a Windows Service and neither exists. It now asks the service what state it is in, and the advice matches the OS.
+- `m3 embedder install-gpu` claimed every install came from PyPI, including for CUDA wheels that are published only to GitHub Releases. It now reports the channel it actually used.
+
+### Changed
+- Bundles the `3.7.29` Rust core, in which `install`, `start`, `stop`, and `uninstall` no longer report an already-done no-op as a failure.
+
+> Verified on Windows. The macOS and Linux service paths were reviewed and are unaffected — `systemctl`/`launchctl` already treat these no-ops as success — but were not exercised on those platforms in this release.
+
 ## [2026.7.26.10] — 2026-07-27 — Sovereignty for upgraders, not just fresh installs
 
 ### Fixed
