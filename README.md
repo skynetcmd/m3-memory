@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.skynetcmd%2Fm3-memory.svg)](https://mcptoplist.com/server/io.github.skynetcmd%2Fm3-memory)
+
 <p align="center">
   <a href="https://github.com/skynetcmd/m3-memory">
     <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/M3-banner.jpg" alt="M3 Memory Banner" width="100%">
