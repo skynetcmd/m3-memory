@@ -441,3 +441,55 @@ def test_wait_for_quiesce_survives_a_raising_tick(monkeypatch):
     result = m3_halt.wait_for_quiesce(timeout=5.0, poll=0.01, on_tick=_boom)
     assert result.ok is True
     assert calls["n"] >= 1, "on_tick was never invoked"
+
+
+# ── 7. `start` against an already-running service ───────────────────────────
+
+@pytest.mark.parametrize("platform,expected,forbidden", [
+    ("win32", "sc.exe start", ("systemd", "nohup", "crontab")),
+    ("darwin", "launchd", ("systemd", "sc.exe")),
+    ("linux", "systemd", ("sc.exe", "launchd")),
+])
+def test_start_failure_hint_is_os_correct(platform, expected, forbidden):
+    """The start-failure advice offered systemd/`nohup` on every platform —
+    including Windows, where the embedder is an SCM service and neither exists.
+    Same defect the install hint had (m3 supports 3 OSes)."""
+    with mock.patch.object(sys, "platform", platform):
+        hint = ea._start_failure_hint(Path("/models/bge.gguf"))
+    assert expected.lower() in hint.lower()
+    for bad in forbidden:
+        assert bad.lower() not in hint.lower(), f"{bad!r} leaked into {platform} advice"
+
+
+def test_already_running_is_not_reported_as_a_start_failure(tmp_path, monkeypatch, capsys):
+    """`start` on an already-running service exits 1 with the opaque winapi
+    error on older binaries, and setup printed "`m3-embed-server start` exited
+    1" about a service that was Automatic, running, and serving :8082. Ask
+    `status` what is true instead of trusting the exit code."""
+    binary = _fake_binary(tmp_path)
+    gguf = tmp_path / "m.gguf"
+    gguf.write_bytes(b"GGUF" + b"\x00" * 64)
+
+    monkeypatch.setattr(
+        ea.subprocess, "run",
+        lambda *a, **k: SimpleNamespace(stdout="running\n", stderr="", returncode=0),
+    )
+    assert ea._service_reports_running(binary, gguf) is True
+
+
+def test_service_reports_running_is_false_when_stopped(tmp_path, monkeypatch):
+    """A genuinely stopped service must NOT be reported as running — the whole
+    point is evidence, not optimism."""
+    binary = _fake_binary(tmp_path)
+    monkeypatch.setattr(
+        ea.subprocess, "run",
+        lambda *a, **k: SimpleNamespace(stdout="stopped\n", stderr="", returncode=0),
+    )
+    assert ea._service_reports_running(binary, tmp_path / "m.gguf") is False
+
+
+def test_service_reports_running_survives_a_crash(tmp_path, monkeypatch):
+    """A probe that cannot run returns False, never raises into setup (§3)."""
+    binary = _fake_binary(tmp_path)
+    monkeypatch.setattr(ea.subprocess, "run", mock.Mock(side_effect=OSError("boom")))
+    assert ea._service_reports_running(binary, tmp_path / "m.gguf") is False

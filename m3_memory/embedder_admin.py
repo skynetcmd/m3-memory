@@ -377,6 +377,51 @@ def _service_binary_is_stale(binary: Path) -> bool:
     return False
 
 
+def _service_reports_running(binary: Path, gguf: Path) -> bool:
+    """True when `status` says the service is RUNNING.
+
+    Companion to _service_reports_installed: an exit code cannot distinguish
+    "start failed" from "already running", but `status` prints the real state.
+    Returns False on any error — never claim running without evidence.
+    """
+    try:
+        proc = subprocess.run(
+            [str(binary), "status"],
+            env={**os.environ, "M3_EMBED_GGUF": str(gguf)},
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+    except Exception:  # noqa: BLE001 — probe must never raise into setup (§3)
+        return False
+    return "running" in f"{proc.stdout}\n{proc.stderr}".lower()
+
+
+def _start_failure_hint(gguf: Path) -> str:
+    """OS-correct advice when `m3-embed-server start` really fails.
+
+    The previous text offered systemd/`nohup` unconditionally — printed even on
+    Windows, where the embedder is an SCM service and neither exists. Same
+    defect the install hint had; fixed here for the start path too, because m3
+    supports 3 OSes and wrong advice is worse than none.
+    """
+    if sys.platform == "win32":
+        return (
+            "  Start it via the Windows Service manager:\n"
+            "    m3 embedder start          (or: sc.exe start m3-embed-server)\n"
+            "  Check what SCM currently thinks:  m3 embedder status\n"
+            "  If it will not start, an Administrator terminal may be required."
+        )
+    if sys.platform == "darwin":
+        return (
+            "  If the launchd user domain is unavailable (SSH with no GUI login),\n"
+            "  run the server directly instead:\n"
+            f"    M3_EMBED_GGUF={gguf} nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &"
+        )
+    return (
+        "  If systemd --user is unavailable, start the server directly:\n"
+        f"    M3_EMBED_GGUF={gguf} nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &"
+    )
+
+
 def _install_failure_hint(gguf: Path) -> str:
     """OS-correct recovery advice. The previous text printed systemd/nohup/
     crontab unconditionally — none of which exist on Windows, where the
@@ -591,10 +636,20 @@ def cmd_install(args: argparse.Namespace) -> int:
     print("[~] starting m3-embed-server")
     rc = _service_cmd(binary, gguf, "start")
     if rc != 0:
+        # `start` against an ALREADY-RUNNING service is the desired end state,
+        # not a failure. Older m3-embed-server builds (<= 3.7.28) return
+        # ERROR_SERVICE_ALREADY_RUNNING flattened into the opaque "IO error in
+        # winapi call" and exit 1, so setup printed "`m3-embed-server start`
+        # exited 1" about a service that was Automatic, running, and serving
+        # :8082. Ask `status` what is actually true rather than trusting the
+        # exit code — the same lesson as the `install` idempotency fix. Newer
+        # binaries report this themselves; this keeps old ones honest too.
+        if _service_reports_running(binary, gguf):
+            print("[OK] sovereign CPU embedder already running on port 8082")
+            return 0
         print(
             f"[!] `m3-embed-server start` exited {rc}\n"
-            "  If systemd --user is unavailable, start the server directly:\n"
-            f"    M3_EMBED_GGUF={gguf} nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &",
+            f"{_start_failure_hint(gguf)}",
             file=sys.stderr,
         )
         return rc
