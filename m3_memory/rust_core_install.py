@@ -441,7 +441,11 @@ def _pip_install_with_pep668_fallback(*pip_args: str) -> int:
 
 
 def install_prebuilt(choice: BackendChoice, *, version: str = M3_CORE_RS_VERSION) -> int:
-    """Try to install the matching prebuilt wheel from PyPI.
+    """Try to install the matching prebuilt wheel via pip.
+
+    pip resolves from PyPI *or* from its local wheel cache, and this returns only
+    an exit code — so a 0 here means "a prebuilt wheel got installed", NOT "it
+    came from PyPI". Callers must not label the result as a PyPI install.
 
     Returns 0 on success, non-zero otherwise. A non-zero result (other than a
     PEP 668 advisory already printed) signals to fall back to a source build.
@@ -868,18 +872,26 @@ def install_rust_core(os_tok: Optional[str] = None, *,
         return 2
 
     # Three-tier install cascade:
-    #   1. PyPI prebuilt — fastest path, no toolchain.
-    #   2. GitHub Release prebuilt — defensive fallback for size-capped builds
-    #      (Linux CUDA wheel is 464 MB, can never go on PyPI) and for any
-    #      backend where PyPI is missing this version.
+    #   1. pip prebuilt — fastest path, no toolchain. Resolves from PyPI OR
+    #      from pip's local wheel cache.
+    #   2. GitHub Release prebuilt — the ONLY channel for the size-capped CUDA
+    #      wheels (windows-cuda ~244 MiB, linux-cuda ~949 MiB against a 100 MB
+    #      per-file limit) and the fallback for any backend PyPI is missing.
     #   3. Source build — last resort, needs Rust + cmake + C++ + backend SDK.
     rc = install_prebuilt(choice)
     if rc == 0:
+        # Deliberately does NOT claim "PyPI". pip exits 0 just as happily from
+        # its local cache without contacting PyPI at all, and install_prebuilt
+        # returns only an exit code — the source is not observable here. Saying
+        # "PyPI prebuilt" was therefore an assertion, not an observation, and it
+        # was provably wrong for CUDA: `m3-core-rs-windows-cuda` is a 404 on
+        # PyPI by design, yet a cache hit still printed "(PyPI prebuilt)" — a
+        # misleading claim in exactly the place someone debugs distribution.
         print(f"[rust-core] installed {choice.package} {M3_CORE_RS_VERSION} "
-              f"(PyPI prebuilt)")
+              f"(prebuilt wheel via pip)")
         return 0
 
-    print(f"[rust-core] PyPI prebuilt unavailable for {choice.package} "
+    print(f"[rust-core] pip prebuilt unavailable for {choice.package} "
           f"(pip exit {rc}); trying GitHub Release fallback.", file=sys.stderr)
     rc_gh = install_from_github_release(choice)
     if rc_gh == 0:

@@ -482,3 +482,28 @@ def test_is_rust_core_current_false_without_embedded_feature(monkeypatch):
         # no EmbeddedEmbedder
     monkeypatch.setitem(sys.modules, "m3_core_rs", _NoFeature())
     assert rci.is_rust_core_current() is False
+
+
+def test_pip_success_is_not_labelled_a_pypi_install(monkeypatch, capsys):
+    """A successful pip install must NOT be reported as coming from PyPI.
+
+    pip exits 0 just as happily from its local wheel cache as from a real PyPI
+    download, and install_prebuilt returns only that exit code — the source is
+    not observable. The old message asserted "(PyPI prebuilt)" anyway, which was
+    provably wrong for CUDA: `m3-core-rs-windows-cuda` is a 404 on PyPI BY
+    DESIGN (the wheels are ~10x the per-file size limit and ship via GitHub
+    Releases), yet a cache hit still printed "installed ... (PyPI prebuilt)" —
+    a false distribution claim in exactly the output someone reads when
+    debugging distribution.
+    """
+    monkeypatch.setattr(rci, "install_prebuilt", lambda choice, **kw: 0)
+    monkeypatch.setattr(
+        rci, "detect_backend",
+        lambda *a, **k: rci.BackendChoice(
+            os_tok="windows", backend="cuda",
+            reason="NVIDIA CUDA toolchain detected"),
+    )
+    assert rci.install_rust_core() == 0
+    out = capsys.readouterr().out
+    assert "PyPI prebuilt" not in out, f"unverifiable PyPI claim returned: {out!r}"
+    assert "prebuilt wheel via pip" in out, out
