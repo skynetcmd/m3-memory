@@ -21,6 +21,11 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.28.1] — 2026-07-28 — FIPS mode no longer crashes every process on the way out
+
+### Fixed
+- With `M3_FIPS_MODE=1`, every m3 process crashed as it exited — after finishing its work correctly. The crypto was always right; only the exit code was wrong, so callers that check it drew the wrong conclusion: `m3 setup` read the failure and reported the embedder "skipped (not installed)" when it had installed and was running. The buffer m3 hands wolfCrypt for its AES context was too small for the library's actual structure, so setting the key wrote past the end of it and corrupted memory. Nothing failed where the damage happened, which is why it surfaced later as a crash during cleanup rather than as a crypto error.
+
 ## [2026.7.28.0] — 2026-07-28 — `m3 setup` stops killing itself halfway through
 
 ### Fixed

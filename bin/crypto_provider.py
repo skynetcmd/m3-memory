@@ -67,6 +67,26 @@ _KAT_PBKDF2_ITERATIONS = 1
 _KAT_PBKDF2_DKLEN = 32
 _KAT_PBKDF2_KEY_HEX = "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc"
 
+# Byte size of the opaque wolfCrypt `Aes` context we hand to wc_AesGcmSetKey /
+# wc_AesGcmEncrypt / wc_AesGcmDecrypt.
+#
+# This MUST be >= sizeof(Aes) in the loaded build, and the struct is bigger than
+# it looks: a wolfSSL compiled with AES-NI (the normal case on x86-64) carries an
+# aligned hardware key schedule, and builds with async/devcrypto support add more
+# still. 512 was too small — wc_AesGcmSetKey wrote past the end of the buffer and
+# corrupted the heap. Nothing failed at the call site: every KAT returned 0 and
+# computed the correct known answer, and the process then died 0xC0000005 in an
+# unrelated garbage collection at interpreter shutdown, long after the crypto
+# was done. That made `m3 setup` report the embedder "SKIPPED (not installed)"
+# when it had installed correctly (2026-07-28). Verified by bisection: with this
+# one value at 512 the process faults; at 1024 it exits 0, all else identical.
+#
+# 4096 is deliberate over-allocation. The context is stack-scoped and freed
+# immediately, so the cost is nothing, whereas guessing tight against an opaque
+# struct we do not control is exactly what caused this. If a future wolfSSL grows
+# past this, the failure mode is silent heap corruption again — so do not trim it.
+_WC_AES_CTX_BYTES = 4096
+
 _KAT_AESGCM_KEY = bytes(range(32))            # 256-bit key 00..1f
 _KAT_AESGCM_NONCE = bytes(range(12))          # 96-bit nonce 00..0b
 _KAT_AESGCM_PLAINTEXT = b"FIPS-KAT-AESGCM!"   # 16 bytes
@@ -409,7 +429,7 @@ class CryptoProvider:
             raise RuntimeError("wolfSSL library not loaded")
         out_buf = ctypes.create_string_buffer(len(data))
         tag_buf = ctypes.create_string_buffer(16)
-        aes = ctypes.create_string_buffer(512)
+        aes = ctypes.create_string_buffer(_WC_AES_CTX_BYTES)
         if self._libwolf.wc_AesGcmSetKey(aes, key, len(key)) != 0:
             raise RuntimeError("wc_AesGcmSetKey failed in KAT")
         ret = self._libwolf.wc_AesGcmEncrypt(
@@ -474,7 +494,7 @@ class CryptoProvider:
         out_buf = ctypes.create_string_buffer(len(data))
         tag_buf = ctypes.create_string_buffer(16)
 
-        aes = ctypes.create_string_buffer(512)
+        aes = ctypes.create_string_buffer(_WC_AES_CTX_BYTES)
         ret_key = self._libwolf.wc_AesGcmSetKey(aes, key, len(key))
         if ret_key != 0:
             raise RuntimeError(f"wc_AesGcmSetKey failed with code: {ret_key}")
@@ -502,7 +522,7 @@ class CryptoProvider:
 
         out_buf = ctypes.create_string_buffer(len(ciphertext))
 
-        aes = ctypes.create_string_buffer(512)
+        aes = ctypes.create_string_buffer(_WC_AES_CTX_BYTES)
         ret_key = self._libwolf.wc_AesGcmSetKey(aes, key, len(key))
         if ret_key != 0:
             raise RuntimeError(f"wc_AesGcmSetKey failed with code: {ret_key}")
