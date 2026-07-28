@@ -535,6 +535,44 @@ def list_blocking_db_writers(engine_root: Optional[str] = None) -> list[ProcInfo
     return [p for p in list_all_db_writers(engine_root) if _role_blocks(p.role)]
 
 
+def _ancestor_pids(pid: int, *, max_depth: int = 24) -> set:
+    """Every ancestor pid of `pid`, walking up until init/System or the walk ends.
+
+    Used to protect this process's whole branch from a tree-kill. `os.getppid()`
+    alone only covers one generation, and on Windows `taskkill /T` kills the
+    target's entire descendant tree — so an ancestor N levels up is just as fatal
+    as the direct parent.
+
+    Bounded by `max_depth` and by a seen-set so a cycle or a recycled pid can
+    never spin. Returns what it managed to resolve; psutil missing or a lookup
+    failing yields a partial (never wrong) set — callers treat this as
+    best-effort protection, not a guarantee.
+    """
+    out: set = set()
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        try:
+            out.add(os.getppid())
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+    seen = {pid}
+    cur = pid
+    for _ in range(max_depth):
+        try:
+            parent = psutil.Process(cur).ppid()
+        except Exception:  # noqa: BLE001 — gone/denied → stop climbing
+            break
+        # pid 0 (System Idle) and a self-parent both mean "top of the chain".
+        if not parent or parent in seen:
+            break
+        out.add(parent)
+        seen.add(parent)
+        cur = parent
+    return out
+
+
 def kill_stale_daemons(
     engine_root: Optional[str] = None,
     *,
@@ -562,11 +600,27 @@ def kill_stale_daemons(
     self_pid = os.getpid()
     # Never kill our own ancestry — an installer launched BY the loop (unusual, but
     # possible in a self-update) must not saw off the branch it is sitting on.
+    #
+    # Protect the FULL ancestor chain, not just the immediate parent. On Windows
+    # the kill below is `taskkill /F /T`, and /T kills the target's whole process
+    # TREE — so killing any ancestor takes this process with it, however many
+    # generations up it sits. {self, parent} was not enough: launched from the
+    # `m3` console script, `m3 setup` is five generations deep —
+    #     m3.exe -> python (UTF-8 re-exec) -> setup -> install_schedules.py -> child
+    # so a DB-writer registered at the shim or the re-exec generation fell
+    # outside the protected set, and `install_schedules.py` killing it dropped
+    # `m3 setup` mid-run. Console output simply stopped after agent wiring and
+    # the command exited 1 with no traceback, while `python -m m3_memory.cli
+    # setup` — which has neither of those two extra generations — completed and
+    # exited 0. Same code, different launcher (2026-07-27).
     protected = {self_pid}
     try:
-        protected.add(os.getppid())
-    except Exception:  # noqa: BLE001 — getppid missing/odd → just protect self
-        pass
+        protected.update(_ancestor_pids(self_pid))
+    except Exception:  # noqa: BLE001 — best-effort; never block the kill path
+        try:
+            protected.add(os.getppid())
+        except Exception:  # noqa: BLE001 — getppid missing/odd → just protect self
+            pass
 
     results: list[dict] = []
     for w in list_all_db_writers(engine_root):
