@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from ._platform import python_exe as _python_exe
+
 # ── small UI helpers ──────────────────────────────────────────────────────────
 # Pure output helpers (never monkeypatched, never call a patched fn) live in
 # wizard/ui.py; re-imported here so `setup_wizard._say` etc. keep resolving.
@@ -1729,7 +1731,7 @@ def _register_embed_server_task(*, non_interactive: bool = False) -> None:
         # Capture output so we can (a) show it AND (b) detect the Windows
         # 'Access is denied' boot-task case to offer inline UAC elevation.
         proc = subprocess.run(
-            [sys.executable, script, "--add", "embed-server"],
+            [_python_exe(), script, "--add", "embed-server"],
             check=False, capture_output=True, text=True,
         )
         if proc.stdout:
@@ -1777,7 +1779,7 @@ def _verify_and_report_schedules(script: str, *, non_interactive: bool) -> None:
     """
     try:
         proc = subprocess.run(
-            [sys.executable, script, "--verify"],
+            [_python_exe(), script, "--verify"],
             check=False, capture_output=True, text=True,
         )
     except Exception as e:  # noqa: BLE001 — verification must never fail setup
@@ -1800,7 +1802,7 @@ def _verify_and_report_schedules(script: str, *, non_interactive: bool) -> None:
         if _offer_elevated_schedule_repair(script, non_interactive=non_interactive):
             print("    Repaired elevated; re-verifying...")
             re_proc = subprocess.run(
-                [sys.executable, script, "--verify"],
+                [_python_exe(), script, "--verify"],
                 check=False, capture_output=True, text=True,
             )
             if re_proc.returncode == 0:
@@ -1877,12 +1879,35 @@ def _wire_claude(capture_mode: str) -> bool:
         # in every project, not just the one the wizard was run from. (The CLI's
         # default is `local`; there is no `--global` flag — passing it makes
         # `claude mcp add` exit with "unknown option" and register nothing.)
-        # `claude mcp add` is idempotent; an existing entry just prints a warning.
-        subprocess.run(["claude", "mcp", "add", "--scope", "user", "memory", "m3"], check=False)
+        #
+        # `claude mcp add` is idempotent in EFFECT but not in EXIT CODE: with the
+        # server already registered it prints "MCP server memory already exists
+        # in user config" and exits 1. `check=False` stops that raising, but the
+        # child inherited our stdout/stderr and its non-zero status still became
+        # `m3 setup`'s exit code — so a fully successful re-run of setup exited 1
+        # (2026-07-27). Capture the output and classify it: already-registered is
+        # SUCCESS, and only a real failure is surfaced.
+        proc = subprocess.run(
+            ["claude", "mcp", "add", "--scope", "user", "memory", "m3"],
+            check=False, capture_output=True, text=True,
+        )
     except FileNotFoundError:
         _warn("`claude` CLI failed to invoke; manual: `claude mcp add --scope user memory m3`")
         return False
-    return True
+
+    blob = f"{proc.stdout or ''}\n{proc.stderr or ''}".strip()
+    if proc.returncode == 0:
+        if blob:
+            print(blob)
+        return True
+    if "already exists" in blob.lower():
+        _say("    (already registered — nothing to do)")
+        return True
+    if blob:
+        print(blob)
+    _warn(f"`claude mcp add` failed (exit {proc.returncode}); "
+          "manual: `claude mcp add --scope user memory m3`")
+    return False
 
 
 def _wire_gemini() -> bool:
@@ -2177,7 +2202,7 @@ def _register_dashboard_task(port: int = 8088) -> None:
     print(f"    Registering the dashboard to auto-start on boot (windowless, :{port})...")
     try:
         proc = subprocess.run(
-            [sys.executable, script, "--add", "dashboard", "--port", str(port)],
+            [_python_exe(), script, "--add", "dashboard", "--port", str(port)],
             check=False, capture_output=True, text=True,
         )
         if proc.stdout:

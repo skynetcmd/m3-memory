@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from m3_memory._platform import os_name as _os_name
+from m3_memory._platform import python_exe as _python_exe
 from m3_memory.install.fs import (  # noqa: F401  (re-exported facade surface — see cli.py / test_installer.py importers)
     _drain_wal,
     _robust_rmtree,
@@ -757,7 +758,7 @@ def _register_dashboard_task(skip_if_exists: bool = False) -> None:
         script = str(Path(__file__).resolve().parent.parent / "bin" / "install_schedules.py")
         if not os.path.exists(script):
             return
-        subprocess.run([sys.executable, script, "--add", "dashboard"],
+        subprocess.run([_python_exe(), script, "--add", "dashboard"],
                        check=False, capture_output=True, text=True)
     except Exception:  # noqa: BLE001 — never fail install on the task step
         pass
@@ -857,7 +858,7 @@ def _chatlog_init_supports(chatlog_init: Path, flag: str) -> bool:
     """
     try:
         result = subprocess.run(
-            [sys.executable, str(chatlog_init), "--help"],
+            [_python_exe(), str(chatlog_init), "--help"],
             capture_output=True, text=True, timeout=10,
         )
         return flag in (result.stdout or "")
@@ -883,7 +884,7 @@ def _run_chatlog_init(bridge: Path, capture_mode: str) -> Optional[str]:
     if not chatlog_init.is_file():
         return f"[!] chatlog_init.py missing under {bridge.parent}; skipping hook wiring"
 
-    cmd = [sys.executable, str(chatlog_init), "--non-interactive"]
+    cmd = [_python_exe(), str(chatlog_init), "--non-interactive"]
 
     # Probe each new flag. If the deployed chatlog_init is older than the
     # wheel, we still get migrations + a saved config (legacy behavior),
@@ -936,7 +937,7 @@ def _run_main_migrations(bridge: Path) -> Optional[str]:
     if not migrate_script.is_file():
         return f"[!] migrate_memory.py missing under {bridge.parent}; skipping main DB init"
 
-    cmd = [sys.executable, str(migrate_script), "up", "--yes", "--target", "main"]
+    cmd = [_python_exe(), str(migrate_script), "up", "--yes", "--target", "main"]
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
         return "[+] main memory DB initialized (migrations applied)"
@@ -1212,7 +1213,7 @@ def _run_os_install(bridge: Path) -> Optional[str]:
 
     # Run using the same python we're currently in
     try:
-        subprocess.run([sys.executable, str(install_script)], check=True)
+        subprocess.run([_python_exe(), str(install_script)], check=True)
         return "OS-specific environment setup complete."
     except subprocess.CalledProcessError as e:
         return f"OS setup failed (code {e.returncode}). Run it manually from {install_script}."
