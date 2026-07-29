@@ -70,25 +70,25 @@ def test_flags_stale_clone_paths_but_not_wheel_or_user(monkeypatch, tmp_path):
     assert "Claude/user_thing" not in labels
 
 
-def test_run_fix_remediates_stale_via_canonical_writer(monkeypatch):
-    """run(fix=True) with a stale finding calls the canonical rewrite and re-scans;
-    run(fix=False) reports only (never touches settings.json)."""
+def test_run_fix_remediates_via_canonical_writer(monkeypatch):
+    """run(fix=True) calls the canonical rewrite and re-scans, EVEN WHEN NOTHING IS
+    STALE (the roots/pins can be wrong while paths are fine); run(fix=False)
+    reports only (never touches settings.json)."""
     calls = {"remediate": 0}
-    scans = iter([[("Claude/statusLine", "/old/repo/bin/x.sh")], []])  # stale, then clean
     monkeypatch.setattr(p, "_scan_mcpservers_hosts", lambda: [])
     monkeypatch.setattr(p, "_scan_opencode", lambda: [])
     monkeypatch.setattr(p, "_scan_hermes", lambda: [])
-    monkeypatch.setattr(p, "_scan_stale_payload", lambda: next(scans))
+    monkeypatch.setattr(p, "_scan_stale_payload", lambda: [])  # NOTHING stale
 
     def fake_remediate():
         calls["remediate"] += 1
         return True
 
-    monkeypatch.setattr(p, "_remediate_stale", fake_remediate)
+    monkeypatch.setattr(p, "_remediate", fake_remediate)
 
     rc = p.run(brief=True, fix=True)
-    assert calls["remediate"] == 1          # remediation ran
-    assert rc == 0                          # re-scan came back clean → healthy exit
+    assert calls["remediate"] == 1          # remediation ran despite no stale finding
+    assert rc == 0
 
 
 def test_run_without_fix_does_not_remediate(monkeypatch):
@@ -97,7 +97,7 @@ def test_run_without_fix_does_not_remediate(monkeypatch):
     monkeypatch.setattr(p, "_scan_opencode", lambda: [])
     monkeypatch.setattr(p, "_scan_hermes", lambda: [])
     monkeypatch.setattr(p, "_scan_stale_payload", lambda: [("Claude/statusLine", "/old/repo/x.sh")])
-    monkeypatch.setattr(p, "_remediate_stale", lambda: calls.__setitem__("remediate", calls["remediate"] + 1) or True)
+    monkeypatch.setattr(p, "_remediate", lambda: calls.__setitem__("remediate", calls["remediate"] + 1) or True)
 
     rc = p.run(brief=True, fix=False)
     assert calls["remediate"] == 0          # report-only: never rewrites

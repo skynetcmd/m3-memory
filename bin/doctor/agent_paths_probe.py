@@ -189,16 +189,31 @@ def _scan_stale_payload() -> list[tuple[str, str]]:
     return out
 
 
-def _remediate_stale() -> bool:
+def _remediate() -> bool:
     """Rewrite every m3-managed Claude command (memory + aux bridges + hooks +
-    statusline) to the CURRENT payload via the canonical writer,
-    generate_configs.install_claude_settings. This is what actually fixes the
-    stale-clone drift — `m3 setup` does not run it, and _heal_agent_settings only
-    touches the memory entry + dead hooks. Returns True if settings changed."""
+    statusline) to the current payload AND correct decoupled roots via the
+    canonical writer, generate_configs.install_claude_settings.
+
+    This is the ONLY path that actually repairs an existing broken config:
+      - `m3 setup` / environment_probe.repair go through
+        chatlog_init.apply_claude_settings, which SKIPS when a chatlog entry is
+        already present — so it never upgrades an unpinned or mis-rooted hook;
+      - _heal_agent_settings only touches the memory entry + dead hooks.
+    install_claude_settings replaces the m3-owned entries wholesale, so it fixes
+    unpinned hooks and wrong M3_*_ROOT env blocks even when the script paths are
+    not stale. Idempotent: a dry-run gate means no backup and no write happen
+    unless something actually differs. Returns True if settings changed."""
     try:
         import shutil
         import sys
         import time
+        bin_dir = _payload_bin()
+        if bin_dir not in sys.path:
+            sys.path.insert(0, bin_dir)
+        import generate_configs
+        # Idempotent gate: don't back up / rewrite when nothing would change.
+        if not generate_configs.install_claude_settings(dry_run=True).get("changed"):
+            return False
         # Back up the user's settings.json first (their non-m3 hooks live there
         # too) — same discipline as the --fix-hooks environment repair.
         settings = Path.home() / ".claude" / "settings.json"
@@ -206,12 +221,8 @@ def _remediate_stale() -> bool:
             bak = settings.with_name(f"settings.json.m3bak-{time.strftime('%Y%m%d-%H%M%S')}")
             shutil.copy2(settings, bak)
             print(f"  [fix] backed up settings.json -> {bak}")
-        bin_dir = _payload_bin()
-        if bin_dir not in sys.path:
-            sys.path.insert(0, bin_dir)
-        import generate_configs
-        res = generate_configs.install_claude_settings(assume_yes=True)
-        return bool(res.get("changed"))
+        print("  [fix] rewriting Claude commands to the current payload + roots …")
+        return bool(generate_configs.install_claude_settings(assume_yes=True).get("changed"))
     except Exception as e:  # noqa: BLE001 — a failed fix must not crash the doctor
         print(f"  [fix] could not rewrite Claude settings: {type(e).__name__}: {e}")
         return False
@@ -222,12 +233,13 @@ def run(brief: bool = False, fix: bool = False) -> int:
     dead = [(lbl, path) for (lbl, path, is_dead) in rows if is_dead]
     stale = _scan_stale_payload()
 
-    # --fix: auto-repair the Claude stale-payload class via the canonical writer.
-    # (Dead paths on other hosts still route through `m3 setup`; only this class
-    # is self-healed here.)
-    if fix and stale and not dead:
-        print("  [fix] rewriting stale Claude commands to the current payload …")
-        if _remediate_stale():
+    # --fix-hooks: repair the Claude config via the canonical writer. NOT gated on
+    # `stale` — the script paths can be fine while the root env blocks or hook pins
+    # are wrong (e.g. a prior rewrite left M3_MEMORY_ROOT=<site-packages> and
+    # unpinned hooks). _remediate() is idempotent (dry-run gate), so it no-ops when
+    # nothing differs. Dead paths on OTHER hosts still route through `m3 setup`.
+    if fix:
+        if _remediate():
             stale = _scan_stale_payload()  # re-scan so the verdict reflects reality
 
     if brief:
