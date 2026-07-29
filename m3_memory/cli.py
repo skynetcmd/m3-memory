@@ -265,6 +265,15 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         rest = list(getattr(args, "rest", []) or [])
         if verbose and "--verbose" not in rest:
             rest.append("--verbose")
+        # Forward the repair flags: --fix is CONSUMED by this subparser (so it is
+        # never in args.rest), and without forwarding it the payload doctor ran in
+        # report mode — its whole repair pass (shared-embedder restart, agent
+        # stale-payload rewrite, DB heal) silently never fired under `m3 doctor
+        # --fix`. --fix-hooks gates the settings.json rewrite.
+        if getattr(args, "fix", False) and "--fix" not in rest:
+            rest.append("--fix")
+        if getattr(args, "fix_hooks", False) and "--fix-hooks" not in rest:
+            rest.append("--fix-hooks")
         if verbose:
             print("\n--- Project Payload Diagnostics ---")
         return _run_bin_script("memory_doctor.py", rest)
@@ -1081,8 +1090,15 @@ Examples:
     )
     p_doctor.add_argument(
         "--fix", action="store_true",
-        help="Repoint any agent MCP configs (Claude/Gemini/Antigravity/...) "
-             "whose bridge/root paths are dead or moved, to the live install.",
+        help="Repair what self-repairs: repoint dead agent MCP configs, restart "
+             "the shared embedder, heal the DB, etc. (runs the payload doctor's "
+             "repair pass too).",
+    )
+    p_doctor.add_argument(
+        "--fix-hooks", action="store_true",
+        help="With --fix: also rewrite m3's Claude settings.json entries (hooks, "
+             "statusline, aux bridges) to the current payload. settings.json is "
+             "backed up first. Opt-in because settings.json is user-owned.",
     )
     p_doctor.add_argument(
         "--verbose", action="store_true",
