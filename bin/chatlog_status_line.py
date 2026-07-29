@@ -18,6 +18,8 @@ import os
 import sys
 from typing import Any
 
+from m3_sdk import getenv_compat
+
 try:
     import chatlog_config
 except ImportError:
@@ -47,7 +49,7 @@ def _humanize_bytes(b: int) -> str:
 
 
 def chatlog_status_line() -> str:
-    if os.environ.get("CHATLOG_STATUSLINE") == "off":
+    if getenv_compat("M3_CHATLOG_STATUSLINE", "CHATLOG_STATUSLINE") == "off":
         return ""
 
     state = _load_state_file()
@@ -95,7 +97,7 @@ def chatlog_status_line() -> str:
     if not warning:
         return ""
 
-    prefix = "[!]" if os.environ.get("CHATLOG_STATUSLINE_ASCII") == "1" else "⚠"
+    prefix = "[!]" if getenv_compat("M3_CHATLOG_STATUSLINE_ASCII", "CHATLOG_STATUSLINE_ASCII") == "1" else "⚠"
     return f"{prefix} {warning}"
 
 

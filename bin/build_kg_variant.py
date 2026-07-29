@@ -28,6 +28,7 @@ import uuid
 from datetime import datetime, timezone
 
 import numpy as np
+from m3_sdk import getenv_compat
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from m3_sdk import add_database_arg, resolve_db_path
@@ -35,7 +36,7 @@ from sqlite_pragmas import apply_pragmas, profile_for_db
 
 # AGENT_DB env var is kept as a deprecated alias; new code should prefer
 # M3_DATABASE or the --database CLI flag.
-_AGENT_DB_LEGACY = os.environ.get("AGENT_DB")
+_AGENT_DB_LEGACY = getenv_compat("M3_AGENT_DB", "AGENT_DB")
 DB_PATH = _AGENT_DB_LEGACY or resolve_db_path(None)
 
 

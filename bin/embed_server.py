@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import time
 from typing import Union
 
 import uvicorn
 from fastapi import FastAPI
+from m3_sdk import getenv_compat
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
 
@@ -96,7 +96,7 @@ def main():
     parser.add_argument("--port", type=int, default=1234, help="Port to serve on")
     parser.add_argument(
         "--host",
-        default=os.environ.get("EMBED_SERVER_HOST", "127.0.0.1"),
+        default=getenv_compat("M3_EMBED_SERVER_HOST", "EMBED_SERVER_HOST", "127.0.0.1"),
         help="Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN)",
     )
     parser.add_argument("--device", default=None, help="Device to use (e.g. cuda:0, cpu)")

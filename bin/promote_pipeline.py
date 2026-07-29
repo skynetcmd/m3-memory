@@ -19,6 +19,8 @@ import urllib.parse
 import urllib.request
 from collections import defaultdict
 
+from m3_sdk import getenv_compat
+
 cp = importlib.util.module_from_spec(
     s := importlib.util.spec_from_file_location("cp", os.path.join(os.path.dirname(__file__), "chatlog_prune.py")))
 s.loader.exec_module(cp)
@@ -40,8 +42,8 @@ DISQUALIFY = re.compile(r"\b(ETA|r/s|tok/s|windows? done|poll(ing)?|workers? ali
                         r"completion[:\s]+\d|so far|still (running|going)|"
                         r"\bstatus\b|\bhealthy\b|no action|stable\.)\b", re.I)
 
-LM_URL = os.environ.get("LM_URL", "http://localhost:1234/v1/chat/completions")
-LM_MODEL = os.environ.get("LM_MODEL", "google/gemma-4-26b-a4b")
+LM_URL = getenv_compat("M3_LM_URL", "LM_URL", "http://localhost:1234/v1/chat/completions")
+LM_MODEL = getenv_compat("M3_LM_MODEL", "LM_MODEL", "google/gemma-4-26b-a4b")
 LM_TOKEN = os.environ.get("LM_API_TOKEN", "")
 
 

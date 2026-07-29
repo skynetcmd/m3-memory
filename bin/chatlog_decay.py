@@ -92,7 +92,7 @@ def resolve_db_path(cli_arg: str | None) -> str:
     # m3_cognitive_loop), then the generic M3_DATABASE. CHATLOG_DB_PATH was
     # previously skipped entirely — setting it and running decay silently
     # pointed at M3_DATABASE instead of the chatlog DB.
-    env = (os.environ.get("CHATLOG_DB")
+    env = (getenv_compat("M3_CHATLOG_DB", "CHATLOG_DB")
            or getenv_compat("M3_CHATLOG_DB_PATH", "CHATLOG_DB_PATH")
            or os.environ.get("M3_DATABASE"))
     if env:

@@ -1465,7 +1465,9 @@ def main():
     args.database = resolve_db_path()
 
     if args.chatlog_db:
-        os.environ["CHATLOG_DB_PATH"] = os.path.abspath(args.chatlog_db)
+        # Namespaced var → the getenv_compat reader honors it without a
+        # deprecation warning for m3's own internal plumbing.
+        os.environ["M3_CHATLOG_DB_PATH"] = os.path.abspath(args.chatlog_db)
     args.chatlog_db = chatlog_config.chatlog_db_path()
 
     # Seed .governor_config.json with current defaults if absent, so the live

@@ -110,8 +110,8 @@ FILES_DB_PROMPT_ON_FIRST_USE: bool = os.environ.get(
 # dominant embeddings are `text-embedding-bge-m3`; Qwen embedding is retired.
 # Mixing models in one store produces semantically incomparable vectors, so
 # the default must name BGE-M3 — an operator can still override via EMBED_MODEL.
-EMBED_MODEL: str = os.environ.get("EMBED_MODEL", "text-embedding-bge-m3")
-EMBED_DIM: int = int(os.environ.get("EMBED_DIM", "1024"))
+EMBED_MODEL: str = getenv_compat("M3_EMBED_MODEL", "EMBED_MODEL", "text-embedding-bge-m3")
+EMBED_DIM: int = int(getenv_compat("M3_EMBED_DIM", "EMBED_DIM", "1024"))
 
 # ── Proper-embedder identity ───────────────────────────────────────────────────
 # A stored vector is only comparable to the rest of the store if it came from the
@@ -203,9 +203,9 @@ EMBED_BREAKER_PRIMARY_RESET_SECS: float = float(
 # ──────────────────────────────────────────────────────────────────────────────
 # Dedup, contradiction, supersede
 # ──────────────────────────────────────────────────────────────────────────────
-DEDUP_LIMIT: int = int(os.environ.get("DEDUP_LIMIT", "1000"))
-DEDUP_THRESHOLD: float = float(os.environ.get("DEDUP_THRESHOLD", "0.92"))
-CONTRADICTION_THRESHOLD: float = float(os.environ.get("CONTRADICTION_THRESHOLD", "0.92"))
+DEDUP_LIMIT: int = int(getenv_compat("M3_DEDUP_LIMIT", "DEDUP_LIMIT", "1000"))
+DEDUP_THRESHOLD: float = float(getenv_compat("M3_DEDUP_THRESHOLD", "DEDUP_THRESHOLD", "0.92"))
+CONTRADICTION_THRESHOLD: float = float(getenv_compat("M3_CONTRADICTION_THRESHOLD", "CONTRADICTION_THRESHOLD", "0.92"))
 # SUPERSEDES_PENALTY: at retrieval time, hits that appear as the to_id of a
 # 'supersedes' edge (i.e., their newer version exists) get score multiplied
 # by this factor. 0.5 = visible but ranked below newer fact. 0.0 = hide.
@@ -216,21 +216,21 @@ SUPERSEDES_PENALTY: float = float(getenv_compat("M3_SUPERSEDES_PENALTY", "SUPERS
 # 'loose' = cosine >= threshold + same type + content-differs only (default
 # since 2026-04-27); 'off' = treat ALL high-cosine same-type pairs as
 # supersedence regardless of title or content (research mode only).
-CONTRADICTION_TITLE_GATE: str = os.environ.get("CONTRADICTION_TITLE_GATE", "loose").lower()
+CONTRADICTION_TITLE_GATE: str = getenv_compat("M3_CONTRADICTION_TITLE_GATE", "CONTRADICTION_TITLE_GATE", "loose").lower()
 
 # CONTRADICTION_TYPE_EXCLUSIONS: comma-separated memory types skipped during
 # contradiction-check. Default skips 'conversation'; set to
 # 'conversation,message' to restore the legacy pre-2026-04-27 behavior. Empty
 # string = check all types.
 CONTRADICTION_TYPE_EXCLUSIONS: frozenset[str] = frozenset(
-    (os.environ.get("CONTRADICTION_TYPE_EXCLUSIONS") or "conversation").lower().split(",")
+    (getenv_compat("M3_CONTRADICTION_TYPE_EXCLUSIONS", "CONTRADICTION_TYPE_EXCLUSIONS") or "conversation").lower().split(",")
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Retrieval params
 # ──────────────────────────────────────────────────────────────────────────────
 SEARCH_ROW_CAP: int = int(getenv_compat("M3_SEARCH_ROW_CAP", "SEARCH_ROW_CAP", "5000"))
-LLM_TIMEOUT: float = float(os.environ.get("LLM_TIMEOUT", "45.0"))
+LLM_TIMEOUT: float = float(getenv_compat("M3_LLM_TIMEOUT", "LLM_TIMEOUT", "45.0"))
 SPEAKER_IN_TITLE: bool = getenv_compat("M3_SPEAKER_IN_TITLE", "SPEAKER_IN_TITLE", "1") == "1"
 SHORT_TURN_THRESHOLD: int = int(getenv_compat("M3_SHORT_TURN_THRESHOLD", "SHORT_TURN_THRESHOLD", "20"))
 TITLE_MATCH_BOOST: float = float(getenv_compat("M3_TITLE_MATCH_BOOST", "TITLE_MATCH_BOOST", "0.15"))
@@ -274,7 +274,7 @@ CORROBORATION: bool = os.environ.get("M3_CORROBORATION", "0") == "1"
 # Cosine floor for treating a high-similarity, same-content write as
 # corroboration (vs. CONTRADICTION_THRESHOLD for different-content). Higher than
 # the contradiction threshold so only true near-duplicates corroborate.
-CORROBORATION_THRESHOLD: float = float(os.environ.get("CORROBORATION_THRESHOLD", "0.95"))
+CORROBORATION_THRESHOLD: float = float(getenv_compat("M3_CORROBORATION_THRESHOLD", "CORROBORATION_THRESHOLD", "0.95"))
 
 # Trim-by-elbow (MMR post-filter) params. Pre-Phase-7+8 the safety knobs
 # defaulted to 20/8/0.05 (scale-aware, prevented the "1-result collapse"

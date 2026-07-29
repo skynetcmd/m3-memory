@@ -36,6 +36,8 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+from m3_sdk import getenv_compat
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 # Production-first sys.path: main bin first, bench bin appended at end.
 _MAIN_BIN = REPO_ROOT / "bin"
@@ -51,7 +53,7 @@ from agent_protocol import strip_code_fences  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
 from slm_intent import load_profile  # noqa: E402
 
-PROFILE_NAME = os.environ.get("OBSERVER_PROFILE", "observer_local")
+PROFILE_NAME = getenv_compat("M3_OBSERVER_PROFILE", "OBSERVER_PROFILE", "observer_local")
 
 
 def _ingest_llm_enabled_from_env(flag: str) -> bool:

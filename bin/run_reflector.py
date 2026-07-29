@@ -25,11 +25,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import re
 import sys
 import time
 from pathlib import Path
+
+from m3_sdk import getenv_compat
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _MAIN_BIN = REPO_ROOT / "bin"
@@ -43,7 +44,7 @@ from auth_utils import get_api_key  # noqa: E402
 from memory.backends import dialect  # noqa: E402
 from slm_intent import load_profile  # noqa: E402
 
-PROFILE_NAME = os.environ.get("REFLECTOR_PROFILE", "reflector_local")
+PROFILE_NAME = getenv_compat("M3_REFLECTOR_PROFILE", "REFLECTOR_PROFILE", "reflector_local")
 JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 

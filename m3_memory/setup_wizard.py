@@ -85,6 +85,22 @@ def _bin_dir() -> Path:
     return here.parent / "bin"                      # legacy default
 
 
+def _env_compat(new_name: str, old_name: str, default: "str | None" = None) -> "str | None":
+    """Env resolution during the M3_* namespacing migration: new > old > default,
+    warning once on the deprecated name. Uses the canonical getenv_compat when the
+    payload bin/ is importable; falls back to a plain dual-read otherwise, since
+    this module can run before bin/ is on sys.path and must never fail setup."""
+    try:
+        sys.path.insert(0, str(_bin_dir()))
+        from m3_core.paths import getenv_compat
+        return getenv_compat(new_name, old_name, default)
+    except Exception:  # noqa: BLE001 — resolver unreachable: degrade, never break setup
+        val = os.environ.get(new_name)
+        if val is not None:
+            return val
+        return os.environ.get(old_name, default)
+
+
 def _ask_yes_no(question: str, default: bool) -> bool:
     suffix = " [Y/n]" if default else " [y/N]"
     while True:
@@ -194,7 +210,7 @@ def _find_hermes_plugins_dir() -> Optional[Path]:
     presence is what lets us drop the m3 provider into place.
     """
     roots = []
-    env_home = os.environ.get("HERMES_HOME")
+    env_home = _env_compat("M3_HERMES_HOME", "HERMES_HOME")
     if env_home:
         roots.append(Path(env_home))
     # Windows app-data location (the `hermes` CLI's default home).
@@ -1283,7 +1299,7 @@ def _probe_llm_endpoints(plan: "SetupPlan", args: argparse.Namespace) -> None:
     vars to match. Mirrors the M3_EMBED_GGUF persistence (shell rc + MCP env)."""
     # If the user already pinned a custom server, honor it — just confirm.
     custom = os.environ.get("M3_LLM_URL", "").strip()
-    csv = os.environ.get("LLM_ENDPOINTS_CSV", "").strip()
+    csv = (_env_compat("M3_LLM_ENDPOINTS_CSV", "LLM_ENDPOINTS_CSV", "") or "").strip()
     if csv:
         _ok(f"  LLM endpoints pinned via LLM_ENDPOINTS_CSV ({csv}); leaving as-is")
         return

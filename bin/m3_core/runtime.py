@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from os import PathLike
 from typing import IO, Optional, Union
 
+from m3_core.paths import getenv_compat
+
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -111,7 +113,7 @@ def ensure_utf8() -> None:
 # Still overridable via env so dev machines with LM Studio on a
 # different port (or a remote Ollama) work without code edits.
 LM_STUDIO_BASE = os.environ.get("LM_STUDIO_BASE", "http://localhost:1234/v1")
-LM_READ_TIMEOUT = float(os.environ.get("LM_READ_TIMEOUT", "4800.0"))
+LM_READ_TIMEOUT = float(getenv_compat("M3_LM_READ_TIMEOUT", "LM_READ_TIMEOUT", "4800.0"))
 
 
 class StructuredLogger:

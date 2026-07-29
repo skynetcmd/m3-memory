@@ -68,6 +68,7 @@ from typing import Any, AsyncIterator, List, Optional, Union
 # (`python bin/mcp_proxy.py` — the OpenClaw path), bypassing the m3 CLI, so it
 # can't rely on the CLI's UTF-8 re-exec. Re-execs once; no-op if already UTF-8.
 from m3_sdk import ensure_utf8 as _ensure_utf8
+from m3_sdk import getenv_compat
 
 _ensure_utf8()
 
@@ -90,7 +91,7 @@ from m3_sdk import M3Context
 ctx = M3Context.for_db(None)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-PROXY_HOST = os.environ.get("MCP_PROXY_HOST", "127.0.0.1")
+PROXY_HOST = getenv_compat("M3_MCP_PROXY_HOST", "MCP_PROXY_HOST", "127.0.0.1")
 PROXY_PORT = 9000
 ANTHROPIC_BASE = "https://api.anthropic.com/v1"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -106,8 +107,8 @@ CONNECT_TIMEOUT = 5.0
 # debug_agent_bridge. Previously this file alone defaulted to 300, so the same
 # env var resolved to two different values depending on entry point (§3: one
 # default per var). Reconciled to the documented canonical value.
-READ_TIMEOUT = float(os.environ.get("LM_READ_TIMEOUT", "4800.0"))
-ALLOW_DESTRUCTIVE = os.environ.get("MCP_PROXY_ALLOW_DESTRUCTIVE", "").lower() in ("1", "true", "yes")
+READ_TIMEOUT = float(getenv_compat("M3_LM_READ_TIMEOUT", "LM_READ_TIMEOUT", "4800.0"))
+ALLOW_DESTRUCTIVE = getenv_compat("M3_MCP_PROXY_ALLOW_DESTRUCTIVE", "MCP_PROXY_ALLOW_DESTRUCTIVE", "").lower() in ("1", "true", "yes")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKSPACE = BASE_DIR

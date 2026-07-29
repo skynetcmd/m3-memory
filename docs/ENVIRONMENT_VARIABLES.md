@@ -4,6 +4,22 @@
 This document specifies the environment variables required by M3 Memory.
  It is essential for security and portability that **no hardcoded values (IPs, API keys, etc.)** are present in any repository files.
 
+## `M3_` namespacing (backward-compatible migration)
+
+All m3-owned environment variables are being namespaced under an **`M3_` prefix**
+to avoid collisions with other tools (a bare `EMBED_MODEL` or `DEDUP_THRESHOLD`
+could clash). The migration is **backward-compatible**: each variable is resolved
+new-name-first, then the old bare name, then the default. If only the deprecated
+bare name is set, m3 uses it **and prints a one-time warning** naming the `M3_`
+replacement. Old names keep working for at least one release, then are removed.
+
+- To migrate: rename `X` → `M3_X` in your shell rc / secret store (e.g.
+  `DEDUP_THRESHOLD` → `M3_DEDUP_THRESHOLD`, `OBSERVER_PROFILE` → `M3_OBSERVER_PROFILE`).
+- `m3 doctor` lists every deprecated bare name currently in use.
+- **Not renamed** (external conventions, keep as-is): third-party API keys
+  (`ANTHROPIC_API_KEY`, `LM_API_TOKEN`, `GH_TOKEN`, …), `AGENT_OS_MASTER_KEY`,
+  and OS/system vars (`APPDATA`, `CUDA_PATH`, `NO_COLOR`, …).
+
 ## 🏛️ The "Zero-Leak" Architecture Principle
 
 ```mermaid

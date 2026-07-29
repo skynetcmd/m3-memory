@@ -20,6 +20,8 @@ import uuid
 from datetime import datetime, timezone
 from glob import glob
 
+from m3_sdk import getenv_compat
+
 # Setup path so we can import bin/ modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -340,7 +342,7 @@ async def main() -> int:
     batch_size = args.batch or cfg.embed_sweeper.batch_size
     max_per_run = (
         args.max_per_run
-        or int(os.environ.get("CHATLOG_EMBED_MAX_PER_RUN", "10000"))
+        or int(getenv_compat("M3_CHATLOG_EMBED_MAX_PER_RUN", "CHATLOG_EMBED_MAX_PER_RUN", "10000"))
     )
     # Soft time budget per run. None -> env default (60s). 0 -> unbounded (old
     # behavior). Keeps a big backlog from pinning the GPU in one long run; the
@@ -348,7 +350,7 @@ async def main() -> int:
     _deadline = (
         args.deadline
         if args.deadline is not None
-        else float(os.environ.get("CHATLOG_EMBED_DEADLINE_S", "60"))
+        else float(getenv_compat("M3_CHATLOG_EMBED_DEADLINE_S", "CHATLOG_EMBED_DEADLINE_S", "60"))
     )
     # run_embed_loop expects an ABSOLUTE time.monotonic() deadline, not a
     # duration — convert here (a raw duration like 60 would read as "already

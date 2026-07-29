@@ -11,6 +11,8 @@ import subprocess
 import urllib.error
 import urllib.request
 
+from m3_sdk import getenv_compat
+
 PORT = 9876
 LM_STUDIO_URL = "http://localhost:1234"
 EMBEDDING_KEYWORDS = ("embed", "nomic", "jina", "bge", "minilm", "e5")
@@ -130,7 +132,7 @@ class StatusHandler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    host = os.environ.get("MACBOOK_STATUS_HOST", "127.0.0.1")
+    host = getenv_compat("M3_MACBOOK_STATUS_HOST", "MACBOOK_STATUS_HOST", "127.0.0.1")
     server = http.server.HTTPServer((host, PORT), StatusHandler)
     print(f"MacBook status server listening on {host}:{PORT}", flush=True)
     server.serve_forever()

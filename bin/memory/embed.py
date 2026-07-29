@@ -26,7 +26,7 @@ from threading import Lock as _ThreadLock
 import httpx as _httpx
 from embedding_utils import unpack as _unpack
 from llm_failover import get_best_embed
-from m3_sdk import M3Context, resolve_db_path
+from m3_sdk import M3Context, getenv_compat, resolve_db_path
 
 from . import config
 
@@ -945,8 +945,8 @@ def set_embed_override(url: str | None, model: str | None = None) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 _EMBED_SEM = asyncio.Semaphore(4)
 
-EMBED_BULK_CHUNK = int(os.environ.get("EMBED_BULK_CHUNK", "1024"))
-EMBED_BULK_CONCURRENCY = int(os.environ.get("EMBED_BULK_CONCURRENCY", "4"))
+EMBED_BULK_CHUNK = int(getenv_compat("M3_EMBED_BULK_CHUNK", "EMBED_BULK_CHUNK", "1024"))
+EMBED_BULK_CONCURRENCY = int(getenv_compat("M3_EMBED_BULK_CONCURRENCY", "EMBED_BULK_CONCURRENCY", "4"))
 _EMBED_BULK_SEM = asyncio.Semaphore(EMBED_BULK_CONCURRENCY)
 
 
@@ -1646,7 +1646,7 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
 # Entity-name embedding cache (used by entity resolution)
 # ──────────────────────────────────────────────────────────────────────────────
 _ENTITY_NAME_EMBED_CACHE: dict[str, list[float]] = {}
-ENTITY_NAME_EMBED_CACHE_MAX = int(os.environ.get("ENTITY_NAME_EMBED_CACHE_MAX", "50000"))
+ENTITY_NAME_EMBED_CACHE_MAX = int(getenv_compat("M3_ENTITY_NAME_EMBED_CACHE_MAX", "ENTITY_NAME_EMBED_CACHE_MAX", "50000"))
 
 
 async def _embed_canonical_cached(canonical_name: str) -> list[float] | None:

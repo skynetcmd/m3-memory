@@ -88,7 +88,7 @@ def resolve_source(cli_arg: str | None) -> str:
 def resolve_target(cli_arg: str | None) -> str:
     if cli_arg:
         return os.path.abspath(cli_arg)
-    env = (os.environ.get("CHATLOG_DB")
+    env = (getenv_compat("M3_CHATLOG_DB", "CHATLOG_DB")
            or getenv_compat("M3_CHATLOG_DB_PATH", "CHATLOG_DB_PATH"))
     if env:
         return os.path.abspath(env)

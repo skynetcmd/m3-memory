@@ -19,6 +19,7 @@ import httpx
 import numpy as np
 import uvicorn
 from fastapi import FastAPI
+from m3_sdk import getenv_compat
 from pydantic import BaseModel, Field
 
 logging.basicConfig(level=logging.INFO, format="%(name)s: [%(levelname)s] %(message)s")
@@ -31,7 +32,7 @@ LLAMA_SERVER_EXE = os.environ.get(
 GGUF_MODEL_PATH = os.environ.get(
     "GGUF_MODEL_PATH", os.path.join(os.getcwd(), "models", "qwen3-q8.gguf")
 )
-LLAMA_PORT = int(os.environ.get("LLAMA_PORT", "9904"))
+LLAMA_PORT = int(getenv_compat("M3_LLAMA_PORT", "LLAMA_PORT", "9904"))
 
 app = FastAPI(title="M3 Qwen3 GPU Proxy")
 llama_process = None
@@ -125,7 +126,7 @@ def main():
     parser.add_argument("--port", type=int, default=9903)
     parser.add_argument(
         "--host",
-        default=os.environ.get("EMBED_SERVER_GPU_HOST", "127.0.0.1"),
+        default=getenv_compat("M3_EMBED_SERVER_GPU_HOST", "EMBED_SERVER_GPU_HOST", "127.0.0.1"),
         help="Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN)",
     )
     args = parser.parse_args()

@@ -431,8 +431,11 @@ async def main() -> int:
             os.environ["M3_DATABASE"] = args.database
             logger.info("Overriding DB path via M3_DATABASE: %s", args.database)
         if args.db:
-            os.environ["CHATLOG_DB_PATH"] = args.db
-            logger.info("Overriding chatlog DB path via CHATLOG_DB_PATH: %s", args.db)
+            # Set the namespaced var so the getenv_compat reader picks it up via
+            # the new name (no self-inflicted deprecation warning for m3's own
+            # internal plumbing). The deprecated CHATLOG_DB_PATH still resolves.
+            os.environ["M3_CHATLOG_DB_PATH"] = args.db
+            logger.info("Overriding chatlog DB path via M3_CHATLOG_DB_PATH: %s", args.db)
         if args.spill_dir:
             chatlog_config.SPILL_DIR = args.spill_dir
             logger.info("Overriding spill dir: %s", args.spill_dir)
