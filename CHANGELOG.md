@@ -21,6 +21,44 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.0] — 2026-07-29 — Runs correctly on a PostgreSQL primary and uses the GPU on Apple Silicon
+
+### Fixed
+- **PostgreSQL primary: several features crashed or silently lost data.** A number
+  of code paths still emitted SQLite-only SQL — literal `?` placeholders,
+  `json_extract(...)`, `strftime('now')` — that runs on SQLite but raises on
+  PostgreSQL, and read JSON columns with a bare `json.loads()` that works on
+  SQLite (TEXT) but raises on PostgreSQL (JSONB returns an already-parsed dict).
+  On a PostgreSQL-primary deployment this crashed multi-session search, the
+  adjacency-linking and title-enrichment passes, and the Reflector, and it
+  silently dropped `session_id` from observations and skipped the user-fact
+  ranking boost. All now route through the storage seam, so the same behavior
+  holds on both backends. Verified against a live PostgreSQL cluster.
+- **Apple Silicon ran the reranker and embedder on CPU.** GPU detection checked
+  only for CUDA, so on an M-series Mac (where CUDA is absent) the cross-encoder
+  reranker, the embedding server, and the local NER extractor all fell back to
+  CPU instead of using the Metal (MPS) GPU. Device selection now prefers
+  CUDA → Metal → CPU via one shared helper.
+- **Autonomous belief-consolidation and chatlog-prune never wrote anything under
+  the background daemon.** Both gated real writes on environment variables, but
+  the launchd/systemd/scheduled-task daemon does not inherit your shell
+  environment, so the toggles were always off there — the passes ran forever as
+  no-ops. They now read a config file (`.cognitive_loop_config.json`) the daemon
+  can actually see, warning loudly on a malformed file instead of silently
+  reverting.
+- The GPU-optimized embedding proxy referenced Windows-only subprocess flags
+  unconditionally, raising `AttributeError` on macOS/Linux; the flags are now
+  guarded per-OS.
+
+### Changed
+- Files vector search now scores candidates through the shared Rust cosine path
+  (a single batched call) instead of a per-row Python loop.
+
+### Security
+- The write-boundary content-safety check now also scans `title` and `metadata`,
+  not just `content`, so an injection/XSS/prompt-injection payload can't be
+  stored through those fields.
+
 ## [2026.7.28.1] — 2026-07-28 — FIPS mode no longer crashes every process on the way out
 
 ### Fixed
