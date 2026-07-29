@@ -21,6 +21,20 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.15] — 2026-07-29 — Gemini onExit hook joins the self-healing writer
+
+### Fixed
+- **The Gemini capture wiring had the same add-only / roots-less bugs the Claude
+  path did.** `apply_gemini_settings` wrote the `SessionEnd` (onExit) hook and the
+  `memory` MCP entry **add-only** — so a stale or unpinned onExit hook was never
+  upgraded — and its memory entry was a bare `{"command": "mcp-memory"}` with **no
+  decoupled-root env**, inconsistent with `installer._register_gemini_mcp` (which
+  uses the canonical roots-bearing entry). It now **replaces** its m3-owned
+  entries: the SessionEnd hook is rebuilt root-pinned even when one already exists
+  (user hooks preserved), and the memory entry uses the same
+  `_canonical_memory_server()` helper as the installer — one self-healing,
+  roots-correct memory-entry shape for Gemini.
+
 ## [2026.7.29.14] — 2026-07-29 — `m3 setup` produces a correct config by itself (single writer)
 
 ### Fixed
