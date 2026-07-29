@@ -281,35 +281,19 @@ def repair(dry_run: bool = True) -> dict:
         return result
 
     try:
-        import chatlog_config
-        import chatlog_init
-        # apply_claude_settings is the canonical, idempotent writer (it owns the
-        # merge + statusLine handling). It skips events that already hold a
-        # chatlog-owned entry, so stale entries must be dropped first or the
-        # re-wire is a no-op on exactly the hooks that are broken.
-        settings = _load_settings() or {}
-        removed = 0
-        for event, entries in list((settings.get("hooks") or {}).items()):
-            kept = [
-                e for e in entries or []
-                if OWNERSHIP_MARKER not in json.dumps(e).lower()
-            ]
-            removed += len(entries or []) - len(kept)
-            if kept:
-                settings["hooks"][event] = kept
-            else:
-                settings["hooks"].pop(event, None)
-        if removed:
-            with open(_claude_settings_path(), "w", encoding="utf-8") as fh:
-                json.dump(settings, fh, indent=2)
-
-        changed, msg = chatlog_init.apply_claude_settings(
-            chatlog_config.resolve_config()
-        )
+        import generate_configs
+        # THE canonical Claude settings writer: it replaces the m3-owned
+        # hooks / statusLine / mcpServers entries with pinned .py hooks and the
+        # correct decoupled roots in ONE idempotent pass, so the doctor's hook
+        # repair and `--fix-hooks`'s payload rewrite use the same writer and the
+        # same format (no /bin/sh-then-.py churn), and this path now also corrects
+        # the server env root blocks. install_claude_settings strips m3-owned
+        # entries itself, so no separate drop step is needed.
+        res = generate_configs.install_claude_settings(assume_yes=True)
         result["actions"].append({
             "action": "rewire", "status": "ok",
-            "detail": f"dropped {removed} stale m3 entr(ies), re-wired via "
-                      f"apply_claude_settings ({msg}); backup at {result['backup']}",
+            "detail": f"re-wired {len(findings)} issue(s) via install_claude_settings "
+                      f"(changed={res.get('changed')}); backup at {result['backup']}",
         })
     except Exception as e:  # noqa: BLE001
         result["actions"].append({

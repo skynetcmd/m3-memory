@@ -119,6 +119,34 @@ def test_user_hooks_are_not_claimed(probe, wire, tmp_path):
     assert probe.check()["hooks_seen"] == 0
 
 
+def test_repair_delegates_to_install_claude_settings(probe, tmp_path, monkeypatch):
+    """The non-dry-run repair writes via the SINGLE canonical writer
+    generate_configs.install_claude_settings (pinned .py hooks + roots + mcpServers)
+    — NOT the old chatlog_init.apply_claude_settings (/bin/sh, add-only). This is
+    what makes `m3 doctor --fix --fix-hooks` use one writer / one format."""
+    monkeypatch.setattr(probe, "check", lambda: {"findings": [{"kind": "dead_path"}]})
+    sp = tmp_path / "settings.json"
+    sp.write_text("{}")
+    monkeypatch.setattr(probe, "_claude_settings_path", lambda: str(sp))
+
+    called = {"install": 0}
+    import generate_configs
+    monkeypatch.setattr(
+        generate_configs, "install_claude_settings",
+        lambda **k: called.__setitem__("install", called["install"] + 1) or {"changed": True},
+    )
+    import chatlog_init
+
+    def _boom(*a, **k):
+        raise AssertionError("repair must not call apply_claude_settings anymore")
+
+    monkeypatch.setattr(chatlog_init, "apply_claude_settings", _boom)
+
+    res = probe.repair(dry_run=False)
+    assert called["install"] == 1
+    assert any("install_claude_settings" in a.get("detail", "") for a in res["actions"])
+
+
 def test_repair_is_dry_run_by_default(probe, wire, tmp_path):
     py = _make(tmp_path, "venv/Scripts/python.exe")
     gone = str(tmp_path / "nope.py").replace("\\", "/")
