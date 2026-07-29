@@ -2,7 +2,7 @@
   "name": "m3",
   "displayName": "m3 Memory",
   "version": "2026.7.29.1",
-  "description": "Local-first persistent memory for Claude Code — 100+ MCP tools, hybrid search (FTS5 + vector + MMR), bitemporal contradictions, GDPR primitives, chatlog auto-capture, multi-agent handoffs.",
+  "description": "Give Claude Code a private memory that lives on your own machine — it remembers across sessions, works fully offline, and never touches the cloud. 100+ MCP tools: fast hybrid search, automatic chat capture, contradiction tracking, and one-command GDPR export/delete.",
   "keywords": [
     "memory",
     "mcp",
