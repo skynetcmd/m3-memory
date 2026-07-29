@@ -99,6 +99,45 @@ def test_posix_interpreter_uses_bin_python_no_exe(monkeypatch):
     assert session.startswith(venv_py)
 
 
+def test_interpreter_falls_back_to_sys_executable_when_no_repo_venv(monkeypatch):
+    """The shipped pipx design creates NO repo `.venv`; deps live in the pipx
+    venv, which is `sys.executable` while `m3 setup` runs. The generator must
+    write that absolute interpreter — NOT a bare `python3` on PATH, which has no
+    m3 deps and made every generated hook/bridge die ModuleNotFoundError.
+
+    (This dev clone's own `sys.executable` is under the repo `.venv`, so we stand
+    in a synthetic pipx interpreter to isolate the fallback from the dev layout.)"""
+    repo_venv = (g._m3_repo_root() + os.sep + ".venv").replace("\\", "/")
+    fake_exe = "/opt/pipx/venvs/m3-memory/bin/python"  # stands in for the pipx interpreter
+    real_exists = os.path.exists
+
+    def fake_exists(p):
+        s = str(p).replace("\\", "/")
+        if s.startswith(repo_venv):
+            return False  # no repo venv (shipped design)
+        if s == fake_exe:
+            return True  # the pipx interpreter exists
+        if s.endswith(".gguf"):
+            return False
+        return real_exists(p)
+
+    monkeypatch.setattr(g.os.path, "exists", fake_exists)
+    monkeypatch.setattr(g.sys, "executable", fake_exe)
+    monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
+    monkeypatch.setattr(g, "_write_json", lambda path, data: None)
+
+    g.generate_configs()
+    settings = g.generate_configs._last_claude
+    # Hooks + statusline are the commands built from python_cmd; they must launch
+    # via the absolute pipx interpreter.
+    session = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+    statusline = settings["statusLine"]["command"]
+    for cmd in (session, statusline):
+        assert cmd.startswith(fake_exe), f"expected {fake_exe!r}, got {cmd!r}"
+    # The regression itself: NOTHING may launch via a bare PATH python (no m3 deps).
+    assert not any(c.startswith(("python ", "python3 ")) for c in _all_commands(settings))
+
+
 # ── invariants that must hold on EVERY OS ────────────────────────────────────
 
 @pytest.mark.parametrize("os_name", ["nt", "posix"])
