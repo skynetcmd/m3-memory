@@ -475,11 +475,19 @@ def chatlog_status_impl() -> str:
             "recent_rows": recent_writes,
             "window_min": recent_window_min,
         },
+        # AUTHORITATIVE hook-wiring verdict — the SAME check `m3 doctor` runs
+        # (Stop/PreCompact m3 entries in settings.json, verified against disk), so
+        # status and doctor never disagree (they used to: doctor said "chatlog
+        # hooks: OK" while the hooks[*] flags below read False). status ∈
+        # {ok, unknown, issues}. This is the wiring signal to trust; the per-agent
+        # hooks[*].wired flags below are only the init-time config echo.
+        "hook_wiring": _hook_wiring_verdict(),
         # NOT a capture-health signal. Each entry's `wired`/`enabled` only
         # records whether a per-turn shell hook was configured in settings.json
         # at init time; the Stop-hook / MCP write path captures turns even when
         # every entry here is False (that is the norm on this deployment). Read
-        # `capture.healthy` for whether turns are landing — NOT these flags.
+        # `capture.healthy` for whether turns are landing, and `hook_wiring.status`
+        # for whether the hooks are correctly wired — NOT these flags.
         # Kept a flat {agent_name: {...}} map (no sentinel keys) so consumers can
         # iterate it as pure agent data; the caveat lives here in code, not in
         # the return shape (§3/§12a: returns stay structured for machine callers).
@@ -502,6 +510,30 @@ def chatlog_status_impl() -> str:
     }
 
     return json.dumps(result, indent=2)
+
+
+def _hook_wiring_verdict() -> dict:
+    """Doctor-aligned hook-wiring verdict. Reads the SAME Stop/PreCompact m3 hook
+    entries in settings.json that `m3 doctor` verifies against disk, so status and
+    doctor can never disagree about whether capture hooks are wired. Best-effort:
+    status must never crash on a missing/renamed probe.
+
+    Returns {status: 'ok'|'unknown'|'issues', hooks_seen: int, findings: list}.
+    """
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        from doctor import environment_probe
+        res = environment_probe.check()
+        return {
+            "status": res.get("status", "unknown"),
+            "hooks_seen": res.get("hooks_seen", 0),
+            "findings": res.get("findings", []),
+        }
+    except Exception as e:  # noqa: BLE001 — status output must not depend on the probe
+        return {"status": "unknown", "hooks_seen": 0, "findings": [],
+                "error": f"{type(e).__name__}: {e}"}
 
 
 def _get_file_size_mb(path: str) -> float:
