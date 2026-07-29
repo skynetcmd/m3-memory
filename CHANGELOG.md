@@ -21,6 +21,24 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.14] — 2026-07-29 — `m3 setup` produces a correct config by itself (single writer)
+
+### Fixed
+- **The documented `pipx upgrade` + `m3 setup` flow left the config broken,
+  requiring an undocumented `m3 doctor --fix --fix-hooks`.** Setup wired Claude with
+  two *partial* writers — `claude mcp add` (memory only) and
+  `chatlog_init.apply_claude_settings` (hooks only, `/bin/sh`, **add-only** so it
+  skipped existing hooks and never upgraded them, and never wrote the server-env
+  roots). The full canonical writer (`install_claude_settings`) was never on the
+  setup path, so setup couldn't refresh a stale config. `apply_claude_settings` now
+  delegates to `install_claude_settings` — the same writer the doctor uses — so
+  `m3 setup` / `m3 chatlog init` write pinned `.py` hooks + decoupled roots in every
+  server env + statusline + aux bridges in one idempotent pass that **replaces**
+  m3-owned entries. The canonical writer now respects the capture mode (Stop only
+  in `both`/`stop` mode) so it can't regress a PreCompact-only user. Net: the
+  documented upgrade flow now yields a correct config with no manual `doctor --fix`,
+  and there is a single Claude-settings writer / format across setup and doctor.
+
 ## [2026.7.29.13] — 2026-07-29 — One Claude-settings writer in the doctor repair (no format churn)
 
 ### Changed
