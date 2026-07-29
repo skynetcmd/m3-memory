@@ -94,11 +94,27 @@ def _profile_search_dirs() -> list[Path]:
             p = part.strip()
             if p:
                 dirs.append(Path(p))
-    # Repo-root default. M3_MEMORY_ROOT is set by m3_sdk at process start;
-    # fall back to bin/'s parent when that env var isn't present yet.
-    base = os.environ.get("M3_MEMORY_ROOT") or str(Path(__file__).resolve().parent.parent)
-    dirs.append(Path(base) / "config" / "slm")
-    return dirs
+    # M3_MEMORY_ROOT-derived default — valid only when that var points at the
+    # repo/payload root.
+    base = os.environ.get("M3_MEMORY_ROOT")
+    if base:
+        dirs.append(Path(base) / "config" / "slm")
+    # ALWAYS also search the code-relative location where profiles actually ship
+    # (bin/slm_intent.py -> <repo>/config/slm). This is the reliable fallback when
+    # M3_MEMORY_ROOT points at a DECOUPLED root (e.g. ~/.m3) rather than the repo
+    # (~/.m3/repo) — the common install layout. Without it, that layout searches
+    # only ~/.m3/config/slm (which doesn't exist) and every SLM feature (entity
+    # extraction, observer, reflector, consolidation) fails "profile not found".
+    dirs.append(Path(__file__).resolve().parent.parent / "config" / "slm")
+    # De-dup, preserving order (an M3_SLM_PROFILES_DIR override stays first).
+    seen: set[str] = set()
+    out: list[Path] = []
+    for d in dirs:
+        key = str(d)
+        if key not in seen:
+            seen.add(key)
+            out.append(d)
+    return out
 
 
 # ── Profile dataclass + loader + cache ────────────────────────────────────────
