@@ -1012,7 +1012,10 @@ def _os_lock_exclusive_nb(fd: int) -> "tuple[bool, Optional[Exception]]":
         except OSError as e:
             # EACCES/EDEADLOCK == already locked by another process (would-block).
             import errno
-            if e.errno in (errno.EACCES, errno.EDEADLOCK, errno.EDEADLK):
+            # errno.EDEADLOCK exists on Windows (where this branch runs) but not
+            # in the macOS errno stub a type checker sees — same platform-stub
+            # false positive as msvcrt above; this line never executes off-nt.
+            if e.errno in (errno.EACCES, errno.EDEADLOCK, errno.EDEADLK):  # type: ignore[attr-defined]
                 return False, None
             return False, e
     else:

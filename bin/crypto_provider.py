@@ -163,6 +163,7 @@ def _trusted_wolfssl_candidates() -> "list[str]":
     # Per-OS library filename(s). macOS uses .dylib (what the build helper
     # produces and installs); we ALSO accept .so there since a Linux-style build
     # or a Homebrew formula may produce it. Windows: wolfssl.dll.
+    lib_names: "tuple[str, ...]"
     if os.name == "nt":
         lib_names = ("wolfssl.dll",)
     elif sys.platform == "darwin":

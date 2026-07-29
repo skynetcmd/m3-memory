@@ -726,9 +726,9 @@ def ingest_path(
     # Non-fatal by contract: a False here means the batch runs unwarmed exactly
     # as it did before, so nothing is gated on the pre-warm succeeding.
     if not dry_run:
-        from .summarize import llm_available, prewarm
+        from .summarize import _llm_available, prewarm
 
-        if llm_available():
+        if _llm_available():
             prewarm()
 
     idx = 0

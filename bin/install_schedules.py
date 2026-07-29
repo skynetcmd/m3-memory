@@ -1031,8 +1031,8 @@ def _verify_windows_task(name: str) -> bool:
             _safe_print(f"{FAIL} {name}: expected self-heal Repetition {expected_rep} is MISSING")
             ok = False
         elif "<Duration>" in xml:
-            _dur = re.search(r"<Duration>([^<]+)</Duration>", xml)
-            _dur = _dur.group(1) if _dur else "?"
+            _dur_m = re.search(r"<Duration>([^<]+)</Duration>", xml)
+            _dur = _dur_m.group(1) if _dur_m else "?"
             _safe_print(
                 f"{FAIL} {name}: self-heal Repetition is BOUNDED "
                 f"(<Duration>{_dur}</Duration>) — it stops repeating after "
