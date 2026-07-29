@@ -178,6 +178,19 @@ def main() -> int:
                     print("  (hook repair not attempted — re-run with "
                           "`--fix --fix-hooks` to re-wire)")
 
+        # Agent stale-payload rewrite is also settings.json surgery (it repoints
+        # memory + aux bridges + hooks + statusline to the current payload), so it
+        # shares the --fix-hooks opt-in gate and backs settings.json up first.
+        if not args.skip_agent_paths:
+            from doctor import agent_paths_probe
+            if args.fix_hooks:
+                agent_paths_probe.run(brief=False, fix=not args.dry_run)
+            else:
+                rc = agent_paths_probe.run(brief=False, fix=False)
+                if rc:
+                    print("  (agent stale-payload rewrite not attempted — re-run "
+                          "with `--fix --fix-hooks`)")
+
         if res["summary"] == "failed" or shared_rc != 0:
             return 1
         return 0

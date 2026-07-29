@@ -70,6 +70,40 @@ def test_flags_stale_clone_paths_but_not_wheel_or_user(monkeypatch, tmp_path):
     assert "Claude/user_thing" not in labels
 
 
+def test_run_fix_remediates_stale_via_canonical_writer(monkeypatch):
+    """run(fix=True) with a stale finding calls the canonical rewrite and re-scans;
+    run(fix=False) reports only (never touches settings.json)."""
+    calls = {"remediate": 0}
+    scans = iter([[("Claude/statusLine", "/old/repo/bin/x.sh")], []])  # stale, then clean
+    monkeypatch.setattr(p, "_scan_mcpservers_hosts", lambda: [])
+    monkeypatch.setattr(p, "_scan_opencode", lambda: [])
+    monkeypatch.setattr(p, "_scan_hermes", lambda: [])
+    monkeypatch.setattr(p, "_scan_stale_payload", lambda: next(scans))
+
+    def fake_remediate():
+        calls["remediate"] += 1
+        return True
+
+    monkeypatch.setattr(p, "_remediate_stale", fake_remediate)
+
+    rc = p.run(brief=True, fix=True)
+    assert calls["remediate"] == 1          # remediation ran
+    assert rc == 0                          # re-scan came back clean → healthy exit
+
+
+def test_run_without_fix_does_not_remediate(monkeypatch):
+    calls = {"remediate": 0}
+    monkeypatch.setattr(p, "_scan_mcpservers_hosts", lambda: [])
+    monkeypatch.setattr(p, "_scan_opencode", lambda: [])
+    monkeypatch.setattr(p, "_scan_hermes", lambda: [])
+    monkeypatch.setattr(p, "_scan_stale_payload", lambda: [("Claude/statusLine", "/old/repo/x.sh")])
+    monkeypatch.setattr(p, "_remediate_stale", lambda: calls.__setitem__("remediate", calls["remediate"] + 1) or True)
+
+    rc = p.run(brief=True, fix=False)
+    assert calls["remediate"] == 0          # report-only: never rewrites
+    assert rc == 1                          # still flags the stale finding
+
+
 def test_no_flags_when_everything_under_payload(monkeypatch, tmp_path):
     payload_bin = tmp_path / "wheel" / "m3_memory" / "bin"
     payload_bin.mkdir(parents=True)

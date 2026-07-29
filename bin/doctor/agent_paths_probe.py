@@ -189,10 +189,46 @@ def _scan_stale_payload() -> list[tuple[str, str]]:
     return out
 
 
-def run(brief: bool = False) -> int:
+def _remediate_stale() -> bool:
+    """Rewrite every m3-managed Claude command (memory + aux bridges + hooks +
+    statusline) to the CURRENT payload via the canonical writer,
+    generate_configs.install_claude_settings. This is what actually fixes the
+    stale-clone drift — `m3 setup` does not run it, and _heal_agent_settings only
+    touches the memory entry + dead hooks. Returns True if settings changed."""
+    try:
+        import shutil
+        import sys
+        import time
+        # Back up the user's settings.json first (their non-m3 hooks live there
+        # too) — same discipline as the --fix-hooks environment repair.
+        settings = Path.home() / ".claude" / "settings.json"
+        if settings.is_file():
+            bak = settings.with_name(f"settings.json.m3bak-{time.strftime('%Y%m%d-%H%M%S')}")
+            shutil.copy2(settings, bak)
+            print(f"  [fix] backed up settings.json -> {bak}")
+        bin_dir = _payload_bin()
+        if bin_dir not in sys.path:
+            sys.path.insert(0, bin_dir)
+        import generate_configs
+        res = generate_configs.install_claude_settings(assume_yes=True)
+        return bool(res.get("changed"))
+    except Exception as e:  # noqa: BLE001 — a failed fix must not crash the doctor
+        print(f"  [fix] could not rewrite Claude settings: {type(e).__name__}: {e}")
+        return False
+
+
+def run(brief: bool = False, fix: bool = False) -> int:
     rows = _scan_mcpservers_hosts() + _scan_opencode() + _scan_hermes()
     dead = [(lbl, path) for (lbl, path, is_dead) in rows if is_dead]
     stale = _scan_stale_payload()
+
+    # --fix: auto-repair the Claude stale-payload class via the canonical writer.
+    # (Dead paths on other hosts still route through `m3 setup`; only this class
+    # is self-healed here.)
+    if fix and stale and not dead:
+        print("  [fix] rewriting stale Claude commands to the current payload …")
+        if _remediate_stale():
+            stale = _scan_stale_payload()  # re-scan so the verdict reflects reality
 
     if brief:
         if not rows and not stale:
@@ -202,7 +238,7 @@ def run(brief: bool = False) -> int:
             print(f"⚠️  agent paths: {len(dead)} dead-path config(s) [{hosts}] — run `m3 setup`")
         elif stale:
             print(f"⚠️  agent paths: {len(stale)} config(s) point at a STALE payload clone "
-                  "(runs old code) — run `m3 setup`")
+                  "(runs old code) — run `m3 doctor --fix --fix-hooks`")
         else:
             print(f"✅ agent paths: OK ({len(rows)} wired host(s), no dead or stale paths)")
         return 1 if (dead or stale) else 0
@@ -230,8 +266,10 @@ def run(brief: bool = False) -> int:
         print(f"  status : [FAIL] {len(stale)} config(s) point at a payload clone that is")
         print("           NOT the installed wheel — the file exists but runs OLD hook/")
         print("           bridge code after an upgrade (the classic ~/.m3/repo drift).")
-        print("  fix    : re-run `m3 setup` — it re-wires every command to the current")
-        print("           payload (bin_dir()), so all servers agree on one fresh copy.")
+        print("  fix    : run `m3 doctor --fix --fix-hooks` — it backs up settings.json,")
+        print("           then rewrites every m3 command (memory, aux bridges, hooks,")
+        print("           statusline) to the current payload via the canonical writer,")
+        print("           so all servers agree on one fresh copy.")
     else:
         print("  status : OK — every wired host points at the live m3 payload.")
     return 1 if (dead or stale) else 0
