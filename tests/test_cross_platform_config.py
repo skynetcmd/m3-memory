@@ -138,6 +138,43 @@ def test_interpreter_falls_back_to_sys_executable_when_no_repo_venv(monkeypatch)
     assert not any(c.startswith(("python ", "python3 ")) for c in _all_commands(settings))
 
 
+def test_installed_layout_ignores_stray_venv_uses_sys_executable(monkeypatch):
+    """A `.venv` beside an INSTALLED wheel (…/site-packages/m3_memory/.venv) is a
+    stray leftover, not the canonical interpreter. In an installed layout the
+    resolver must skip that .venv and use sys.executable (the pipx interpreter
+    with m3's deps) — even though the stray .venv/bin/python exists on disk."""
+    installed_root = "/opt/pipx/venvs/m3-memory/lib/python3.14/site-packages/m3_memory"
+    stray_venv = installed_root + "/.venv/bin/python"
+    fake_exe = "/opt/pipx/venvs/m3-memory/bin/python"
+    real_exists = os.path.exists
+
+    def fake_exists(p):
+        s = str(p).replace("\\", "/")
+        return True if s in (stray_venv, fake_exe) else real_exists(p)
+
+    monkeypatch.setattr(g.os.path, "exists", fake_exists)
+    monkeypatch.setattr(g.sys, "executable", fake_exe)
+
+    assert g._is_installed_layout(installed_root) is True
+    cmd = g._resolve_python_cmd(installed_root)
+    assert cmd == fake_exe, cmd
+    assert "/.venv/" not in cmd, f"stray .venv leaked into interpreter: {cmd!r}"
+
+
+def test_source_checkout_still_uses_repo_venv(monkeypatch):
+    """A genuine source checkout (NOT under site-packages) keeps using its own
+    repo `.venv` — the installed-layout guard must not regress dev clones."""
+    dev_root = "/testroot/src/m3-memory"
+    dev_venv = dev_root + "/.venv/bin/python"
+    real_exists = os.path.exists
+    monkeypatch.setattr(g.os, "name", "posix")
+    monkeypatch.setattr(g.os.path, "exists",
+                        lambda p: True if str(p).replace("\\", "/") == dev_venv else real_exists(p))
+
+    assert g._is_installed_layout(dev_root) is False
+    assert g._resolve_python_cmd(dev_root) == dev_venv
+
+
 def test_bin_scripts_root_at_payload_bindir_not_the_clone(monkeypatch):
     """Hooks / bridges / statusline must resolve to the authoritative payload
     (bin_dir() = the installed wheel), NOT a ~/.m3/repo clone that upgrades leave

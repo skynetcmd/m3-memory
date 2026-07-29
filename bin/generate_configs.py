@@ -4,6 +4,47 @@ import shutil
 import sys
 
 
+def _is_installed_layout(m3_repo_root: str) -> bool:
+    """True when m3_repo_root is an INSTALLED package dir (…/site-packages/… or
+    …/dist-packages/…), as opposed to a source checkout. A `.venv` beside an
+    installed wheel is a stray leftover, never the canonical interpreter."""
+    r = m3_repo_root.replace("\\", "/")
+    return "/site-packages/" in r or "/dist-packages/" in r
+
+
+def _resolve_python_cmd(m3_repo_root: str) -> str:
+    """Resolve an ABSOLUTE interpreter that actually has m3's dependencies, so
+    hooks/MCP/statusline don't depend on whatever "python" is on PATH (the venv
+    may not be activated when a hook fires). Always forward-slash: Claude Code
+    runs hook commands through a shell (Git Bash on Windows) where backslashes
+    are escapes.
+
+    Order:
+      1. A repo-local .venv — ONLY for a genuine SOURCE checkout. A `.venv`
+         sitting beside an INSTALLED wheel (…/site-packages/m3_memory/.venv) is a
+         stray leftover, NOT the canonical interpreter; using it reintroduces the
+         exact footgun this resolver avoids (an interpreter that may lack deps or
+         later vanish). Skip the .venv guess whenever the root is an installed
+         layout.
+      2. sys.executable — the interpreter running this code (the pipx interpreter
+         under `m3 setup`; the repo .venv when a dev runs it). Definitionally has
+         m3's deps. (A bare `python3` on PATH was the original bug: no m3 deps, so
+         every generated bridge/hook died ModuleNotFound.)
+      3. Bare PATH python only as a last resort.
+    """
+    if os.name == "nt":
+        venv_py = os.path.join(m3_repo_root, ".venv", "Scripts", "python.exe")
+    else:
+        venv_py = os.path.join(m3_repo_root, ".venv", "bin", "python")
+    if os.path.exists(venv_py) and not _is_installed_layout(m3_repo_root):
+        return venv_py.replace("\\", "/")
+    if sys.executable and os.path.isabs(sys.executable) and os.path.exists(sys.executable):
+        return sys.executable.replace("\\", "/")
+    return "python" if os.name == "nt" else (
+        "python3" if shutil.which("python3") else "python"
+    )
+
+
 def generate_configs():
     """Generates gemini-settings.json and claude-settings.json from templates."""
     # m3_repo_root  = the repo directory (where bin/ lives)
@@ -12,34 +53,7 @@ def generate_configs():
     m3_state_root = os.path.dirname(m3_repo_root)
     config_dir    = os.path.join(m3_repo_root, "config")
 
-    # Resolve an ABSOLUTE interpreter that actually has m3's dependencies, so
-    # hooks/MCP/statusline don't depend on whatever "python" happens to be on PATH
-    # (the venv may not be activated when a hook fires). Always forward-slash:
-    # Claude Code runs hook commands through a shell (Git Bash on Windows) where
-    # backslashes are escapes.
-    #
-    # Order matters:
-    #   1. A repo-local .venv (dev clones keep their deps there).
-    #   2. sys.executable — the interpreter running this code. Under the shipped
-    #      pipx/`m3 setup` design there is NO repo .venv; deps live in the pipx
-    #      venv, and that IS sys.executable here. This is the correct production
-    #      interpreter. (Falling back to a bare `python3` on PATH was the bug: PATH
-    #      python has no m3 deps, so every generated bridge/hook died ModuleNotFound.)
-    #   3. Bare PATH python only as a last resort (frozen/embedded edge cases where
-    #      sys.executable isn't a usable standalone interpreter).
-    if os.name == "nt":
-        venv_py = os.path.join(m3_repo_root, ".venv", "Scripts", "python.exe")
-    else:
-        venv_py = os.path.join(m3_repo_root, ".venv", "bin", "python")
-    if os.path.exists(venv_py):
-        python_cmd = venv_py.replace("\\", "/")
-    elif sys.executable and os.path.isabs(sys.executable) and os.path.exists(sys.executable):
-        python_cmd = sys.executable.replace("\\", "/")
-    else:
-        # Last resort — a bare name resolved at hook time (python3 preferred off-Windows).
-        python_cmd = "python" if os.name == "nt" else (
-            "python3" if shutil.which("python3") else "python"
-        )
+    python_cmd = _resolve_python_cmd(m3_repo_root)
 
     # Embedder GGUF: discover a bge-m3 model, but do NOT push it into the MCP
     # server env. An env var forces every MCP-server process to open its OWN CUDA
