@@ -30,8 +30,35 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-PY="python"
-command -v python >/dev/null 2>&1 || PY="python3"
+# Resolve the PROJECT interpreter, not a bare system `python`. The drift and
+# shim gates below import the project's deps (pytest for the shim gate; the m3
+# packages for the drift gate), so a bare `python` on a venv-based checkout —
+# where the deps live in .venv, not system python — errors with
+# ModuleNotFoundError and FALSE-POSITIVE BLOCKS the push (observed 2026-07-29:
+# homebrew's bare python failed all 21 shim tests while .venv passed them).
+# Prefer, in order: an active virtualenv, a repo-local .venv, then python/python3.
+if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then
+  PY="$VIRTUAL_ENV/bin/python"
+elif [ -x "$ROOT/.venv/bin/python" ]; then
+  PY="$ROOT/.venv/bin/python"
+elif command -v python >/dev/null 2>&1; then
+  PY="python"
+else
+  PY="python3"
+fi
+
+# Both pytest/script gates below are LOCAL safety nets; CI (ci.yml) runs them
+# unconditionally on every push. If the resolved interpreter can't import the
+# deps (a bare checkout with no venv), a real check is impossible — so WARN
+# LOUDLY and defer to CI rather than BLOCK a legitimate push on a local
+# environment gap. A false block is worse than a check CI still enforces (§3:
+# loud, not silent).
+# Probe the deps the gates actually import: pytest (the shim gate's runner) plus
+# a couple of core project runtime deps (numpy, mcp) that the shim test and the
+# drift script pull in. pytest alone is a FALSE signal — a bare system python
+# often has pytest globally yet lacks the project's runtime deps, so the gate
+# would still error. All three present ⇒ this interpreter can run the gates.
+py_has_deps() { "$PY" -c 'import pytest, numpy, mcp' >/dev/null 2>&1; }
 
 # --- Determine the exact push range -----------------------------------------
 # git feeds the pre-push hook one line per ref on stdin:
@@ -77,10 +104,13 @@ if printf '%s\n' "$CHANGED" | grep -qE \
   '^bin/mcp_tool_catalog\.py$|^bin/mcp_proxy\.py$|^bin/gen_tool_manifest\.py$|^bin/gen_mcp_inventory\.py$|^docs/tools/MCP_CATALOG\.json$|^docs/MCP_TOOLS\.md$|^README\.md$|^docs/COMPARISON\.md$|^docs/MYTHS_AND_FACTS\.md$|^docs/tools/files_memory\.md$|^tests/test_tool_count_drift\.py$|^tests/test_mcp_catalog_manifest_fresh\.py$'
 then
   echo "[pre-push] 1/3 tool-catalog drift gate (catalog/docs touched — checking)"
-  "$PY" bin/check_tool_catalog_drift.py || {
+  if ! py_has_deps; then
+    echo "[pre-push] 1/3 drift gate — WARNING: '$PY' lacks project deps; deferring to CI." >&2
+    echo "           Install dev deps for local coverage: pip install -e '.[dev]'" >&2
+  elif ! "$PY" bin/check_tool_catalog_drift.py; then
     echo "[pre-push] BLOCKED: tool-catalog drift. Regenerate + commit, then re-push." >&2
     exit 1
-  }
+  fi
 else
   echo "[pre-push] 1/3 tool-catalog drift gate — skipped (no catalog/doc paths in push)"
 fi
@@ -96,12 +126,15 @@ fi
 if printf '%s\n' "$CHANGED" | grep -qE '^bin/memory/[a-z_]+\.py$|^bin/memory_core\.py$'
 then
   echo "[pre-push] 2/3 shim re-export integrity gate (memory shim touched — checking)"
-  "$PY" -m pytest tests/test_shim_reexports.py -q >/dev/null 2>&1 || {
+  if ! py_has_deps; then
+    echo "[pre-push] 2/3 shim gate — WARNING: '$PY' lacks project deps; deferring to CI." >&2
+    echo "           Install dev deps for local coverage: pip install -e '.[dev]'" >&2
+  elif ! "$PY" -m pytest tests/test_shim_reexports.py -q >/dev/null 2>&1; then
     echo "[pre-push] BLOCKED: a memory shim re-export is missing (likely stripped" >&2
     echo "  by 'ruff --fix'). Run: pytest tests/test_shim_reexports.py -q" >&2
     echo "  Restore the dropped 'from .<sibling> import ...' + mark it # noqa: F401." >&2
     exit 1
-  }
+  fi
 else
   echo "[pre-push] 2/3 shim re-export integrity gate — skipped (no memory shim in push)"
 fi
