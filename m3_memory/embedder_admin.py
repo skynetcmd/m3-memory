@@ -590,10 +590,13 @@ def cmd_install(args: argparse.Namespace) -> int:
     print(f"[=] using bundled GGUF: {gguf} ({size_mb} MB)")
 
     _warn_if_port_busy("install")
-    print(f"[~] registering m3-embed-server (concurrency={args.concurrency})")
+    # getattr default: cmd_start delegates here to auto-install, and the `start`
+    # subparser has no --concurrency flag (install's default of 2 applies).
+    concurrency = getattr(args, "concurrency", 2)
+    print(f"[~] registering m3-embed-server (concurrency={concurrency})")
     extra: list[str] = []
-    if args.concurrency:
-        extra += ["--concurrency", str(args.concurrency)]
+    if concurrency:
+        extra += ["--concurrency", str(concurrency)]
     rc = _service_cmd(binary, gguf, "install", *extra)
     if rc != 0:
         # An already-registered service is NOT a failure. Older embed-server
@@ -679,8 +682,16 @@ def _binary_and_gguf_or_fail() -> Optional[tuple[Path, Path]]:
 def cmd_start(args: argparse.Namespace) -> int:
     pair = _binary_and_gguf_or_fail()
     if not pair: return 1
+    binary, gguf = pair
+    # `start` on a service that was never registered used to fail with generic
+    # start-troubleshooting advice (systemd/nohup), not the real fix. When the
+    # binary exists but the service isn't registered, auto-install it (locate
+    # GGUF + register + start) so `m3 embedder start` "just works".
+    if not _service_reports_installed(binary, gguf):
+        print("[~] m3-embed-server is not registered as a service — installing it now.")
+        return cmd_install(args)
     _warn_if_port_busy("start")
-    return _service_cmd(*pair, "start")
+    return _service_cmd(binary, gguf, "start")
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
