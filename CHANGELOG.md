@@ -21,6 +21,21 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.12] — 2026-07-29 — `doctor --fix --fix-hooks` repairs wrong roots / unpinned hooks
+
+### Fixed
+- **`m3 doctor --fix --fix-hooks` could not fix an install whose paths were fine
+  but whose roots/hook-pins were wrong.** The stale-payload remediation only ran
+  when script paths were *stale*; an install could have correct wheel paths yet
+  carry `M3_MEMORY_ROOT=<site-packages>` (no engine/config roots) in every server
+  env and unpinned capture hooks — and the other repair path
+  (`environment_probe.repair` → `chatlog_init.apply_claude_settings`) is a no-op on
+  an existing chatlog entry (it only adds when absent, never upgrades). So nothing
+  repaired it. The canonical writer (`install_claude_settings`) now runs under
+  `--fix-hooks` whenever anything differs — not only on stale paths — with a
+  dry-run gate keeping it idempotent. `m3 doctor --fix --fix-hooks` now repoints
+  paths, pins the hook roots, and corrects the server env blocks in one pass.
+
 ## [2026.7.29.11] — 2026-07-29 — Capture-hook writer also pins the roots
 
 ### Fixed
