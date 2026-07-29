@@ -21,6 +21,22 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.9] — 2026-07-29 — Config generation writes correct decoupled roots
+
+### Fixed
+- **Generated MCP/hook configs pointed at the wrong data roots.** `generate_configs`
+  set `M3_MEMORY_ROOT` to the *code* location (`…/site-packages` under an installed
+  wheel), omitted `M3_ENGINE_ROOT`/`M3_CONFIG_ROOT` from the server env blocks, and
+  emitted capture hooks with no inline root pins. Because the MCP server doesn't
+  inherit the shell env and hooks inherit the agent's process env (not the server
+  env block), this is the CLAUDE.md "split-brain" hazard — and the `doctor --fix
+  --fix-hooks` stale-payload rewrite could turn a correctly-rooted config into a
+  broken one (server resolving `site-packages/engine`, hooks unpinned). Config
+  generation now resolves the three data roots properly and writes all three into
+  every server env block **and** inline-pins `M3_ENGINE_ROOT`/`M3_CONFIG_ROOT` on
+  every capture hook. (If you ran `m3 doctor --fix --fix-hooks` on 2026.7.29.7/.8,
+  upgrade and re-run it — this release rewrites the roots correctly.)
+
 ## [2026.7.29.8] — 2026-07-29 — `m3 doctor --fix` actually runs the payload repairs
 
 ### Fixed
