@@ -21,6 +21,39 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.5] — 2026-07-29 — Setup & diagnostics robustness
+
+### Fixed
+- **Wired hooks/bridges could run stale code after an upgrade.** The payload
+  ships inside the wheel, but config generation rooted bin/ scripts at
+  `<repo>/bin`, so after `pip install -U` the core memory bridge followed the
+  wheel while the aux bridges, chatlog **capture hooks**, and statusline kept
+  pointing at a `~/.m3/repo` clone the upgrade never refreshed — running old code
+  silently. Every generated command is now rooted at the authoritative payload
+  (`bin_dir()`), so all servers agree on one fresh copy. `m3 doctor` gained
+  **stale-payload detection**: an m3 command whose script exists but isn't under
+  the current payload is reported (the old dead-path check missed it) with the
+  fix — re-run `m3 setup`.
+- **Generated hook/bridge/statusline commands could launch an interpreter with
+  no m3 dependencies.** Config generation preferred a `<repo>/.venv` the pipx
+  design never creates, then fell back to a bare `python3` on PATH (no deps). It
+  now uses the pipx interpreter running setup (absolute, has the deps).
+- **`chatlog_status` and `m3 doctor` disagreed about hook wiring.** status echoed
+  an init-time config flag (often False) while doctor verified the Stop/PreCompact
+  entries against disk. status now reports a `hook_wiring` block sourced from the
+  same check, so they can't diverge.
+- **`reembed_space` errored on the chatlog store.** `agent_chatlog.db`'s
+  embeddings table predates the `vector_kind` column; the scan/delete now adapt to
+  that schema (and gained `--all-dbs` to process both engine stores).
+
+### Added
+- **`m3 embedder start` auto-installs the service when it isn't registered**
+  (locate GGUF → register → start) instead of failing with generic advice.
+- **Fleet embed-model guardrail on sync.** `pg_sync` warns loudly when a node and
+  the warehouse embed with different model families (bge-m3 vs qwen3 vs nomic),
+  which silently mixes incomparable vector spaces and degrades ranking — pointing
+  the operator to converge and re-embed.
+
 ## [2026.7.29.4] — 2026-07-29 — Local SLM features work; setup survives non-interactive installs
 
 ### Fixed
