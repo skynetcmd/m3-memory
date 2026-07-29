@@ -67,12 +67,17 @@ def _should_yield_to_user(min_idle_s: float = 30.0) -> "str | None":
 async def _run(apply: bool, threshold: int, stale_days: int, source_type: str) -> str:
     import memory_maintenance
 
-    # Hard gate: writing requires BOTH --apply and M3_CONSOLIDATION_AUTO=1.
-    auto = os.environ.get("M3_CONSOLIDATION_AUTO", "0") == "1"
+    # Hard gate: writing requires BOTH --apply and the consolidation_auto toggle.
+    # Resolved from the cognitive-loop config FILE (config > env > default), NOT a
+    # bare env var: the loop runs under launchd/systemd, which don't inherit shell
+    # env, so an env-only gate is permanently off under the daemon (DESIGN §3).
+    from m3_core.autonomy import autonomy_flag
+    auto = autonomy_flag("consolidation_auto", "M3_CONSOLIDATION_AUTO")
     dry_run = not (apply and auto)
     if apply and not auto:
-        prefix = ("[skipped-apply] M3_CONSOLIDATION_AUTO is not set — running DRY-RUN. "
-                  "Set M3_CONSOLIDATION_AUTO=1 to enable autonomous belief writes.\n")
+        prefix = ("[skipped-apply] consolidation_auto is not enabled — running DRY-RUN. "
+                  "Set consolidation_auto=true in .cognitive_loop_config.json (or "
+                  "M3_CONSOLIDATION_AUTO=1) to enable autonomous belief writes.\n")
     else:
         prefix = ""
 

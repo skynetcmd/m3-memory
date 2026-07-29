@@ -978,7 +978,10 @@ async def run_chatlog_prune_pass(args):
                                   args.chatlog_prune_threshold):
         logger.debug("No chatlog-prune work (no aged backlog over threshold). Skipping.")
         return
-    apply = os.environ.get("M3_CHATLOG_PRUNE_AUTO", "0").lower() in ("1", "true", "yes")
+    # Config file > env > default (see consolidate_beliefs): a bare env gate is
+    # dead under launchd/systemd, which don't inherit shell env (DESIGN §3).
+    from m3_core.autonomy import autonomy_flag
+    apply = autonomy_flag("chatlog_prune_auto", "M3_CHATLOG_PRUNE_AUTO")
     logger.info("Starting chatlog noise-prune pass (apply=%s)...", apply)
     try:
         from types import SimpleNamespace
@@ -1468,6 +1471,10 @@ def main():
     # Seed .governor_config.json with current defaults if absent, so the live
     # tuning knob always exists and is discoverable (idempotent; never clobbers).
     ensure_governor_config()
+    # Same for the autonomous-write toggles: the daemon can't read shell env, so
+    # seed the config file it CAN read, discoverable for the operator to flip on.
+    from m3_core.autonomy import ensure_autonomy_config
+    ensure_autonomy_config()
 
     try:
         asyncio.run(main_loop(args))

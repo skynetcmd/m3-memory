@@ -1181,6 +1181,8 @@ def main():
             sys.path.insert(0, str(script_dir))
             from m3_sdk import ensure_governor_config
             ensure_governor_config()
+            from m3_core.autonomy import ensure_autonomy_config
+            ensure_autonomy_config()
         except Exception:
             pass
 
