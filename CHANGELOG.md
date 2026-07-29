@@ -21,6 +21,21 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.6] — 2026-07-29 — Env-var M3_ namespacing (backward-compatible)
+
+### Changed
+- **m3-owned environment variables are now namespaced under `M3_`.** 32 vars
+  read bare, unprefixed names (`EMBED_DIM`, `DEDUP_THRESHOLD`, `OBSERVER_PROFILE`,
+  `LM_URL`, `MCP_PROXY_HOST`, `CONTRADICTION_THRESHOLD`, …) — a protocol violation
+  and a collision risk with other tools. Each is now resolved
+  **new-name-first, then the deprecated bare name, then the default**. The old
+  names keep working for at least one release but print a **one-time deprecation
+  warning** naming the `M3_` replacement, and `m3 doctor` lists every deprecated
+  name still in use. Fully backward-compatible — no deployment breaks; migrate by
+  renaming `X` → `M3_X` in your shell rc / secret store. Third-party API keys,
+  `AGENT_OS_MASTER_KEY`, and OS/system vars are deliberately left unchanged. See
+  `docs/ENVIRONMENT_VARIABLES.md`.
+
 ## [2026.7.29.5] — 2026-07-29 — Setup & diagnostics robustness
 
 ### Fixed
