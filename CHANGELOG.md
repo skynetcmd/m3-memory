@@ -21,6 +21,26 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.7] — 2026-07-29 — Stale-payload agent configs become fixable
+
+### Fixed
+- **`m3 doctor` flagged 7 "stale payload clone" configs but the advised remedy
+  didn't fix them.** After an upgrade, the aux bridges, chatlog capture hooks, and
+  statusline in `~/.claude/settings.json` still pointed at a `~/.m3/repo` clone
+  (running old code), while only the `memory` MCP followed the wheel. The doctor
+  said "run `m3 setup`", but setup never runs the canonical settings writer, so
+  nothing changed. `m3 doctor --fix --fix-hooks` now rewrites **every** m3-managed
+  Claude command (memory + aux bridges + hooks + statusline) to the current
+  payload via `install_claude_settings`, after backing up `settings.json`. It
+  shares the existing `--fix-hooks` opt-in gate (settings.json is user-owned). The
+  advice text now points at the working remedy.
+- **A stray `.venv` beside the installed wheel could become the hook interpreter.**
+  A leftover `…/site-packages/m3_memory/.venv` (from a prior op, not shipped in the
+  wheel) made config generation pick `<repo>/.venv/bin/python` when the package dir
+  was the install location — an interpreter that may lack deps or vanish. The
+  resolver now skips the repo-`.venv` guess in an installed layout and uses the
+  pipx interpreter; genuine source checkouts still use their repo `.venv`.
+
 ## [2026.7.29.6] — 2026-07-29 — Env-var M3_ namespacing (backward-compatible)
 
 ### Changed
