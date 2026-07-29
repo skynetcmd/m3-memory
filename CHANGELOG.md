@@ -21,6 +21,19 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.2] — 2026-07-29 — Listing copy: end-user framing and one consistent benchmark figure
+
+### Changed
+- **Plugin marketplace cards** (Claude Code + Antigravity) now lead with what m3
+  does for you — a private memory that lives on your own machine, remembers across
+  sessions, works offline, no cloud — instead of opening with implementation jargon.
+  m3 is for everyday desktop users, not only developers, and the cards now read that
+  way.
+- **MCP registry description** now quotes the same benchmark figure as everywhere
+  else — `99.2% LongMemEval-S retrieval@10` — where it previously showed a different
+  number. (No product/runtime change in this release; publishing a new version is
+  the only way to refresh the registry entry, whose versions are immutable.)
+
 ## [2026.7.29.1] — 2026-07-29 — Pre-push hook no longer false-blocks on a venv-based checkout
 
 ### Fixed
