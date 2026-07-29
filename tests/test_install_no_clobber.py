@@ -64,7 +64,7 @@ def isolated_roots(tmp_path, monkeypatch):
     # Silence prompts / config writes; never hit the network.
     monkeypatch.setattr(installer, "_prompt_endpoint_choice", lambda *a, **k: None)
     monkeypatch.setattr(installer, "_prompt_capture_mode", lambda *a, **k: "none")
-    monkeypatch.setattr(installer, "_prompt_cognitive_loop", lambda *a, **k: False)
+    monkeypatch.setattr(installer, "_prompt_and_install_cognitive_loop", lambda *a, **k: None)
     monkeypatch.setattr(installer, "save_config", lambda *a, **k: None)
     return m3_sdk, installer
 

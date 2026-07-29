@@ -665,14 +665,53 @@ def _prompt_capture_mode(interactive: bool, capture_flag: Optional[str]) -> Opti
     return {"1": "both", "2": "precompact", "3": "stop", "4": "none"}.get(reply)
 
 
-def _prompt_cognitive_loop(interactive: bool, cognitive_loop_flag: bool) -> bool:
-    """Passthrough for the --cognitive-loop install flag.
+def _register_cognitive_loop_task() -> None:
+    """Register the cognitive-loop background service (launchd / systemd /
+    schtasks) via ``install_schedules.py --add cognitive-loop``. Best-effort;
+    never aborts install. The loop runs entity extraction, belief consolidation,
+    the reflector, and chatlog-prune — idling when there's no work."""
+    try:
+        script = str(Path(__file__).resolve().parent.parent / "bin" / "install_schedules.py")
+        if not os.path.exists(script):
+            return
+        subprocess.run([_python_exe(), script, "--add", "cognitive-loop"],
+                       check=False, capture_output=True, text=True)
+    except Exception:  # noqa: BLE001 — never fail install on the task step
+        pass
 
-    Stub today: returns the flag verbatim. Reserved as the prompt site for
-    when the cognitive-loop install path lands and we want to ask
-    interactively (mirrors _prompt_endpoint_choice / _prompt_capture_mode).
-    """
-    return cognitive_loop_flag
+
+def _prompt_and_install_cognitive_loop(interactive: bool, forced: bool = False) -> None:
+    """Offer the autonomous cognitive loop at install/upgrade (default yes).
+
+    Closes a real operational gap: this was NEVER installed by setup — the wiring
+    was a placeholder (``del cognitive_loop_choice``), so the autonomous
+    enrichment engine shipped OFF on every install and users had to know to run
+    ``m3 schedules --add cognitive-loop`` by hand. Mirrors
+    _prompt_and_install_dashboard: interactive prompt (default yes); ``forced``
+    (the --cognitive-loop flag) installs even non-interactively; a headless run
+    without the flag leaves it (add later). Best-effort — a failed register step
+    never aborts the install."""
+    try:
+        if forced:
+            enable = True
+        elif not interactive:
+            return  # headless without --cognitive-loop: leave it; `m3 schedules --add cognitive-loop` later
+        else:
+            print()
+            print("  Cognitive loop (recommended): a background service that keeps memory")
+            print("  enriched — entity extraction, belief consolidation, contradiction")
+            print("  detection, chatlog pruning. Auto-starts on boot; idles when idle.")
+            ans = input("  Enable the autonomous cognitive loop? [Y/n] ").strip().lower()
+            enable = ans not in ("n", "no")
+        if not enable:
+            print("  Skipped. Enable later with:  m3 schedules --add cognitive-loop")
+            return
+        _register_cognitive_loop_task()
+        print("    [OK] cognitive loop installed (background enrichment enabled).")
+    except (EOFError, KeyboardInterrupt):
+        print()
+    except Exception as e:  # noqa: BLE001 — optional step, never abort install
+        print(f"    [!] cognitive loop step skipped ({e}); enable later:  m3 schedules --add cognitive-loop")
 
 
 def _dashboard_deps_present() -> bool:
@@ -1479,12 +1518,13 @@ def install_m3(
     # promptly and the clone/download doesn't block on input below.
     endpoint_choice = _prompt_endpoint_choice(interactive, endpoint)
     capture_choice = _prompt_capture_mode(interactive, capture_mode)
-    cognitive_loop_choice = _prompt_cognitive_loop(interactive, cognitive_loop)
-    del cognitive_loop_choice  # placeholder: wired downstream once the cognitive-loop install path lands
     db_backend_choice = _prompt_db_backend(interactive, db_backend)  # None=sqlite, or ("postgres", dsn)
     # Offer the web dashboard at install/upgrade time (default yes) — so existing
     # users who run `m3 update` are offered it too, not just first-time `m3 setup`.
     _prompt_and_install_dashboard(interactive)
+    # Enable the autonomous cognitive loop (default yes). Was a placeholder that
+    # discarded the choice, so the enrichment engine shipped OFF on every install.
+    _prompt_and_install_cognitive_loop(interactive, forced=cognitive_loop)
 
     # Preserve user data across --force / update. The repo tree under
     # repo_path/memory/ holds chatlog DBs, the chatlog config, and the
