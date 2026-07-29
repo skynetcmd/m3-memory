@@ -69,13 +69,20 @@ DEFAULT_PROFILE = "entities_local_qwen"
 DEFAULT_VOCAB_YAML = REPO_ROOT / "config" / "lists" / "entity_graph_m3.yaml"
 BACKUP_DIR = Path(get_m3_root()) / "backups" / "entities"
 
-# By default, only types where named-entity extraction is sensible.
+# By default, only DURABLE types where named-entity extraction is high-value.
 # Curated content (note/decision/knowledge/reference/fact/plan/document/
-# infrastructure/network_config/local_device/home_automation) is INCLUDED
-# here because — unlike Observer/user-fact extraction — entity extraction
-# DOES work on these. They're full of named tools, hosts, files, etc.
+# infrastructure/network_config/local_device/home_automation) is full of named
+# tools, hosts, files, etc. `observation` is the CONSOLIDATED distillate of
+# chatlogs (the durable signal the Observer keeps), so it IS included.
+#
+# CHATLOG TYPES (message, conversation, chat_log) are DELIBERATELY EXCLUDED:
+# they are transient status/progress whose enrichment value decays to ~null once
+# the work lands, and extracting from them pollutes the entity graph with
+# ephemeral nodes (commit hashes, intermediate states) — negative ROI. Chatlogs
+# are handled by the decay/prune + consolidation path; entity extraction runs on
+# the durable distillate (`observation`), NOT the raw chatter. Pass
+# `--types message,chat_log,...` to override for a deliberate one-off.
 DEFAULT_TYPES = (
-    "message", "conversation", "chat_log",
     "note", "decision", "knowledge", "reference", "fact", "plan",
     "document", "observation",
     "project", "config", "infrastructure", "network_config",
