@@ -466,21 +466,25 @@ async def process_conversation(
     # invisible to the metric (memory 914843f8, 2026-05-05).
     session_date = "unknown"
     source_session_id = ""
+    # metadata_json comes back as str on SQLite but an already-parsed dict on
+    # PostgreSQL/JSONB — a bare json.loads() raises TypeError on PG (swallowed
+    # below), silently dropping session_id so observations become invisible to
+    # the SHR metric (the failure the comment above warns about). Route through
+    # the seam's json_column_to_dict(), which normalizes either shape.
+    from memory.backends import dialect as _dialect
+    _d = _dialect()
     for t in turns:
         meta = t[5] if len(t) > 5 else None
         if meta:
-            try:
-                m = json.loads(meta)
-                if not source_session_id:
-                    sid = m.get("session_id")
-                    if sid:
-                        source_session_id = str(sid)
-                if m.get("session_date") and session_date == "unknown":
-                    session_date = str(m["session_date"]).split(" ")[0].replace("/", "-")
-                if source_session_id and session_date != "unknown":
-                    break
-            except Exception:
-                pass
+            m = _d.json_column_to_dict(meta)
+            if not source_session_id:
+                sid = m.get("session_id")
+                if sid:
+                    source_session_id = str(sid)
+            if m.get("session_date") and session_date == "unknown":
+                session_date = str(m["session_date"]).split(" ")[0].replace("/", "-")
+            if source_session_id and session_date != "unknown":
+                break
     if session_date == "unknown" and turns:
         # last-resort: use created_at first 10 chars (ISO date prefix)
         ca = turns[0][4] if len(turns[0]) > 4 and turns[0][4] else None

@@ -1077,19 +1077,21 @@ async def memory_search_scored_impl(
     intent_user_fact_active = INTENT_ROUTING and intent_hint == "user-fact"
     role_boosts: list[float] = [0.0] * len(rows)
     if intent_user_fact_active:
+        # metadata_json is str on SQLite but an already-parsed dict on PG/JSONB.
+        # The old `'"role"' not in meta_raw` substring guard silently matched
+        # nothing on PG (dict key-membership test), so the boost never applied
+        # there. Route the whole-column read through the seam normalizer instead.
+        from .backends import dialect as _dialect
+        _d = _dialect()
         for i, row in enumerate(rows):
             try:
                 meta_raw = row["metadata_json"] if "metadata_json" in row.keys() else None
             except (IndexError, KeyError):
                 meta_raw = None
-            if not meta_raw or '"role"' not in meta_raw or '"user"' not in meta_raw:
+            if not meta_raw:
                 continue
-            try:
-                meta = json.loads(meta_raw)
-                if isinstance(meta, dict) and meta.get("role") == "user":
-                    role_boosts[i] = INTENT_USER_FACT_BOOST
-            except (json.JSONDecodeError, TypeError):
-                pass
+            if _d.json_column_to_dict(meta_raw).get("role") == "user":
+                role_boosts[i] = INTENT_USER_FACT_BOOST
 
     # Procedural ranking: on a 'procedural' intent ("how do I X"), surface the
     # reusable `procedure`-type memories. Additive term keyed on the single head

@@ -654,14 +654,16 @@ def build_db_selector_html(selected_db: str) -> str:
     </div>
     """
 
-def parse_metadata(metadata_json: str) -> tuple[list, dict]:
-    """Helper to extract tags and extras from JSON string."""
+def parse_metadata(metadata_json) -> tuple[list, dict]:
+    """Helper to extract tags and extras from a metadata_json column value.
+
+    The column comes back as a str on SQLite but an already-parsed dict on
+    PostgreSQL/JSONB; a bare json.loads() would TypeError on PG and silently
+    return no tags. Route through the seam normalizer, which handles both.
+    """
     if not metadata_json:
         return [], {}
-    try:
-        meta = json.loads(metadata_json)
-    except Exception:
-        return [], {}
+    meta = _active_backend().dialect().json_column_to_dict(metadata_json)
     tags = meta.get("tags") or []
     extras = {k: v for k, v in meta.items() if k != "tags" and v}
     return tags, extras
