@@ -21,6 +21,27 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.3] — 2026-07-29 — Setup actually enables the background enrichment engine
+
+### Fixed
+- **`m3 setup` never installed the cognitive loop.** The background service that
+  keeps memory enriched — entity extraction, belief consolidation, contradiction
+  detection, chatlog pruning — was never registered by setup: the installer
+  collected the choice and then discarded it (a leftover placeholder), so even an
+  explicit `--cognitive-loop` flag did nothing. The autonomous engine shipped
+  **off** on every install, and users had to know to run
+  `m3 schedules --add cognitive-loop` by hand. Setup now offers it (default yes)
+  and installs it, honoring the flag. (Already-installed users: enable it with
+  `m3 schedules --add cognitive-loop`.)
+
+### Changed
+- **Entity extraction now targets durable content, not transient chatlogs.**
+  It no longer runs on `message`/`conversation`/`chat_log` — those are transient
+  status/progress whose value decays once the work lands, and extracting from
+  them polluted the entity graph with ephemeral nodes (commit hashes,
+  intermediate states). Extraction now runs on curated/core memories plus the
+  consolidated `observation` distillate. Pass `--types` to override for a one-off.
+
 ## [2026.7.29.2] — 2026-07-29 — Listing copy: end-user framing and one consistent benchmark figure
 
 ### Changed
