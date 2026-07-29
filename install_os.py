@@ -59,6 +59,30 @@ def setup_master_key(python_exe):
     print("This key will be securely stored in your native OS keyring (macOS Keychain,")
     print("Windows Credential Manager, or Linux Secret Service) and NEVER synced.")
 
+    # Non-interactive path (Claude Code Bash / SSH / CI): getpass() on a stdin
+    # with no TTY raises EOFError, which used to abort the ENTIRE post-install
+    # (incl. later config regen). Never prompt without a TTY. If the key is in
+    # the env, store it silently; otherwise skip (it is already "press Enter to
+    # skip" for interactive users) and let the user configure it later.
+    if not sys.stdin.isatty():
+        env_key = os.environ.get("AGENT_OS_MASTER_KEY", "").strip()
+        if env_key:
+            script = (
+                "import os, keyring\n"
+                "keyring.set_password('system', 'AGENT_OS_MASTER_KEY',"
+                " os.environ['AGENT_OS_MASTER_KEY'])\n"
+                "print('\\u2705 Saved AGENT_OS_MASTER_KEY to native OS keyring"
+                " (from environment).')\n"
+            )
+            env = os.environ.copy()
+            env["AGENT_OS_MASTER_KEY"] = env_key
+            run_cmd([python_exe, "-c", script], env=env)
+        else:
+            print("Non-interactive session: skipping master key prompt. "
+                  "Set AGENT_OS_MASTER_KEY in the environment or run "
+                  "`m3 setup` in a terminal to configure synced API keys later.")
+        return
+
     while True:
         master_key = getpass.getpass("\nEnter the AGENT_OS_MASTER_KEY (or press Enter to skip for now): ").strip()
         if not master_key:
