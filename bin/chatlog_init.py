@@ -402,10 +402,18 @@ def apply_gemini_settings() -> tuple[bool, str]:
     except Exception:
         pass  # best-effort; not blocking
 
-    # 1. mcpServers.memory — points Gemini at the mcp-memory CLI.
+    # 1. mcpServers.memory — the CANONICAL entry (interpreter + bridge + decoupled
+    #    roots), REPLACING a stale or roots-less one. Same shape + helper as
+    #    installer._register_gemini_mcp, so Gemini has ONE self-healing memory-entry
+    #    writer instead of an add-only console-script stub that carried no roots.
+    try:
+        from m3_memory.installer import _canonical_memory_server
+        canonical_mem = _canonical_memory_server()
+    except Exception:  # noqa: BLE001 — degraded fallback, still callable
+        canonical_mem = {"command": "mcp-memory"}
     mcp_servers = existing.setdefault("mcpServers", {})
-    if "memory" not in mcp_servers:
-        mcp_servers["memory"] = {"command": "mcp-memory"}
+    if mcp_servers.get("memory") != canonical_mem:
+        mcp_servers["memory"] = canonical_mem
         actions.append("memory MCP")
 
     # 2. security.auth.selectedType — required by Gemini >=0.39 for headless
@@ -421,12 +429,17 @@ def apply_gemini_settings() -> tuple[bool, str]:
         auth["selectedType"] = "oauth-personal"
         actions.append("auth method")
 
-    # 3. hooks.SessionEnd — chatlog ingest on session exit.
+    # 3. hooks.SessionEnd — chatlog ingest on session exit. REPLACE any existing
+    #    m3-owned (chatlog) entry with the freshly-built, root-pinned command so a
+    #    stale or unpinned onExit hook is UPGRADED. The old add-only version skipped
+    #    whenever an entry was already present and so could never fix one. User
+    #    entries in SessionEnd are preserved.
     hooks = existing.setdefault("hooks", {})
-    session_end = hooks.get("SessionEnd") or []
-    if not any("chatlog" in json.dumps(e).lower() for e in session_end):
-        session_end.append({"hooks": [{"type": "command", "command": hook_cmd}]})
-        hooks["SessionEnd"] = session_end
+    current_se = hooks.get("SessionEnd") or []
+    user_se = [e for e in current_se if "chatlog" not in json.dumps(e).lower()]
+    desired_se = user_se + [{"hooks": [{"type": "command", "command": hook_cmd}]}]
+    if current_se != desired_se:
+        hooks["SessionEnd"] = desired_se
         actions.append("SessionEnd hook")
 
     if not actions:
