@@ -21,6 +21,20 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.10] — 2026-07-29 — `doctor --fix` embed_backfill actually runs
+
+### Fixed
+- **`m3 doctor --fix` reported `[error] embed_backfill: … can't open file`.** Two
+  bugs: (1) the script path was built with a stray extra `bin/` segment (doctor.py
+  is already in `bin/memory/`), pointing at a nonexistent
+  `bin/bin/embed_backfill.py`; and (2) on macOS a venv's python symlinks to the
+  base framework python, so `sys.executable` can resolve to an interpreter whose
+  site-packages lacks m3's deps — the child would then die `ModuleNotFoundError`.
+  The path is now correct and the child inherits `PYTHONPATH` from the running
+  interpreter, so it finds m3's modules regardless of which python
+  `sys.executable` points at. (This step only became reachable once 2026.7.29.8
+  made `m3 doctor --fix` run the payload repair pass.)
+
 ## [2026.7.29.9] — 2026-07-29 — Config generation writes correct decoupled roots
 
 ### Fixed
