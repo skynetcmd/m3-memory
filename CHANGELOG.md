@@ -21,6 +21,20 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.8] — 2026-07-29 — `m3 doctor --fix` actually runs the payload repairs
+
+### Fixed
+- **`m3 doctor --fix` silently skipped the payload doctor's entire repair pass.**
+  The `doctor` subparser consumed `--fix` into its own flag (for the
+  installer-level agent-path repoint) and never forwarded it to the payload
+  doctor (`bin/memory_doctor.py`), which therefore ran in **report mode**. So the
+  shared-embedder restart, the DB heal, and the new agent stale-payload rewrite
+  never fired under `m3 doctor --fix` — the advised fixes did nothing. `m3 doctor`
+  now forwards `--fix`/`--fix-hooks` to the payload doctor, and `--fix-hooks` is a
+  documented flag. `m3 doctor --fix --fix-hooks` now genuinely repoints stale
+  Claude configs to the current payload (verified: 0 stale refs after), and
+  `m3 doctor --fix` runs the shared-embedder repair.
+
 ## [2026.7.29.7] — 2026-07-29 — Stale-payload agent configs become fixable
 
 ### Fixed
