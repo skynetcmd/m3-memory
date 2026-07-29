@@ -133,6 +133,12 @@ def fail(
 ) -> None:
     """Increment attempts + record last_error. Row stays in queue
     until attempts hits MAX_ATTEMPTS, after which pop_batch skips it."""
+    # PORTABILITY BOUNDARY: this whole module is SQLite-only by design — `db` is
+    # typed sqlite3.Connection and the enrich subsystem short-circuits on any
+    # non-SQLite backend (enrich/prep.py returns early when active_backend().name
+    # != "sqlite"). The literal `?` binds and strftime()/'now' below are therefore
+    # safe here. If enrich is ever un-gated for PostgreSQL, convert every query in
+    # this file to the seam (dialect.param()/now()), not just this one.
     _validate_table(table)
     db.execute(
         f"""

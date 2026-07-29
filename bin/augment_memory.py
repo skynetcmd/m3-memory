@@ -40,6 +40,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR / "bin"))
 
 from m3_sdk import add_database_arg, resolve_db_path  # noqa: E402
+from memory.backends import dialect  # noqa: E402
 from memory_core import _db, memory_link_impl  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(name)s: [%(levelname)s] %(message)s")
@@ -55,22 +56,28 @@ async def link_adjacent_turns(user_id: str = "", limit: int = 10000) -> int:
     not zero-cost (it hits the link impl once per adjacent pair).
     """
     logger.info("Scanning memory_items for adjacency candidates...")
+    # Seam primitives: literal '?' and json_extract() are SQLite-only. Route
+    # binds through param() and the JSON cast through json_extract_int() so this
+    # adjacency scan runs on PostgreSQL as well as SQLite.
+    _d = dialect()
+    _p = _d.param()
+    _turn_idx = _d.json_extract_int("metadata_json", "turn_index")
     clauses = [
         "is_deleted = 0",
         "conversation_id IS NOT NULL",
-        "json_extract(metadata_json, '$.turn_index') IS NOT NULL",
+        f"{_turn_idx} IS NOT NULL",
     ]
     params: list = []
     if user_id:
-        clauses.append("user_id = ?")
+        clauses.append(f"user_id = {_p}")
         params.append(user_id)
     where = " AND ".join(clauses)
     sql = (
         f"SELECT id, conversation_id, "
-        f"       CAST(json_extract(metadata_json, '$.turn_index') AS INTEGER) AS turn_index "
+        f"       {_turn_idx} AS turn_index "
         f"FROM memory_items WHERE {where} "
         f"ORDER BY conversation_id, turn_index "
-        f"LIMIT ?"
+        f"LIMIT {_p}"
     )
     params.append(limit)
 
@@ -107,16 +114,18 @@ async def enrich_user_titles(user_id: str = "", limit: int = 200) -> int:
     """
     from slm_intent import extract_entities
 
+    _d = dialect()
+    _p = _d.param()
     clauses = [
         "is_deleted = 0",
-        "json_extract(metadata_json, '$.role') = 'user'",
+        f"{_d.json_extract_text('metadata_json', 'role')} = 'user'",
     ]
     params: list = []
     if user_id:
-        clauses.append("user_id = ?")
+        clauses.append(f"user_id = {_p}")
         params.append(user_id)
     where = " AND ".join(clauses)
-    sql = f"SELECT id, content, title FROM memory_items WHERE {where} LIMIT ?"
+    sql = f"SELECT id, content, title FROM memory_items WHERE {where} LIMIT {_p}"
     params.append(limit)
 
     with _db() as db:
@@ -152,7 +161,10 @@ async def enrich_user_titles(user_id: str = "", limit: int = 200) -> int:
         if new_title == title:
             continue
         with _db() as db:
-            db.execute("UPDATE memory_items SET title = ? WHERE id = ?", (new_title, r["id"]))
+            db.execute(
+                f"UPDATE memory_items SET title = {_p} WHERE id = {_p}",
+                (new_title, r["id"]),
+            )
         updated += 1
 
     logger.info(

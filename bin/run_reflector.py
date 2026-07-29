@@ -40,6 +40,7 @@ import httpx  # noqa: E402
 import memory_core as mc  # noqa: E402
 from agent_protocol import strip_code_fences  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
+from memory.backends import dialect  # noqa: E402
 from slm_intent import load_profile  # noqa: E402
 
 PROFILE_NAME = os.environ.get("REFLECTOR_PROFILE", "reflector_local")
@@ -151,23 +152,29 @@ def _load_observations_for_conv(
     does not already exist (i.e. unprocessed observations the latest pass
     must consider). Defers implementation — Phase D2.
     """
+    # Seam primitives: literal '?', json_extract(), and a whole-column json.loads
+    # are all SQLite-only and break on PostgreSQL (syntax error / no json_extract
+    # / JSONB returns a dict → json.loads TypeError). Route binds through param(),
+    # the JSON field reads through json_extract_text(), and the whole-column read
+    # through json_column_to_dict().
+    _d = dialect()
+    _p = _d.param()
+    _conv = _d.json_extract_text("metadata_json", "conversation_id")
+    _obsdate = _d.json_extract_text("metadata_json", "observation_date")
     with mc._db() as db:
-        sql = """
+        sql = f"""
         SELECT id, content, valid_from, created_at, metadata_json
         FROM memory_items
         WHERE type='observation'
           AND COALESCE(is_deleted,0)=0
-          AND user_id = ?
-          AND json_extract(metadata_json, '$.conversation_id') = ?
-        ORDER BY json_extract(metadata_json, '$.observation_date') ASC, id ASC
+          AND user_id = {_p}
+          AND {_conv} = {_p}
+        ORDER BY {_obsdate} ASC, id ASC
         """
         rows = db.execute(sql, (user_id or "", conversation_id)).fetchall()
     out: list[tuple[str, dict]] = []
     for rid, content, vfrom, cat, meta in rows:
-        try:
-            md = json.loads(meta) if meta else {}
-        except Exception:
-            md = {}
+        md = _d.json_column_to_dict(meta)
         out.append((rid, {
             "text": content or "",
             "observation_date": md.get("observation_date") or (cat[:10] if cat else None),
@@ -264,12 +271,12 @@ async def drain_queue_mode(args, profile, token: str) -> None:
 
     with mc._db() as db:
         queue_rows = db.execute(
-            """
+            f"""
             SELECT id, conversation_id, user_id, attempts
             FROM reflector_queue
             WHERE attempts < 5
             ORDER BY attempts ASC, enqueued_at ASC
-            LIMIT ?
+            LIMIT {dialect().param()}
             """,
             (args.batch,)
         ).fetchall()
@@ -280,20 +287,22 @@ async def drain_queue_mode(args, profile, token: str) -> None:
 
     async with httpx.AsyncClient() as client:
         async def drain_one(qid: int, conv_id: str, uid: str, _attempts: int) -> None:
+            _d = dialect()
+            _p = _d.param()
             async with sem:
                 try:
                     await reflect_conversation(
                         uid or "", conv_id, profile, client, token, counters,
                     )
                     with mc._db() as db:
-                        db.execute("DELETE FROM reflector_queue WHERE id=?", (qid,))
+                        db.execute(f"DELETE FROM reflector_queue WHERE id={_p}", (qid,))
                         db.commit()
                 except Exception as e:  # noqa: BLE001
                     with mc._db() as db:
                         db.execute(
-                            "UPDATE reflector_queue SET attempts=attempts+1, "
-                            "last_error=?, last_attempt_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') "
-                            "WHERE id=?",
+                            f"UPDATE reflector_queue SET attempts=attempts+1, "
+                            f"last_error={_p}, last_attempt_at={_d.now()} "
+                            f"WHERE id={_p}",
                             (str(e)[:500], qid),
                         )
                         db.commit()

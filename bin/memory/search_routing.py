@@ -66,8 +66,14 @@ def _pull_predecessor_turns(scored: list, user_id: str = "", scope: str = "") ->
         # the parent_score of the higher-ranked hit (first occurrence wins).
         wanted.setdefault(key, p_score)
     try:
+        # Seam primitives: literal '?' / json_extract() are SQLite-only and raise
+        # on PostgreSQL. Route binds through param()/placeholder() and the JSON
+        # cast through json_extract_int() so this executes on both backends.
+        from .backends import dialect as _dialect
+        _d = _dialect()
+        _p = _d.param()
         with _db() as db:
-            placeholders = ",".join("?" * len(cids))
+            placeholders = _d.placeholder(len(cids))
             # TENANCY (§7): conversation_id is per-conversation isolation, NOT
             # per-tenant. Re-apply the caller's user_id/scope so a shared/forged
             # conversation_id can't hydrate another tenant's turn N-1 — mirroring
@@ -76,15 +82,15 @@ def _pull_predecessor_turns(scored: list, user_id: str = "", scope: str = "") ->
             _tenancy_sql = ""
             _tenancy_params: list = []
             if user_id:
-                _tenancy_sql += " AND user_id = ?"
+                _tenancy_sql += f" AND user_id = {_p}"
                 _tenancy_params.append(user_id)
             if scope:
-                _tenancy_sql += " AND scope = ?"
+                _tenancy_sql += f" AND scope = {_p}"
                 _tenancy_params.append(scope)
             rows = db.execute(
                 f"SELECT id, content, title, type, importance, metadata_json, "
                 f"  conversation_id, "
-                f"  CAST(json_extract(metadata_json, '$.turn_index') AS INTEGER) AS turn_index "
+                f"  {_d.json_extract_int('metadata_json', 'turn_index')} AS turn_index "
                 f"FROM memory_items "
                 f"WHERE conversation_id IN ({placeholders}) AND is_deleted = 0{_tenancy_sql}",
                 tuple(cids) + tuple(_tenancy_params),
