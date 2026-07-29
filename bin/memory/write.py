@@ -265,6 +265,16 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
     safety_err = _check_content_safety(content)
     if safety_err:
         return safety_err
+    # Extend the write-boundary safety gate beyond `content` (§6): the same XSS /
+    # injection / prompt-injection payloads are dangerous in `title` (rendered in
+    # UIs, read by downstream enrichment LLMs) and `metadata` (stored verbatim).
+    # Previously only `content` was scanned, so a payload in title/metadata was
+    # stored unfiltered while the identical string in content was rejected.
+    for _fname, _fval in (("title", title), ("metadata", metadata)):
+        if _fval and isinstance(_fval, str):
+            _ferr = _check_content_safety(_fval)
+            if _ferr:
+                return _ferr.replace("content rejected", f"{_fname} rejected")
     if scope not in VALID_SCOPES:
         scope = "agent"
     item_id = str(uuid.uuid4())

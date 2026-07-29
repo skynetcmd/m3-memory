@@ -16,12 +16,9 @@ Public API:
 from __future__ import annotations
 
 import logging
-import math
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Optional
-
-from embedding_utils import unpack
 
 from .db import _db
 from .embed import embed_texts
@@ -52,17 +49,6 @@ class SearchHit:
     original_path: Optional[str] = None
     corpus_id: Optional[str] = None
     metadata: dict = field(default_factory=dict)
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
 
 
 def _corpus_filter_clause(
@@ -238,13 +224,21 @@ def _vec_query(conn: sqlite3.Connection, query: str, limit: int,
         params.append(filetype)
 
     rows = conn.execute(sql, params).fetchall()
-    scored: list[tuple[str, float]] = []
-    for r in rows:
-        try:
-            v = unpack(r["embedding"])
-        except Exception:
-            continue
-        scored.append((r["leaf_uuid"], _cosine(qvec, v)))
+    # Route ranking through the canonical Rust-backed batch cosine — a single FFI
+    # hop (numpy / pure-Python fallback inside), the SAME path memory vector
+    # search uses — instead of a per-row Python cosine loop. A wrong-length blob
+    # scores 0.0 in every path. Candidates are still the full compatible-embedding
+    # set (the add-on-free brute-force baseline; an sqlite-vec/pgvector ANN index
+    # is the Phase-4 accelerator), but scored in one Rust call, not N Python ones.
+    pairs = [(r["leaf_uuid"], r["embedding"]) for r in rows if r["embedding"] is not None]
+    if not pairs:
+        return []
+    from memory.util import _cosine_batch_packed
+    uuids = [p[0] for p in pairs]
+    # psycopg returns BYTEA as memoryview; normalize to bytes like the seam does.
+    blobs = [bytes(b) if isinstance(b, memoryview) else b for _, b in pairs]
+    scores = _cosine_batch_packed(qvec, blobs, len(qvec))
+    scored = list(zip(uuids, (float(s) for s in scores)))
     scored.sort(key=lambda x: -x[1])
     return scored[:limit]
 
