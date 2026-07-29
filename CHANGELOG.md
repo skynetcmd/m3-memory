@@ -21,6 +21,24 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.4] — 2026-07-29 — Local SLM features work; setup survives non-interactive installs
+
+### Fixed
+- **All local SLM features were silently disabled by a profile-path mismatch.**
+  The profile resolver only searched `<M3_MEMORY_ROOT>/config/slm`. When
+  `M3_MEMORY_ROOT` points at the data root (e.g. `~/.m3`) but the profiles ship
+  under the payload clone (`~/.m3/repo/config/slm`), resolution missed every
+  profile and returned "profile not found" — disabling entity extraction, the
+  observer, the reflector, and fact enrichment with no obvious cause. The
+  resolver now also searches the code-relative `config/slm` directory where the
+  profiles actually ship (the `M3_SLM_PROFILES_DIR` override still wins).
+- **Non-interactive `m3 setup` aborted at the master-key prompt.** The vault
+  setup called `getpass()` unconditionally; on a stdin with no TTY (Claude Code
+  Bash, SSH, CI) that raises `EOFError`, which aborted the whole post-install
+  including later config regeneration — a successful install reported as failed.
+  Setup now skips the prompt without a TTY, reading `AGENT_OS_MASTER_KEY` from
+  the environment when present and otherwise deferring it cleanly.
+
 ## [2026.7.29.3] — 2026-07-29 — Setup actually enables the background enrichment engine
 
 ### Fixed

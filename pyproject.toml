@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.7.29.3"
+version = "2026.7.29.4"
 description = "Give your AI agent a memory — local-first, private, easy to install. Guided setup wizard; works out of the box on your own machine, no cloud. For everyday agent users, homelabs, and developers alike · 99.2% LongMemEval-S retrieval @ k=10 · Works with Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · any MCP agent (native + one-command plugins) · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable"
 
 readme = "README.md"
