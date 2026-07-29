@@ -21,6 +21,18 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.11] — 2026-07-29 — Capture-hook writer also pins the roots
+
+### Fixed
+- **The chatlog capture wiring wrote unpinned hooks, reverting `doctor --fix`.**
+  `chatlog_init` (run by `m3 setup` / `m3 chatlog init`) wrote the Claude
+  PreCompact/Stop and Gemini onExit hooks as `/bin/sh {sh}` with no inline
+  `M3_ENGINE_ROOT`/`M3_CONFIG_ROOT` — the CLAUDE.md split-brain hazard — and,
+  being a second hook writer, it silently reverted the pinned hooks that
+  `generate_configs` / `m3 doctor --fix --fix-hooks` install (leaving a lone
+  unpinned `/bin/sh` PreCompact after a setup). Both writers now inline-pin the
+  engine/config roots, so a `setup` no longer undoes a `doctor --fix`.
+
 ## [2026.7.29.10] — 2026-07-29 — `doctor --fix` embed_backfill actually runs
 
 ### Fixed
