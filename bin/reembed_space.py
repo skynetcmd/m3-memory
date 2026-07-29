@@ -79,6 +79,38 @@ def _resolve_default_db() -> str:
     return resolve_engine_file("agent_memory.db")
 
 
+def _resolve_chatlog_db() -> str:
+    """The engine-root agent_chatlog.db (the transient capture store), for
+    --all-dbs. Its memory_embeddings table predates ``vector_kind`` — handled by
+    _has_vector_kind so a scan no longer errors 'no such column'."""
+    from m3_core.paths import resolve_engine_file
+    return resolve_engine_file("agent_chatlog.db")
+
+
+def _has_vector_kind(conn) -> bool:
+    """True if the embeddings table has the ``vector_kind`` partition column.
+
+    The chatlog store's ``memory_embeddings`` (and any pre-partition core DB)
+    predates ``vector_kind`` — it has only ``embed_model``/``dim``. Detecting the
+    column lets the tool run on BOTH schemas instead of erroring
+    'no such column: vector_kind' the moment it is pointed at a chatlog DB.
+    Portable: cursor.description carries the column names on SQLite and psycopg.
+    """
+    try:
+        cur = conn.execute(f"SELECT * FROM {_embeddings_table()} LIMIT 0")
+        cols = [d[0] for d in (cur.description or [])]
+        return "vector_kind" in cols
+    except Exception:  # noqa: BLE001 — introspection failed; assume current schema
+        return True
+
+
+def _vector_kind_expr(conn) -> str:
+    """SQL expression for the space partition: the real column when present, else
+    a constant 'default' so a vector_kind-less table reads as one space (mixed
+    model FAMILIES within it are still detected via embed_model)."""
+    return "COALESCE(vector_kind, 'default')" if _has_vector_kind(conn) else "'default'"
+
+
 def _scan(db_path: str):
     """Return [(vector_kind, embed_model, family, dim, count)] for the store."""
     from doctor.embed_space_probe import _family
@@ -86,8 +118,9 @@ def _scan(db_path: str):
 
     out = []
     with active_backend().open_readonly(db_path) as conn:
+        vk = _vector_kind_expr(conn)
         cur = conn.execute(
-            "SELECT COALESCE(vector_kind, 'default'), COALESCE(embed_model, ''), "
+            f"SELECT {vk}, COALESCE(embed_model, ''), "
             "       COALESCE(dim, 0), COUNT(*) "
             f"FROM {_embeddings_table()} GROUP BY 1, 2, 3"
         )
@@ -169,13 +202,17 @@ def _delete_doomed(db_path: str, doomed) -> int:
     else:
         cm = backend.connection()
 
-    sql = (
-        f"DELETE FROM {_embeddings_table()} "
-        f"WHERE COALESCE(vector_kind,'default')={ph} "
-        f"AND COALESCE(embed_model,'')={ph} AND COALESCE(dim,0)={ph}"
-    )
     deleted = 0
     with cm as conn:
+        # Adapt to a vector_kind-less table (chatlog / pre-partition core DB): the
+        # WHERE clause must match the space expression _scan grouped on, or the
+        # delete matches nothing.
+        vk = _vector_kind_expr(conn)
+        sql = (
+            f"DELETE FROM {_embeddings_table()} "
+            f"WHERE {vk}={ph} "
+            f"AND COALESCE(embed_model,'')={ph} AND COALESCE(dim,0)={ph}"
+        )
         cur = conn.cursor() if hasattr(conn, "cursor") else conn
         for kind, tag, _fam, dim, _n in doomed:
             res = cur.execute(sql, (kind, tag, dim))
@@ -220,14 +257,43 @@ def main(argv=None) -> int:
                     help="Skip the pre-delete DB copy (not recommended).")
     ap.add_argument("--no-backfill", action="store_true",
                     help="Do not chain embed_backfill.py after deleting.")
+    ap.add_argument("--all-dbs", action="store_true",
+                    help="Process BOTH engine stores (agent_memory.db and "
+                         "agent_chatlog.db). File backend only. Ignores --db.")
     args = ap.parse_args(argv)
+
+    if args.all_dbs:
+        if not _is_file_backend():
+            print("error: --all-dbs is a file-backend convenience (per-file stores). "
+                  "On a pooled backend run once per logical store instead.")
+            return 1
+        try:
+            targets = [_resolve_default_db(), _resolve_chatlog_db()]
+        except Exception as e:  # noqa: BLE001
+            print(f"error: could not load path seam: {type(e).__name__}: {e}")
+            return 1
+        worst = 0
+        for i, db in enumerate(targets):
+            if i:
+                print()
+                print("=" * 60)
+            if not os.path.exists(db):
+                print(f"skip    : no such DB: {db}")
+                continue
+            worst = max(worst, _process_one_db(db, args))
+        return worst
 
     try:
         db_path = args.db or _resolve_default_db()
     except Exception as e:  # noqa: BLE001
         print(f"error: could not load path seam: {type(e).__name__}: {e}")
         return 1
+    return _process_one_db(db_path, args)
 
+
+def _process_one_db(db_path: str, args) -> int:
+    """Scan one store, report its mixed spaces, and (with --apply) retire the
+    non-kept families + backfill. Shared by the single-DB and --all-dbs paths."""
     # Only a file backend has a path to check; on a pooled store db_path is a
     # label, not a file, and this guard would abort every run.
     if _is_file_backend() and not os.path.exists(db_path):
