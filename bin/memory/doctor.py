@@ -394,6 +394,18 @@ def _resolve_embed_stores(main_db: Any) -> list[str]:
     return out
 
 
+def _embed_backfill_script() -> str:
+    """Absolute path to bin/embed_backfill.py. doctor.py lives in bin/memory/, so
+    dirname(dirname(__file__)) is already bin/ and the script sits right there. A
+    stray extra "bin" segment used to yield a nonexistent bin/bin/embed_backfill.py
+    that failed with a cryptic "can't open file"."""
+    import os
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "embed_backfill.py",
+    )
+
+
 async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
     """Run the doctor in repair mode — attempt to auto-fix detected issues.
 
@@ -585,10 +597,7 @@ async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
             )
         else:
             import os as _os
-            bf_script = _os.path.join(
-                _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-                "bin", "embed_backfill.py"
-            )
+            bf_script = _embed_backfill_script()
             _ok: list[str] = []
             _err: list[str] = []
             for _store, _n in _missing_by_store.items():
@@ -597,6 +606,15 @@ async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
                 try:
                     env = _os.environ.copy()
                     env["M3_DATABASE"] = str(_store)
+                    # macOS: a venv's python symlinks to the base framework python,
+                    # so sys.executable can resolve to an interpreter whose
+                    # site-packages LACKS m3's deps → the child would die
+                    # ModuleNotFoundError. Propagate our own import paths so the
+                    # child finds them regardless of which python sys.executable
+                    # points at (the child has no -E, so PYTHONPATH is honored).
+                    env["PYTHONPATH"] = _os.pathsep.join(
+                        p for p in ([env.get("PYTHONPATH", "")] + sys.path) if p
+                    )
                     result = subprocess.run(
                         [sys.executable, bf_script, "--db", str(_store), "--limit", "500"],
                         env=env,
