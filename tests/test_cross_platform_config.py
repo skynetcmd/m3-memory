@@ -138,6 +138,42 @@ def test_interpreter_falls_back_to_sys_executable_when_no_repo_venv(monkeypatch)
     assert not any(c.startswith(("python ", "python3 ")) for c in _all_commands(settings))
 
 
+def test_bin_scripts_root_at_payload_bindir_not_the_clone(monkeypatch):
+    """Hooks / bridges / statusline must resolve to the authoritative payload
+    (bin_dir() = the installed wheel), NOT a ~/.m3/repo clone that upgrades leave
+    stale. Regression for the split where the core memory bridge followed the
+    wheel while the aux bridges + capture hooks followed the stale clone."""
+    import m3_memory.installer as installer
+
+    fake_payload = pathlib.Path("/opt/pipx/venvs/m3-memory/lib/pythonX/site-packages/m3_memory/bin")
+    monkeypatch.setattr(installer, "bin_dir", lambda: fake_payload)
+
+    # No repo .venv → interpreter falls back to sys.executable (absolute).
+    repo_venv = (g._m3_repo_root() + os.sep + ".venv").replace("\\", "/")
+    real_exists = os.path.exists
+    monkeypatch.setattr(g.os.path, "exists",
+                        lambda p: False if str(p).replace("\\", "/").startswith(repo_venv)
+                        or str(p).endswith(".gguf") else real_exists(p))
+    monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
+    monkeypatch.setattr(g, "_write_json", lambda path, data: None)
+
+    g.generate_configs()
+    settings = g.generate_configs._last_claude
+    fp = str(fake_payload).replace("\\", "/")
+
+    # Every MCP bridge script arg + every hook + the statusline must live under the
+    # payload bin, and NONE may reference a /repo/ clone path.
+    session = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+    statusline = settings["statusLine"]["command"]
+    assert fp in session, f"hook not rooted at payload: {session!r}"
+    assert fp in statusline, f"statusline not rooted at payload: {statusline!r}"
+    for name, srv in settings["mcpServers"].items():
+        script = srv["args"][0]
+        assert script.startswith(fp), f"{name} bridge not under payload: {script!r}"
+    for cmd in _all_commands(settings):
+        assert "/repo/" not in cmd and "/.m3/repo" not in cmd, f"clone path leaked: {cmd!r}"
+
+
 # ── invariants that must hold on EVERY OS ────────────────────────────────────
 
 @pytest.mark.parametrize("os_name", ["nt", "posix"])

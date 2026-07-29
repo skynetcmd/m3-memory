@@ -107,28 +107,116 @@ def _scan_hermes() -> list[tuple[str, str, bool]]:
     return out
 
 
+def _current_payload_bin() -> "str | None":
+    """The authoritative payload bin/ (the installed wheel, or a dev checkout) —
+    the single directory every wired m3 command should resolve under."""
+    try:
+        import sys
+        sys.path.insert(0, os.path.join(_payload_bin(), "..", "m3_memory"))
+        from m3_memory.installer import bin_dir
+        bd = bin_dir()
+        return str(bd.resolve()) if bd else None
+    except Exception:  # noqa: BLE001 — resolver unavailable: skip stale detection
+        return None
+
+
+# m3-owned MCP server names generate_configs writes; only these are ours to judge.
+_M3_SERVER_NAMES = frozenset(
+    {"memory", "custom_pc_tool", "grok_intel", "web_research", "debug_agent"}
+)
+
+
+def _scan_stale_payload() -> list[tuple[str, str]]:
+    """(label, script) for wired m3 commands whose SCRIPT still exists but does
+    NOT live under the current payload bin — a ~/.m3/repo clone the upgrade left
+    behind. `_path_dead` misses these (the file is present), yet they run OLD
+    hook/bridge code. Only flags m3-owned entries (known server names + m3 hook
+    markers), never a user's own MCP server."""
+    import json
+
+    payload = _current_payload_bin()
+    if not payload:
+        return []
+    # realpath both sides so a symlinked pipx/venv dir (settings holds one form,
+    # bin_dir() resolves another) is not a false "stale" — only a genuinely
+    # different payload root trips the check.
+    payload_real = os.path.realpath(payload).replace("\\", "/").rstrip("/") + "/"
+
+    def _under(script: object) -> bool:
+        if not isinstance(script, str) or not script:
+            return True  # nothing to judge
+        return os.path.realpath(script).replace("\\", "/").startswith(payload_real)
+
+    settings_path = Path.home() / ".claude" / "settings.json"
+    if not settings_path.is_file():
+        return []
+    try:
+        data = json.loads(settings_path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        return []
+
+    out: list[tuple[str, str]] = []
+    # MCP bridges: the script is args[0].
+    for name, srv in (data.get("mcpServers") or {}).items():
+        if name not in _M3_SERVER_NAMES or not isinstance(srv, dict):
+            continue
+        args = srv.get("args") or []
+        script = args[0] if args else None
+        if isinstance(script, str) and script.endswith(".py") and not _under(script):
+            out.append((f"Claude/{name}", script))
+    # Hooks + statusline: the m3 script is the second token of the command string.
+    def _cmd_script(cmd: object) -> "str | None":
+        if not isinstance(cmd, str):
+            return None
+        parts = cmd.split()
+        # <interpreter> <script...>; find the m3 payload token.
+        for tok in parts[1:]:
+            if ("bin/hooks/chatlog/" in tok.replace("\\", "/")
+                    or "bin/statusline-command" in tok.replace("\\", "/")):
+                return tok
+        return None
+
+    for event, entries in (data.get("hooks") or {}).items():
+        for entry in entries or []:
+            for h in (entry.get("hooks") or []) if isinstance(entry, dict) else []:
+                s = _cmd_script(h.get("command"))
+                if s and not _under(s):
+                    out.append((f"Claude/hook:{event}", s))
+    sl = (data.get("statusLine") or {}).get("command") if isinstance(data.get("statusLine"), dict) else None
+    s = _cmd_script(sl)
+    if s and not _under(s):
+        out.append(("Claude/statusLine", s))
+    return out
+
+
 def run(brief: bool = False) -> int:
     rows = _scan_mcpservers_hosts() + _scan_opencode() + _scan_hermes()
     dead = [(lbl, path) for (lbl, path, is_dead) in rows if is_dead]
+    stale = _scan_stale_payload()
 
     if brief:
-        if not rows:
+        if not rows and not stale:
             print("agent paths: no wired agent configs found")
         elif dead:
             hosts = ", ".join(sorted({lbl for lbl, _ in dead}))
             print(f"⚠️  agent paths: {len(dead)} dead-path config(s) [{hosts}] — run `m3 setup`")
+        elif stale:
+            print(f"⚠️  agent paths: {len(stale)} config(s) point at a STALE payload clone "
+                  "(runs old code) — run `m3 setup`")
         else:
-            print(f"✅ agent paths: OK ({len(rows)} wired host(s), no dead paths)")
-        return 1 if dead else 0
+            print(f"✅ agent paths: OK ({len(rows)} wired host(s), no dead or stale paths)")
+        return 1 if (dead or stale) else 0
 
     print()
     print("=== agent integration paths ===")
-    if not rows:
+    if not rows and not stale:
         print("  status : no agent has m3 wired here (nothing to check).")
         return 0
     for lbl, path, is_dead in rows:
         mark = "DEAD" if is_dead else "ok"
         print(f"  [{mark:>4}] {lbl}: {path}")
+    for lbl, script in stale:
+        print(f"  [STALE] {lbl}: {script}")
     if dead:
         print()
         print(f"  status : [FAIL] {len(dead)} config(s) point at a moved/deleted path — m3")
@@ -137,6 +225,13 @@ def run(brief: bool = False) -> int:
         print("  fix    : re-run `m3 setup` — it self-heals stale agent configs (repoints")
         print("           them to the current install). For Hermes, re-run the Hermes")
         print("           wiring step so its .pth points at the live bin/.")
+    elif stale:
+        print()
+        print(f"  status : [FAIL] {len(stale)} config(s) point at a payload clone that is")
+        print("           NOT the installed wheel — the file exists but runs OLD hook/")
+        print("           bridge code after an upgrade (the classic ~/.m3/repo drift).")
+        print("  fix    : re-run `m3 setup` — it re-wires every command to the current")
+        print("           payload (bin_dir()), so all servers agree on one fresh copy.")
     else:
-        print("  status : OK — every wired host points at a live m3 install.")
-    return 1 if dead else 0
+        print("  status : OK — every wired host points at the live m3 payload.")
+    return 1 if (dead or stale) else 0

@@ -61,7 +61,29 @@ def generate_configs():
     except Exception as _e:  # noqa: BLE001 — config gen must not hard-fail on this
         print(f"[generate_configs] WARN: could not seed shared embedder config: {_e}")
 
+    # Root bin/ scripts at the AUTHORITATIVE payload — the wheel-packaged bin/
+    # when installed (the same resolver the core memory bridge uses), a
+    # dev-checkout bin/ otherwise. Generated hooks/bridges/statusline MUST point
+    # here, never at a ~/.m3/repo clone that `pip install -U` leaves stale: that
+    # split (core bridge on the wheel, aux bridges + capture hooks on the clone)
+    # silently ran old hook/bridge code after an upgrade. Rooting every generated
+    # command at bin_dir() makes all servers agree on one fresh payload.
+    payload_bin = None
+    try:
+        from m3_memory.installer import bin_dir as _resolve_bin_dir
+        _bd = _resolve_bin_dir()
+        if _bd is not None:
+            payload_bin = str(_bd)
+    except Exception:
+        payload_bin = None
+    if not payload_bin:
+        payload_bin = os.path.join(m3_repo_root, "bin")
+
     def repo(path):
+        # Every caller passes "bin/<...>"; root those at the authoritative payload
+        # bin so a stale clone can never shadow the installed wheel.
+        if path.startswith("bin/"):
+            return os.path.join(payload_bin, path[4:]).replace("\\", "/")
         return os.path.join(m3_repo_root, path).replace("\\", "/")
 
     def mcp_server(script, extra_env=None):
