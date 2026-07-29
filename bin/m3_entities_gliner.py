@@ -123,14 +123,14 @@ def _load_gliner(cfg: _Cfg):
         sys.exit(2)
     model = GLiNER.from_pretrained(cfg.model_id)
     if cfg.device == "cuda":
-        try:
-            import torch
-            if not torch.cuda.is_available():
-                print("[gliner] WARN: cuda requested but not available; falling back to cpu", flush=True)
-                cfg.device = "cpu"
-        except Exception as e:
-            print(f"[gliner] WARN: torch import failed ({e}); falling back to cpu", flush=True)
-            cfg.device = "cpu"
+        # Default/'cuda' means "best GPU available": cuda > mps (Apple Metal) > cpu.
+        # The old fallback went straight to cpu, skipping Metal on Apple Silicon
+        # (DESIGN §1). An explicit --device cpu/mps skips this block untouched.
+        from m3_core.gpu import torch_device
+        resolved = torch_device()
+        if resolved != "cuda":
+            print(f"[gliner] cuda not available; using {resolved}", flush=True)
+        cfg.device = resolved
     if cfg.device != "cpu":
         model = model.to(cfg.device)
     elapsed = time.perf_counter() - t0

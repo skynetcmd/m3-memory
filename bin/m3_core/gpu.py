@@ -24,6 +24,37 @@ _gpu_probe_cache: dict[str, Any] = {"ts": 0.0, "util": 0.0, "backend": None, "mi
 _GPU_PROBE_MAX_MISSES = 3
 
 
+def torch_device(prefer_index: bool = False) -> str:
+    """Best available PyTorch device string: ``cuda`` > ``mps`` (Apple Metal) > ``cpu``.
+
+    The naive ``"cuda" if torch.cuda.is_available() else "cpu"`` silently pins
+    Apple Silicon — a first-class target (DESIGN §1) — to CPU, because
+    ``torch.cuda.is_available()`` is False on Metal. Probing MPS as the middle
+    tier lets M-series GPUs be used. Single-sourced here so the three ML device
+    call sites (reranker, embed server, GLiNER NER) don't each re-derive it and
+    drift back to CUDA-only. Returns ``"cpu"`` if torch is unavailable.
+
+    prefer_index: return ``"cuda:0"`` instead of ``"cuda"`` when CUDA is chosen,
+    for callers pinning a specific GPU. MPS/CPU never carry an index.
+    """
+    try:
+        import torch
+    except Exception:  # torch absent → CPU is the only option
+        return "cpu"
+    try:
+        if torch.cuda.is_available():
+            return "cuda:0" if prefer_index else "cuda"
+    except Exception:
+        pass
+    try:
+        mps = getattr(torch.backends, "mps", None)
+        if mps is not None and mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
+
+
 def _no_window() -> dict:
     """subprocess kwargs that suppress a console window on Windows (no-op off
     Windows). These GPU/telemetry probes run on the per-cycle governor path;

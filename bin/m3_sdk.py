@@ -59,6 +59,7 @@ from m3_core.gpu import (  # noqa: F401
     _gpu_probe_cache,
     _no_window,
     probe_gpu_util,
+    torch_device,
 )
 from m3_core.locking import (  # noqa: F401
     _MIGRATION_LOCK_MAX_AGE_S,

@@ -94,7 +94,14 @@ def start_llama_server():
     ]
 
     logger.info(f"Starting llama-server: {' '.join(cmd)}")
-    llama_process = subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    # CREATE_NEW_PROCESS_GROUP is Windows-only; getattr keeps this importable and
+    # runnable on macOS/Linux (LLAMA_SERVER_EXE is env-overridable to a POSIX
+    # llama-server), where a bare attribute reference would AttributeError (§1).
+    _popen_kwargs = {}
+    _flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    if _flags:
+        _popen_kwargs["creationflags"] = _flags
+    llama_process = subprocess.Popen(cmd, **_popen_kwargs)
 
     # Wait for server to be ready
     max_retries = 30
@@ -133,7 +140,14 @@ def main():
         finally:
             if llama_process:
                 logger.info("Stopping llama-server...")
-                os.kill(llama_process.pid, signal.CTRL_BREAK_EVENT)
+                # CTRL_BREAK_EVENT is Windows-only and pairs with the process
+                # group above; on POSIX use terminate() (SIGTERM). A bare
+                # signal.CTRL_BREAK_EVENT reference AttributeErrors off Windows (§1).
+                _brk = getattr(signal, "CTRL_BREAK_EVENT", None)
+                if os.name == "nt" and _brk is not None:
+                    os.kill(llama_process.pid, _brk)
+                else:
+                    llama_process.terminate()
     else:
         sys.exit(1)
 

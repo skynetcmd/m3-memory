@@ -104,16 +104,14 @@ def main():
 
     model_name = "qwen3-embedding"
 
-    # Auto-detect CUDA if device not specified
+    # Auto-detect device if not specified: cuda:0 > mps (Apple Metal) > cpu.
+    # A bare cuda-only check pins Apple Silicon to CPU (DESIGN §1); torch_device()
+    # probes MPS as the middle tier. prefer_index keeps the "cuda:0" GPU pin.
     device = args.device
     if device is None:
-        import torch
-        if torch.cuda.is_available():
-            device = "cuda:0"
-            logger.info("Auto-detected GPU0 (CUDA) for embeddings.")
-        else:
-            device = "cpu"
-            logger.info("No GPU detected, falling back to CPU.")
+        from m3_core.gpu import torch_device
+        device = torch_device(prefer_index=True)
+        logger.info(f"Auto-detected device for embeddings: {device}")
 
     logger.info(f"Loading {args.model} on {device}...")
     model = SentenceTransformer(args.model, device=device)

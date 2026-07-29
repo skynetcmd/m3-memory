@@ -277,11 +277,10 @@ def _get_reranker(model_name: str):
                 f"requirements.txt). Install/repair via: "
                 f"pip install -r requirements.txt. Original error: {e}"
             ) from e
-        try:
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        except ImportError:
-            device = "cpu"
+        # cuda > mps (Apple Metal) > cpu. A bare cuda-only check pins Apple
+        # Silicon to CPU (DESIGN §1); torch_device() probes MPS as the middle tier.
+        from m3_core.gpu import torch_device
+        device = torch_device()
         model = CrossEncoder(model_name, device=device)
         # Publish name FIRST then model? No — publish model then name would let a
         # lock-free reader see a new model under the old name. Assign the model,
