@@ -80,6 +80,11 @@ def test_postgres_selection_builds_backend(monkeypatch):
 def test_postgres_selection_no_dsn_fails_loud(monkeypatch):
     """postgres backend with NO DSN anywhere raises, never silently uses SQLite."""
     monkeypatch.setenv("M3_DB_BACKEND", "postgres")
+    # Clear EVERY DSN source, highest-precedence first: M3_PRIMARY_PG_URL >
+    # M3_PG_URL > PG_URL. Omitting M3_PRIMARY_PG_URL made this "no DSN anywhere"
+    # test non-hermetic — it failed on a PG-primary dev box / dual-backend run
+    # where that var is set, because _resolve_dsn found it and never raised (§3).
+    monkeypatch.delenv("M3_PRIMARY_PG_URL", raising=False)
     monkeypatch.delenv("M3_PG_URL", raising=False)
     monkeypatch.delenv("PG_URL", raising=False)
     # Force the vault fallback to yield nothing, so the real _resolve_dsn runs
