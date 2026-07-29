@@ -100,20 +100,55 @@ def generate_configs():
             return os.path.join(payload_bin, path[4:]).replace("\\", "/")
         return os.path.join(m3_repo_root, path).replace("\\", "/")
 
+    # Decoupled roots (CLAUDE.md "Split-brain hazard"): the MCP server does NOT
+    # inherit the shell env, so its env block AND the capture hooks must carry the
+    # DATA roots explicitly. Resolve them the way the rest of m3 does — NEVER from
+    # the code location (m3_state_root is the wheel's parent = site-packages under
+    # an installed layout, which would point the server at a nonexistent
+    # site-packages/engine and silently orphan the real DB on the next restart).
+    try:
+        from m3_sdk import get_m3_config_root, get_m3_engine_root, get_m3_root
+        memory_root = get_m3_root()
+        engine_root = get_m3_engine_root()
+        config_root = get_m3_config_root()
+    except Exception:  # noqa: BLE001 — SDK unavailable: env vars, then ~/.m3 defaults
+        _home = os.path.expanduser("~")
+        memory_root = os.environ.get("M3_MEMORY_ROOT") or os.path.join(_home, ".m3")
+        engine_root = os.environ.get("M3_ENGINE_ROOT") or os.path.join(memory_root, "engine")
+        config_root = os.environ.get("M3_CONFIG_ROOT") or os.path.join(memory_root, "config")
+    memory_root = str(memory_root).replace("\\", "/")
+    engine_root = str(engine_root).replace("\\", "/")
+    config_root = str(config_root).replace("\\", "/")
+
     def mcp_server(script, extra_env=None):
-        env = {"M3_MEMORY_ROOT": m3_state_root.replace("\\", "/")}
+        # All three roots so the server resolves its DBs/config correctly without
+        # the shell env (which it does not see).
+        env = {
+            "M3_MEMORY_ROOT": memory_root,
+            "M3_ENGINE_ROOT": engine_root,
+            "M3_CONFIG_ROOT": config_root,
+        }
         if extra_env:
             env.update(extra_env)
         return {"command": python_cmd, "args": [repo(f"bin/{script}")], "env": env}
 
+    # Inline-pin the engine + config roots on every capture hook. The hook
+    # inherits Claude Code's PROCESS env (NOT the server env block above), so
+    # without these it resolves a different engine root than the server and the
+    # two chatlog halves diverge (CLAUDE.md "Split-brain hazard"). The shell
+    # `VAR=val cmd` prefix is honored because Claude Code runs hooks through a
+    # shell (Git Bash on Windows). m3 roots are space-free by convention, matching
+    # the prior working format.
+    _root_pins = f"M3_ENGINE_ROOT={engine_root} M3_CONFIG_ROOT={config_root} "
+
     # Invoke the .py hook directly with the venv interpreter — no /bin/sh, which
     # doesn't exist on native Windows (it only works today because Claude Code
     # routes hooks through Git Bash). The .py is the cross-platform entry point.
-    hook_cmd = f"{python_cmd} {repo('bin/hooks/chatlog/claude_code_precompact.py')}"
+    hook_cmd = f"{_root_pins}{python_cmd} {repo('bin/hooks/chatlog/claude_code_precompact.py')}"
     hook_entry = [{"hooks": [{"type": "command", "command": hook_cmd}]}]
 
     session_start_cmd = (
-        f"{python_cmd} {repo('bin/hooks/chatlog/session_start_capture_check.py')}"
+        f"{_root_pins}{python_cmd} {repo('bin/hooks/chatlog/session_start_capture_check.py')}"
     )
     session_start_entry = [{"hooks": [{
         "type": "command",

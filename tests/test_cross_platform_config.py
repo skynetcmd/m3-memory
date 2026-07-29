@@ -88,7 +88,9 @@ def test_windows_interpreter_uses_scripts_python_exe(monkeypatch):
     settings, venv_py = _build_settings(monkeypatch, "nt")
     assert venv_py.endswith("/.venv/Scripts/python.exe")
     session = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-    assert session.startswith(venv_py)
+    # Hooks now carry an inline M3_ENGINE_ROOT/M3_CONFIG_ROOT prefix, so the
+    # interpreter follows the pins rather than starting the command.
+    assert f"{venv_py} " in session
 
 
 def test_posix_interpreter_uses_bin_python_no_exe(monkeypatch):
@@ -96,7 +98,7 @@ def test_posix_interpreter_uses_bin_python_no_exe(monkeypatch):
     assert venv_py.endswith("/.venv/bin/python")
     assert ".exe" not in venv_py
     session = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-    assert session.startswith(venv_py)
+    assert f"{venv_py} " in session
 
 
 def test_interpreter_falls_back_to_sys_executable_when_no_repo_venv(monkeypatch):
@@ -128,14 +130,44 @@ def test_interpreter_falls_back_to_sys_executable_when_no_repo_venv(monkeypatch)
 
     g.generate_configs()
     settings = g.generate_configs._last_claude
-    # Hooks + statusline are the commands built from python_cmd; they must launch
-    # via the absolute pipx interpreter.
+    # statusline has no root-pin prefix → starts with the interpreter; the hook
+    # carries the M3_ENGINE_ROOT/M3_CONFIG_ROOT pins first, then the interpreter.
     session = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
     statusline = settings["statusLine"]["command"]
-    for cmd in (session, statusline):
-        assert cmd.startswith(fake_exe), f"expected {fake_exe!r}, got {cmd!r}"
+    assert statusline.startswith(fake_exe), statusline
+    assert f"{fake_exe} " in session, session
     # The regression itself: NOTHING may launch via a bare PATH python (no m3 deps).
     assert not any(c.startswith(("python ", "python3 ")) for c in _all_commands(settings))
+
+
+def test_decoupled_roots_pinned_in_server_env_and_hooks(monkeypatch):
+    """The MCP server does not inherit the shell env, and capture hooks inherit
+    the agent's PROCESS env (not the server env block). So every server env block
+    must carry all three data roots, and every capture hook must inline-pin
+    M3_ENGINE_ROOT + M3_CONFIG_ROOT — resolved from the DATA root, never the code
+    location. Regression for the remediation that wrote M3_MEMORY_ROOT=<site-
+    packages> and dropped the engine/config roots (split-brain)."""
+    monkeypatch.setenv("M3_MEMORY_ROOT", "/data/.m3")
+    monkeypatch.setenv("M3_ENGINE_ROOT", "/data/.m3/engine")
+    monkeypatch.setenv("M3_CONFIG_ROOT", "/data/.m3/config")
+    monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
+    monkeypatch.setattr(g, "_write_json", lambda path, data: None)
+
+    g.generate_configs()
+    settings = g.generate_configs._last_claude
+
+    for name, srv in settings["mcpServers"].items():
+        env = srv.get("env", {})
+        assert env.get("M3_MEMORY_ROOT") == "/data/.m3", (name, env)
+        assert env.get("M3_ENGINE_ROOT") == "/data/.m3/engine", (name, env)
+        assert env.get("M3_CONFIG_ROOT") == "/data/.m3/config", (name, env)
+        # never the code location
+        assert "site-packages" not in env.get("M3_MEMORY_ROOT", "")
+
+    for event in ("PreCompact", "Stop", "SessionStart"):
+        cmd = settings["hooks"][event][0]["hooks"][0]["command"]
+        assert "M3_ENGINE_ROOT=/data/.m3/engine" in cmd, cmd
+        assert "M3_CONFIG_ROOT=/data/.m3/config" in cmd, cmd
 
 
 def test_installed_layout_ignores_stray_venv_uses_sys_executable(monkeypatch):
