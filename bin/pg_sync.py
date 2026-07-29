@@ -726,6 +726,44 @@ def _ensure_pg_embeddings_schema(pg_cur):
         logger.info("PG schema: created memory_embeddings table")
 
 
+def _embed_families(cur) -> set:
+    """Distinct embedding model FAMILIES present in a store (via its cursor).
+    Two tags of ONE model (the in-process GGUF vs the LM Studio server tag) map
+    to the same family, so they never look like a mismatch."""
+    try:
+        from doctor.embed_space_probe import _family
+    except Exception:  # noqa: BLE001 — fall back to a crude normaliser
+        def _family(t):  # type: ignore[misc]
+            return (t or "").strip().lower()
+    try:
+        cur.execute("SELECT DISTINCT embed_model FROM memory_embeddings")
+        return {_family(str(t or "")) for (t,) in cur.fetchall() if t}
+    except Exception:  # noqa: BLE001 — never let a diagnostic abort the sync
+        return set()
+
+
+def _warn_on_embed_family_mismatch(sl_cur, pg_cur, target_name: str) -> None:
+    """Warn LOUDLY when local and warehouse stores embed with DIFFERENT model
+    families. Mixing families in one vector space makes cosine ranking
+    meaningless (bge-m3 vs qwen3 vs nomic are not comparable), which is exactly
+    how CDW pulls silently degraded search. Warn-only: the sync still proceeds
+    (refusing would strand a fleet mid-migration), but the operator is told to
+    converge on one family and re-embed. `m3 doctor`'s embed-space probe reports
+    the resulting mix per store."""
+    local = _embed_families(sl_cur)
+    remote = _embed_families(pg_cur)
+    if not local or not remote:
+        return
+    if len(local | remote) > 1:
+        logger.warning(
+            f"[{target_name}] EMBED-FAMILY MISMATCH: local={sorted(local)} "
+            f"warehouse={sorted(remote)} — syncing MIXES incomparable vector "
+            "spaces and degrades search ranking. Converge every node on ONE "
+            "embed family, then re-embed (bin/reembed_space.py). See `m3 doctor` "
+            "embed-space check."
+        )
+
+
 def sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target_name: str):
     """Synchronizes the memory_embeddings table bi-directionally with watermark logic."""
     logger.info(f"[{target_name}] Synchronizing memory_embeddings...")
@@ -734,6 +772,9 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target_name: str):
     now = datetime.now(timezone.utc).isoformat()
 
     _ensure_pg_embeddings_schema(pg_cur)
+    # Fleet guardrail: a warehouse embedded with a different model family than
+    # this node silently poisons the shared vector space on sync (see docstring).
+    _warn_on_embed_family_mismatch(sl_cur, pg_cur, target_name)
 
     # 1. PUSH: Local to Remote (delta)
     watermark = _get_watermark(sl_cur, "emb_push", target_name)
