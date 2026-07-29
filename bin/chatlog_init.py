@@ -271,16 +271,39 @@ def install_schedules() -> bool:
         return False
 
 
+def _root_env_prefix() -> str:
+    """Inline `M3_ENGINE_ROOT=… M3_CONFIG_ROOT=… ` prefix for capture hooks.
+
+    A capture hook inherits the agent's PROCESS env (NOT the MCP server env
+    block), so without these it can resolve a different engine root than the
+    server and diverge the two chatlog halves (CLAUDE.md 'Split-brain hazard').
+    generate_configs pins these too; both writers must, or one reverts the other.
+    Trailing space so it prefixes the command directly. m3 roots are space-free
+    by convention (matches the prior working format)."""
+    try:
+        from m3_sdk import get_m3_config_root, get_m3_engine_root
+        eng, cfg = get_m3_engine_root(), get_m3_config_root()
+    except Exception:  # noqa: BLE001 — SDK unavailable: env vars, then ~/.m3 defaults
+        _home = os.path.expanduser("~")
+        _mem = os.environ.get("M3_MEMORY_ROOT") or os.path.join(_home, ".m3")
+        eng = os.environ.get("M3_ENGINE_ROOT") or os.path.join(_mem, "engine")
+        cfg = os.environ.get("M3_CONFIG_ROOT") or os.path.join(_mem, "config")
+    eng = str(eng).replace("\\", "/")
+    cfg = str(cfg).replace("\\", "/")
+    return f"M3_ENGINE_ROOT={eng} M3_CONFIG_ROOT={cfg} "
+
+
 def _build_claude_hook_command(config: ChatlogConfig) -> tuple[str, bool]:
     """Return (command_string, stop_hook_enabled) for the current OS."""
     ps1 = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
                        "claude_code_precompact.ps1").replace("\\", "/")
     sh = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
                       "claude_code_precompact.sh").replace("\\", "/")
+    prefix = _root_env_prefix()
     if sys.platform == "win32":
-        hook_cmd = f"powershell -NoProfile -ExecutionPolicy Bypass -File {ps1}"
+        hook_cmd = f"{prefix}powershell -NoProfile -ExecutionPolicy Bypass -File {ps1}"
     else:
-        hook_cmd = f"/bin/sh {sh}"
+        hook_cmd = f"{prefix}/bin/sh {sh}"
     cc = config.host_agents.get("claude-code")
     stop_enabled = bool(cc and cc.stop_hook)
     return hook_cmd, stop_enabled
@@ -414,10 +437,13 @@ def apply_gemini_settings() -> tuple[bool, str]:
                       "gemini_cli_onexit.sh").replace("\\", "/")
     ps1 = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
                        "gemini_cli_onexit.ps1").replace("\\", "/")
+    # Same split-brain pin as the Claude hook: the onExit hook inherits Gemini's
+    # process env, not the MCP server env block.
+    prefix = _root_env_prefix()
     if sys.platform == "win32":
-        hook_cmd = f"powershell -NoProfile -ExecutionPolicy Bypass -File {ps1}"
+        hook_cmd = f"{prefix}powershell -NoProfile -ExecutionPolicy Bypass -File {ps1}"
     else:
-        hook_cmd = f"/bin/sh {sh}"
+        hook_cmd = f"{prefix}/bin/sh {sh}"
 
     actions: list[str] = []
 
