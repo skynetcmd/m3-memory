@@ -21,6 +21,20 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.13] — 2026-07-29 — One Claude-settings writer in the doctor repair (no format churn)
+
+### Changed
+- **`m3 doctor --fix --fix-hooks` now uses a single writer / single hook format.**
+  `environment_probe.repair` re-wired hooks via `chatlog_init.apply_claude_settings`
+  (`/bin/sh`, add-only, no server-env roots) while the stale-payload remediation
+  used `generate_configs.install_claude_settings` (`.py`, replaces entries, writes
+  roots) — so each `--fix-hooks` rewrote the hooks `/bin/sh`→`.py` and only the
+  second path fixed the server env. `environment_probe.repair` now delegates to
+  `install_claude_settings` too, so the repair writes pinned `.py` hooks + correct
+  decoupled roots in one pass and the payload-rewrite step after it is an
+  idempotent no-op. (The setup capture-wiring writer is intentionally unchanged —
+  it has stop-hook-aware, add-only semantics on the setup path.)
+
 ## [2026.7.29.12] — 2026-07-29 — `doctor --fix --fix-hooks` repairs wrong roots / unpinned hooks
 
 ### Fixed
