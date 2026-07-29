@@ -169,14 +169,29 @@ def generate_configs():
         "debug_agent":    mcp_server("debug_agent_bridge.py"),
     }
 
+    # Respect the capture config: PreCompact + SessionStart are always wired, but
+    # Stop is the per-turn toggle — write it only when the claude-code stop_hook is
+    # enabled ('both' mode), else capture is PreCompact-only and a Stop hook would
+    # fire against the user's explicit choice. Best-effort — default to the
+    # recommended 'both' (Stop on) if the config can't be read.
+    stop_enabled = True
+    try:
+        import chatlog_config
+        _cc = chatlog_config.resolve_config().host_agents.get("claude-code")
+        stop_enabled = bool(_cc.stop_hook) if _cc is not None else True
+    except Exception:  # noqa: BLE001 — config unreadable: keep the recommended default
+        stop_enabled = True
+    claude_hooks = {
+        "SessionStart": session_start_entry,
+        "PreCompact":   hook_entry,
+    }
+    if stop_enabled:
+        claude_hooks["Stop"] = hook_entry
+
     # ── claude-settings.json ──────────────────────────────────────────────────
     claude = {
         "model": "opus",
-        "hooks": {
-            "SessionStart": session_start_entry,
-            "PreCompact":   hook_entry,
-            "Stop":         hook_entry,
-        },
+        "hooks": claude_hooks,
         "statusLine": {
             "type":    "command",
             "command": f"{python_cmd} {repo('bin/statusline-command.sh')}",

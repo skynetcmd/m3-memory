@@ -25,19 +25,29 @@ def test_root_env_prefix_contains_both_pins(monkeypatch):
     assert p.endswith(" ")  # prefixes the command directly
 
 
-def test_claude_hook_command_is_pinned(monkeypatch):
-    monkeypatch.setenv("M3_MEMORY_ROOT", "/data/.m3")
-    monkeypatch.setenv("M3_ENGINE_ROOT", "/data/.m3/engine")
-    monkeypatch.setenv("M3_CONFIG_ROOT", "/data/.m3/config")
+def test_apply_claude_settings_delegates_to_canonical_writer(monkeypatch):
+    """apply_claude_settings (the setup capture-wiring writer) must delegate to
+    generate_configs.install_claude_settings — the single canonical Claude writer
+    — so `m3 setup` produces the same pinned .py hooks + roots the doctor writes,
+    and stops emitting its own /bin/sh add-only hooks."""
+    import types
 
-    class _CC:
-        stop_hook = True
+    called = {"install": 0}
+    import generate_configs
+    monkeypatch.setattr(
+        generate_configs, "install_claude_settings",
+        lambda **k: called.__setitem__("install", called["install"] + 1) or {"changed": True},
+    )
+    # npm-PATH side-fix must stay best-effort and not block.
+    import m3_memory.installer as _inst
+    monkeypatch.setattr(_inst, "_fix_npm_global_path", lambda: "")
 
-    class _Cfg:
-        host_agents = {"claude-code": _CC()}
+    cfg = types.SimpleNamespace(host_agents={"claude-code": types.SimpleNamespace(stop_hook=True)})
+    changed, msg = ci.apply_claude_settings(cfg)
+    assert called["install"] == 1
+    assert changed is True
+    assert "mcpServers" in msg  # wrote the full config, not just hooks
 
-    cmd, stop = ci._build_claude_hook_command(_Cfg())
-    assert "M3_ENGINE_ROOT=" in cmd and "M3_CONFIG_ROOT=" in cmd
-    # pins come first, before the interpreter/script
-    assert cmd.index("M3_ENGINE_ROOT=") < cmd.index("/bin/sh") if "/bin/sh" in cmd else True
-    assert stop is True
+    # The old /bin/sh hook builders are gone.
+    assert not hasattr(ci, "_build_claude_hook_command")
+    assert not hasattr(ci, "_build_claude_settings_patch")

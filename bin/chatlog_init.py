@@ -293,65 +293,36 @@ def _root_env_prefix() -> str:
     return f"M3_ENGINE_ROOT={eng} M3_CONFIG_ROOT={cfg} "
 
 
-def _build_claude_hook_command(config: ChatlogConfig) -> tuple[str, bool]:
-    """Return (command_string, stop_hook_enabled) for the current OS."""
-    ps1 = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
-                       "claude_code_precompact.ps1").replace("\\", "/")
-    sh = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
-                      "claude_code_precompact.sh").replace("\\", "/")
-    prefix = _root_env_prefix()
-    if sys.platform == "win32":
-        hook_cmd = f"{prefix}powershell -NoProfile -ExecutionPolicy Bypass -File {ps1}"
-    else:
-        hook_cmd = f"{prefix}/bin/sh {sh}"
-    cc = config.host_agents.get("claude-code")
-    stop_enabled = bool(cc and cc.stop_hook)
-    return hook_cmd, stop_enabled
-
-
-def _build_claude_settings_patch(config: ChatlogConfig) -> dict:
-    """Construct just the hooks + statusLine fields we want to merge in."""
-    hook_cmd, stop_enabled = _build_claude_hook_command(config)
-    hooks_block: dict = {
-        "PreCompact": [{"hooks": [{"type": "command", "command": hook_cmd}]}],
-    }
-    if stop_enabled:
-        hooks_block["Stop"] = [{"hooks": [{"type": "command", "command": hook_cmd}]}]
-    status_script = os.path.join(BASE_DIR, "bin", "chatlog_status_line.py").replace("\\", "/")
-    return {
-        "hooks": hooks_block,
-        "statusLine": {"type": "command", "command": f"python {status_script}"},
-    }
+# (The old Claude hook builders — _build_claude_hook_command /
+# _build_claude_settings_patch — were removed when apply_claude_settings below
+# became a thin delegate to generate_configs.install_claude_settings, the single
+# canonical Claude writer. _root_env_prefix() above is retained: the Gemini
+# onExit hook still needs the same inline root pins.)
 
 
 def apply_claude_settings(config: ChatlogConfig) -> tuple[bool, str]:
-    """Merge chatlog hooks into ~/.claude/settings.json. Idempotent.
+    """Write m3's Claude config via the single canonical writer,
+    generate_configs.install_claude_settings.
 
-    Creates the file if missing. If hooks.PreCompact / hooks.Stop / statusLine
-    already contain entries, we ONLY add our entry when no existing command
-    contains 'chatlog' — this preserves user-authored hooks and avoids
-    duplicate-firing on re-runs.
+    Historically this merged ONLY the chatlog hooks (``/bin/sh``, add-only). It
+    now delegates to the same writer the doctor and ``m3 doctor --fix --fix-hooks``
+    use, so ``m3 setup`` / ``m3 chatlog init`` produce a fully-correct config in
+    ONE pass: pinned ``.py`` hooks (respecting stop_hook / capture mode), the
+    decoupled roots in every MCP-server env block, the statusline, and the aux
+    bridges — with no add-only staleness (it REPLACES m3-owned entries, so a
+    reinstall actually refreshes them) and no ``/bin/sh``-vs-``.py`` churn between
+    setup and the doctor. That is why the documented ``pipx upgrade`` + ``m3 setup``
+    flow now yields a correct config with no ``m3 doctor --fix --fix-hooks`` needed.
 
-    Writes a timestamped backup before the first modification so users can
-    revert. Returns (changed, message).
+    Keeps the npm-global PATH fix and the ``(changed, msg)`` return contract callers
+    rely on. ``config`` is accepted for API compatibility; install_claude_settings
+    resolves the same (already-persisted) capture config itself.
     """
     settings_path = Path.home() / ".claude" / "settings.json"
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
 
-    existing: dict = {}
-    if settings_path.is_file():
-        try:
-            existing = json.loads(settings_path.read_text(encoding="utf-8")) or {}
-        except json.JSONDecodeError as e:
-            return False, f"refused to edit {settings_path}: unparseable JSON ({e}). Fix or remove and re-run."
-
-    patch = _build_claude_settings_patch(config)
-
-    # Ensure ~/.npm-global/bin is on the non-login shell PATH. Claude Code is
-    # commonly installed via `npm install -g @anthropic-ai/claude-code`
-    # AFTER install-m3 has run — at which point install-m3's PATH fix was
-    # a no-op because the dir didn't exist yet. Same ordering issue as the
-    # Gemini-installed-after-m3 case; same fix.
+    # Ensure ~/.npm-global/bin is on the non-login shell PATH — Claude Code is
+    # commonly `npm install -g`'d AFTER install-m3, when that PATH fix was a no-op
+    # (the dir didn't exist yet).
     path_action: Optional[str] = None
     try:
         from m3_memory.installer import _fix_npm_global_path
@@ -361,47 +332,19 @@ def apply_claude_settings(config: ChatlogConfig) -> tuple[bool, str]:
     except Exception:
         pass  # best-effort; not blocking
 
-    def _chatlog_entry_present(hook_entries: list) -> bool:
-        return any(
-            "chatlog" in json.dumps(e).lower() for e in (hook_entries or [])
-        )
+    try:
+        import generate_configs
+        res = generate_configs.install_claude_settings(assume_yes=True)
+        changed = bool(res.get("changed"))
+    except Exception as e:  # noqa: BLE001 — surface, don't crash the caller
+        return False, f"could not write Claude settings via install_claude_settings: {e}"
 
-    hooks = existing.setdefault("hooks", {})
-    changed = False
-
-    for event, patch_entry in patch["hooks"].items():
-        current = hooks.get(event) or []
-        if _chatlog_entry_present(current):
-            continue  # idempotent — our entry (or an equivalent) already there
-        current.extend(patch_entry)
-        hooks[event] = current
-        changed = True
-
-    # statusLine is a single object, not a list. Only overwrite if missing
-    # or currently chatlog-owned. Respect a user-set custom statusLine.
-    sl = existing.get("statusLine")
-    if not isinstance(sl, dict) or "chatlog" in json.dumps(sl).lower():
-        if existing.get("statusLine") != patch["statusLine"]:
-            existing["statusLine"] = patch["statusLine"]
-            changed = True
-
-    if not changed:
-        # settings.json was already complete, but the PATH fix above may have
-        # done useful work (common when npm-global was created between runs).
-        # Surface that so the user sees what happened.
-        if path_action:
-            return True, f"added {path_action}; chatlog entries in {settings_path} already present"
-        return False, f"no change — chatlog entries already present in {settings_path}"
-
-    # Backup before write.
-    if settings_path.is_file():
-        stamp = datetime.now().strftime("%Y%m%dT%H%M%SZ")
-        backup = settings_path.with_suffix(f".json.bak.{stamp}")
-        backup.write_text(settings_path.read_text(encoding="utf-8"), encoding="utf-8")
-
-    settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
-    events = ", ".join(patch["hooks"].keys())
-    msg = f"merged chatlog hooks ({events}) + statusLine into {settings_path}"
+    if changed:
+        msg = f"wrote m3 hooks + statusLine + mcpServers into {settings_path}"
+    elif path_action:
+        msg = f"Claude settings already up to date ({settings_path})"
+    else:
+        return False, f"no change — Claude settings already up to date ({settings_path})"
     if path_action:
         msg = f"added {path_action}; {msg}"
     return True, msg

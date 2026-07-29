@@ -152,6 +152,16 @@ def test_decoupled_roots_pinned_in_server_env_and_hooks(monkeypatch):
     monkeypatch.setenv("M3_CONFIG_ROOT", "/data/.m3/config")
     monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
     monkeypatch.setattr(g, "_write_json", lambda path, data: None)
+    # Enable the Stop hook ('both' mode) so all three capture hooks are written
+    # and checked; generate_configs writes Stop only when stop_hook is on.
+    import types
+
+    import chatlog_config
+    monkeypatch.setattr(
+        chatlog_config, "resolve_config",
+        lambda: types.SimpleNamespace(
+            host_agents={"claude-code": types.SimpleNamespace(stop_hook=True)}),
+    )
 
     g.generate_configs()
     settings = g.generate_configs._last_claude
@@ -168,6 +178,26 @@ def test_decoupled_roots_pinned_in_server_env_and_hooks(monkeypatch):
         cmd = settings["hooks"][event][0]["hooks"][0]["command"]
         assert "M3_ENGINE_ROOT=/data/.m3/engine" in cmd, cmd
         assert "M3_CONFIG_ROOT=/data/.m3/config" in cmd, cmd
+
+
+def test_stop_hook_omitted_when_disabled(monkeypatch):
+    """PreCompact-only mode (stop_hook off) must NOT wire a Stop hook — the
+    canonical writer respects the capture config so delegating apply_claude_settings
+    to it can't regress a PreCompact-only user into per-turn Stop capture."""
+    monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
+    monkeypatch.setattr(g, "_write_json", lambda path, data: None)
+    import types
+
+    import chatlog_config
+    monkeypatch.setattr(
+        chatlog_config, "resolve_config",
+        lambda: types.SimpleNamespace(
+            host_agents={"claude-code": types.SimpleNamespace(stop_hook=False)}),
+    )
+    g.generate_configs()
+    hooks = g.generate_configs._last_claude["hooks"]
+    assert "Stop" not in hooks
+    assert "PreCompact" in hooks and "SessionStart" in hooks
 
 
 def test_installed_layout_ignores_stray_venv_uses_sys_executable(monkeypatch):
