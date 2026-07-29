@@ -21,6 +21,18 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.29.1] — 2026-07-29 — Pre-push hook no longer false-blocks on a venv-based checkout
+
+### Fixed
+- **Developer tooling:** the shared `pre-push` hook ran its drift and shim-integrity
+  gates with a bare `python` off `PATH`. On a virtualenv-based checkout — where the
+  project's dependencies live in `.venv`, not the system Python — that interpreter
+  can't import the project, so both gates failed with `ModuleNotFoundError` and
+  blocked the push even though nothing was actually wrong. The hook now resolves the
+  project interpreter (active virtualenv → repo `.venv` → `python`/`python3`), and
+  when no interpreter has the dependencies it warns and defers to CI (which runs the
+  same gates) instead of blocking a legitimate push. No runtime/product change.
+
 ## [2026.7.29.0] — 2026-07-29 — Runs correctly on a PostgreSQL primary and uses the GPU on Apple Silicon
 
 ### Fixed
