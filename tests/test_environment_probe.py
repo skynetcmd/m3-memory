@@ -7,7 +7,6 @@ the 48-hour context-loss failure in CLAUDE.md, and no probe covered it
 (agent_paths_probe reads MCP *server* configs, never the `hooks` block).
 """
 
-import json
 import os
 import sys
 

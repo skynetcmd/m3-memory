@@ -11,9 +11,7 @@ Contract now:
   exit 3 -- installed, verification FAILED (distinct from 2 = aborted)
 """
 
-import argparse
 import subprocess
-import sys
 
 import pytest
 

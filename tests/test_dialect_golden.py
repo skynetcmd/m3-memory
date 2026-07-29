@@ -150,10 +150,6 @@ def test_golden_covers_every_divergent_helper():
         # public name. Track only the public divergent surface here.
         if meth_name.startswith("_"):
             continue
-        try:
-            src = base_attr.__doc__ or ""
-        except Exception:
-            src = ""
         # A method is divergent if the SQLite and Postgres singletons disagree on
         # its output for our fixed inputs — the definition that actually matters.
         divergent.add(meth_name)

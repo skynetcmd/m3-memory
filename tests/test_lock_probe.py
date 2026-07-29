@@ -1,7 +1,6 @@
 """Tests for the single-instance lock doctor probe (bin/doctor/lock_probe.py)."""
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 

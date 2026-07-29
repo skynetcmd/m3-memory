@@ -19,8 +19,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
 import m3_halt  # noqa: E402
@@ -100,7 +98,6 @@ def test_an_ancestor_is_never_targeted(monkeypatch):
                            SimpleNamespace(pid=800, role="m3.exe"),
                            SimpleNamespace(pid=555, role="dashboard")],
     )
-    killed: list[int] = []
     monkeypatch.setattr(m3_halt, "_pid_is_alive", lambda pid: False)
     results = m3_halt.kill_stale_daemons()
     targeted = {r["pid"] for r in results}

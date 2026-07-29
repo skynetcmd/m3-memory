@@ -101,10 +101,12 @@ def test_seam_seed_helpers_insert_schema_valid_rows_on_pg(pg):
     seed_memory_row / seed_embedding_row are the fix for raw-SQL fixture drift —
     the ONE place that knows every NOT NULL column. This asserts they satisfy the
     real PG schema (memory_items.type NOT NULL, memory_embeddings.id NOT NULL PK)."""
-    from conftest import seed_embedding_row, seed_memory_row  # type: ignore
+    import struct
+
     from memory.backends import dialect
     from memory.db import _db
-    import struct
+
+    from conftest import seed_embedding_row, seed_memory_row  # type: ignore
 
     d = dialect()
     mid = f"seed-{uuid.uuid4().hex[:10]}"

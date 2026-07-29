@@ -33,7 +33,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
 from m3_memory import embedder_admin as ea  # noqa: E402
 
-
 # ── 2. OS-correct failure advice ─────────────────────────────────────────────
 
 @pytest.mark.parametrize("platform,expected,forbidden", [

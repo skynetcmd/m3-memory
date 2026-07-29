@@ -14,7 +14,7 @@ if _BIN not in sys.path:
 
 from wiki import anchor as A  # noqa: E402
 from wiki.cluster import Cluster  # noqa: E402
-from wiki.select import EDGE_WEIGHTS, Edge, Mem  # noqa: E402
+from wiki.select import Edge, Mem  # noqa: E402
 
 
 def _mem(id, conf=0.8, imp=0.9, vto=None):

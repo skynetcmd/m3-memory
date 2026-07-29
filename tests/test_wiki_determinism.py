@@ -9,8 +9,6 @@ import os
 import sqlite3
 import sys
 
-import pytest
-
 _HERE = os.path.dirname(__file__)
 _BIN = os.path.normpath(os.path.join(_HERE, "..", "bin"))
 if _BIN not in sys.path:
@@ -416,9 +414,9 @@ def test_synth_cache_roundtrip(tmp_path):
     _bin = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "bin"))
     if _bin not in _sys.path:
         _sys.path.insert(0, _bin)
-    from wiki.synth import SynthConfig, Synthesizer
     from wiki.cluster import Cluster
     from wiki.select import Mem
+    from wiki.synth import SynthConfig, Synthesizer
 
     m = Mem(id="m-1", type="belief", title="T", content="body", importance=0.9,
             confidence=0.8, valid_from=None, valid_to=None, pinned=0,
@@ -513,6 +511,7 @@ def test_non_discriminative_entities_excluded_from_comention():
     co-mention edges — they bridge unrelated topics into one blob. Only
     discriminative entities (person, benchmark, …) should link."""
     import sqlite3
+
     from wiki import select as S
     conn = sqlite3.connect(":memory:")
     conn.executescript(
@@ -553,6 +552,7 @@ def test_self_referential_project_name_excluded_from_comention():
     TYPE is discriminative for real external orgs. A value-level exclusion must
     drop the self-name bridge while keeping real-org links."""
     import sqlite3
+
     from wiki import select as S
     conn = sqlite3.connect(":memory:")
     conn.executescript(

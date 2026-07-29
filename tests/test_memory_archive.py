@@ -107,7 +107,7 @@ def test_gdpr_forget_erases_archived_rows(main_db):
         MM._transfer_to_archive(mid, "expired", db)
         if hasattr(db, "commit"):
             db.commit()
-    assert len(_archive_rows(f"WHERE user_id = ?", (uid,))) == 1
+    assert len(_archive_rows("WHERE user_id = ?", (uid,))) == 1
 
     MM.gdpr_forget_impl(uid)
 

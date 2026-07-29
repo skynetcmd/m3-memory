@@ -6,7 +6,6 @@ TestClient. Requires the [dashboard] extra (fastapi); skipped cleanly if absent.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 

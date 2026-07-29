@@ -28,6 +28,7 @@ def test_enrich_valid_types_matches_spec():
     import re
 
     import mcp_tool_catalog
+
     from memory import enrich
 
     spec_types = set(mcp_tool_catalog.VALID_MEMORY_TYPES) - {"auto"}

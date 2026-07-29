@@ -141,6 +141,7 @@ class TestStaleLockRecovery:
     def setup_method(self):
         import os
         from datetime import datetime, timedelta, timezone
+
         import pg_sync
         self.P = pg_sync
         self.os = os
@@ -218,8 +219,9 @@ class TestSyncAllInterpreter:
     for every pipx user -> the scheduled sync task failed with FileNotFoundError."""
 
     def test_resolved_python_exists_and_is_current(self):
-        import sys as _sys
         import pathlib
+        import sys as _sys
+
         import sync_all
         assert pathlib.Path(sync_all.PY).exists(), \
             f"sync_all.PY does not exist: {sync_all.PY}"
@@ -231,5 +233,6 @@ class TestSyncAllInterpreter:
         # path under an in-tree '.venv' unless that's genuinely where sys.executable
         # lives (dev tree). The resolver prefers sys.executable.
         import sys as _sys
+
         import sync_all
         assert sync_all.PY == _sys.executable
