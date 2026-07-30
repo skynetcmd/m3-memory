@@ -28,12 +28,28 @@ chatlog pointing at the old path), and prints a post-migration checklist.
 
 ### Split-brain hazard (read before changing roots)
 Two env paths must BOTH be pinned or the system splits: the **MCP server** reads
-its root from the server's `env` block in client `settings.json` (it does NOT
-source `~/.zshenv`), while the **chatlog Stop/PreCompact hook** inherits Claude
-Code's *process* env (NOT the server `env` block). Pinning only one makes the
-server read the new root while the hook keeps writing turns to the old one. Fix:
-add `M3_ENGINE_ROOT` + `M3_CONFIG_ROOT` to every m3 MCP server `env` block AND
-inline-prefix both hook `command`s with the same two vars. Claude Code reloads
-hooks **live** but re-resolves server env only on restart — a mid-session pin
-diverges the two chatlog DBs; reconcile with a UNION merge (`INSERT OR IGNORE`),
-never an overwrite.
+its root from its own registration's `env` block (NOT from `~/.zshenv`), while
+the **chatlog Stop/PreCompact hook** inherits the agent's *process* env (NOT the
+server `env` block). Pinning only one makes the server read the new root while
+the hook keeps writing turns to the old one. Fix: pin `M3_ENGINE_ROOT` +
+`M3_CONFIG_ROOT` in the server registration's `env` AND inline-prefix both hook
+`command`s with the same two vars.
+
+**Where the server `env` lives is agent-specific — and Claude Code is the
+exception.** Claude Code does **NOT** read MCP server *definitions* from
+`~/.claude/settings.json` (only `~/.claude.json`, `.mcp.json`, and plugins are
+honored). So m3's Claude memory server is registered via
+`claude mcp add --scope user m3_memory m3 --env M3_ENGINE_ROOT=… --env
+M3_CONFIG_ROOT=…` (written to `~/.claude.json`) — that `--env` is where Claude's
+server roots must go, NOT a `settings.json` `mcpServers` block (which Claude
+ignores; `generate_configs` no longer writes one). The m3 **plugin** alternative
+carries roots via its `userConfig` (`${user_config.engine_root/config_root}`);
+`m3 setup` keeps the plugin's server disabled (`disabledMcpServers +=
+plugin:m3:memory`) so only the direct `mcp__m3_memory__` server runs. For
+Gemini/Antigravity/Cursor/Cline the roots DO go in the `env` block of the
+`memory` entry in their own config files (those ARE read). `settings.json` hooks
+and `statusLine` ARE read for Claude — only `mcpServers` is not.
+
+Claude Code reloads hooks **live** but re-resolves server env only on restart — a
+mid-session pin diverges the two chatlog DBs; reconcile with a UNION merge
+(`INSERT OR IGNORE`), never an overwrite.
