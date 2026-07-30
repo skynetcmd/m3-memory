@@ -25,7 +25,7 @@ Scope:
 Output:
     Observations are written as type='observation' rows under variant
     --target-variant (default: m3-observations-YYYYMMDD). Read them back
-    with mcp__memory__memory_search or any retrieval call that opts into
+    with mcp__m3_memory__memory_search or any retrieval call that opts into
     M3_PREFER_OBSERVATIONS=1.
 
 Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflector.py.
@@ -937,7 +937,7 @@ async def _main_async(args) -> int:
     print(f"  failed: {counters_total['failed']}")
     print()
     print("  retrieve later via:")
-    print("    M3_PREFER_OBSERVATIONS=1 mcp__memory__memory_search ...")
+    print("    M3_PREFER_OBSERVATIONS=1 mcp__m3_memory__memory_search ...")
     print(f"  (or pass --observer-variant {args.target_variant} to the bench harness)")
 
     # Auto-emit a per-run report so every enrich run leaves an artifact.

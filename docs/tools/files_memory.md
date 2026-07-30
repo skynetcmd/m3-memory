@@ -245,7 +245,7 @@ Single staleness-review + notification dispatch pass. Suitable for cron,
 scheduled tasks, or one-off invocations. Each cycle invokes
 `files_staleness_review` and emits a notification per
 (file_node, event_kind) pair via `memory.db`'s `notifications` inbox
-(`mcp__memory__notify` shape). Per-pair cooldown (default 1 hour)
+(`mcp__m3_memory__notify` shape). Per-pair cooldown (default 1 hour)
 suppresses duplicate notifications across cycles — state lives in a
 `watch_state` k/v table inside `files.db` so cooldowns survive restarts.
 

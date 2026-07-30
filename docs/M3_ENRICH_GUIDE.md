@@ -4,7 +4,7 @@
 It reads conversations from your m3 core memory and chatlog, extracts
 atomic user-facts with three-date metadata (when said / when about /
 verbatim phrasing), and writes them back as `type='observation'` rows
-that are searchable via `mcp__memory__memory_search`.
+that are searchable via `mcp__m3_memory__memory_search`.
 
 > **TL;DR**
 > ```bash
@@ -548,7 +548,7 @@ and add the env vars to the `memory` server's `env` block:
 > | **No GUI host (CI / headless)** | Kill and re-launch the process that owns the MCP child |
 >
 > Verification that the restart took: in a fresh tool call, run any
-> `mcp__memory__memory_search` and check that observation rows appear
+> `mcp__m3_memory__memory_search` and check that observation rows appear
 > in the results. If they don't, the env didn't propagate — see the
 > [Verify it's active](#verify-its-active) section below.
 

@@ -54,8 +54,8 @@ Per-result scores from each pillar are exposed via `memory_suggest`. There is no
 **Fact:** M3's lifecycle is built on plain decay + retention policies:
 - Configurable `decay_rate` per memory
 - `expires_at` for hard expiry
-- `mcp__memory__memory_set_retention` for per-agent retention rules
-- Periodic `mcp__memory__memory_maintenance` for orphan pruning and dedup
+- `mcp__m3_memory__memory_set_retention` for per-agent retention rules
+- Periodic `mcp__m3_memory__memory_maintenance` for orphan pruning and dedup
 
 No SDEs, no manifolds. Just rule-based maintenance running on a SQLite database.
 
@@ -74,7 +74,7 @@ No SDEs, no manifolds. Just rule-based maintenance running on a SQLite database.
 ### ❌ Myth: "M3 doesn't do fact extraction" *or* "M3 forces you to use its extraction layer"
 
 **Fact:** M3 ships a **local SLM fact-extraction pipeline** (`m3_enrich`, `run_observer`, `run_reflector`) but **using it is optional**. You can:
-- Run M3 as raw substrate, calling `mcp__memory__memory_write` directly with your own structured data
+- Run M3 as raw substrate, calling `mcp__m3_memory__memory_write` directly with your own structured data
 - Run M3 with the built-in pipeline using a local SLM (qwen3-8b via LM Studio, etc.)
 - Run M3 with the built-in pipeline using a cloud model (Anthropic Haiku, Gemini Flash, GPT-4o-mini — see `config/slm/`)
 - Mix modes per agent or per write
@@ -156,9 +156,9 @@ For positive grounding, here's the short list of what M3 *does* implement (with 
 | Bitemporal | `valid_from` / `valid_to` per memory; `created_at` is transaction time | `m3_memory/store.py` |
 | Contradiction handling | Supersedes relationships set on conflicting writes | `bin/run_reflector.py` |
 | Entity extraction | Optional SLM pipeline | `bin/m3_enrich.py`, `bin/run_observer.py` |
-| Knowledge graph | 9 relationship types, 3-hop traversal | `mcp__memory__memory_graph`, `memory_link` |
+| Knowledge graph | 9 relationship types, 3-hop traversal | `mcp__m3_memory__memory_graph`, `memory_link` |
 | GDPR | `gdpr_forget` (Art. 17), `gdpr_export` (Art. 20) | `m3_memory/gdpr.py` |
-| Multi-agent | WAL concurrent writes (30s busy_timeout + retry) + optional shared PostgreSQL pool; agent registry; SQL-layer scope isolation; handoffs | `mcp__memory__agent_*`, `memory_handoff`, `bin/pg_sync.py` |
+| Multi-agent | WAL concurrent writes (30s busy_timeout + retry) + optional shared PostgreSQL pool; agent registry; SQL-layer scope isolation; handoffs | `mcp__m3_memory__agent_*`, `memory_handoff`, `bin/pg_sync.py` |
 | Sync | Optional bi-directional delta sync to PostgreSQL | `bin/sync_all.py` |
 | MCP | Native — 100+ tools, zero config in MCP-aware clients | `m3_memory/mcp/*` |
 

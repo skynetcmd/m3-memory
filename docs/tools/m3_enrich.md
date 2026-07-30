@@ -36,7 +36,7 @@ Scope:
 Output:
     Observations are written as type='observation' rows under variant
     --target-variant (default: m3-observations-YYYYMMDD). Read them back
-    with mcp__memory__memory_search or any retrieval call that opts into
+    with mcp__m3_memory__memory_search or any retrieval call that opts into
     M3_PREFER_OBSERVATIONS=1.
 
 Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflector.py.

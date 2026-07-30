@@ -38,7 +38,7 @@ You write entities directly via MCP tools. Retrieval is pure SQLite + vector + g
 **Setup:**
 ```bash
 pip install m3-memory
-# That's it. Don't run m3_enrich. Use mcp__memory__memory_write directly.
+# That's it. Don't run m3_enrich. Use mcp__m3_memory__memory_write directly.
 ```
 
 ### Pattern B: M3 + built-in SLM extraction
@@ -102,7 +102,7 @@ This is where M3 earns its keep. A typical pattern:
 
 - **One M3 store** (a single SQLite file on whichever box is most always-on — or a PostgreSQL primary backend if you'd rather run a shared server).
 - **Multiple agents** read and write through MCP — a Claude Code instance on your laptop, a Gemini CLI agent on your desktop, an OpenCode agent on a server, plus any background workers (a Home Assistant integration, a periodic web scraper, etc.).
-- **Per-agent scoping** via `agent_id` and optional `scope` keeps each agent's working memory tidy without preventing cross-agent reads. Use the agent registry (`mcp__memory__agent_register`) so each writer is identified.
+- **Per-agent scoping** via `agent_id` and optional `scope` keeps each agent's working memory tidy without preventing cross-agent reads. Use the agent registry (`mcp__m3_memory__agent_register`) so each writer is identified.
 - **Handoffs** via `memory_handoff` — agent A leaves a structured task for agent B, agent B's next session sees it via its inbox.
 - **Notifications** — for cross-machine signaling without a separate message bus.
 

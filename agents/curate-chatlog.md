@@ -1,7 +1,7 @@
 ---
 name: curate-chatlog
 description: Curate the m3-chatlog store — clean, dedupe, decay ephemeral turns, prune abandoned conversations, promote high-signal chunks to long-term memory. Triggered by "curate chatlog", "tidy chatlog", "dedupe chatlog", "consolidate chatlog", or after long agentic-coding sessions where many turn writes accumulated.
-tools: Bash, Read, Grep, mcp__memory__chatlog_search, mcp__memory__chatlog_status, mcp__memory__chatlog_promote, mcp__memory__chatlog_rescrub, mcp__memory__memory_delete, mcp__memory__memory_delete_bulk, mcp__memory__memory_update, mcp__memory__curate_chatlog_apply, mcp__plugin_m3_m3__chatlog_search, mcp__plugin_m3_m3__chatlog_status, mcp__plugin_m3_m3__chatlog_promote, mcp__plugin_m3_m3__chatlog_rescrub, mcp__plugin_m3_m3__memory_delete, mcp__plugin_m3_m3__memory_delete_bulk, mcp__plugin_m3_m3__memory_update, mcp__plugin_m3_m3__curate_chatlog_apply
+tools: Bash, Read, Grep, mcp__m3_memory__chatlog_search, mcp__m3_memory__chatlog_status, mcp__m3_memory__chatlog_promote, mcp__m3_memory__chatlog_rescrub, mcp__m3_memory__memory_delete, mcp__m3_memory__memory_delete_bulk, mcp__m3_memory__memory_update, mcp__m3_memory__curate_chatlog_apply, mcp__plugin_m3_memory__chatlog_search, mcp__plugin_m3_memory__chatlog_status, mcp__plugin_m3_memory__chatlog_promote, mcp__plugin_m3_memory__chatlog_rescrub, mcp__plugin_m3_memory__memory_delete, mcp__plugin_m3_memory__memory_delete_bulk, mcp__plugin_m3_memory__memory_update, mcp__plugin_m3_memory__curate_chatlog_apply
 model: sonnet
 ---
 
@@ -38,7 +38,7 @@ These rules cost almost nothing to follow (you already have the tool outputs in 
 
 ## Tool usage
 
-You have BOTH `mcp__memory__*` and `mcp__plugin_m3_m3__*` registered. Prefer `mcp__plugin_m3_m3__*` (current plugin namespace); fall back to `mcp__memory__*` if the plugin form errors.
+The memory tools are `mcp__m3_memory__*` (the direct server `m3 setup` registers, and the default). If you instead see `mcp__plugin_m3_memory__*` (the m3 plugin's server), use that — both call the same backend. Prefer `mcp__m3_memory__*` when both are present.
 
 For decay sweeps, **delegate to `bin/chatlog_decay.py`** via `Bash`. Do NOT compute decay multipliers per-row in tokens — the tool runs deterministic Python against the DB and returns a JSON summary you read back. This is the explicit minimize-token-use pattern.
 
