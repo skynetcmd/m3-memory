@@ -1957,6 +1957,14 @@ def _wire_claude(capture_mode: str) -> bool:
 
     reg_ok = _claude_mcp_add(add_cmd)
     if reg_ok:
+        # Belt-and-suspenders: the canonical settings writer (via _wire_claude_hooks
+        # -> install_claude_settings) normally disables the plugin's memory server,
+        # but that path can no-op or fail (capture_mode=none, chatlog_init error)
+        # while `claude mcp add` still succeeds — leaving the direct server AND an
+        # enabled plugin server both live (double model load, split namespace). Pin
+        # the disable directly so "direct registered" and "plugin disabled" are
+        # atomic. Idempotent + best-effort; never blocks setup.
+        _disable_claude_plugin_server()
         # Loud default: the direct server is active; the plugin's server is kept off.
         print()
         _ok("  Claude memory server: mcp__m3_memory__ (direct — low-friction, roots-pinned).")
@@ -2003,6 +2011,47 @@ def _claude_mcp_add(add_cmd: list[str]) -> bool:
     _warn(f"`claude mcp add m3_memory` failed (exit {proc.returncode}); "
           "manual: `claude mcp add --scope user m3_memory m3`")
     return False
+
+
+# The m3 plugin's MCP server ids to keep disabled when the direct `m3_memory`
+# server is the active default. `memory` is the current plugin server key
+# (mcp__plugin_m3_memory__); `m3` is the pre-rename key an upgrader may still
+# carry. Mirrors generate_configs.install_claude_settings section 4 — kept here
+# as a targeted safety net (disabledMcpServers only, no hook/statusline rewrite).
+_CLAUDE_PLUGIN_SERVER_IDS = ("plugin:m3:memory", "plugin:m3:m3")
+
+
+def _disable_claude_plugin_server() -> None:
+    """Merge the m3 plugin's server ids into ~/.claude/settings.json
+    disabledMcpServers so only the direct `mcp__m3_memory__` server runs.
+
+    A narrow, idempotent JSON merge — never clobbers a user's own disables, never
+    touches any other key, never raises. This is the guaranteed floor under the
+    canonical writer: the direct server must never be registered without the
+    plugin's competing server being turned off in the same setup.
+    """
+    settings_path = Path(os.path.expanduser("~")) / ".claude" / "settings.json"
+    try:
+        if settings_path.is_file():
+            with open(settings_path, encoding="utf-8") as fh:
+                live = json.load(fh)
+        else:
+            live = {}
+        if not isinstance(live, dict):
+            return
+        disabled = live.get("disabledMcpServers")
+        if not isinstance(disabled, list):
+            disabled = []
+        added = [pid for pid in _CLAUDE_PLUGIN_SERVER_IDS if pid not in disabled]
+        if not added:
+            return  # already disabled — nothing to write
+        disabled.extend(added)
+        live["disabledMcpServers"] = disabled
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(settings_path, "w", encoding="utf-8") as fh:
+            json.dump(live, fh, indent=2, sort_keys=True)
+    except Exception:  # noqa: BLE001 — the disable is a safety net, never fatal
+        pass
 
 
 def _wire_claude_hooks(capture_mode: str) -> bool:

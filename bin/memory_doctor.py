@@ -118,6 +118,11 @@ def main() -> int:
              "entities extracted?).",
     )
     parser.add_argument(
+        "--skip-claude-mcp", action="store_true",
+        help="Skip the Claude single-server check (is exactly ONE m3 memory "
+             "server live — not the direct server AND the plugin's together?).",
+    )
+    parser.add_argument(
         "--verbose", action="store_true",
         help="Show the full detail (DB-repair steps + each probe's expanded "
              "report + model-load logs). Default is a compact one-line-per-check "
@@ -195,6 +200,20 @@ def main() -> int:
                 if rc:
                     print("  (agent stale-payload rewrite not attempted — re-run "
                           "with `--fix --fix-hooks`)")
+
+        # Claude single-server convergence: turn off the plugin's competing
+        # server and/or drop a legacy roots-less `memory` entry so exactly one m3
+        # server runs. Same --fix-hooks gate + backup contract as the two probes
+        # above — it edits the user's ~/.claude files (settings.json disable merge,
+        # `claude mcp remove`). --fix alone reports; --fix --fix-hooks converges.
+        if not args.skip_claude_mcp:
+            from doctor import claude_mcp_probe
+            if args.fix_hooks:
+                claude_mcp_probe.run(brief=False, fix=not args.dry_run)
+            else:
+                claude_mcp_probe.run(brief=False, fix=False)
+                print("  (Claude single-server convergence not attempted — re-run "
+                      "with `--fix --fix-hooks`)")
 
         if res["summary"] == "failed" or shared_rc != 0:
             return 1
@@ -315,6 +334,16 @@ def main() -> int:
         # It surfaces what nothing else does — the loop being uninstalled, loaded
         # but dead, or live-but-zero-entities (see m3-coalescing-daemon-dormant).
         cognitive_loop_probe.run(brief=brief)
+
+    if not args.skip_claude_mcp:
+        from doctor import claude_mcp_probe
+        # Report-only and exit-code-neutral: a double-run (direct server AND the
+        # plugin's server both live) still WORKS, just wastefully (payload loaded
+        # twice, tools split across two prefixes), and a plugin-only setup is a
+        # supported choice — so this nags with the fix but never fails the doctor.
+        # It is the ONLY check that catches a `/plugin install` re-enabling the
+        # plugin server after `m3 setup` disabled it.
+        claude_mcp_probe.run(brief=brief)
 
     # On a failure in brief mode, point the user at the full detail (§3: an
     # error should tell you how to see more, not dead-end).

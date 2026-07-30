@@ -45,7 +45,13 @@ server roots must go, NOT a `settings.json` `mcpServers` block (which Claude
 ignores; `generate_configs` no longer writes one). The m3 **plugin** alternative
 carries roots via its `userConfig` (`${user_config.engine_root/config_root}`);
 `m3 setup` keeps the plugin's server disabled (`disabledMcpServers +=
-plugin:m3:memory`) so only the direct `mcp__m3_memory__` server runs. For
+plugin:m3:memory` — written atomically with the `claude mcp add`, not only via
+the hooks writer) so only the direct `mcp__m3_memory__` server runs. That
+disable is a one-shot write, so a LATER `/plugin install m3` re-enables the
+plugin server behind m3's back → two live servers (double payload load, split
+`mcp__m3_memory__` / `mcp__plugin_m3_memory__` namespace). `claude_mcp_probe`
+(the `m3 doctor` "one m3 server, not two" check) is the only thing that catches
+that; `m3 doctor --fix --fix-hooks` converges back to one. For
 Gemini/Antigravity/Cursor/Cline the roots DO go in the `env` block of the
 `memory` entry in their own config files (those ARE read). `settings.json` hooks
 and `statusLine` ARE read for Claude — only `mcpServers` is not.
