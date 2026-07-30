@@ -665,22 +665,43 @@ def _prompt_capture_mode(interactive: bool, capture_flag: Optional[str]) -> Opti
     return {"1": "both", "2": "precompact", "3": "stop", "4": "none"}.get(reply)
 
 
-def _register_cognitive_loop_task() -> None:
+def _install_schedules_script() -> "Optional[Path]":
+    """Path to ``bin/install_schedules.py`` in the ACTIVE payload, or None.
+
+    Resolves via bin_dir() — which honors ``$M3_PATH_BIN``, the wheel-packaged
+    ``m3_memory/bin/``, AND a dev-checkout sibling ``bin/``. The old
+    ``Path(__file__).parent.parent / "bin"`` only resolved in a repo checkout: on
+    a pip/pipx install bin/ lives *inside* the package (``m3_memory/bin/``), so
+    the path pointed at a non-existent ``site-packages/bin`` and the caller
+    silently no-op'd — the cognitive-loop / dashboard task NEVER registered on a
+    real install while ``[OK]`` still printed."""
+    bd = bin_dir()
+    if not bd:
+        return None
+    script = bd / "install_schedules.py"
+    return script if script.exists() else None
+
+
+def _register_cognitive_loop_task() -> bool:
     """Register the cognitive-loop background service (launchd / systemd /
     schtasks) via ``install_schedules.py --add cognitive-loop``. Best-effort;
-    never aborts install. The loop runs entity extraction, belief consolidation,
-    the reflector, and chatlog-prune — idling when there's no work."""
+    never aborts install. Returns True only when the task was ACTUALLY registered
+    (script found AND the add exited 0), so the caller's ``[OK]`` is honest — a
+    missing script or a failed add returns False. The loop runs entity
+    extraction, belief consolidation, the reflector, and chatlog-prune — idling
+    when there's no work."""
     try:
-        script = str(Path(__file__).resolve().parent.parent / "bin" / "install_schedules.py")
-        if not os.path.exists(script):
-            return
-        subprocess.run([_python_exe(), script, "--add", "cognitive-loop"],
-                       check=False, capture_output=True, text=True)
+        script = _install_schedules_script()
+        if not script:
+            return False
+        proc = subprocess.run([_python_exe(), str(script), "--add", "cognitive-loop"],
+                              check=False, capture_output=True, text=True)
+        return proc.returncode == 0
     except Exception:  # noqa: BLE001 — never fail install on the task step
-        pass
+        return False
 
 
-def _prompt_and_install_cognitive_loop(interactive: bool, forced: bool = False) -> None:
+def _prompt_and_install_cognitive_loop(interactive: bool, forced: bool = False) -> bool:
     """Offer the autonomous cognitive loop at install/upgrade (default yes).
 
     Closes a real operational gap: this was NEVER installed by setup — the wiring
@@ -690,12 +711,17 @@ def _prompt_and_install_cognitive_loop(interactive: bool, forced: bool = False) 
     _prompt_and_install_dashboard: interactive prompt (default yes); ``forced``
     (the --cognitive-loop flag) installs even non-interactively; a headless run
     without the flag leaves it (add later). Best-effort — a failed register step
-    never aborts the install."""
+    never aborts the install.
+
+    Returns True only when the loop was ACTUALLY registered, so the caller can
+    tell "the requested extra was configured" (a legitimate success on an
+    already-present payload) apart from "nothing was done" (the refuse-without
+    --force case)."""
     try:
         if forced:
             enable = True
         elif not interactive:
-            return  # headless without --cognitive-loop: leave it; `m3 schedules --add cognitive-loop` later
+            return False  # headless without --cognitive-loop: leave it; add later
         else:
             print()
             print("  Cognitive loop (recommended): a background service that keeps memory")
@@ -705,13 +731,20 @@ def _prompt_and_install_cognitive_loop(interactive: bool, forced: bool = False) 
             enable = ans not in ("n", "no")
         if not enable:
             print("  Skipped. Enable later with:  m3 schedules --add cognitive-loop")
-            return
-        _register_cognitive_loop_task()
-        print("    [OK] cognitive loop installed (background enrichment enabled).")
+            return False
+        if _register_cognitive_loop_task():
+            print("    [OK] cognitive loop installed (background enrichment enabled).")
+            return True
+        print("    [!] cognitive loop NOT registered (install_schedules.py not "
+              "found on the payload, or the add failed). Enable later with:  "
+              "m3 schedules --add cognitive-loop")
+        return False
     except (EOFError, KeyboardInterrupt):
         print()
+        return False
     except Exception as e:  # noqa: BLE001 — optional step, never abort install
         print(f"    [!] cognitive loop step skipped ({e}); enable later:  m3 schedules --add cognitive-loop")
+        return False
 
 
 def _dashboard_deps_present() -> bool:
@@ -794,10 +827,10 @@ def _register_dashboard_task(skip_if_exists: bool = False) -> None:
             )
             if q.returncode == 0:
                 return
-        script = str(Path(__file__).resolve().parent.parent / "bin" / "install_schedules.py")
-        if not os.path.exists(script):
+        script = _install_schedules_script()
+        if not script:
             return
-        subprocess.run([_python_exe(), script, "--add", "dashboard"],
+        subprocess.run([_python_exe(), str(script), "--add", "dashboard"],
                        check=False, capture_output=True, text=True)
     except Exception:  # noqa: BLE001 — never fail install on the task step
         pass
@@ -1524,7 +1557,7 @@ def install_m3(
     _prompt_and_install_dashboard(interactive)
     # Enable the autonomous cognitive loop (default yes). Was a placeholder that
     # discarded the choice, so the enrichment engine shipped OFF on every install.
-    _prompt_and_install_cognitive_loop(interactive, forced=cognitive_loop)
+    did_cognitive_loop = _prompt_and_install_cognitive_loop(interactive, forced=cognitive_loop)
 
     # Preserve user data across --force / update. The repo tree under
     # repo_path/memory/ holds chatlog DBs, the chatlog config, and the
@@ -1534,6 +1567,22 @@ def install_m3(
     preserved_dir: Optional[Path] = None
     if repo_path.exists():
         if not force:
+            # The payload is already present; without --force there is nothing to
+            # RE-FETCH. But if an explicit extra was requested and configured
+            # above (e.g. `m3 install-m3 --cognitive-loop` on an existing
+            # install), that WAS the work — report success and exit 0, not an
+            # error. Only a bare `install-m3` with nothing to do is a refusal.
+            if did_cognitive_loop:
+                print(
+                    "  System payload already present — left in place (the requested "
+                    "extra was configured above).\n"
+                    "  • To upgrade the payload to the current version:  m3 update\n"
+                    "  • To re-fetch the system files in place:          m3 install-m3 --force\n"
+                    f"  (installed at {repo_path}) Your memories and chatlog are preserved."
+                )
+                # Payload untouched; return the existing bridge to honor the
+                # ``-> Path`` contract (callers use it as the resolved bridge).
+                return find_bridge() or (repo_path / "bin" / "memory_bridge.py")
             raise RuntimeError(
                 "m3 is already installed — nothing to do.\n"
                 "  • To reconfigure (re-wire agents, change options):  m3 setup\n"
