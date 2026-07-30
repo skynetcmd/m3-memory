@@ -1912,33 +1912,84 @@ def _step_install_wolfssl(plan: "SetupPlan") -> bool:
 # ── per-agent wiring ──────────────────────────────────────────────────────────
 
 def _wire_claude(capture_mode: str) -> bool:
-    """Register the m3 MCP in Claude Code via `claude mcp add`, then run chatlog
-    hook init for Claude. Skips silently if `claude` CLI isn't present."""
-    if not shutil.which("claude"):
-        _warn("Claude CLI not on PATH; skipping Claude wiring")
-        return False
-    _say("  · registering m3 MCP in Claude Code (user scope)")
-    try:
-        # `--scope user` writes to the user-level config so the MCP is available
-        # in every project, not just the one the wizard was run from. (The CLI's
-        # default is `local`; there is no `--global` flag — passing it makes
-        # `claude mcp add` exit with "unknown option" and register nothing.)
-        #
-        # `claude mcp add` is idempotent in EFFECT but not in EXIT CODE: with the
-        # server already registered it prints "MCP server memory already exists
-        # in user config" and exits 1. `check=False` stops that raising, but the
-        # child inherited our stdout/stderr and its non-zero status still became
-        # `m3 setup`'s exit code — so a fully successful re-run of setup exited 1
-        # (2026-07-27). Capture the output and classify it: already-registered is
-        # SUCCESS, and only a real failure is surfaced.
-        proc = subprocess.run(
-            ["claude", "mcp", "add", "--scope", "user", "memory", "m3"],
-            check=False, capture_output=True, text=True,
-        )
-    except FileNotFoundError:
-        _warn("`claude` CLI failed to invoke; manual: `claude mcp add --scope user memory m3`")
-        return False
+    """Wire Claude Code to m3 the canonical way and LOUDLY default to the direct
+    MCP server:
 
+      1. Register the memory server via `claude mcp add --scope user m3_memory m3`
+         (roots pinned per-install) → clean `mcp__m3_memory__` namespace. Claude
+         Code does NOT read server definitions from settings.json, so `claude mcp
+         add` (writing ~/.claude.json) is the low-friction, scriptable path — the
+         m3 plugin is the optional marketplace-discovery alternative.
+      2. Migrate off the old roots-less `memory` registration a prior setup wrote.
+      3. Write capture hooks + statusline via the single canonical settings writer
+         (also prunes the dead settings.json mcpServers block and disables the m3
+         plugin's own memory server so a user never runs two).
+
+    Returns True when at least the registration or hook wiring succeeded.
+    """
+    hooks_ok = _wire_claude_hooks(capture_mode)
+
+    if not shutil.which("claude"):
+        _warn("Claude CLI not on PATH; skipping `claude mcp add` — install the "
+              "Claude Code CLI and re-run, or add the m3 plugin.")
+        return hooks_ok
+
+    from m3_memory.installer import _canonical_memory_env
+    # Roots-bearing env so the server, the hooks, and every other m3 process agree
+    # on the same databases (the split-brain guard). Same source of truth the
+    # other agents' memory entries use.
+    try:
+        env = _canonical_memory_env()
+    except Exception:  # noqa: BLE001 — never block registration on env resolution
+        env = {}
+    add_cmd = ["claude", "mcp", "add", "--scope", "user"]
+    for k, v in env.items():
+        add_cmd += ["--env", f"{k}={v}"]
+    add_cmd += ["m3_memory", "m3"]
+
+    _say("  · registering m3 memory server in Claude Code (mcp__m3_memory__, user scope)")
+    # Drop the legacy roots-less `memory` entry a prior setup created (migration),
+    # then drop any existing `m3_memory` so the re-add REFRESHES the env (root
+    # pins) — `claude mcp add` on an existing name is a no-op that would leave a
+    # stale env behind. Both removals are best-effort.
+    _claude_mcp_remove("memory")
+    _claude_mcp_remove("m3_memory")
+
+    reg_ok = _claude_mcp_add(add_cmd)
+    if reg_ok:
+        # Loud default: the direct server is active; the plugin's server is kept off.
+        print()
+        _ok("  Claude memory server: mcp__m3_memory__ (direct — low-friction, roots-pinned).")
+        print("     The optional m3 plugin (marketplace discovery) ships its own memory")
+        print("     server; it is kept DISABLED so you never run two. To switch to the")
+        print("     plugin instead, remove \"plugin:m3:memory\" from disabledMcpServers")
+        print("     in ~/.claude/settings.json.")
+    return reg_ok or hooks_ok
+
+
+def _claude_mcp_remove(name: str) -> None:
+    """Best-effort `claude mcp remove --scope user <name>`; never raises."""
+    try:
+        subprocess.run(["claude", "mcp", "remove", "--scope", "user", name],
+                       check=False, capture_output=True, text=True)
+    except Exception:  # noqa: BLE001 — cleanup is best-effort
+        pass
+
+
+def _claude_mcp_add(add_cmd: list[str]) -> bool:
+    """Run `claude mcp add …`, classifying already-exists as success.
+
+    `claude mcp add` is idempotent in EFFECT but not in EXIT CODE — an existing
+    server prints "already exists" and exits 1. `_wire_claude` removes the entry
+    first so this normally sees a clean rc=0 add; the already-exists branch is the
+    belt-and-suspenders path (and keeps a successful re-run from leaking exit 1).
+    """
+    try:
+        proc = subprocess.run(add_cmd, check=False, capture_output=True, text=True)
+    except FileNotFoundError:
+        _warn("`claude` CLI failed to invoke; manual: "
+              "`claude mcp add --scope user m3_memory m3`")
+        return False
     blob = f"{proc.stdout or ''}\n{proc.stderr or ''}".strip()
     if proc.returncode == 0:
         if blob:
@@ -1949,9 +2000,44 @@ def _wire_claude(capture_mode: str) -> bool:
         return True
     if blob:
         print(blob)
-    _warn(f"`claude mcp add` failed (exit {proc.returncode}); "
-          "manual: `claude mcp add --scope user memory m3`")
+    _warn(f"`claude mcp add m3_memory` failed (exit {proc.returncode}); "
+          "manual: `claude mcp add --scope user m3_memory m3`")
     return False
+
+
+def _wire_claude_hooks(capture_mode: str) -> bool:
+    """Persist the capture mode and write Claude's hooks + statusline via the
+    canonical settings writer (chatlog_init --apply-claude → install_claude_settings).
+
+    This must run in `m3 setup` regardless of whether install-m3 fetched a fresh
+    payload: install-m3's chatlog init short-circuits when the payload is already
+    present (the common pip-install / upgrade case), so without this the hooks are
+    never re-pinned and the user is pushed into `m3 doctor --fix --fix-hooks`.
+    install_claude_settings also prunes the dead settings.json mcpServers block and
+    disables the plugin's memory server. Best-effort — never aborts setup.
+    """
+    if capture_mode == "none":
+        return True
+    try:
+        from m3_memory._platform import python_exe
+        bin_dir = _bin_dir()
+        chatlog_init = Path(bin_dir) / "chatlog_init.py" if bin_dir else None
+        if not chatlog_init or not chatlog_init.is_file():
+            _warn("chatlog_init.py not found; skipping Claude hook wiring")
+            return False
+        proc = subprocess.run(
+            [python_exe(), str(chatlog_init), "--non-interactive",
+             "--capture-mode", capture_mode, "--apply-claude"],
+            check=False, capture_output=True, text=True,
+        )
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+            _warn(f"Claude hook wiring reported: {tail[-1] if tail else 'unknown error'}")
+            return False
+        return True
+    except Exception as e:  # noqa: BLE001 — hook wiring must never crash setup
+        _warn(f"could not wire Claude hooks: {type(e).__name__}: {e}")
+        return False
 
 
 def _wire_gemini() -> bool:

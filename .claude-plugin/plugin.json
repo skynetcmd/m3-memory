@@ -46,16 +46,30 @@
       "title": "In-proc embedder GGUF path (tier-1)",
       "description": "Absolute path to a BGE-M3 GGUF file. When set, the MCP server loads it in-process via m3_core_rs for 10-100x faster embeds. Optional — if empty, all embeds go through tier-2 HTTP. Common path: %USERPROFILE%/.lmstudio/models/deepsweet/bge-m3-GGUF-Q4_K_M/bge-m3-GGUF-Q4_K_M.gguf",
       "default": ""
+    },
+    "engine_root": {
+      "type": "string",
+      "title": "Engine root (databases) — advanced",
+      "description": "Override where m3 keeps its databases + runtime state. Leave EMPTY for the default (~/.m3/engine, or M3_MEMORY_ROOT/engine). Only set this if you deliberately relocated the engine root — it must match the M3_ENGINE_ROOT every other m3 process uses, or the MCP server and the chatlog hooks will read different databases.",
+      "default": ""
+    },
+    "config_root": {
+      "type": "string",
+      "title": "Config root — advanced",
+      "description": "Override where m3 keeps its configuration (.chatlog_config.json, salt, …). Leave EMPTY for the default (~/.m3/config, or M3_MEMORY_ROOT/config). Only set this if you deliberately relocated the config root; it must match M3_CONFIG_ROOT everywhere else.",
+      "default": ""
     }
   },
   "mcpServers": {
-    "m3": {
+    "memory": {
       "command": "m3",
       "env": {
         "LLM_ENDPOINTS_CSV": "${user_config.endpoint}",
         "M3_AUTO_INSTALL": "1",
         "M3_EMBED_FALLBACK_URL": "${user_config.embed_fallback_url}",
-        "M3_EMBED_GGUF": "${user_config.embed_gguf}"
+        "M3_EMBED_GGUF": "${user_config.embed_gguf}",
+        "M3_ENGINE_ROOT": "${user_config.engine_root}",
+        "M3_CONFIG_ROOT": "${user_config.config_root}"
       }
     }
   }

@@ -307,9 +307,12 @@ def _strip_m3_hook_entries(hook_list, repo_root_fwd):
 
 def install_claude_settings(settings_path=None, assume_yes=False, dry_run=False,
                             keep_status_line=False):
-    """Idempotently merge m3's hooks + statusLine + mcpServers into the user's live
-    Claude Code settings.json. Safe to re-run (upgrades): m3-owned entries are
-    replaced in place — never duplicated. User-owned keys/hooks are preserved.
+    """Idempotently merge m3's hooks + statusLine into the user's live Claude Code
+    settings.json (and PRUNE any dead m3-owned mcpServers a prior version wrote —
+    Claude Code does not read server definitions from settings.json; the memory
+    server is registered via `claude mcp add m3_memory` or the plugin). Safe to
+    re-run (upgrades): m3-owned entries are replaced in place — never duplicated.
+    User-owned keys/hooks are preserved.
 
     statusLine consent: we never silently replace a status line that differs from
     our own. If the live one differs, the user is asked (default YES — adopt m3's
@@ -409,10 +412,42 @@ def install_claude_settings(settings_path=None, assume_yes=False, dry_run=False,
                 print(f"Saved prior status line to {sidecar}")
             live["statusLine"] = m3_status
 
-    # 3. mcpServers — merge by key: m3 keys overwrite, foreign servers preserved.
-    live_mcp = live.get("mcpServers", {}) if isinstance(live.get("mcpServers"), dict) else {}
-    live_mcp.update(m3.get("mcpServers", {}))
-    live["mcpServers"] = live_mcp
+    # 3. mcpServers — Claude Code does NOT read server DEFINITIONS from
+    #    settings.json (only ~/.claude.json / .mcp.json / plugins are honored), so
+    #    the memory + legacy per-bridge servers we used to write here were dead
+    #    config. The memory server is now registered via `claude mcp add m3_memory`
+    #    (setup) or the m3 plugin. PRUNE any m3-owned keys a prior version left so
+    #    the dead block doesn't linger and mislead (probes/users); never add them
+    #    back. Foreign servers a user placed here are not ours to remove (they are
+    #    equally inert, but hands-off). Drop the key entirely if nothing remains.
+    m3_owned = set(m3.get("mcpServers", {}))
+    live_mcp = live.get("mcpServers") if isinstance(live.get("mcpServers"), dict) else None
+    if live_mcp:
+        for key in m3_owned:
+            live_mcp.pop(key, None)
+        if live_mcp:
+            live["mcpServers"] = live_mcp
+        else:
+            live.pop("mcpServers", None)
+
+    # 4. disabledMcpServers — LOUDLY DEFAULT to the direct `mcp__m3_memory__`
+    #    server. The m3 plugin (if a user installs it for marketplace discovery)
+    #    also provides a memory server; leaving both on would run TWO m3 servers
+    #    (double model load) and split the tool namespace. Keep the plugin's server
+    #    turned OFF so `claude mcp add m3_memory` is the single active one. Unlike
+    #    server DEFINITIONS, `disabledMcpServers` IS honored for plugin servers,
+    #    non-interactively, on next launch. Cover the current key (`memory`) and the
+    #    pre-rename key (`m3`) so an upgrader is covered too. Merge — never clobber
+    #    a user's own disables. A user who deliberately prefers the plugin removes
+    #    these two ids.
+    _plugin_ids = ["plugin:m3:memory", "plugin:m3:m3"]
+    disabled = live.get("disabledMcpServers")
+    if not isinstance(disabled, list):
+        disabled = []
+    for _pid in _plugin_ids:
+        if _pid not in disabled:
+            disabled.append(_pid)
+    live["disabledMcpServers"] = disabled
 
     after = json.dumps(live, indent=2, sort_keys=True)
     diff = "".join(difflib.unified_diff(
@@ -445,7 +480,7 @@ def install_claude_settings(settings_path=None, assume_yes=False, dry_run=False,
             f.write(backup)
         print(f"Backed up existing settings to {bak}")
     _write_json(settings_path, live)
-    print(f"Installed m3 hooks + statusLine + mcpServers into {settings_path}")
+    print(f"Installed m3 hooks + statusLine into {settings_path}")
     return {"changed": True, "path": settings_path, "diff": diff}
 
 
@@ -454,7 +489,7 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(description="Generate m3 configs / install Claude hooks")
     ap.add_argument("--install-claude", action="store_true",
-                    help="Merge hooks+statusLine+mcpServers into ~/.claude/settings.json")
+                    help="Merge hooks+statusLine into ~/.claude/settings.json")
     ap.add_argument("--settings-path", default=None,
                     help="Override target settings.json path")
     ap.add_argument("--yes", action="store_true", help="Apply without prompting")
