@@ -331,7 +331,10 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
     """
     plan = SetupPlan()
     plan.endpoint = args.endpoint
-    plan.cognitive_loop = bool(args.cognitive_loop)
+    # --cognitive-loop forces on; --no-cognitive-loop forces off. The interactive
+    # branch below re-asks (default yes) unless a flag already pinned the choice.
+    plan.cognitive_loop = bool(args.cognitive_loop) and not bool(
+        getattr(args, "no_cognitive_loop", False))
 
     if args.non_interactive:
         # Honor explicit --agent flags; otherwise wire whatever we detected.
@@ -645,6 +648,31 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
                     print(f"    (port out of range; keeping {plan.dashboard_port})")
             except ValueError:
                 print(f"    (not a number; keeping {plan.dashboard_port})")
+
+    # Offer the cognitive-loop daemon. Default YES — it's the background engine
+    # that turns captured memories into DERIVED knowledge: entity extraction,
+    # belief consolidation, and reflection all run here, OFF the write path.
+    # Without it the store hoards raw turns but never distills them (entity
+    # search stays empty, the knowledge graph never fills). It is governor-paced
+    # (yields under host load) and only spends an LLM call when there's a real
+    # backlog + a reachable model, so idle cost is ~nil; the heavier autonomy
+    # passes (consolidation/distillation/prune) stay gated behind their own
+    # opt-in env flags. Registered as a boot service, cross-OS (launchd/systemd/
+    # schtasks). Skipped when a flag already pinned the choice.
+    if not (args.cognitive_loop or getattr(args, "no_cognitive_loop", False)):
+        print()
+        print("  Cognitive-loop daemon (recommended):")
+        print("    The background engine that distills captured memories into")
+        print("    derived knowledge — entity extraction, belief consolidation,")
+        print("    reflection — off the write path. Without it, m3 stores raw")
+        print("    turns but never builds the entity graph (entity search stays")
+        print("    empty). Governor-paced (yields under load); only works a")
+        print("    backlog when a model is reachable, so idle cost is negligible.")
+        print("    Runs as a boot service. Heavier autonomy passes stay opt-in.")
+        plan.cognitive_loop = _ask_yes_no(
+            "  Install the cognitive-loop daemon (auto-start on boot)?",
+            default=True,
+        )
 
     return plan
 
@@ -2583,7 +2611,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--cognitive-loop", action="store_true",
-        help="Enable the background cognitive loop worker.",
+        help="Enable the background cognitive loop worker (pre-answers the "
+             "interactive prompt; forces install in non-interactive mode).",
+    )
+    parser.add_argument(
+        "--no-cognitive-loop", action="store_true",
+        help="Do not install the cognitive loop worker (opt out of the "
+             "default-yes interactive prompt).",
     )
     parser.add_argument(
         "--decouple-roots", action="store_true",

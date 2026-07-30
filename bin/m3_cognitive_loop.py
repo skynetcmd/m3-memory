@@ -359,15 +359,30 @@ def _conn_for_pass(db_path: Optional[str]):
     return mc._db()
 
 
+# The gate must probe for exactly the types the extractor will process. The
+# entity pass runs m3_entities with types=None (run_entity_pass), so the
+# extractor applies its DEFAULT_TYPES — which DELIBERATELY EXCLUDE the chatlog
+# types (message/chat_log/conversation). Deriving the IN-list from DEFAULT_TYPES
+# keeps the gate and the extractor in lockstep: hardcoding message/chat_log here
+# made the gate report "work exists" for rows the extractor always skips, so the
+# entity pass re-fired every cycle doing nothing for them. Single source of truth
+# (m3_entities.DEFAULT_TYPES) — the two can never drift again. Values are trusted
+# module constants (safe identifiers), so quoted-literal interpolation is fine;
+# the SQL is executed without params by three call sites (has_entity_work).
+_ENTITY_WORK_TYPES_SQL = ", ".join(f"'{t}'" for t in m3_entities.DEFAULT_TYPES)
+
+
 def _entity_work_sql(items_tbl: str, link_tbl: str) -> str:
     """The un-entitized-rows probe over a given items + item-entities table pair.
     Same SQL shape for core (memory_items/memory_item_entities) and chatlog
-    (chat_log_items/chat_log_item_entities on PG)."""
+    (chat_log_items/chat_log_item_entities on PG). The `type IN (...)` list is
+    derived from m3_entities.DEFAULT_TYPES (see _ENTITY_WORK_TYPES_SQL) so the
+    gate only counts rows the extractor will actually process."""
     return f"""
         SELECT 1 FROM {items_tbl} mi
         LEFT JOIN {link_tbl} mie ON mi.id = mie.memory_id
         WHERE mi.is_deleted = 0
-          AND mi.type IN ('message', 'chat_log', 'note', 'observation')
+          AND mi.type IN ({_ENTITY_WORK_TYPES_SQL})
           AND mie.memory_id IS NULL
         LIMIT 1
     """

@@ -113,6 +113,11 @@ def main() -> int:
         help="Skip the web-dashboard liveness check (registry + port probe).",
     )
     parser.add_argument(
+        "--skip-cognitive-loop", action="store_true",
+        help="Skip the cognitive-loop dormancy check (installed + running + "
+             "entities extracted?).",
+    )
+    parser.add_argument(
         "--verbose", action="store_true",
         help="Show the full detail (DB-repair steps + each probe's expanded "
              "report + model-load logs). Default is a compact one-line-per-check "
@@ -301,6 +306,15 @@ def main() -> int:
         # prints the URL when healthy, and on a wedged/dead entry nags with
         # `m3 doctor --fix`. The kill/restart happens only in the --fix branch.
         dashboard_probe.run(brief=brief, fix=False)
+
+    if not args.skip_cognitive_loop:
+        from doctor import cognitive_loop_probe
+        # Report-only and exit-code-neutral: whether to run the derived-knowledge
+        # loop is the user's operational choice (some hosts capture-only), so a
+        # dormant loop nags with the one-command fix but never fails the doctor.
+        # It surfaces what nothing else does — the loop being uninstalled, loaded
+        # but dead, or live-but-zero-entities (see m3-coalescing-daemon-dormant).
+        cognitive_loop_probe.run(brief=brief)
 
     # On a failure in brief mode, point the user at the full detail (§3: an
     # error should tell you how to see more, not dead-end).
