@@ -128,13 +128,63 @@ your shell, or the process that imports m3 — LangChain/SDK/CLI):
 The schema is created automatically on first connect if the server wasn't reachable
 at install time — nothing else to do once the database is up.
 
+### Database pooling & pragmas
+
+Low-level knobs for the local SQLite/primary store: explicit DB paths, the
+connection pool, and startup behavior. All have working defaults — override only
+for a non-standard layout or to debug connection issues.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_DB_PATH` | _(resolver default)_ | Explicit path to the main memory DB, used by the session-start capture check when it can't resolve via the canonical roots. |
+| `M3_MEMORY_DB` | _(resolver default)_ | Explicit memory-DB path as seen by the files-memory view (`files_memory.config`). |
+| `M3_DB_POOL_SIZE` | `5` | Size of the main SQLite connection pool. |
+| `M3_DB_POOL_TIMEOUT` | `30` | Seconds a caller waits to check out a pooled connection before erroring. |
+| `M3_CONTEXT_CACHE_SIZE` | — | LRU capacity for cached per-database contexts in `m3_core.context`. |
+| `M3_SQLITE_MMAP_SIZE` | — | Value for the SQLite `mmap_size` pragma (bytes). Larger values memory-map more of the DB for read-heavy workloads. |
+| `M3_SKIP_MIGRATIONS` | _(unset)_ | Set to skip running schema migrations on startup (e.g. a read-only or already-migrated DB). |
+| `M3_DISABLE_AUTO_ACTIVATION` | _(unset)_ | Set to skip the auto-activation step that runs when a DB connection is opened. |
+| `M3_DEBUG` | _(unset)_ | Set to enable verbose DB/debug logging. |
+
+### Chatlog subsystem
+
+Configuration for the chatlog capture store (`agent_chatlog.db`) and its embed
+sweeper — the hook-driven turn-capture pipeline. Paths default to the resolved
+engine root; the sweeper knobs bound background embedding cost.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_CHATLOG_DB` | _(engine root)_ | Path to the chatlog SQLite DB. *(legacy alias: `CHATLOG_DB`, still honored via `getenv_compat`.)* |
+| `M3_CHATLOG_DB_PATH` | _(engine root)_ | Alternate chatlog DB path used by the ingest path. |
+| `M3_CHATLOG_DB_POOL_SIZE` | `4` | Size of the chatlog connection pool. |
+| `M3_CHATLOG_DB_POOL_TIMEOUT` | `10` | Seconds to wait for a chatlog pool checkout before erroring. |
+| `M3_CHATLOG_EMBED_DEADLINE_S` | `60` | Wall-clock budget for one embed-sweep run; the sweep stops cleanly when exceeded. |
+| `M3_CHATLOG_EMBED_MAX_PER_RUN` | `10000` | Maximum rows embedded in a single sweep run. |
+| `M3_CHATLOG_STATUSLINE` | _(on)_ | Set to `off` to disable the chatlog capture indicator in the status line. |
+| `M3_CHATLOG_STATUSLINE_ASCII` | _(unset)_ | Set to `1` to render the indicator as ASCII (`[!]`) instead of the `⚠` glyph (for terminals without emoji support). |
+
 ### Infrastructure & Connectivity
 
 | Variable | Purpose | Example Keychain Command (macOS) |
 |---|---|---|
 | `M3_MEMORY_ROOT` | Optional master state-root override (see [Roots & precedence](#roots--precedence-the-single-source-of-truth)). Defaults to `~/.m3-memory`. | `export M3_MEMORY_ROOT="/path/to/state"` (Set directly) |
-| `SYNC_TARGET_IP` | IP address of the central PostgreSQL server. | `_keychain_set agentos_sync_target_ip "YOUR_SERVER_IP"` |
+| `M3_SYNC_TARGET_IP` | IP address of the central PostgreSQL server (fallback sync target). *(legacy alias: `SYNC_TARGET_IP`, still honored via `getenv_compat`.)* | `_keychain_set agentos_sync_target_ip "YOUR_SERVER_IP"` |
 | `PG_URL`| **Optional — deprecated.** Legacy warehouse DSN. Use `M3_CDW_PG_URL` for the data-warehouse role or `M3_PRIMARY_PG_URL` for a PostgreSQL primary store (see "Primary database backend" above). The default install is SQLite and needs no PostgreSQL at all. | `_keychain_set agentos_cdw_pg_url "postgresql://USERNAME:REPLACE_WITH_YOUR_PASSWORD@host/db"` |
+
+### Postgres & sync
+
+Knobs for the PostgreSQL backend pool and the cross-machine sync job
+(`bin/sync_all.py`). Only relevant when you run a PostgreSQL primary/warehouse or
+the LAN sync workflow; the default SQLite install ignores all of these.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_PG_FORBIDDEN_HOSTS` | — | Comma-separated blocklist of PostgreSQL hosts the backend refuses to connect to (guardrail against accidentally targeting a protected server). |
+| `M3_PG_POOL_MIN` | — | Minimum size of the PostgreSQL connection pool. |
+| `M3_PG_POOL_MAX` | — | Maximum size of the PostgreSQL connection pool. |
+| `M3_PG_SYNC_TIMEOUT` | — | Timeout (seconds) for a PostgreSQL sync operation. |
+| `M3_POSTGRES_SERVER` | — | Target PostgreSQL host for the sync job. *(legacy alias: `POSTGRES_SERVER`, still honored via `getenv_compat`.)* Falls back to [`M3_SYNC_TARGET_IP`](#infrastructure--connectivity). |
+| `M3_SYNC_DBS` | — | Which databases the sync job should replicate (selector/list). |
 
 ### API Keys & Authentication
 
@@ -169,6 +219,22 @@ in shell rc files (see the Zero-Leak principle above).
 > m3 uses GitHub only for **development & deployment** (docs/badge generation, CI,
 > releases), never at runtime. See [Development & repo tooling](#development--repo-tooling).
 
+### Identity, agent & auth
+
+Who a running m3 process is (user + agent identity), device-origin material for
+the auth layer, and tenancy isolation. Most resolve from install-time config;
+override only for multi-agent / multi-device setups.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_USER_ID` | _(config)_ | Owning user identity for the process (Hermes identity layer). |
+| `M3_AGENT_ID` | _(config)_ | Agent identity for the process (Hermes identity layer). |
+| `M3_AGENT_DB` | _(resolver default)_ | Per-agent DB path used when building a KG variant. *(legacy alias: `AGENT_DB`, still honored via `getenv_compat`.)* |
+| `M3_AGENT_OS_SALT_HEX` | _(generated)_ | Hex-encoded salt for agent-OS auth derivation. |
+| `M3_ORIGIN_DEVICE` | _(host)_ | Origin-device identifier stamped by the auth layer. |
+| `M3_ENFORCE_AGENT_ISOLATION` | — | When enabled, enforces strict per-agent data isolation so one agent cannot read another's memories. |
+| `M3_MACBOOK_STATUS_HOST` | — | Host/bind address for the MacBook status server. |
+
 ### FIPS / Cryptography (`bin/crypto_provider.py`)
 
 Tiered FIPS crypto — see [`FIPS_MODULE_BOUNDARY.md`](FIPS_MODULE_BOUNDARY.md).
@@ -190,10 +256,27 @@ The MCP proxy bridges OpenAI-compatible chat clients (Aider, OpenClaw) to the MC
 | Variable | Purpose | Default |
 |---|---|---|
 | `LM_STUDIO_BASE` | Base URL of the local LLM endpoint that the proxy forwards completion requests to. | `http://localhost:1234/v1` |
-| `LM_READ_TIMEOUT` | Read timeout (seconds) for upstream LLM calls. | `300` |
-| `MCP_PROXY_ALLOW_DESTRUCTIVE` | When set to `1`, `true`, or `yes`, exposes the 8 destructive catalog tools (`memory_delete`, `memory_maintenance`, `memory_set_retention`, `memory_export`, `memory_import`, `gdpr_export`, `gdpr_forget`, `agent_offline`). Default hides them. | unset |
+| `M3_LM_READ_TIMEOUT` | Read timeout (seconds) for upstream LLM calls (long: ~80 min, sized for 32k-token generations). *(legacy alias: `LM_READ_TIMEOUT`, still honored via `getenv_compat`.)* | `4800` |
+| `M3_MCP_PROXY_ALLOW_DESTRUCTIVE` | When set to `1`, `true`, or `yes`, exposes the 8 destructive catalog tools (`memory_delete`, `memory_maintenance`, `memory_set_retention`, `memory_export`, `memory_import`, `gdpr_export`, `gdpr_forget`, `agent_offline`). Default hides them. *(legacy alias: `MCP_PROXY_ALLOW_DESTRUCTIVE`, still honored via `getenv_compat`.)* | unset |
 
 **Per-request header**: clients should send `X-Agent-Id: <agent-name>` on `/v1/chat/completions`. The proxy propagates this to the catalog dispatcher and enforces `inject_agent_id` for tools that record agent identity (`memory_write`, `agent_heartbeat`, etc.) — clients cannot spoof identity in the request body.
+
+### MCP bridge & transport
+
+Bind addresses, transport mode, and payload paths for the memory MCP bridge
+(`bin/memory_bridge.py`) and the MCP proxy host. Defaults suit a local stdio
+server; set these to run the bridge over HTTP or bind to a specific interface.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_TRANSPORT` | `stdio` | Bridge transport mode: `stdio` (default) or `http`. |
+| `M3_HTTP_HOST` | — | Bind host for the bridge when `M3_TRANSPORT=http`. |
+| `M3_HTTP_PORT` | — | Bind port for the bridge when `M3_TRANSPORT=http`. |
+| `M3_HTTP_PATH` | — | URL path the HTTP bridge serves the MCP endpoint on. |
+| `M3_MCP_PROXY_HOST` | — | Bind host for the MCP proxy (see [MCP Proxy](#mcp-proxy-binmcp_proxypy)). |
+| `M3_TOOLS_LAZY` | — | When set, defer loading tool implementations until first use (faster bridge startup). |
+| `M3_PATH_BIN` | _(payload)_ | Path to the m3 `bin/` directory the bridge dispatches to. |
+| `M3_BRIDGE_PATH` | _(installer)_ | Path to the bridge entry-point script recorded by the installer. |
 
 ### Retrieval & Ranking Tuning
 
@@ -208,11 +291,19 @@ These knobs change how results are ranked. Defaults are safe — override only i
 | `M3_INTENT_ROUTING` | `1` | Retrieval-side intent routing (role-boost + predecessor-pull). On by default; set `0` to disable. Distinct from the SLM intent classifier (`M3_SLM_CLASSIFIER`, off by default). |
 | `M3_INTENT_PROCEDURAL_BOOST` | `0.20` | Additive ranking boost applied to a `procedure`-type memory when the query intent is `procedural` ("how do I X"). Gated by `M3_INTENT_ROUTING`; a non-procedural intent (or routing off) leaves ranking byte-identical. Set `0` to disable. |
 | `M3_ROUTER_TEMPORAL_K_BUMP` | `5` | Extra `k` added when a query is routed as temporal (e.g. contains "when", "before", "days ago"), widening verbatim retrieval for date-sensitive questions. |
-| `SUPERSEDES_PENALTY` | `0.5` | At retrieval time, an older fact that has been superseded by a newer one is demoted by this multiplier (0.5 = ranked at half score). Set to `1.0` to disable demotion. |
-| `CONTRADICTION_THRESHOLD` | `0.92` | Cosine floor above which a differing same-type memory is superseded on write. Deliberately conservative: it fires on near-restatements of the same claim, so two facts that are topically related but genuinely different (~0.74, say) are **both kept**. Use `memory_supersede` to close a fact explicitly; lower this only after measuring your own corpus. |
-| `CONTRADICTION_TITLE_GATE` | `loose` | How contradiction detection decides two memories are about the same thing: `strict` (legacy — require a title substring match), `loose` (cosine + type + content-diff, default), or `off` (no title check). |
-| `CONTRADICTION_TYPE_EXCLUSIONS` | `conversation` | Comma-separated memory types skipped entirely during contradiction detection. |
-| `CONTRADICTION_TYPE_EXCLUSIONS` | `conversation` | Comma-separated memory `type`s skipped during contradiction checks. |
+| `M3_SUPERSEDES_PENALTY` | `0.5` | At retrieval time, an older fact that has been superseded by a newer one is demoted by this multiplier (0.5 = ranked at half score). Set to `1.0` to disable demotion. *(legacy alias: `SUPERSEDES_PENALTY`, still honored via `getenv_compat`.)* |
+| `M3_CONTRADICTION_THRESHOLD` | `0.92` | Cosine floor above which a differing same-type memory is superseded on write. Deliberately conservative: it fires on near-restatements of the same claim, so two facts that are topically related but genuinely different (~0.74, say) are **both kept**. Use `memory_supersede` to close a fact explicitly; lower this only after measuring your own corpus. *(legacy alias: `CONTRADICTION_THRESHOLD`, still honored via `getenv_compat`.)* |
+| `M3_CONTRADICTION_TITLE_GATE` | `loose` | How contradiction detection decides two memories are about the same thing: `strict` (legacy — require a title substring match), `loose` (cosine + type + content-diff, default), or `off` (no title check). *(legacy alias: `CONTRADICTION_TITLE_GATE`, still honored via `getenv_compat`.)* |
+| `M3_CONTRADICTION_TYPE_EXCLUSIONS` | `conversation` | Comma-separated memory `type`s skipped entirely during contradiction detection. *(legacy alias: `CONTRADICTION_TYPE_EXCLUSIONS`, still honored via `getenv_compat`.)* |
+| `M3_SEARCH_ROW_CAP` | `5000` | Hard cap on the number of candidate rows pulled from the store per search before ranking, bounding worst-case query cost. *(legacy alias: `SEARCH_ROW_CAP`, still honored via `getenv_compat`.)* |
+| `M3_DEDUP_LIMIT` | `1000` | Maximum candidate rows considered by the retrieval-time near-duplicate collapse. |
+| `M3_OBSERVATION_BUDGET_TOKENS` | — | Token budget for the two-stage observation expansion; caps how much surrounding turn text is pulled into an observation. |
+| `M3_TWO_STAGE_MAX_TURNS_PER_OBS` | — | Ceiling on how many turns a single observation may expand to in two-stage retrieval. |
+| `M3_TWO_STAGE_TURN_PENALTY` | — | Per-turn rank penalty applied as an observation expands, so long expansions decay in score. |
+| `M3_INTENT_USER_FACT_BOOST` | — | Additive ranking boost for `user`-scoped fact memories when intent routing classifies the query as fact-seeking. |
+| `M3_BYPASS_SURFACE_CAP` | — | Set to bypass the per-entity surface cap, letting all matching entity surfaces through (debug / exhaustive-recall). |
+| `M3_AUTO_RELATED_LINK` | — | When enabled, automatically create `related` edges between newly written memories and their nearest neighbors. |
+| `M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT` | — | Restrict auto-related linking to memories sharing the same variant/scope, preventing cross-scope link bleed. |
 
 #### Adaptive-k elbow trim
 
@@ -247,7 +338,7 @@ columns) and 036 (trust + corroboration ledger). See
 | `M3_CONFIDENCE_WEIGHT` | `0.10` | Weight of the confidence term when `M3_CONFIDENCE_RANKING=1`. |
 | `M3_CONFIDENCE_MODEL` | `transparent` | Which representation drives ranking: `transparent` (the stored, user-facing aggregate) or `bayesian` (the Beta-posterior mean kept alongside, experimental). The displayed `confidence` is always the transparent value. |
 | `M3_CORROBORATION` | `0` | `1` makes a near-identical re-write (high cosine + same content) corroborate the existing memory — bumping its `corroboration_count`/`confidence` and recording a ledger event — instead of creating an orphan duplicate row. |
-| `CORROBORATION_THRESHOLD` | `0.95` | Cosine floor for treating a same-content write as corroboration. Higher than `CONTRADICTION_THRESHOLD` so only true near-duplicates corroborate. |
+| `M3_CORROBORATION_THRESHOLD` | `0.95` | Cosine floor for treating a same-content write as corroboration. Higher than `M3_CONTRADICTION_THRESHOLD` so only true near-duplicates corroborate. *(legacy alias: `CORROBORATION_THRESHOLD`, still honored via `getenv_compat`.)* |
 | `M3_TRUST_AUTOTUNE` | `0` | `1` lets daily maintenance nudge agent trust from observed contradiction/corroboration. Off = explicit `agent_set_trust` only. |
 | `M3_CONSOLIDATION_AUTO` | `0` | `1` lets the background job run autonomous episodic→semantic belief consolidation. Off = manual/curator-triggered only. |
 
@@ -286,6 +377,35 @@ Auth: if the endpoint enforces a key (LM Studio default), set
 [`LM_API_TOKEN`](#api-keys--authentication) — it is sent as
 `Authorization: Bearer <token>`. Omit for tokenless endpoints (Ollama).
 
+### Files Memory — ingestion, dedup & promotion
+
+The rest of the file-ingestion subsystem's tunables (`files_memory/*`): corpus
+selection and defaults, crawl/size limits, extraction concurrency, near-duplicate
+detection, and promotion of file-derived facts into long-term memory. All have
+working defaults.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_FILES_CORPUS` | _(default corpus)_ | Active corpus name for a files operation. |
+| `M3_FILES_DEFAULT_CORPUS` | — | Default corpus used when none is specified. |
+| `M3_FILES_DEFAULT_SCOPE` | — | Default scope applied to ingested files. |
+| `M3_FILES_DEFAULT_EXTRACT_MODE` | — | Default extraction mode for new files (e.g. text vs. fact extraction). |
+| `M3_FILES_DB_PATH` | _(engine root)_ | Explicit path to the files-memory DB (`files.db`). |
+| `M3_FILES_FOLLOW_SYMLINKS` | — | When enabled, the crawler follows symlinks during ingestion. |
+| `M3_FILES_MAX_FILE_BYTES` | — | Maximum size (bytes) of a single file the ingester will read. |
+| `M3_FILES_MAX_FILES_PER_INGEST` | — | Cap on files processed in one ingest run. |
+| `M3_FILES_MAX_LEAF_TOKENS` | — | Maximum tokens per leaf chunk when splitting a file. |
+| `M3_FILES_EXTRACT_CONCURRENCY` | — | Maximum concurrent extraction tasks for file ingestion. |
+| `M3_FILES_EXTRACT_MAX_ATTEMPTS` | — | Retry cap for a failed file-extraction item before it is poisoned. |
+| `M3_FILES_EXTRACT_MIN_LEAF_CHARS` | — | Minimum leaf-chunk character count below which extraction is skipped. |
+| `M3_FILES_DEDUP_THRESHOLD` | — | Cosine threshold above which two file leaves are treated as duplicates. |
+| `M3_FILES_DEDUP_MAX_PAIRS` | — | Maximum candidate pairs the dedup pass compares. |
+| `M3_FILES_DEDUP_LEAF_LIMIT` | — | Cap on leaves considered in a single dedup pass. |
+| `M3_FILES_PROMOTION_SCOPE` | — | Scope assigned to file-derived facts when promoted to long-term memory. |
+| `M3_FILES_PROMO_HALF_LIFE_DAYS` | — | Half-life (days) for the recency term in the promotability score. |
+| `M3_FILES_PROMO_SUGGEST_THRESHOLD` | — | Promotability score above which a file fact is suggested for promotion. |
+| `M3_FILES_PREWARM_TIMEOUT_S` | — | Timeout (seconds) for the summarizer prewarm step. |
+
 ### Local LLM selection
 
 M3 does not pin a specific chat model. `bin/llm_failover.py` discovers whatever is loaded on your OpenAI-compatible endpoint(s) and picks the largest model by parameter count, filtering out embedding-only models. To minimize latency for enrichment features (auto-classify, summarization), keep a **small** instruct model (0.5B–1B) loaded alongside your embedder:
@@ -306,8 +426,10 @@ M3 only probes endpoints you opt into. Probing a provider you don't run is not f
 | `M3_LLM_URL` | _(unset)_ | A single OpenAI-compatible `/v1` base URL for **your own server** (llama.cpp, vLLM, LocalAI, a remote box). Tried **first**. Setting it also turns off the LM Studio default probe (you've named your endpoint), so a custom-server user gets no stray `:1234` probe. Re-add LM Studio with `M3_ENABLE_LMSTUDIO_FAILOVER=1` if you want it as a fallback. |
 | `M3_ENABLE_LMSTUDIO_FAILOVER` | `1` (on; `0` when `M3_LLM_URL` is set) | Probe the LM Studio endpoint (`http://localhost:1234/v1`). Set to `0` if you don't run LM Studio (e.g. **Ollama-only users**) to skip its probe. |
 | `M3_ENABLE_OLLAMA_FAILOVER` | `0` (off) | Set to `1`/`true`/`yes` to also probe the Ollama endpoint (`http://localhost:11434/v1`). **Ollama users: set this.** |
-| `LLM_ENDPOINTS_CSV` | _(unset)_ | Comma-separated endpoint list, probed in order. **Overrides `M3_LLM_URL` and both toggles** — full control. Use for an ordered multi-endpoint / multi-machine LAN failover — e.g. `"http://localhost:8080/v1,http://gpu-box.local:8000/v1"`. |
+| `M3_LLM_ENDPOINTS_CSV` | _(unset)_ | Comma-separated endpoint list, probed in order. **Overrides `M3_LLM_URL` and both toggles** — full control. Use for an ordered multi-endpoint / multi-machine LAN failover — e.g. `"http://localhost:8080/v1,http://gpu-box.local:8000/v1"`. *(legacy alias: `LLM_ENDPOINTS_CSV`, still honored via `getenv_compat`.)* |
 | `M3_LLM_CONNECT_TIMEOUT` | `0.3` | Per-endpoint connect timeout in seconds. Raise for slow remote LAN endpoints. |
+| `M3_LM_MODEL` | _(unset)_ | Explicit local-LM chat model id for pipelines that request a named model (e.g. promote/distill), instead of auto-selecting the loaded model. |
+| `M3_LLM_TIMEOUT` | `45` | Generic per-request timeout (seconds) for local LLM chat calls that don't have their own timeout knob. |
 
 Examples by runtime:
 - **LM Studio** (default) — no config.
@@ -315,19 +437,137 @@ Examples by runtime:
 - **llama.cpp / vLLM / LocalAI / remote** — `M3_LLM_URL="http://localhost:8080/v1"` (no LM Studio probe; add `M3_ENABLE_LMSTUDIO_FAILOVER=1` to keep it as a fallback).
 - **Multiple endpoints in a specific order** — `LLM_ENDPOINTS_CSV="url1,url2,…"`.
 
+### Embedding — model & client
+
+Identity and client behavior of the embedder: which model/space vectors are
+tagged with, chunking, in-process vs. HTTP embedding, bulk batching, and the httpx
+connection pool. The stock bge-m3 defaults are correct for a standard install —
+change the model/dim/space vars only if you deliberately re-embed your corpus into
+a new vector space.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_EMBED_MODEL` | _(bge-m3)_ | Embed-model tag applied to stored vectors. *(legacy alias: `EMBED_MODEL`, still honored via `getenv_compat`.)* |
+| `M3_EMBED_DIM` | — | Embedding vector dimension. A model whose output dim ≠ this is rejected. *(legacy alias: `EMBED_DIM`, still honored via `getenv_compat`.)* |
+| `M3_EMBED_SPACE_TAG` | — | Identity tag for the embedding vector space; used to keep incompatible spaces from being compared. |
+| `M3_EMBED_COMPATIBLE_MODELS` | — | CSV of model tags considered space-compatible with the active model (their vectors may be mixed in search). |
+| `M3_EMBED_FALLBACK_MODEL_TAG` | — | Model tag applied to vectors produced on the fallback path. |
+| `M3_EMBED_REQUIRE_UNIT_NORM` | — | When enabled, enforce that returned embeddings are unit-normalized. |
+| `M3_EMBED_NORM_TOL` | — | Tolerance for the unit-norm check when `M3_EMBED_REQUIRE_UNIT_NORM` is on. |
+| `M3_EMBED_INPROC` | — | When set, use the in-process embedder rather than POSTing to an embed server. |
+| `M3_EMBED_INIT_TIMEOUT_S` | — | Timeout (seconds) for embedder initialization. |
+| `M3_EMBED_SEARCH_DEADLINE_S` | — | Per-search wall budget for producing the query embedding before falling back. |
+| `M3_EMBED_BULK_CHUNK` | `1024` | Batch size for bulk embedding. |
+| `M3_EMBED_BULK_CONCURRENCY` | `4` | Concurrent batches during bulk embedding. |
+| `M3_EMBED_CHUNK_MAX_CHARS` | — | Maximum characters per text chunk before embedding. |
+| `M3_EMBED_CHUNK_OVERLAP_CHARS` | — | Character overlap between consecutive chunks. |
+| `M3_EMBED_HTTP_MAX_CONNS` | — | httpx maximum total connections to the embed server. |
+| `M3_EMBED_HTTP_MAX_KEEPALIVE` | — | httpx maximum keep-alive connections. |
+| `M3_EMBED_HTTP_KEEPALIVE_EXPIRY` | — | httpx keep-alive expiry (seconds). |
+| `M3_EMBED_DISCOVERY_NEG_TTL` | — | Negative-cache TTL (seconds) for failed embed-endpoint discovery. |
+| `M3_ENTITY_NAME_EMBED_CACHE_MAX` | `50000` | Cap on cached entity-name embeddings held in memory. |
+| `M3_MODELS_ROOT` | — | Root directory for local model files the embedder loads from. |
+| `M3_DEBUG_EMBED_MODEL` | — | Debug-only embed-model override used by the agent-bridge debug path. |
+
+### Embedding — circuit breakers
+
+Per-tier failure count + cooldown for the embed-backend circuit breaker
+(`bin/memory/config.py`). Each embed tier (in-process embedded, CPU fallback, HTTP
+primary, cloud) trips independently after N consecutive failures and resets after a
+cooldown. Defaults are conservative; tune only if a flaky backend trips too eagerly
+or recovers too slowly.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_EMBED_BREAKER_EMBEDDED_THRESHOLD` | — | Consecutive failures before the in-process embedded tier trips open. |
+| `M3_EMBED_BREAKER_EMBEDDED_RESET_SECS` | — | Cooldown (seconds) before the embedded tier is retried. |
+| `M3_EMBED_BREAKER_CPU_FALLBACK_THRESHOLD` | — | Failure threshold for the CPU HTTP-fallback tier. |
+| `M3_EMBED_BREAKER_CPU_FALLBACK_RESET_SECS` | — | Cooldown (seconds) for the CPU-fallback tier. |
+| `M3_EMBED_BREAKER_PRIMARY_THRESHOLD` | — | Failure threshold for the HTTP primary tier. |
+| `M3_EMBED_BREAKER_PRIMARY_RESET_SECS` | — | Cooldown (seconds) for the HTTP primary tier. |
+| `M3_EMBED_BREAKER_CLOUD_THRESHOLD` | — | Failure threshold for the cloud embed tier. |
+| `M3_EMBED_BREAKER_CLOUD_RESET_SECS` | — | Cooldown (seconds) for the cloud embed tier. |
+
+### Embedding server
+
+Bind, concurrency, and batching for the standalone embed servers
+(`bin/embed_server_inproc.py`, `bin/embed_server_gpu.py`) and the embedder admin.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_EMBED_SERVER_HOST` | — | Bind host for the in-process embed server. |
+| `M3_EMBED_SERVER_PORT` | — | Bind port for the in-process embed server. |
+| `M3_EMBED_SERVER_GPU_HOST` | — | Bind host for the GPU embed server. |
+| `M3_EMBED_SERVER_CONCURRENCY` | — | Maximum concurrent embed requests the server processes. |
+| `M3_EMBED_SERVER_MAX_BATCH` | — | Maximum batch size the server coalesces per forward pass. |
+| `M3_EMBED_SERVER_INTERACTIVE_RESERVED` | — | Concurrency slots reserved for interactive (low-latency) requests. |
+| `M3_EMBED_INTERACTIVE_MAX_TEXTS` | — | Maximum texts allowed in a single interactive embed request. |
+| `M3_EMBED_SERVER_BIN` | — | Path to the embed-server binary the admin launches. |
+| `M3_LLAMA_PORT` | `9904` | Port the GPU embed server's llama.cpp backend listens on. |
+| `M3_NO_MODEL_DOWNLOAD` | _(unset)_ | Set to forbid automatic model downloads (offline / air-gapped hosts). |
+
+### SLM profiles
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_SLM_PROFILE` | — | Active small-language-model profile name for the SLM intent classifier. |
+| `M3_SLM_PROFILES_DIR` | — | Directory to load SLM profiles from. |
+
+---
+
+## Extraction & write-through
+
+The generic SLM-extraction configuration shared by the fact-enrichment and
+entity-graph pipelines (`bin/memory/extraction.py`). These are the **actual**
+controlling vars — the older per-pipeline `M3_FACT_ENRICHED_*` /
+`M3_ENTITY_GRAPH_*` names are not read by any code (see the corrected rows in
+those sections). Write-through toggles govern whether extraction/classification
+runs synchronously on the write path.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_EXTRACTION_TYPE` | `rule_based` | Which extraction pipeline to instantiate on write (`rule_based`, an SLM extractor, etc.). |
+| `M3_EXTRACTION_URL` | (empty) | SLM extraction endpoint URL. When set (with a model), routes extraction to that OpenAI-compatible endpoint. |
+| `M3_EXTRACTION_MODEL` | (empty) | SLM extraction model id. |
+| `M3_EXTRACTION_PROMPT` | (empty) | Prompt override for the extractor. |
+| `M3_EXTRACTION_SCRIPT` | (empty) | Path to a custom extraction script. |
+| `M3_EXTRACTION_FUNCTION` | `extract` | Function/mode name invoked in the extractor. |
+| `M3_EXTRACTION_WRITE_THROUGH` | — | When enabled, run extraction synchronously on the write path instead of enqueuing it. |
+| `M3_INLINE_CLASSIFY` | — | When enabled, run type classification inline on the write path. |
+
 ---
 
 ## Fact Enrichment
 
-SLM-distillation pipeline to extract atomic facts from stored memories. **On by default** — `memory_write` enqueues fact extraction unless you turn it off. It only does work when a fact-extraction SLM endpoint is reachable (set via `M3_FACT_ENRICHED_URL`/`MODEL` or the `fact_enriched.yaml` profile); with no endpoint configured the queue simply no-ops. Because it calls a local LLM per write, it adds latency and (for chatty workloads) row volume — set `M3_ENABLE_FACT_ENRICHED=0` to disable. See ARCHITECTURE.md for design overview.
+SLM-distillation pipeline to extract atomic facts from stored memories. **On by default** — `memory_write` enqueues fact extraction unless you turn it off. It only does work when a fact-extraction SLM endpoint is reachable — configured through the generic **`M3_EXTRACTION_URL` / `M3_EXTRACTION_MODEL`** family (see [Extraction & write-through](#extraction--write-through)) or the `fact_enriched.yaml` profile; with no endpoint configured the queue simply no-ops. Because it calls a local LLM per write, it adds latency and (for chatty workloads) row volume — set `M3_ENABLE_FACT_ENRICHED=0` to disable. See ARCHITECTURE.md for design overview.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `M3_ENABLE_FACT_ENRICHED` | `true` | Master gate. On by default; set to `0`/`false`/`no` to disable fact extraction on writes. |
 | `M3_FACT_ENRICH_CONCURRENCY` | `2` | Maximum concurrent SLM enrichment tasks. Higher values parallelize fact extraction; lower values reduce latency jitter on write paths. |
 | `M3_FACT_ENRICH_MAX_ATTEMPTS` | `5` | Maximum retries for failed enrichment queue items before they are marked as poison (poisoned items remain visible in queue with `last_error` for manual inspection). |
-| `M3_FACT_ENRICHED_URL` | (empty) | Override SLM endpoint URL. If unset, reads from the `fact_enriched.yaml` profile `url` field. |
-| `M3_FACT_ENRICHED_MODEL` | (empty) | Override SLM model name. If unset, reads from the `fact_enriched.yaml` profile `model` field. Both URL and model must be non-empty when enrichment runs, or the extraction fails with a clear error. |
+| ~~`M3_FACT_ENRICHED_URL`~~ | — | **Corrected.** No code reads this per-pipeline name. The SLM endpoint for fact extraction is set through the generic **`M3_EXTRACTION_URL`** (see [Extraction & write-through](#extraction--write-through)), falling back to the `fact_enriched.yaml` profile `url` field. |
+| ~~`M3_FACT_ENRICHED_MODEL`~~ | — | **Corrected.** No code reads this per-pipeline name. The SLM model for fact extraction is set through the generic **`M3_EXTRACTION_MODEL`** (see [Extraction & write-through](#extraction--write-through)), falling back to the `fact_enriched.yaml` profile `model` field. |
+
+### Enrichment pipeline knobs (batch enrichment CLI)
+
+Controls for the batch-enrichment tooling (`bin/m3_enrich.py`) and the auto-enrich
+trigger on chatlog ingest — profile selection, conversation targeting, retry/budget
+caps, and input-size gates.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_ENRICH_PROFILE` | — | Enrichment profile the batch enricher runs under. |
+| `M3_ENRICH_CONV_LIST` | — | Explicit list of conversation ids to enrich. |
+| `M3_ENRICH_TRACK_STATE` | — | When enabled, persist per-conversation enrichment state to resume across runs. |
+| `M3_ENRICH_MAX_ATTEMPTS` | — | Retry cap for a failed enrichment item. |
+| `M3_ENRICH_BUDGET_USD` | — | Spend ceiling (USD) for a cloud-backed enrichment run. |
+| `M3_ENRICH_INPUT_MAX_K` | — | Maximum input size (K tokens/chars) fed to the enricher per item. |
+| `M3_ENRICH_MIN_SIZE_K` | — | Skip conversations smaller than this size. |
+| `M3_ENRICH_MAX_SIZE_K` | — | Skip (or split) conversations larger than this size. |
+| `M3_ENRICH_SEND_TO` | — | Routing target for enrichment output. |
+| `M3_AUTO_ENRICH` | — | When enabled, chatlog ingest auto-triggers enrichment for qualifying conversations. |
+| `M3_AUTO_ENRICH_MIN_TURNS` | — | Minimum turns a conversation needs before auto-enrich fires. |
 
 ---
 
@@ -344,7 +584,7 @@ Autonomous pipeline that rolls up successful (completed) task runs — a task pl
 
 ## Entity-Relation Graph
 
-SLM-extraction pipeline to build a typed knowledge graph of entities and relationships from stored memories. **On by default** — writes are queued for entity extraction unless you turn it off. Like fact enrichment, it only does work when an extraction SLM endpoint is reachable (`M3_ENTITY_GRAPH_URL`/`MODEL` or the `entity_graph.yaml` profile); with no endpoint the queue no-ops. It calls a local LLM per write, so it adds latency — set `M3_ENABLE_ENTITY_GRAPH=0` to disable. The entity-type and predicate vocabulary is user-configurable via `M3_ENTITY_VOCAB_YAML` (see below). See ARCHITECTURE.md for design overview.
+SLM-extraction pipeline to build a typed knowledge graph of entities and relationships from stored memories. **On by default** — writes are queued for entity extraction unless you turn it off. Like fact enrichment, it only does work when an extraction SLM endpoint is reachable — configured through the generic **`M3_EXTRACTION_URL` / `M3_EXTRACTION_MODEL`** family (see [Extraction & write-through](#extraction--write-through)) or the `entity_graph.yaml` profile; with no endpoint the queue no-ops. It calls a local LLM per write, so it adds latency — set `M3_ENABLE_ENTITY_GRAPH=0` to disable. The entity-type and predicate vocabulary is user-configurable via `M3_ENTITY_VOCAB_YAML` (see below). See ARCHITECTURE.md for design overview.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -354,8 +594,37 @@ SLM-extraction pipeline to build a typed knowledge graph of entities and relatio
 | `M3_ENTITY_EXTRACT_MAX_ATTEMPTS` | `5` | Queue retry cap before poisoned-item exclusion. Failed items remain in extraction queue with `last_error` for manual inspection. |
 | `M3_ENTITY_RESOLVE_FUZZY_MIN` | `0.8` | Minimum token-Jaccard similarity score for fuzzy-match resolution tier. Entities with canonical names matching above this threshold within the same type are merged. |
 | `M3_ENTITY_RESOLVE_COSINE_MIN` | `0.85` | Minimum embedding cosine similarity for cosine-match resolution tier (final fallback before creating a new entity). |
-| `M3_ENTITY_GRAPH_URL` | (empty) | Override SLM endpoint URL. If unset, reads from the `entity_graph.yaml` profile `url` field. |
-| `M3_ENTITY_GRAPH_MODEL` | (empty) | Override SLM model name. If unset, reads from the `entity_graph.yaml` profile `model` field. Both URL and model must be non-empty when extraction runs, or the process fails with a clear error. |
+| ~~`M3_ENTITY_GRAPH_URL`~~ | — | **Corrected.** No code reads this per-pipeline name. The SLM endpoint for entity extraction is set through the generic **`M3_EXTRACTION_URL`** (see [Extraction & write-through](#extraction--write-through)), falling back to the `entity_graph.yaml` profile `url` field. |
+| ~~`M3_ENTITY_GRAPH_MODEL`~~ | — | **Corrected.** No code reads this per-pipeline name. The SLM model for entity extraction is set through the generic **`M3_EXTRACTION_MODEL`** (see [Extraction & write-through](#extraction--write-through)), falling back to the `entity_graph.yaml` profile `model` field. |
+
+### Entity extraction & coalescing
+
+Controls for the entity-coalescing pass (`bin/entity_coalesce.py`) that merges
+duplicate entities, plus targeting/seed knobs for extraction. Coalescing is gated
+off by default (`M3_ENTITY_COALESCE_FLAG`); the `MAX_*` caps bound its cost.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_ENTITY_COALESCE_FLAG` | — | Master enable for the entity-coalescing pass. |
+| `M3_ENTITY_COALESCE_AUTOMERGE` | — | When enabled, high-confidence matches are merged automatically (vs. suggested only). |
+| `M3_ENTITY_COALESCE_FUZZY_HIGH` | — | Fuzzy-similarity threshold above which two entities are treated as the same. |
+| `M3_ENTITY_COALESCE_MAX_PAIRS` | — | Cap on candidate entity pairs compared per run. |
+| `M3_ENTITY_COALESCE_MAX_BLOCK` | — | Maximum block size for the blocking stage. |
+| `M3_ENTITY_COALESCE_MAX_CLUSTER` | — | Maximum cluster size a single merge may span. |
+| `M3_ENTITY_SEED_STOPLIST` | — | Stoplist of seed terms excluded from entity extraction. |
+| `M3_ENTITIES_CONV_LIST` | — | Explicit list of conversation ids to run entity extraction over. |
+
+### GLiNER entity model
+
+Configuration for the optional GLiNER neural entity extractor
+(`bin/m3_entities_gliner.py`).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_GLINER_MODEL` | — | GLiNER model id/path to load. |
+| `M3_GLINER_THRESHOLD` | — | Confidence threshold for accepting an extracted span. |
+| `M3_GLINER_BATCH_SIZE` | — | Batch size for GLiNER inference. |
+| `M3_GLINER_DEVICE` | — | Compute device for GLiNER (`cpu`, `cuda`, `mps`, …). |
 
 ---
 
@@ -428,6 +697,55 @@ increments by the number of inputs served along that path.
 | `M3_TEST_GGUF` | (empty) | Test-only. Points the `m3-embed-llamacpp` crate's opt-in real-inference test at a GGUF model. Unset → that test is skipped. Not read by m3-memory at runtime. |
 
 > **Note — the `M3_MMR_SHADOW` var has been retired.** An earlier build added a shadow-mode flag for the MMR reranker; the Rust MMR (`mmr_rerank_scored`) is now authoritative when `m3_core_rs` is loaded (it replicates the Python loop's selection sequence exactly, verified by `tests/test_oxidation_parity.py`). No env var gates it — `M3_CORE_RS_DISABLE` is the only override.
+
+## Cognitive loop, observer & reflector
+
+The autonomous cognitive loop (`bin/m3_cognitive_loop.py`) and its observer /
+reflector passes. Deadlines and per-pass limits bound how much work each pass does;
+profile vars select the model/behavior. See ARCHITECTURE.md for the loop design.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_CLASSIFY_DEADLINE_S` | — | Wall budget (seconds) for the loop's classification step before it yields. |
+| `M3_LIMIT_PER_PASS` | — | Maximum items the loop processes in a single pass (see also `M3_GOVERNOR_THROTTLED_LIMIT`). |
+| `M3_OBSERVER_PRECISE_PROVENANCE` | — | When enabled, the observer records precise (per-source) provenance for its observations. |
+| `M3_REFLECTOR_PROFILE` | — | Model/behavior profile for the reflector pass. *(legacy alias: `REFLECTOR_PROFILE`, still honored via `getenv_compat`.)* |
+
+## Dashboard
+
+Bind address and health-probe caching for the local m3 dashboard
+(`bin/dashboard_server.py`).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_DASHBOARD_HOST` | — | Bind host for the dashboard server. |
+| `M3_DASHBOARD_PORT` | `8088` | Bind port for the dashboard server. |
+| `M3_DASHBOARD_LLM_SMOKE` | — | When enabled, run an LLM smoke test as part of the dashboard health check. |
+| `M3_DASHBOARD_LLM_SMOKE_TTL_S` | — | Cache TTL (seconds) for the LLM smoke-test result. |
+| `M3_DASHBOARD_LLM_BLOCK_TTL_S` | — | TTL (seconds) for the LLM health "blocked" state before it is re-probed. |
+
+## Cloud / privacy enclave
+
+Opt-in cloud fallback for embedding/inference through a privacy-preserving enclave.
+All default OFF — no data leaves the machine unless `M3_ALLOW_CLOUD_FALLBACK` is
+enabled and an enclave URL is set. The minimization level governs how much of a
+payload is stripped before it leaves the host.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_ALLOW_CLOUD_FALLBACK` | _(off)_ | Master gate allowing fallback to the cloud enclave when local backends are unavailable. |
+| `M3_CLOUD_ENCLAVE_URL` | — | URL of the privacy enclave endpoint. |
+| `M3_CLOUD_AUTH_TOKEN` | — | Bearer token for the cloud enclave. |
+| `M3_CLOUD_AUTH_TOKEN_KEYRING` | — | Keyring entry name to read the enclave token from (preferred over the inline var). |
+| `M3_CLOUD_MINIMIZATION_LEVEL` | — | How aggressively payloads are minimized/redacted before leaving the host. |
+
+## Installation & runtime
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_HOME` | _(resolver default)_ | m3 home root used by install/runtime hooks (e.g. pre-compact). |
+| `M3_AUTO_INSTALL` | _(unset)_ | When set, the CLI auto-runs the installer if the payload is missing. |
+| `M3_TASK_LOG_FILE` | — | Path the task runtime writes its log to. |
 
 ## Development & repo tooling
 
