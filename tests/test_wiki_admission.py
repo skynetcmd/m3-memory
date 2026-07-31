@@ -256,6 +256,7 @@ def _cluster(*ids):
 
 async def _run(clusters, edges=None, gate=None):
     writes = []
+    links = []
 
     async def _write(**a):
         writes.append(a)
@@ -266,6 +267,21 @@ async def _run(clusters, edges=None, gate=None):
 
     async def _ensure_prompt(comp, stats, *, scope, user_id):
         return "prompt-id"
+
+    def _link(from_id, to_id, relationship_type):
+        """Capture provenance edges instead of writing them.
+
+        MUST be injected. `_write_provenance_edges` falls back to the real
+        `memory.write.memory_link_impl`, which opens the DEFAULT engine database
+        (`_db()` with no argument) — i.e. the developer's LIVE
+        ~/.m3/engine/agent_memory.db. That made this test INSERT into the user's
+        production store, and on any machine where m3 is actually running it
+        blocked forever on the SQLite write lock held by the MCP server /
+        dashboard / cognitive-loop daemon. The other three collaborators were
+        already faked; this one was simply missed.
+        """
+        links.append((from_id, to_id, relationship_type))
+        return f"Linked {from_id} --[{relationship_type}]--> {to_id}"
 
     class _C:
         prompt_version = "1"
@@ -279,7 +295,8 @@ async def _run(clusters, edges=None, gate=None):
 
     stats = await WC.compile_clusters(
         clusters, _C(), heads={}, edges=edges, gate=gate,
-        _write=_write, _supersede=_supersede, _ensure_prompt=_ensure_prompt)
+        _write=_write, _supersede=_supersede, _ensure_prompt=_ensure_prompt,
+        _link=_link)
     return stats, writes
 
 
