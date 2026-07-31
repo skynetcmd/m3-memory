@@ -322,7 +322,59 @@ def _cmd_schedules(args: argparse.Namespace) -> int:
     port = getattr(args, "port", None)
     if port:
         argv += ["--port", str(port)]
+
+    # On Windows, --repair and --add/--remove need admin: registering a boot
+    # (ONSTART) task, and deleting one, are both privileged. Running unelevated
+    # is not merely useless here — it is DESTRUCTIVE for --repair, which deletes
+    # each task and then fails to recreate it, taking a working service down
+    # (observed twice on 2026-07-27). So elevate BEFORE running, rather than
+    # letting the child fail and print a command to paste into another shell.
+    # A missed UAC dialog re-asks; declining falls through to the unelevated run
+    # so nothing becomes unreachable just because elevation was refused.
+    if sys.platform == "win32" and sub in ("repair", "add", "remove"):
+        script = _resolve_bin_script("install_schedules.py")
+        if script and _elevate_schedules_windows(str(script), argv, sub):
+            return 0
     return _run_bin_script("install_schedules.py", argv)
+
+
+def _elevate_schedules_windows(script: str, argv: list, sub: str) -> bool:
+    """UAC-elevate an install_schedules.py invocation. True iff it succeeded.
+
+    Reuses setup_wizard's retry-aware elevation helpers so a UAC dialog that
+    opens behind the terminal, lands on another monitor, or eats a reflexive
+    Enter is re-offered rather than silently downgrading the command.
+    """
+    try:
+        from .setup_wizard import _ask_yes_no, _retry_elevated
+    except Exception:  # noqa: BLE001 — wizard unavailable: run unelevated
+        return False
+
+    if sub == "repair":
+        print("  `--repair` DELETES and recreates each task. Unelevated, the "
+              "delete succeeds\n  and the recreate fails — taking a running "
+              "service down. It needs admin.")
+    if not _ask_yes_no("  Run it elevated now? (opens a Windows admin prompt)",
+                       default=True):
+        return False
+
+    import subprocess as _sp
+
+    def _run() -> bool:
+        arg_list = ",".join(f"'{a}'" for a in [script, *argv])
+        ps = (
+            f"$p = Start-Process -FilePath '{sys.executable}' "
+            f"-ArgumentList {arg_list} -Verb RunAs -PassThru -Wait; "
+            "exit $p.ExitCode"
+        )
+        try:
+            out = _sp.run(["powershell", "-NoProfile", "-NonInteractive",
+                           "-Command", ps], timeout=300, check=False)
+            return out.returncode == 0
+        except Exception:  # noqa: BLE001 — UAC cancelled / powershell missing
+            return False
+
+    return _retry_elevated(_run, what=f"elevated `m3 schedules {sub}`")
 
 
 def _cmd_wiki(args: argparse.Namespace) -> int:
@@ -788,6 +840,33 @@ def _json_type_to_argparse(t: str):
     return {"integer": int, "number": float}.get(t)  # str is the argparse default
 
 
+class _CommaSplitAppend(argparse.Action):
+    """Collect an array-of-scalar flag from space- AND comma-separated values,
+    ACCUMULATING across repeats.
+
+    Fixes two halves of the same bug (2026-07-31):
+      * ``--patterns "a,b,c"`` used to bind the raw string, which the tool layer
+        then iterated per-character into ['a', ',', 'b', ...].
+      * ``--patterns a --patterns b`` used to OVERWRITE (last wins) rather than
+        append, so there was no working way to pass several values at all.
+
+    Both forms now yield the same list, and repeats add to it::
+
+        --patterns api_keys jwt
+        --patterns api_keys,jwt
+        --patterns api_keys --patterns jwt
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if isinstance(values, str):
+            values = [values]
+        out = list(getattr(namespace, self.dest, None) or [])
+        for v in values:
+            # Split on commas, drop empties from "a,,b" / trailing commas.
+            out.extend(part for part in str(v).split(",") if part.strip())
+        setattr(namespace, self.dest, out)
+
+
 def _esc(s: str) -> str:
     """Escape % for argparse help (it %-expands help strings; a bare % in a
     tool description otherwise raises 'badly formed help string')."""
@@ -883,6 +962,22 @@ def _add_tool_domain_subcommands(subparsers) -> None:
                             f"--{pname}", dest=pname,
                             action=_ap.BooleanOptionalAction,
                             default=None, help=phelp,
+                        )
+                    elif ptype == "array":
+                        # Array-of-SCALAR (array-of-object went to --json above).
+                        # Without nargs this bound a bare str, and the tool layer
+                        # then iterated it CHARACTER BY CHARACTER: `--patterns
+                        # "api_keys,jwt"` became ['a','p','i',...]. Observed
+                        # 2026-07-31 silently mis-configuring chatlog redaction —
+                        # the config saved "successfully" with 49 one-letter
+                        # groups. Accept BOTH shell-native forms:
+                        #   --patterns api_keys jwt          (space-separated)
+                        #   --patterns api_keys,jwt          (comma-separated)
+                        tp.add_argument(
+                            f"--{pname}", dest=pname, nargs="+",
+                            action=_CommaSplitAppend,
+                            required=req, default=None,
+                            help=(phelp + "  (space- or comma-separated)").strip(),
                         )
                     else:
                         tp.add_argument(

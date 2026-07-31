@@ -775,7 +775,8 @@ def _prompt_and_install_dashboard(interactive: bool) -> None:
             # clobbering a port the user previously chose (the chosen port isn't
             # persisted to config, so we can't re-supply it). Preserving the
             # existing task keeps their port on upgrade.
-            _register_dashboard_task(skip_if_exists=True)
+            _register_dashboard_task(skip_if_exists=True,
+                                     non_interactive=not interactive)
         return
 
     print()
@@ -800,7 +801,7 @@ def _prompt_and_install_dashboard(interactive: bool) -> None:
         )
         if proc.returncode == 0:
             print("    [OK] web dashboard installed.")
-            _register_dashboard_task()
+            _register_dashboard_task(non_interactive=not interactive)
         else:
             if proc.stderr:
                 for line in proc.stderr.strip().splitlines()[-3:]:
@@ -810,13 +811,28 @@ def _prompt_and_install_dashboard(interactive: bool) -> None:
         print(f'    [!] dashboard install skipped ({e}); add later:  pip install "m3-memory[dashboard]"')
 
 
-def _register_dashboard_task(skip_if_exists: bool = False) -> None:
+def _register_dashboard_task(skip_if_exists: bool = False,
+                             non_interactive: bool = False) -> None:
     """Register the boot-start dashboard task (windowless). Best-effort.
 
     ``skip_if_exists``: on an upgrade, don't re-register when an AgentOS_Dashboard
     task already exists — re-registering would rebind the hardcoded default port
     and clobber a user-chosen one (the port isn't persisted, so we can't re-pass
     it). Only used on the deps-already-present path.
+
+    A denied ONSTART registration is OFFERED INLINE UAC, not just printed. This
+    call site used to capture the subprocess output, discard it, and ignore the
+    return code — so a boot task that failed with 'Access is denied' produced a
+    silent no-op here while the child's copy-paste banner scrolled past. The user
+    then learned at the NEXT reboot that the dashboard never came back. Windows
+    has no inline sudo, so one UAC consent dialog is the whole cost (§3 fail
+    loud; the inline-UAC preference is the documented one — a consent dialog
+    beats a context-switch to an admin shell).
+
+    Windows-only by construction: Linux/macOS register the dashboard as a
+    USER-level systemd --user unit / LaunchAgent, which needs no privilege and
+    never reaches the denied branch. ``_offer_elevated_schedule_repair`` is
+    itself a no-op off win32, so this stays correct on all three OSes.
     """
     try:
         if skip_if_exists and sys.platform == "win32":
@@ -830,10 +846,28 @@ def _register_dashboard_task(skip_if_exists: bool = False) -> None:
         script = _install_schedules_script()
         if not script:
             return
-        subprocess.run([_python_exe(), str(script), "--add", "dashboard"],
-                       check=False, capture_output=True, text=True)
-    except Exception:  # noqa: BLE001 — never fail install on the task step
-        pass
+        proc = subprocess.run([_python_exe(), str(script), "--add", "dashboard"],
+                              check=False, capture_output=True, text=True)
+        if proc.returncode == 0:
+            return
+        # Surface the child's own diagnostics — swallowing them is what made this
+        # failure invisible in the first place.
+        out = (proc.stdout or "") + (proc.stderr or "")
+        for line in out.strip().splitlines():
+            if line.strip():
+                print(f"    {line.strip()}")
+        if "access is denied" not in out.lower():
+            return  # a non-privilege failure: the printed output is the report
+        from .setup_wizard import _offer_elevated_schedule_repair
+        if _offer_elevated_schedule_repair(str(script),
+                                           non_interactive=non_interactive):
+            return  # registered elevated — the banner above is now moot
+        print("    [!] dashboard boot task NOT registered — it will not start after")
+        print("        a reboot. Register it later with:  m3 schedules repair")
+    except Exception as e:  # noqa: BLE001 — never fail install on the task step
+        # Even here, say something: a silent except is how the original bug hid.
+        print(f"    [!] could not register the dashboard boot task ({e});")
+        print("        register it later with:  m3 schedules repair")
 
 
 def _mask_dsn(dsn: str) -> str:

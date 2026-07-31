@@ -36,8 +36,8 @@ from m3_memory._platform import os_name as _os_name
 # PyPI install (by version) and the GitHub-release asset fetch (by tag).
 # 3.7.4 was the first release whose wheels bundle the m3-embed-server binary.
 #
-# 3.7.29 / v2026.7.29 (2026-07-27). Verify the Release is complete with:
-#   gh release view v2026.7.29 --repo skynetcmd/m3-core-rs
+# 3.7.31 / v2026.7.31 (2026-07-31). Verify the Release is complete with:
+#   gh release view v2026.7.31 --repo skynetcmd/m3-core-rs
 #
 # WHERE EACH WHEEL LIVES — not every backend can go to PyPI. The CUDA wheels
 # exceed PyPI's per-file size limit (windows-cuda ~244 MiB, linux-cuda ~949 MiB
@@ -55,8 +55,8 @@ from m3_memory._platform import os_name as _os_name
 # Until each PyPI project registers its trusted publisher, the GitHub-Release
 # hop is load-bearing for EVERY backend, not just CUDA. Do not "simplify" the
 # cascade on the assumption PyPI is current.
-M3_CORE_RS_VERSION = "3.7.29"
-M3_CORE_RS_GIT_TAG = "v2026.7.29"
+M3_CORE_RS_VERSION = "3.7.31"
+M3_CORE_RS_GIT_TAG = "v2026.7.31"
 
 # Cargo features per backend, mirroring build_wheel.py's _MATRIX (the source
 # fallback passes these to maturin via pip's config-settings).

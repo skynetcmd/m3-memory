@@ -60,7 +60,22 @@ ANTH = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
 OPENAI_PROJ = "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
 XAI = "xai-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
 GOOGLE = "AIza" + "B" * 35
-AWS_ID = "AKIAIOSFODNN7EXAMPLE"
+AWS_ID = "AKIAIOSFODNN7EXAMPLE"  # AWS's own published doc example
+# STS (temporary) credentials. These are SYNTHETIC — sequential/repeated filler
+# that merely has the SHAPE of the real credentials found unredacted in a live
+# chatlog on 2026-07-31 (24 occurrences inside pasted S3 pre-signed URLs, none
+# matched because the group only knew AKIA). Never paste a real credential into
+# a test, even an expired one: it publishes the secret to a public repo and
+# records the leak permanently in git history.
+AWS_STS_ID = "ASIAEXAMPLE1234567XZ"
+AWS_STS_SIG = "c2lnbmF0dXJlRXhhbXBsZTAwMDA%3D"
+AWS_STS_TOKEN = "FwoGZXIvYXdzEExampleSessionTokenPaddingAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+AWS_PRESIGNED = (
+    "https://x.s3.amazonaws.com/f.md"
+    f"?AWSAccessKeyId={AWS_STS_ID}"
+    f"&Signature={AWS_STS_SIG}"
+    f"&x-amz-security-token={AWS_STS_TOKEN}"
+)
 JWT = "eyJhbGciOiJIUzI1NiIs.eyJzdWIiOiIxMjM0NTY3.SflKxwRJSMeKKF2QT4"
 BEARER = "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -95,6 +110,56 @@ def test_all_groups_together():
     content = f"{ANTH} {BEARER} {JWT} {AWS_ID} {GH} a@b.com"
     assert_parity(content, cfg(patterns=ALL_GROUPS))
     assert_parity(content, cfg(patterns=ALL_GROUPS + ["pii"], pii=True))
+
+
+# --- AWS STS / pre-signed URLs (regression, 2026-07-31) --------------------
+#
+# The aws_keys group matched only AKIA (long-lived IAM). Temporary STS
+# credentials start with ASIA and were stored verbatim. These assert BOTH
+# engines redact, not merely that they agree — parity alone would happily
+# certify "both miss it", which is exactly the state that shipped.
+
+
+@pytest.mark.parametrize(
+    "sample,label",
+    [
+        (AWS_STS_ID, "bare STS key id"),
+        (AWS_PRESIGNED, "full pre-signed URL"),
+        (f"AWSAccessKeyId={AWS_STS_ID}", "query-string param"),
+    ],
+)
+def test_aws_sts_key_is_redacted(sample, label):
+    scrubbed, count, groups = assert_parity(sample, cfg(patterns=["aws_keys"]))
+    assert count > 0, f"{label}: STS credential left in plaintext"
+    assert AWS_STS_ID not in scrubbed, f"{label}: key id survived scrubbing"
+    assert "aws_keys" in groups
+
+
+def test_aws_presigned_signature_and_token_redacted():
+    """Scrubbing the key id alone still leaves a usable signed request."""
+    scrubbed, count, _ = assert_parity(AWS_PRESIGNED, cfg(patterns=["aws_keys"]))
+    assert AWS_STS_SIG not in scrubbed, "signature survived"
+    assert AWS_STS_TOKEN not in scrubbed, "session token survived"
+
+
+def test_aws_long_lived_key_still_redacted():
+    """The ASIA widening must not regress AKIA."""
+    scrubbed, count, _ = assert_parity(AWS_ID, cfg(patterns=["aws_keys"]))
+    assert count > 0 and AWS_ID not in scrubbed
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "We discussed the AWS migration and the signature of the function.",
+        "ASIA is a continent; AKIA Corp makes batteries.",
+        "The method signature changed in this release.",
+    ],
+)
+def test_aws_patterns_do_not_eat_prose(prose):
+    """Widening must not turn ordinary English into [REDACTED]."""
+    scrubbed, count, _ = assert_parity(prose, cfg(patterns=["aws_keys"]))
+    assert count == 0, f"false positive on prose: {scrubbed!r}"
 
 
 # --- eval order ------------------------------------------------------------

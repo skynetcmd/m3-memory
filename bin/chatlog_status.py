@@ -309,6 +309,49 @@ def _minutes_since(iso_ts: str | None) -> float | None:
         return None
 
 
+def _config_drift(config: chatlog_config.ChatlogConfig) -> list[tuple[str, Any, Any]]:
+    """Redaction fields where the ON-DISK config disagrees with the LIVE one.
+
+    Returns ``[(field, live_value, disk_value), ...]``; empty when they agree or
+    the file cannot be read. Purely diagnostic and never raises — a status probe
+    that crashes is worse than the drift it reports.
+
+    Why this exists: ``resolve_config()`` memoises into a module-global cache
+    that only the tool-mediated setters invalidate. A hand-edit of
+    ``.chatlog_config.json`` therefore does NOT reach a long-lived process, so
+    ``chatlog_status`` can report ``enabled: false`` while the file says true —
+    and a rescrub launched on the strength of that file either refuses or
+    scrubs with the stale pattern set. Observed 2026-07-31.
+    """
+    try:
+        path = Path(chatlog_config.CONFIG_PATH)
+        if not path.is_file():
+            return []
+        disk = json.loads(path.read_text(encoding="utf-8")).get("redaction", {})
+        if not isinstance(disk, dict):
+            return []
+    except Exception:  # noqa: BLE001 — unreadable/corrupt file: nothing to compare
+        return []
+
+    live = config.redaction
+    drift: list[tuple[str, Any, Any]] = []
+    for field, live_val in (
+        ("enabled", bool(live.enabled)),
+        ("patterns", sorted(live.patterns or [])),
+        ("redact_pii", bool(live.redact_pii)),
+    ):
+        if field not in disk:
+            continue  # absent on disk == "use the default"; not drift
+        disk_val = disk[field]
+        if field == "patterns":
+            disk_val = sorted(disk_val) if isinstance(disk_val, list) else disk_val
+        elif isinstance(live_val, bool):
+            disk_val = bool(disk_val)
+        if disk_val != live_val:
+            drift.append((field, live_val, disk_val))
+    return drift
+
+
 def _compute_warnings(
     state: dict[str, Any],
     config: chatlog_config.ChatlogConfig,
@@ -369,6 +412,20 @@ def _compute_warnings(
             "redaction is OFF (chat turns stored verbatim, secrets included)"
             " -> fix: m3 chat chatlog_set_redaction --enabled true"
             " ; retro-clean existing rows with m3 chat chatlog_rescrub"
+        )
+
+    # The config is cached per-process and only invalidated by edits made
+    # THROUGH the tools. A hand-edit of .chatlog_config.json (or an edit by
+    # another process) leaves a long-lived server serving the OLD config while
+    # the file says otherwise -- and a rescrub run in that window silently
+    # scrubs against stale settings, or refuses outright. Report the divergence
+    # rather than let it look like the edit did not work (§3 fail loud).
+    for _key, _live, _disk in _config_drift(config):
+        warnings.append(
+            f"redaction.{_key} on disk ({_disk!r}) differs from the running "
+            f"config ({_live!r}) -> the process is serving a STALE config; "
+            "restart the m3 MCP server / daemon before relying on it "
+            "(a rescrub now would use the stale settings)"
         )
 
     spill = state.get("spill", {})

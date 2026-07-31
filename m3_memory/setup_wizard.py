@@ -1071,8 +1071,12 @@ def _retry_elevated(action, *, what: str, max_attempts: int = 5) -> bool:
     So: retry, but never trap. Each failure re-asks, and the user can stop with
     'quit' / 'q' / 'no'. `action` returns True on success.
     """
+    # Name the mechanism the user will actually see. This helper is also reached
+    # from the POSIX kill path, where the prompt is sudo, not a UAC dialog.
+    _how = ("approve the Windows UAC dialog" if sys.platform == "win32"
+            else "enter your sudo password")
     for attempt in range(1, max_attempts + 1):
-        _say(f"  Requesting administrator access (approve the Windows UAC dialog)"
+        _say(f"  Requesting administrator access ({_how})"
              f"{'' if attempt == 1 else f' — attempt {attempt}/{max_attempts}'}...")
         if action():
             return True
@@ -1139,7 +1143,15 @@ def _kill_stuck_writers(stuck, *, allow_sudo: bool = False) -> bool:
             continue
         # Unprivileged kill refused (typically an elevated target). On an
         # interactive run, retry with elevation before giving up.
-        if allow_sudo and elevate(p.pid):
+        #
+        # Go through _retry_elevated, not a bare one-shot call: a UAC dialog is
+        # easy to miss (opens behind the terminal, lands on another monitor, or
+        # eats a reflexive Enter), and a single missed consent used to abandon
+        # the writer silently — setup then carried on with a stale process still
+        # holding the DB. Re-ask instead; the user can still decline explicitly.
+        if allow_sudo and _retry_elevated(
+            lambda: elevate(p.pid), what=f"elevated stop of {p.role} (pid {p.pid})"
+        ):
             _ok(f"    stopped {p.role} (pid {p.pid}) via {how}")
             continue
         all_ok = False

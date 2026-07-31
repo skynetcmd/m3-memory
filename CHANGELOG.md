@@ -19,7 +19,64 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-No unreleased changes.
+### None pending
+
+## [2026.7.31.1] — 2026-07-31 — inline UAC on every privileged install step; AWS STS redaction
+
+### Fixed
+- **The dashboard boot task failed silently instead of offering elevation.**
+  Registering an ONSTART scheduled task needs admin. Every other privileged
+  install step already offered inline UAC — one consent dialog rather than a
+  context-switch into a separate admin shell — but `_register_dashboard_task`
+  captured the child's output, threw it away, ignored the return code, and
+  swallowed exceptions with a bare `except: pass`. An "Access is denied" was
+  therefore invisible; the user found out at the next reboot, when the
+  dashboard did not come back. It now prints the child's diagnostics, detects
+  the denial, offers inline UAC, and — if declined — names `m3 schedules
+  repair` instead of leaving a dead end. Windows-only by construction:
+  Linux/macOS register user-level systemd/LaunchAgent units and never hit the
+  privileged branch.
+- **A missed UAC dialog permanently downgraded the install.** `_kill_stuck_writers`
+  called the elevation helper as a bare one-shot, so a consent prompt that
+  opened behind the terminal, appeared on another monitor, or ate a reflexive
+  Enter left the stuck writer running and setup carried on over a live DB lock.
+  It now goes through the same retry-and-re-ask loop as the other elevated
+  steps (up to 5 attempts, explicit `quit` to stop).
+- **`m3 schedules repair` ran unelevated, which is destructive, not merely
+  useless.** `--repair` deletes each task and recreates it; unprivileged, the
+  delete succeeds and the recreate fails, taking a running service down. It now
+  elevates first on Windows, warns what `--repair` actually does, and falls back
+  to the unelevated run only if elevation is declined.
+- **Array CLI flags were split into individual characters.**
+  `m3 chat chatlog_set_redaction --patterns "api_keys,jwt"` bound a plain
+  string that the tool layer then iterated per character, persisting 49
+  one-letter "pattern groups" and reporting success — redaction was configured
+  and silently inert. Repeating the flag overwrote instead of appending, so
+  there was no working way to pass several values at all. Array-of-scalar args
+  now accept both `--flag a b` and `--flag a,b`, and repeats accumulate.
+- **AWS STS credentials were stored verbatim.** The `aws_keys` redaction group
+  matched only `AKIA` (long-lived IAM keys). Temporary STS keys start with
+  `ASIA` and went unredacted — a live chatlog scan found 24 of them inside
+  pasted S3 pre-signed URLs. A short TTL is not redaction. Both prefixes now
+  match, along with the two other halves of a pre-signed URL
+  (`x-amz-security-token` and `Signature`): scrubbing the key id alone still
+  leaves a working signed request in the log.
+- **A hand-edited chatlog config silently served stale settings.**
+  `resolve_config()` memoises into a process-global cache that only the
+  tool-mediated setters invalidate, so editing `.chatlog_config.json` directly
+  left a long-lived server serving the old config — `chatlog_status` reported
+  redaction off while the file said on, and a rescrub launched on the strength
+  of that file used the stale settings. `chatlog_status` now reports the
+  divergence and names the restart.
+
+### Changed
+- Rust core pinned to **3.7.31** (`v2026.7.31`), which carries the matching
+  STS redaction patterns and finally exports `__version__` /
+  `__build_backend__`. The missing `__version__` meant `is_rust_core_current()`
+  could never read an installed version, so its deliberately conservative
+  "never skip an upgrade on a guess" fallback re-downloaded the core on every
+  `m3 setup` — 244 MB on windows-cuda, ~949 MB on linux-cuda, silently, every
+  run. Upgrades now skip correctly when the pinned version is already present.
 
 ## [2026.7.31.0] — 2026-07-31 — `m3 doctor --fix` migrates every deprecated env var
 

@@ -170,14 +170,33 @@ def compile_patterns(config: dict) -> None:
                 ),
             ],
             "aws_keys": [
+                # AKIA = long-lived IAM key; ASIA = TEMPORARY (STS) key. Both are
+                # real credentials. Only AKIA was matched until 2026-07-31, when a
+                # live chatlog scan turned up 24 unredacted ASIA key IDs inside
+                # pasted S3 pre-signed URLs. A short TTL is not redaction (§6).
                 (
                     "access_key_id",
-                    re.compile(r"AKIA[0-9A-Z]{16}"),
+                    re.compile(r"A(?:KIA|SIA)[0-9A-Z]{16}"),
                 ),
                 (
                     "secret_access_key",
                     re.compile(
                         r"(?i)aws[_-]?secret[_-]?access[_-]?key[\"'\s:=]+[A-Za-z0-9/+=]{40}"
+                    ),
+                ),
+                # The other two halves of a pre-signed URL. Without these, scrubbing
+                # the key ID alone still leaves a working signed request in the log.
+                (
+                    "session_token",
+                    re.compile(
+                        r"(?i)(?:x-amz-security-token|aws[_-]?session[_-]?token)"
+                        r"[\"'\s:=]*[A-Za-z0-9/+=%_-]{40,}"
+                    ),
+                ),
+                (
+                    "presigned_signature",
+                    re.compile(
+                        r"(?i)(?:X-Amz-)?Signature[\"'\s:=]*[A-Za-z0-9/+=%]{16,}"
                     ),
                 ),
             ],
