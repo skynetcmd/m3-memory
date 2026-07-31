@@ -18,7 +18,9 @@ Under the hood, M3 treats agent memory as a **distributed-systems infrastructure
 
 One decision saved from a conversation, then recalled by a *different* agent in a *new* session, on a different machine. No audio; captioned throughout.
 
-**[Download the video](https://github.com/skynetcmd/m3-memory/releases/download/v2026.7.30.1/m3-promo.mp4)** to play locally.
+https://github.com/user-attachments/assets/8da27a04-d686-4d2d-8e23-df28358fb08d
+
+<sub>Player not loading? <a href="https://github.com/skynetcmd/m3-memory/releases/download/v2026.7.30.1/m3-promo.mp4"><b>Download the video</b></a> to play locally.</sub>
 
 ---
 
