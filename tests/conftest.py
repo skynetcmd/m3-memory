@@ -473,6 +473,57 @@ def _reset_storage_backend_cache():
     _clear()
 
 
+_EMBED_PRISTINE: dict = {}
+
+
+def _snapshot_embed_globals(mod) -> None:
+    """Capture the import-time shared-mode switches, once, BEFORE any test can
+    mutate them. Called from a session-scoped autouse fixture as well as from the
+    per-test restore, so the values are pristine even if the very first test to
+    touch memory.embed is one that flips shared mode on."""
+    if mod is None:
+        return
+    if "_INPROC_ALLOWED" not in _EMBED_PRISTINE and hasattr(mod, "_INPROC_ALLOWED"):
+        _EMBED_PRISTINE["_INPROC_ALLOWED"] = mod._INPROC_ALLOWED
+    if "_EMBED_CFG" not in _EMBED_PRISTINE and hasattr(mod, "_EMBED_CFG"):
+        try:
+            _EMBED_PRISTINE["_EMBED_CFG"] = dict(mod._EMBED_CFG)
+        except (TypeError, ValueError):
+            _EMBED_PRISTINE["_EMBED_CFG"] = {}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _capture_pristine_embed_globals():
+    """Import memory.embed once at session start and snapshot its shared-mode
+    switches, so the restore below always has genuinely-pristine values."""
+    try:
+        import memory.embed as _m
+        _snapshot_embed_globals(_m)
+    except Exception:  # noqa: BLE001 — best effort; module may not be importable
+        pass
+    yield
+
+
+def _restore_embed_globals(mod) -> None:
+    """Restore memory.embed's shared-mode switches to their FIRST-IMPORT values.
+
+    `_INPROC_ALLOWED` is derived at import time from whether a config file was
+    found and whether it disables the in-process embedder, so there is no
+    hardcodable "default" — the correct value is whatever this environment
+    computed before any test mutated it. Snapshot on first sight, restore after
+    every test.
+    """
+    _snapshot_embed_globals(mod)
+    if "_INPROC_ALLOWED" in _EMBED_PRISTINE:
+        mod._INPROC_ALLOWED = _EMBED_PRISTINE["_INPROC_ALLOWED"]
+    if "_EMBED_CFG" in _EMBED_PRISTINE and hasattr(mod, "_EMBED_CFG"):
+        try:
+            mod._EMBED_CFG.clear()
+            mod._EMBED_CFG.update(_EMBED_PRISTINE["_EMBED_CFG"])
+        except (AttributeError, TypeError):
+            mod._EMBED_CFG = dict(_EMBED_PRISTINE["_EMBED_CFG"])
+
+
 @pytest.fixture(autouse=True)
 def _reset_embed_global_cache():
     """Reset memory.embed's in-process embedder cache between tests.
@@ -512,6 +563,19 @@ def _reset_embed_global_cache():
                 cache.clear()
             except (AttributeError, TypeError):
                 pass
+        # The shared-embedder switches are ALSO module globals, read straight by
+        # memory.doctor to decide tier-1's verdict ("shared-mode" vs
+        # "not-configured"). A sibling test that exercises shared mode leaves
+        # _INPROC_ALLOWED=False / _EMBED_CFG={"disable_inproc_embedder": True}
+        # behind, and the next test to call memory_doctor_impl inherits that
+        # verdict — test_doctor::test_tier1_not_configured_when_no_gguf passed
+        # alone and failed under batch ordering for exactly this reason.
+        #
+        # Restore the values captured at FIRST import, not a hardcoded default:
+        # _INPROC_ALLOWED is computed from the config file's presence and
+        # contents (see memory/embed.py), so pinning it to True here would
+        # invent a state this environment never had.
+        _restore_embed_globals(mod)
 
 
 # Environment variables that must NOT leak from the developer's shell into a

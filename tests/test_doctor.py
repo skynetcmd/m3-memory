@@ -122,8 +122,19 @@ async def test_tier1_not_configured_when_no_gguf(monkeypatch):
 
     Auto-detect is disabled here so the test is deterministic regardless of
     whether the host happens to have a bge-m3 GGUF in a canonical dir — that
-    auto-detect path is covered separately."""
+    auto-detect path is covered separately.
+
+    Shared mode is forced OFF for the same reason. doctor checks shared mode
+    FIRST and returns 'shared-mode' before it ever looks at the GGUF, so on a
+    developer box whose real ~/.m3/config/.embed_config.json sets
+    disable_inproc_embedder (the shipped default, and what `m3 embedder shared`
+    writes) this assertion measured the host's config instead of the behaviour
+    under test. Shared-mode reporting has its own coverage in
+    test_doctor_shared_embedder.py."""
     monkeypatch.setenv("M3_EMBED_GGUF_AUTODETECT", "0")
+    import memory.embed as _emb
+    monkeypatch.setattr(_emb, "_INPROC_ALLOWED", True, raising=False)
+    monkeypatch.setattr(_emb, "_EMBED_CFG", {}, raising=False)
     from memory.doctor import memory_doctor_impl
     out = await memory_doctor_impl()
     assert out["tier_1"]["status"] == "not-configured"

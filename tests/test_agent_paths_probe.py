@@ -9,11 +9,28 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _BIN = str(Path(__file__).resolve().parents[1] / "bin")
 if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
 from doctor import agent_paths_probe as P  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_host_payload_scan(monkeypatch):
+    """Isolate every test in this file from the DEVELOPER'S OWN machine.
+
+    `run()` also calls `_scan_stale_payload()`, which reads the real
+    ~/.claude/settings.json. The tests below stub the three host scanners but not
+    this one, so a developer with genuinely stale hooks on their machine — which
+    is the normal state right after a payload upgrade — saw run() return 1 and
+    three unrelated tests fail. The assertions are about the STUBBED rows, so the
+    host's real payload state must never leak in. Tests that exercise stale-payload
+    behaviour stub this themselves (see test_agent_paths_stale.py).
+    """
+    monkeypatch.setattr(P, "_scan_stale_payload", lambda: [])
 
 
 def test_path_dead_distinguishes_kinds(tmp_path):
