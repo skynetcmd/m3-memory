@@ -396,7 +396,10 @@ async def test_compile_clusters_records_ledger_run_and_membership():
         clusters, comp, heads={},
         edges=None, gate=None,  # gating off (no edges) so both clusters compile
         importance_threshold=0.55, entity_comention=True,
-        _write=_write, _ensure_prompt=_ensure_prompt, _ledger_db=db)
+        # _link MUST be injected: the fallback is the real memory_link_impl,
+        # which writes to the live ~/.m3/engine/agent_memory.db.
+        _write=_write, _ensure_prompt=_ensure_prompt, _ledger_db=db,
+        _link=lambda a, b, r: f"Linked {a} --[{r}]--> {b}")
 
     assert stats.created == 2
     # A completed run exists with the right params.
@@ -425,6 +428,7 @@ async def test_compile_clusters_ledger_off_writes_no_run(monkeypatch):
 
     await _wc.compile_clusters(
         clusters, comp, heads={}, edges=None, record_run=False,
-        _write=_write, _ensure_prompt=_ensure_prompt, _ledger_db=db)
+        _write=_write, _ensure_prompt=_ensure_prompt, _ledger_db=db,
+        _link=lambda a, b, r: f"Linked {a} --[{r}]--> {b}")
     n = db.execute("SELECT COUNT(*) AS c FROM cluster_run").fetchone()["c"]
     assert n == 0

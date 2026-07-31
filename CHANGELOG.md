@@ -61,6 +61,19 @@ the policy is forward-going only.
   match, along with the two other halves of a pre-signed URL
   (`x-amz-security-token` and `Signature`): scrubbing the key id alone still
   leaves a working signed request in the log.
+- **Four wiki tests wrote to the developer's live engine database.**
+  `compile_clusters` takes four injectable collaborators; these tests faked
+  `_write`, `_supersede` and `_ensure_prompt` but missed `_link`, so
+  `_write_provenance_edges` fell through to the real `memory_link_impl`, which
+  opens the default engine DB (`~/.m3/engine/agent_memory.db`) and inserted
+  provenance rows into it. On a machine where m3 is running it never got that
+  far — the write blocked forever on the SQLite lock held by the MCP server,
+  dashboard and cognitive loop, so the tests hung with no timeout and the suite
+  looked stuck rather than failing. CI never caught it because there is no live
+  engine DB there. Test-only change; the injection point already existed. A new
+  `test_wiki_no_live_db_writes.py` statically asserts that every
+  `compile_clusters` caller injects `_link` and that the seam keeps existing —
+  it found two of the four offenders on its first run.
 - **A hand-edited chatlog config silently served stale settings.**
   `resolve_config()` memoises into a process-global cache that only the
   tool-mediated setters invalidate, so editing `.chatlog_config.json` directly

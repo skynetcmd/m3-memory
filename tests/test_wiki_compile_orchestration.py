@@ -82,7 +82,7 @@ def test_load_heads_dedupes_same_title_deterministically():
 # ── compile_clusters (full pass) ─────────────────────────────────────────────
 
 async def _run(clusters, compiler, heads, **kw):
-    writes, sups, prompts = [], [], []
+    writes, sups, prompts, links = [], [], [], []
 
     async def _write(**a):
         writes.append(a)
@@ -96,9 +96,22 @@ async def _run(clusters, compiler, heads, **kw):
         prompts.append(comp.prompt_version)
         return "prompt-id"
 
+    def _link(from_id, to_id, relationship_type):
+        """Capture provenance edges instead of writing them.
+
+        MUST be injected. `_write_provenance_edges` otherwise falls back to the
+        real `memory.write.memory_link_impl`, which opens the DEFAULT engine
+        database — the developer's live ~/.m3/engine/agent_memory.db — and
+        inserts into it. Where m3 is actually running the write instead blocks
+        forever on the SQLite lock held by the MCP server / dashboard /
+        cognitive-loop daemon, hanging the suite with no timeout of its own.
+        """
+        links.append((from_id, to_id, relationship_type))
+        return f"Linked {from_id} --[{relationship_type}]--> {to_id}"
+
     stats = await WC.compile_clusters(
         clusters, compiler, heads, _write=_write, _supersede=_supersede,
-        _ensure_prompt=_ensure_prompt, **kw)
+        _ensure_prompt=_ensure_prompt, _link=_link, **kw)
     return stats, writes, sups, prompts
 
 
