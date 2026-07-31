@@ -44,17 +44,20 @@ from m3_memory._platform import os_name as _os_name
 # against a 100 MB limit — an order of magnitude, so size is a permanent
 # barrier, not a hurdle a rebuild clears). They ship ONLY via the GitHub
 # Release, and release.yml's publish matrix deliberately omits them;
-# `m3-core-rs-windows-cuda` being a 404 on PyPI is BY DESIGN. This is exactly
-# why the resolver cascades PyPI -> GitHub Release -> source: on a CUDA box the
-# GitHub hop is the normal path, not a fallback from something broken.
+# `m3-core-rs-windows-cuda` being a 404 on PyPI is BY DESIGN.
 #
-# CAVEAT for the 5 PyPI-eligible backends (cpu / vulkan / macos-metal): they are
-# SUPPOSED to publish to PyPI but currently do not. Every publish job fails
-# trusted-publishing exchange (invalid-publisher), so PyPI still serves 3.7.4
-# (2026-07-04) for all five while the GitHub Release carries the current build.
-# Until each PyPI project registers its trusted publisher, the GitHub-Release
-# hop is load-bearing for EVERY backend, not just CUDA. Do not "simplify" the
-# cascade on the assumption PyPI is current.
+# The resolver therefore cascades GitHub Release -> PyPI -> source. The Release
+# is the CANONICAL channel: it carries all 7 backends x 4 interpreters on every
+# tag, so it is complete by construction, whereas PyPI can never carry CUDA.
+#
+# It is also the only channel that is CURRENT. The 5 PyPI-eligible backends
+# (cpu / vulkan / macos-metal) are supposed to publish to PyPI but do not: every
+# publish job fails trusted-publishing exchange with `invalid-publisher`, so all
+# five still serve 3.7.4 (2026-07-04) while 3.7.25/.27/.28/.29/.31 each shipped a
+# complete Release. A PyPI-first cascade would install that stale core and STOP,
+# because pip exits 0 — a stale success is worse than a clean miss. Fixing the
+# PyPI publishers (see docs) does not make PyPI-first correct again; leave the
+# Release first.
 M3_CORE_RS_VERSION = "3.7.31"
 M3_CORE_RS_GIT_TAG = "v2026.7.31"
 
@@ -871,13 +874,41 @@ def install_rust_core(os_tok: Optional[str] = None, *,
               f"{choice.os_tok}-{choice.backend}", file=sys.stderr)
         return 2
 
-    # Three-tier install cascade:
-    #   1. pip prebuilt — fastest path, no toolchain. Resolves from PyPI OR
-    #      from pip's local wheel cache.
-    #   2. GitHub Release prebuilt — the ONLY channel for the size-capped CUDA
-    #      wheels (windows-cuda ~244 MiB, linux-cuda ~949 MiB against a 100 MB
-    #      per-file limit) and the fallback for any backend PyPI is missing.
+    # Three-tier install cascade — GITHUB RELEASE FIRST.
+    #
+    #   1. GitHub Release prebuilt — the canonical, COMPLETE channel: every
+    #      release carries all 7 backends x 4 interpreters, and it is the only
+    #      channel for the size-capped CUDA wheels (windows-cuda ~244 MiB,
+    #      linux-cuda ~949 MiB against a 100 MB per-file limit).
+    #   2. pip prebuilt — PyPI or pip's local wheel cache.
     #   3. Source build — last resort, needs Rust + cmake + C++ + backend SDK.
+    #
+    # WHY THE RELEASE COMES FIRST (changed 2026-07-31). PyPI is not merely
+    # incomplete, it is STALE: every `publish` job has failed trusted-publishing
+    # exchange with `invalid-publisher` since 3.7.4, so all five PyPI-eligible
+    # projects still serve a 2026-07-04 build while 3.7.25/.27/.28/.29/.31 each
+    # shipped a complete 28-asset Release. Trying PyPI first therefore meant
+    # either installing a months-old core (pip exits 0 — a SUCCESS, so the
+    # cascade stops and never reaches the good wheel) or paying a doomed network
+    # round-trip before falling through. Version-pinning the pip install does not
+    # save it: `==3.7.31` simply 404s on PyPI, so the fast path is a guaranteed
+    # miss for every backend.
+    #
+    # Ordering by "which channel actually has the artifact" rather than by
+    # "which is nominally fastest" also fixes the CUDA case, where the pip hop
+    # was always a wasted attempt against a package that 404s by design.
+    #
+    # This is not a workaround to unwind once PyPI is fixed: the Release is
+    # complete by construction for all 7 backends, while PyPI can never carry
+    # CUDA. Keep the Release first.
+    rc_gh = install_from_github_release(choice)
+    if rc_gh == 0:
+        print(f"[rust-core] installed {choice.package} {M3_CORE_RS_VERSION} "
+              f"(GitHub Release)")
+        return 0
+
+    print(f"[rust-core] GitHub Release unavailable for {choice.package} "
+          f"(exit {rc_gh}); trying pip prebuilt.", file=sys.stderr)
     rc = install_prebuilt(choice)
     if rc == 0:
         # Deliberately does NOT claim "PyPI". pip exits 0 just as happily from
@@ -891,20 +922,12 @@ def install_rust_core(os_tok: Optional[str] = None, *,
               f"(prebuilt wheel via pip)")
         return 0
 
-    print(f"[rust-core] pip prebuilt unavailable for {choice.package} "
-          f"(pip exit {rc}); trying GitHub Release fallback.", file=sys.stderr)
-    rc_gh = install_from_github_release(choice)
-    if rc_gh == 0:
-        print(f"[rust-core] installed {choice.package} {M3_CORE_RS_VERSION} "
-              f"(GitHub Release)")
-        return 0
-
     if not allow_source_fallback:
         _print_manual_build_recommendation(choice, pypi_rc=rc, release_rc=rc_gh)
         return rc_gh
 
     print(f"[rust-core] no prebuilt wheel available for {choice.package} "
-          f"(PyPI={rc}, Release={rc_gh}); falling back to source build.",
+          f"(Release={rc_gh}, PyPI={rc}); falling back to source build.",
           file=sys.stderr)
     rc_src = install_from_source(choice)
     if rc_src != 0:

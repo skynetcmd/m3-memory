@@ -158,8 +158,16 @@ def test_install_from_source_cpu_passes_embedded_feature(monkeypatch):
     assert captured["argv"][idx + 1] == "build-args=--features embedded"
 
 
-def test_install_rust_core_prebuilt_success_skips_fallbacks(monkeypatch):
-    """PyPI prebuilt succeeds — neither GitHub Release nor source attempted."""
+def test_install_rust_core_github_release_success_skips_fallbacks(monkeypatch):
+    """GitHub Release succeeds — neither pip nor source attempted.
+
+    The Release is tier 1 (changed 2026-07-31). It is the only channel that is
+    both COMPLETE (all 7 backends x 4 interpreters every tag; PyPI can never
+    carry the size-capped CUDA wheels) and CURRENT (PyPI's publish jobs have
+    failed trusted-publishing exchange since 3.7.4, so it serves a 2026-07-04
+    build). Trying pip first meant installing that stale core and STOPPING,
+    because pip exits 0 — a stale success the cascade cannot recover from.
+    """
     calls = []
     monkeypatch.setattr(rci, "install_prebuilt",
                         lambda c, **k: calls.append("prebuilt") or 0)
@@ -171,30 +179,30 @@ def test_install_rust_core_prebuilt_success_skips_fallbacks(monkeypatch):
                         lambda os_tok=None: rci.BackendChoice("linux", "cuda", "t"))
     rc = rci.install_rust_core()
     assert rc == 0
-    assert calls == ["prebuilt"]
+    assert calls == ["github"], "pip must not be consulted when the Release has it"
 
 
-def test_install_rust_core_falls_back_pypi_to_github(monkeypatch):
-    """PyPI fails -> GitHub Release succeeds -> source NOT attempted.
+def test_install_rust_core_falls_back_github_to_pip(monkeypatch):
+    """GitHub Release fails -> pip succeeds -> source NOT attempted.
 
-    Locks in the 3-tier order: PyPI -> GitHub Release -> source.
+    Locks in the 3-tier order: GitHub Release -> pip -> source.
     """
     calls = []
     monkeypatch.setattr(rci, "install_prebuilt",
-                        lambda c, **k: calls.append("prebuilt") or 1)
+                        lambda c, **k: calls.append("prebuilt") or 0)
     monkeypatch.setattr(rci, "install_from_github_release",
-                        lambda c, **k: calls.append("github") or 0)
+                        lambda c, **k: calls.append("github") or 1)
     monkeypatch.setattr(rci, "install_from_source",
                         lambda c, **k: calls.append("source") or 0)
     monkeypatch.setattr(rci, "detect_backend",
                         lambda os_tok=None: rci.BackendChoice("macos", "metal", "t"))
     rc = rci.install_rust_core()
     assert rc == 0
-    assert calls == ["prebuilt", "github"]
+    assert calls == ["github", "prebuilt"]
 
 
 def test_install_rust_core_falls_back_all_three_tiers(monkeypatch):
-    """PyPI + GitHub Release both fail -> source build attempted."""
+    """GitHub Release + pip both fail -> source build attempted."""
     calls = []
     monkeypatch.setattr(rci, "install_prebuilt",
                         lambda c, **k: calls.append("prebuilt") or 1)
@@ -206,11 +214,11 @@ def test_install_rust_core_falls_back_all_three_tiers(monkeypatch):
                         lambda os_tok=None: rci.BackendChoice("linux", "cuda", "t"))
     rc = rci.install_rust_core()
     assert rc == 0
-    assert calls == ["prebuilt", "github", "source"]
+    assert calls == ["github", "prebuilt", "source"]
 
 
 def test_install_rust_core_no_source_fallback_when_disabled(monkeypatch):
-    """allow_source_fallback=False -> PyPI + GitHub Release attempted, then
+    """allow_source_fallback=False -> Release + pip attempted, then
     recommendation printed and source build NOT triggered. The curl install.sh
     flow passes False so users aren't surprised by a multi-minute Rust build.
     """
@@ -225,7 +233,29 @@ def test_install_rust_core_no_source_fallback_when_disabled(monkeypatch):
                         lambda os_tok=None: rci.BackendChoice("macos", "metal", "t"))
     rc = rci.install_rust_core(allow_source_fallback=False)
     assert rc != 0
-    assert calls == ["prebuilt", "github"]  # source NOT attempted
+    assert calls == ["github", "prebuilt"]  # source NOT attempted
+
+
+def test_cuda_never_wastes_a_pypi_roundtrip(monkeypatch):
+    """A CUDA box must reach its wheel without consulting PyPI at all.
+
+    m3-core-rs-{windows,linux}-cuda are 404 on PyPI BY DESIGN (both exceed the
+    100 MB per-file limit by an order of magnitude), so the old PyPI-first
+    cascade opened every CUDA install with a guaranteed-miss network hop.
+    """
+    for os_tok in ("windows", "linux"):
+        calls = []
+        monkeypatch.setattr(rci, "install_prebuilt",
+                            lambda c, **k: calls.append("prebuilt") or 0)
+        monkeypatch.setattr(rci, "install_from_github_release",
+                            lambda c, **k: calls.append("github") or 0)
+        monkeypatch.setattr(rci, "install_from_source",
+                            lambda c, **k: calls.append("source") or 0)
+        monkeypatch.setattr(
+            rci, "detect_backend",
+            lambda os_tok=None, _o=os_tok: rci.BackendChoice(_o, "cuda", "t"))
+        assert rci.install_rust_core() == 0
+        assert "prebuilt" not in calls, f"{os_tok}-cuda consulted PyPI"
 
 
 # ── GitHub Release fallback ────────────────────────────────────────────────────
@@ -421,17 +451,23 @@ def test_skips_install_when_already_current(monkeypatch):
 
 
 def test_force_reinstalls_even_when_current(monkeypatch):
-    """--force overrides the skip-if-current guard."""
+    """--force overrides the skip-if-current guard.
+
+    Instruments the FIRST tier (the GitHub Release) — this test is about the
+    skip guard, not the cascade order, so it only needs to observe that an
+    install was attempted at all.
+    """
     calls = []
     monkeypatch.setattr(rci, "is_rust_core_current", lambda: True)
-    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: calls.append("prebuilt") or 0)
-    monkeypatch.setattr(rci, "install_from_github_release", lambda c, **k: 0)
+    monkeypatch.setattr(rci, "install_from_github_release",
+                        lambda c, **k: calls.append("github") or 0)
+    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: 0)
     monkeypatch.setattr(rci, "install_from_source", lambda c, **k: 0)
     monkeypatch.setattr(rci, "detect_backend",
                         lambda os_tok=None: rci.BackendChoice("linux", "cpu", "t"))
     rc = rci.install_rust_core(force=True)
     assert rc == 0
-    assert calls == ["prebuilt"], "force must reinstall"
+    assert calls == ["github"], "force must reinstall"
 
 
 def test_explicit_backend_bypasses_skip(monkeypatch):
@@ -439,12 +475,13 @@ def test_explicit_backend_bypasses_skip(monkeypatch):
     even if the current version matches."""
     calls = []
     monkeypatch.setattr(rci, "is_rust_core_current", lambda: True)
-    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: calls.append("prebuilt") or 0)
-    monkeypatch.setattr(rci, "install_from_github_release", lambda c, **k: 0)
+    monkeypatch.setattr(rci, "install_from_github_release",
+                        lambda c, **k: calls.append("github") or 0)
+    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: 0)
     monkeypatch.setattr(rci, "install_from_source", lambda c, **k: 0)
     rc = rci.install_rust_core(backend="cpu", os_tok="linux")
     assert rc == 0
-    assert calls == ["prebuilt"]
+    assert calls == ["github"]
 
 
 @pytest.mark.real_is_current

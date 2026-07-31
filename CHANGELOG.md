@@ -70,6 +70,19 @@ the policy is forward-going only.
   divergence and names the restart.
 
 ### Changed
+- **The Rust-core installer now pulls from the GitHub Release first**, then pip,
+  then source. PyPI was tier 1, and PyPI is both incomplete and stale: the CUDA
+  wheels can never go there (windows-cuda ~244 MiB, linux-cuda ~949 MiB against
+  a 100 MB per-file limit), and every `publish` job has failed
+  trusted-publishing exchange with `invalid-publisher` since 3.7.4 — so all five
+  PyPI-eligible backends still serve a 2026-07-04 build while 3.7.25 through
+  3.7.31 each shipped a complete 28-asset Release. A PyPI-first cascade would
+  install that months-old core and **stop**, because pip exits 0; a stale
+  success is worse than a clean miss, and version-pinning does not help (the
+  pinned version simply 404s). On a CUDA box the old order also opened every
+  install with a guaranteed-miss network round-trip. The Release is complete by
+  construction for all 7 backends, so it stays tier 1 even once the PyPI
+  publishers are fixed.
 - Rust core pinned to **3.7.31** (`v2026.7.31`), which carries the matching
   STS redaction patterns and finally exports `__version__` /
   `__build_backend__`. The missing `__version__` meant `is_rust_core_current()`
