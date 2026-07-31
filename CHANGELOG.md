@@ -21,6 +21,42 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.31.0] — 2026-07-31 — `m3 doctor --fix` migrates every deprecated env var
+
+### Fixed
+- **29 deprecated env vars were silently skipped by the env-migration helper.**
+  `DEPRECATED_ENV_RENAMES` is the authoritative old→new map that `m3 doctor`
+  scans config files for and that `--fix` rewrites, but it had drifted to **16
+  entries against 45 `getenv_compat` call sites**. Anything missing from the map
+  was invisible to the helper: a user with `AGENT_DB`, `CHATLOG_DB`, `LM_URL`,
+  `EMBED_MODEL`, `CONTRADICTION_THRESHOLD`, `DEDUP_THRESHOLD` (and 23 more) in a
+  `settings.json` env block or dotenv was never warned and never migrated, while
+  the code had already moved to the `M3_*` names. The map now covers every call
+  site — **47 vars** are reported and rewritten (was 19). The var keeps working
+  either way thanks to `getenv_compat`'s fallback; what was broken was the
+  migration *prompt*, so the deprecation would have expired silently.
+
+### Testing
+- **The test suite is green again: 3001 passed, 0 failed** (was 4 failed on
+  `main`). Besides the map drift above, three failures were tests measuring the
+  developer's own machine rather than the behaviour under test:
+  - `test_agent_paths_probe` stubbed three host scanners but not
+    `_scan_stale_payload`, so `run()` scanned the real `~/.claude/settings.json`
+    and any developer with stale hooks after a payload upgrade — the normal
+    post-upgrade state — failed three tests. Now isolated with an autouse
+    fixture, so no future test in that file can reach host config either.
+  - `test_doctor::test_tier1_not_configured_when_no_gguf` asserted a GGUF
+    verdict, but doctor evaluates shared mode **first** and returns
+    `shared-mode` before it ever looks at the GGUF. On a box whose real
+    `.embed_config.json` sets `disable_inproc_embedder` (the shipped default)
+    the test measured host config. Shared mode is now forced off for that case,
+    the same way autodetect already was.
+  - `conftest` now restores `memory.embed`'s `_INPROC_ALLOWED` / `_EMBED_CFG`
+    between tests — module globals that decide the shared-mode verdict and were
+    leaking across tests. They are restored from a snapshot taken at first
+    import rather than a hardcoded default, since `_INPROC_ALLOWED` is derived
+    from the config file's presence and contents.
+
 ## [2026.7.30.2] — 2026-07-30 — The web dashboard ships in the base install
 
 ### Changed
