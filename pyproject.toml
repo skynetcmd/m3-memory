@@ -103,6 +103,17 @@ dependencies = [
     "PyYAML>=6.0.3,<7",
     "psutil>=7.2.2,<8",
     "tqdm>=4.67.3,<5",
+    # FastAPI + uvicorn are core: the web dashboard (bin/dashboard_server.py,
+    # `m3 dashboard`) is the non-developer entry point to memory, the wiki and
+    # the knowledge graph, and gating it behind an extra hid it from the people
+    # who need it most. They also back bin/mcp_proxy.py and the bin/embed_server*
+    # fallbacks, all of which import them unguarded at module level — so any user
+    # reaching those surfaces already had to discover an extra first. Both are
+    # pure-Python wheels with no heavy transitive deps (no torch), so core stays
+    # light. The [dashboard] / [web] extras remain, and still resolve, for
+    # anyone who pinned them.
+    "fastapi>=0.136.1,<1",
+    "uvicorn>=0.46.0,<1",
     # SQL-injection AST guard in bin/memory/util.py::_check_content_safety.
     # Was in requirements.txt but missing here, so `pip install -e .` omitted it
     # and the guard silently degraded to a no-op (returning "safe" for DROP/

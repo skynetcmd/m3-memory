@@ -15,15 +15,18 @@ storage backend) and runs as a **windowless background service** on
 
 ## Install
 
-The dashboard's dependencies (FastAPI + uvicorn) ship as an optional extra so a
-default install stays lightweight:
+Nothing to install — the dashboard's dependencies (FastAPI + uvicorn) ship in
+the **base install**, so `pip install m3-memory` is enough:
 
 ```bash
-pip install "m3-memory[dashboard]"
+m3 dashboard
 ```
 
-The interactive setup wizard (`m3 setup`) also offers to install the dashboard
-(default **yes**) and to register it to auto-start on boot.
+The `m3-memory[dashboard]` extra still resolves, for anyone who pinned it before
+the dependencies moved into core.
+
+The interactive setup wizard (`m3 setup`) also offers to register the dashboard
+to auto-start on boot.
 
 ---
 
@@ -142,8 +145,9 @@ never hardcodes an engine.
 
 ## Troubleshooting
 
-- **`m3 dashboard` says it needs web dependencies** — run
-  `pip install "m3-memory[dashboard]"`.
+- **`m3 dashboard` says it needs web dependencies** — you are on a release from
+  before FastAPI/uvicorn moved into the base install. Upgrade with
+  `pip install -U m3-memory`, or install the extra: `pip install "m3-memory[dashboard]"`.
 - **Port already in use** — another instance is running; `m3 dashboard --status`
   shows it, `m3 dashboard --stop` clears it (this also cleans up an orphaned
   instance the process registry missed).
