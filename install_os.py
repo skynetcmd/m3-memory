@@ -1,5 +1,7 @@
 import getpass
+import ntpath
 import os
+import posixpath
 import subprocess
 import sys
 import venv
@@ -34,7 +36,14 @@ def get_m3_root() -> str:
     """Returns the M3 root directory for user state (~/.m3-memory)."""
     root = os.getenv("M3_MEMORY_ROOT")
     if root:
-        return os.path.abspath(os.path.expanduser(root))
+        # Do NOT abspath a root that is already absolute: os.path.abspath only
+        # understands the host convention, so on Windows a POSIX root like
+        # /data/.m3 (exported from Git Bash or WSL) reads as relative and would
+        # be rewritten to C:\data\.m3. Mirrors bin/m3_core/paths.py::_abs_root.
+        p = os.path.expanduser(root)
+        if posixpath.isabs(p) or ntpath.isabs(p):
+            return p.replace("\\", "/")
+        return os.path.abspath(p).replace("\\", "/")
     return os.path.join(os.path.expanduser("~"), ".m3-memory")
 
 M3_ROOT = get_m3_root()

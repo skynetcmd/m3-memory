@@ -21,6 +21,48 @@ the policy is forward-going only.
 
 No unreleased changes.
 
+## [2026.7.30.2] — 2026-07-30 — The web dashboard ships in the base install
+
+### Changed
+- **`fastapi` and `uvicorn` moved from the `[dashboard]` / `[web]` extras into
+  core dependencies.** `pip install m3-memory` now provides the web dashboard
+  outright — `m3 dashboard` works with no second install step. The dashboard is
+  the entry point to memory, the Memory Wiki and the knowledge graph for people
+  who are not living in a terminal, and putting it behind an extra hid it from
+  exactly those users. The same two packages also back `bin/mcp_proxy.py` and the
+  `bin/embed_server*` fallbacks, which import them unguarded at module level, so
+  reaching any of those surfaces previously meant discovering an extra first.
+  Both are pure-Python wheels and pull no heavy transitive dependencies (no
+  torch), so a default install stays light. The `[dashboard]` and `[web]` extras
+  are retained and still resolve, so existing pins and install scripts keep
+  working unchanged.
+
+### Fixed
+- **An absolute POSIX root no longer gets a drive letter grafted onto it on
+  Windows.** `get_m3_root` / `get_m3_engine_root` / `get_m3_config_root` called
+  `os.path.abspath` unconditionally. `os.path.abspath` only understands the host
+  convention, so on Windows a root like `M3_MEMORY_ROOT=/data/.m3` — exactly what
+  you get by exporting it from Git Bash or WSL — reads as *relative* and was
+  silently rewritten to `C:\data\.m3`. The MCP server then resolved its databases
+  under a directory the user never chose, orphaning the real store. Roots that are
+  already absolute under **either** convention are now left alone; genuinely
+  relative roots are still resolved. Same fix applied in `m3_memory/install_os.py`.
+- **`_resolve_python_cmd` no longer falls back to a bare `python`** when
+  `sys.executable` is a POSIX path on Windows — the same `os.path.isabs`
+  blind spot. That fallback is the ModuleNotFound footgun the resolver exists to
+  prevent: a PATH interpreter without m3's dependencies.
+
+### Documentation
+- **README gains a Multi-agent synchronization row.** One line summarising what
+  the multi-agent layer actually provides — memory scoped per `agent` / `org` /
+  `user`, direct handoffs into another agent's inbox, shared tasks with a
+  recursive task tree, and opt-in SQL-layer isolation — linking to
+  [Multi-Agent Orchestration](docs/MULTI_AGENT.md).
+- **A video overview now plays inline at the top of the README**, with a
+  download link to the release asset as a fallback.
+- `docs/DASHBOARD.md` no longer instructs users to install an extra that is now
+  part of core.
+
 ## [2026.7.29.15] — 2026-07-29 — Gemini onExit hook joins the self-healing writer
 
 ### Fixed

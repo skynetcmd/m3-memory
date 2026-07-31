@@ -1,7 +1,23 @@
 import json
+import ntpath
 import os
+import posixpath
 import shutil
 import sys
+
+
+def _is_abs_any(p: str) -> bool:
+    """True when `p` is absolute under EITHER path convention.
+
+    `os.path.isabs` only understands the host's convention: on Windows it calls
+    a POSIX path like `/opt/pipx/venvs/m3-memory/bin/python` relative (no drive
+    letter), and on POSIX it calls `C:/…` relative. Interpreter paths handled
+    here can legitimately be either — a POSIX-style `sys.executable` reaches this
+    code under Git Bash / WSL / cross-platform test harnesses — and treating one
+    as relative silently drops it to the bare-`python` fallback, which is the
+    ModuleNotFound footgun this resolver exists to prevent.
+    """
+    return posixpath.isabs(p) or ntpath.isabs(p)
 
 
 def _is_installed_layout(m3_repo_root: str) -> bool:
@@ -38,7 +54,7 @@ def _resolve_python_cmd(m3_repo_root: str) -> str:
         venv_py = os.path.join(m3_repo_root, ".venv", "bin", "python")
     if os.path.exists(venv_py) and not _is_installed_layout(m3_repo_root):
         return venv_py.replace("\\", "/")
-    if sys.executable and os.path.isabs(sys.executable) and os.path.exists(sys.executable):
+    if sys.executable and _is_abs_any(sys.executable) and os.path.exists(sys.executable):
         return sys.executable.replace("\\", "/")
     return "python" if os.name == "nt" else (
         "python3" if shutil.which("python3") else "python"

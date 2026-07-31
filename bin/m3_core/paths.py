@@ -1,7 +1,9 @@
 import argparse
 import contextvars
 import logging
+import ntpath
 import os
+import posixpath
 import sqlite3
 import sys
 from contextlib import contextmanager
@@ -263,13 +265,30 @@ def resolve_venv_python() -> str:
     return os.path.join(base, ".venv", "bin", "python")
 
 
+def _abs_root(root: str) -> str:
+    """Expand `~` and make relative roots absolute, WITHOUT rewriting a path that
+    is already absolute under either path convention.
+
+    `os.path.abspath` only understands the host convention. On Windows a POSIX
+    root such as `/data/.m3` — which is exactly what a user gets by exporting
+    M3_MEMORY_ROOT from Git Bash or WSL — looks relative, so abspath silently
+    prefixes the current drive and yields `C:\\data\\.m3`. The server then points
+    at a location the user never chose, and the real store is orphaned. Absolute
+    roots are returned normalised (forward slashes) and otherwise untouched.
+    """
+    p = os.path.expanduser(root)
+    if posixpath.isabs(p) or ntpath.isabs(p):
+        return p.replace("\\", "/")
+    return os.path.abspath(p).replace("\\", "/")
+
+
 def get_m3_root() -> str:
     """Returns the M3 root directory for user state (config, backups, etc.).
     Honors M3_MEMORY_ROOT env var, defaults to ~/.m3-memory.
     """
     root = os.getenv("M3_MEMORY_ROOT")
     if root:
-        return os.path.abspath(os.path.expanduser(root))
+        return _abs_root(root)
     return os.path.join(os.path.expanduser("~"), ".m3-memory")
 
 
@@ -279,10 +298,10 @@ def get_m3_config_root() -> str:
     """
     root = os.getenv("M3_CONFIG_ROOT")
     if root:
-        return os.path.abspath(os.path.expanduser(root))
+        return _abs_root(root)
     m3_mem_root = os.getenv("M3_MEMORY_ROOT")
     if m3_mem_root:
-        return os.path.join(os.path.abspath(os.path.expanduser(m3_mem_root)), "config")
+        return posixpath.join(_abs_root(m3_mem_root), "config")
     return os.path.join(os.path.expanduser("~"), ".m3", "config")
 
 
@@ -292,10 +311,10 @@ def get_m3_engine_root() -> str:
     """
     root = os.getenv("M3_ENGINE_ROOT")
     if root:
-        return os.path.abspath(os.path.expanduser(root))
+        return _abs_root(root)
     m3_mem_root = os.getenv("M3_MEMORY_ROOT")
     if m3_mem_root:
-        return os.path.join(os.path.abspath(os.path.expanduser(m3_mem_root)), "engine")
+        return posixpath.join(_abs_root(m3_mem_root), "engine")
     return os.path.join(os.path.expanduser("~"), ".m3", "engine")
 
 
