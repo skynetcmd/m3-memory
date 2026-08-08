@@ -1,8 +1,8 @@
 ---
 tool: bin/run_observer.py
-sha1: 27dcf9e2a836
-mtime_utc: 2026-07-19T03:04:59.630082+00:00
-generated_utc: 2026-07-19T19:29:22.840878+00:00
+sha1: 2cf71c0ee3d4
+mtime_utc: 2026-08-07T23:53:52.249552+00:00
+generated_utc: 2026-08-08T14:40:50.085000+00:00
 private: false
 ---
 
@@ -39,7 +39,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 ## Entry points
 
-- `def main()` (line 844)
+- `def main()` (line 850)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -51,7 +51,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 | `--source-variant` | Variant-mode: pull conversations from this variant. When set, drains the entire variant; ignores observation_queue. Sentinel '__none__' selects rows whose variant IS NULL. | None |  | str |  |
 | `--source-type` | Comma-separated source memory types to drain (default: message,conversation; allowed: message,conversation,chat_log). | None |  | str |  |
 | `--qid-column` | Column the --qids-file ids filter on: user_id (default) or conversation_id (for corpora where the scoping id lives there). | None |  | str |  |
-| `--target-variant` | Variant tag for emitted observation rows. Empty = production default (NULL). | `` |  | str |  |
+| `--target-variant` | Variant tag for emitted observation rows. REQUIRED in variant/bench mode (when --source-variant is set) — the run aborts if empty, so a bench corpus can't silently write NULL-variant rows into production memory. In queue mode (no --source-variant) empty is allowed and means the production default (NULL). | `` |  | str |  |
 | `--limit` | Cap source rows in variant mode (for smokes). | None |  | int |  |
 | `--concurrency` | Concurrent Observer SLM calls. | `4` |  | int |  |
 | `--qids-file` | Optional JSON file with a list of ids; scopes variant-mode work to those ids only. | None |  | str |  |
@@ -62,7 +62,6 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 ## Environment variables read
 
 - `M3_OBSERVER_PRECISE_PROVENANCE`
-- `OBSERVER_PROFILE`
 
 ---
 
@@ -70,6 +69,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 - `agent_protocol (strip_code_fences)`
 - `auth_utils (get_api_key)`
+- `m3_sdk (getenv_compat)`
 - `memory_core`
 - `slm_intent (load_profile)`
 - `unified_ai (async_client_for_profile)`

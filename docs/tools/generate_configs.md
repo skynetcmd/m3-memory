@@ -1,8 +1,8 @@
 ---
 tool: bin/generate_configs.py
-sha1: e94b7351cf9d
-mtime_utc: 2026-07-19T03:04:59.579307+00:00
-generated_utc: 2026-07-19T19:29:22.277242+00:00
+sha1: 58487d1efe55
+mtime_utc: 2026-08-07T23:53:52.048400+00:00
+generated_utc: 2026-08-08T14:40:49.863483+00:00
 private: false
 ---
 
@@ -24,7 +24,7 @@ _(no module docstring — update the source file.)_
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--install-claude` | Merge hooks+statusLine+mcpServers into ~/.claude/settings.json | `False` |  | store_true |  |
+| `--install-claude` | Merge hooks+statusLine into ~/.claude/settings.json | `False` |  | store_true |  |
 | `--settings-path` | Override target settings.json path | None |  | str |  |
 | `--yes` | Apply without prompting | `False` |  | store_true |  |
 | `--dry-run` | Show the diff but write nothing | `False` |  | store_true |  |
@@ -34,13 +34,19 @@ _(no module docstring — update the source file.)_
 
 ## Environment variables read
 
+- `M3_CONFIG_ROOT`
 - `M3_EMBED_GGUF`
+- `M3_ENGINE_ROOT`
+- `M3_MEMORY_ROOT`
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `chatlog_config`
 - `m3_memory.embedder_admin (seed_shared_config)`
+- `m3_memory.installer (bin_dir)`
+- `m3_sdk (get_m3_config_root, get_m3_engine_root, get_m3_root)`
 
 ---
 
@@ -53,6 +59,8 @@ _(no subprocess / http / sqlite calls detected)_
 ## Notable external imports
 
 - `difflib`
+- `ntpath`
+- `posixpath`
 
 ---
 
@@ -60,7 +68,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 - `.aider.conf.yml`
 - `.mcp.json`
-- `Merge hooks+statusLine+mcpServers into ~/.claude/settings.json`
+- `Merge hooks+statusLine into ~/.claude/settings.json`
 - `claude-settings.json`
 - `gemini-settings.json`
 

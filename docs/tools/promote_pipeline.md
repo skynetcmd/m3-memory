@@ -1,8 +1,8 @@
 ---
 tool: bin/promote_pipeline.py
-sha1: c7bd0864f832
-mtime_utc: 2026-06-30T21:32:48.333647+00:00
-generated_utc: 2026-06-30T22:19:18.523714+00:00
+sha1: d729811b79ce
+mtime_utc: 2026-08-08T03:47:37.162304+00:00
+generated_utc: 2026-08-08T14:40:50.070202+00:00
 private: false
 ---
 
@@ -20,7 +20,7 @@ Stage 2 (--smoke N / --run): batched judge via LM Studio; distill PROMOTE
 
 ## Entry points
 
-- `def main()` (line 129)
+- `def main()` (line 133)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -41,15 +41,13 @@ Stage 2 (--smoke N / --run): batched judge via LM Studio; distill PROMOTE
 
 ## Environment variables read
 
-- `LM_API_TOKEN`
-- `LM_MODEL`
-- `LM_URL`
+_(none detected)_
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_sdk (get_secret, getenv_compat)`
 
 ---
 
@@ -57,7 +55,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db`` (line 50)
+- `sqlite3.connect()  → `db`` (line 54)
 
 
 ---

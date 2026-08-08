@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_cognitive_loop.py
-sha1: 06d6ef9c07fd
-mtime_utc: 2026-07-19T18:05:57.566327+00:00
-generated_utc: 2026-07-19T19:29:22.401601+00:00
+sha1: dd3c78332752
+mtime_utc: 2026-08-07T23:53:52.112853+00:00
+generated_utc: 2026-08-08T14:40:49.913767+00:00
 private: false
 ---
 
@@ -30,7 +30,7 @@ for m3_enrich and m3_entities.
 
 ## Entry points
 
-- `def main()` (line 1115)
+- `def main()` (line 1359)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -78,8 +78,7 @@ for m3_enrich and m3_entities.
 
 ## Environment variables read
 
-- `CHATLOG_DB_PATH`
-- `M3_CHATLOG_PRUNE_AUTO`
+- `M3_CHATLOG_DB_PATH`
 - `M3_CLASSIFY_DEADLINE_S`
 - `M3_DATABASE`
 - `M3_EMBED_MODEL`
@@ -99,7 +98,7 @@ for m3_enrich and m3_entities.
 - `m3_enrich`
 - `m3_entities`
 - `m3_halt`
-- `m3_sdk (M3Context, ensure_governor_config, get_governor_pacing, get_m3_config_root, resolve_db_path)`
+- `m3_sdk (M3Context, acquire_or_exit, ensure_governor_config, get_governor_pacing, get_m3_config_root, resolve_db_path)`
 - `memory_core`
 - `memory_maintenance`
 - `slm_intent (load_profile)`
@@ -113,11 +112,11 @@ for m3_enrich and m3_entities.
 
 **subprocess**
 
-- `subprocess.Popen()  → `argv`` (line 73)
+- `subprocess.Popen()  → `argv`` (line 119)
 
 **sqlite**
 
-- `sqlite3.connect()  → `path`` (line 556)
+- `sqlite3.connect()  → `path`` (line 707)
 
 
 ---
@@ -125,10 +124,11 @@ for m3_enrich and m3_entities.
 ## Notable external imports
 
 - `atexit`
-- `ctypes`
+- `m3_core.autonomy (autonomy_flag)`
+- `m3_core.autonomy (ensure_autonomy_config)`
 - `memory.backends (active_backend)`
 - `memory.backends (active_backend, chatlog_table)`
-- `memory.backends (chatlog_table, dialect)`
+- `memory.backends (active_backend, chatlog_table, dialect)`
 - `memory.backends (dialect)`
 - `memory.embed (recover_if_fallback_healthy)`
 - `memory.enrich (_auto_classify)`

@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_status_line.py
-sha1: 120ef53a4c64
-mtime_utc: 2026-07-02T01:21:24.642231+00:00
-generated_utc: 2026-07-03T20:00:03.139864+00:00
+sha1: fc004938fc06
+mtime_utc: 2026-08-07T23:53:51.810688+00:00
+generated_utc: 2026-08-08T14:40:49.762630+00:00
 private: false
 ---
 
@@ -26,7 +26,7 @@ Respects env:
 
 ## Entry points
 
-- `def main()` (line 102)
+- `def main()` (line 104)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -39,14 +39,14 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-- `CHATLOG_STATUSLINE`
-- `CHATLOG_STATUSLINE_ASCII`
+_(none detected)_
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config`
+- `m3_sdk (getenv_compat)`
 
 ---
 

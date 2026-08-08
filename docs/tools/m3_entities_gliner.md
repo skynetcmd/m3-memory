@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_entities_gliner.py
-sha1: 0072125b0ebc
-mtime_utc: 2026-06-30T21:32:48.329659+00:00
-generated_utc: 2026-06-30T22:19:18.371098+00:00
+sha1: 918e437bcbcc
+mtime_utc: 2026-08-07T23:53:52.149180+00:00
+generated_utc: 2026-08-08T14:40:49.961949+00:00
 private: false
 ---
 
@@ -99,7 +99,7 @@ _(no subprocess / http / sqlite calls detected)_
 ## Notable external imports
 
 - `gliner (GLiNER)`
-- `torch`
+- `m3_core.gpu (torch_device)`
 
 ---
 

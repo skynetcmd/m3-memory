@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_proxy.py
-sha1: 1fb56d9bdb6b
-mtime_utc: 2026-07-17T02:38:55.031479+00:00
-generated_utc: 2026-07-17T02:39:19.613661+00:00
+sha1: 7255cd9cb4b9
+mtime_utc: 2026-08-07T23:53:52.165302+00:00
+generated_utc: 2026-08-08T14:40:49.978871+00:00
 private: false
 ---
 
@@ -79,10 +79,7 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-- `LM_READ_TIMEOUT`
 - `LM_STUDIO_BASE`
-- `MCP_PROXY_ALLOW_DESTRUCTIVE`
-- `MCP_PROXY_HOST`
 
 ---
 
@@ -91,7 +88,9 @@ _(no argparse arguments detected)_
 - `custom_tool_bridge`
 - `debug_agent_bridge`
 - `m3_sdk (M3Context)`
+- `m3_sdk (acquire_or_exit)`
 - `m3_sdk (ensure_utf8)`
+- `m3_sdk (getenv_compat)`
 - `mcp_tool_catalog`
 - `memory_bridge`
 
@@ -101,7 +100,7 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 678)
+- `httpx.AsyncClient()` (line 679)
 
 
 ---

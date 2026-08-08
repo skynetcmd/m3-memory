@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_prune.py
-sha1: 9a53485544c5
-mtime_utc: 2026-07-19T03:04:59.545388+00:00
-generated_utc: 2026-07-19T19:29:22.038193+00:00
+sha1: 41672c3c81a2
+mtime_utc: 2026-08-07T23:53:51.779612+00:00
+generated_utc: 2026-08-08T14:40:49.747786+00:00
 private: false
 ---
 
@@ -46,7 +46,7 @@ USAGE
 ## Entry points
 
 - `def run()` (line 185)
-- `def main()` (line 341)
+- `def main()` (line 372)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -86,7 +86,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 209)
+- `sqlite3.connect()  → `db_path`` (line 210)
 
 
 ---

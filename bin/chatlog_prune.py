@@ -88,12 +88,23 @@ _STRUCT_RE = re.compile(r"(^|\n)\s*(#{1,3}\s|\*\s|-\s|\d+[.)]\s)", re.M)
 # Noise categories that are ALWAYS safe to soft-delete (unambiguous chatter).
 _HARD_NOISE = frozenset({"short_cmd", "repeat_status_req", "repeat_status_resp"})
 
+# Only scan the first N chars of a turn for keep-signal / status / durable markers.
+# Those markers (``` , "decided", IMPORTANT, TODO, status vocab) appear early in a
+# real turn if at all; a turn can be MEGABYTES (a pasted log / big tool output), and
+# running these regexes over the FULL content of every turn every prune sweep pegged
+# a CPU core for hours (the classify() hot path). The regexes are linear, so a bound
+# makes each classify O(cap) regardless of turn size. Generous enough (matches the
+# spirit of _is_general_ephemeral's 2000-char snip) that keep-signal behavior is
+# preserved for normal turns; only pathological giant dumps are truncated.
+_SIGNAL_SCAN_CAP = 20_000
+
 
 def _is_protected(content: str, generic_protect_len: int) -> bool:
     """A turn worth keeping out of the tombstone bin (suppress-only)."""
     if not content:
         return False
-    if _DURABLE_RE.search(content) or _SIGNAL_RE.search(content):
+    probe = content[:_SIGNAL_SCAN_CAP]
+    if _DURABLE_RE.search(probe) or _SIGNAL_RE.search(probe):
         return True
     # substantial, structured explanation = likely reference value
     if len(content) >= generic_protect_len and len(_STRUCT_RE.findall(content)) >= 2:
@@ -162,7 +173,7 @@ def classify(role: str, content: str, importance: float, norm: str,
         return None, "keep:importance"
     if content and "?" in content[:200]:
         return None, "keep:question"
-    if _SIGNAL_RE.search(content or ""):
+    if _SIGNAL_RE.search((content or "")[:_SIGNAL_SCAN_CAP]):
         return None, "keep:signal"
     # NOISE classes
     if _is_general_ephemeral(content):
@@ -172,9 +183,9 @@ def classify(role: str, content: str, importance: float, norm: str,
     # repeated status: recurring normalized form + status vocabulary, both sides
     if cluster_size >= args.status_min_cluster and norm:
         r = (role or "").lower()
-        if r == "user" and _STATUS_REQ_RE.search(content or ""):
+        if r == "user" and _STATUS_REQ_RE.search((content or "")[:_SIGNAL_SCAN_CAP]):
             return "repeat_status_req", f"cluster={cluster_size}"
-        if r in ("assistant", "tool", "") and _STATUS_RESP_RE.search(content or ""):
+        if r in ("assistant", "tool", "") and _STATUS_RESP_RE.search((content or "")[:_SIGNAL_SCAN_CAP]):
             return "repeat_status_resp", f"cluster={cluster_size}"
     # generic low-value (the bulk) — aged unpromoted default-importance chat
     if not args.no_generic and (importance is None or importance <= args.generic_imp_max):

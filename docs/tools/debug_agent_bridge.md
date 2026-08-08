@@ -1,8 +1,8 @@
 ---
 tool: bin/debug_agent_bridge.py
-sha1: 60c93208e8a9
-mtime_utc: 2026-07-19T03:04:59.552132+00:00
-generated_utc: 2026-07-19T19:29:22.168332+00:00
+sha1: f92ecf730f20
+mtime_utc: 2026-08-07T23:53:51.861064+00:00
+generated_utc: 2026-08-08T14:40:49.814189+00:00
 private: false
 ---
 
@@ -41,6 +41,7 @@ _(no argparse arguments detected)_
 - `AI_WORKSPACE_DIR`
 - `COMPUTERNAME`
 - `HOSTNAME`
+- `M3_DEBUG_EMBED_MODEL`
 
 ---
 

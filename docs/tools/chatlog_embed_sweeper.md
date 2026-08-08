@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_embed_sweeper.py
-sha1: 1d5b6b5edef0
-mtime_utc: 2026-07-02T01:21:24.639162+00:00
-generated_utc: 2026-07-03T20:00:03.074278+00:00
+sha1: 35b62eed11b5
+mtime_utc: 2026-08-07T23:53:51.770285+00:00
+generated_utc: 2026-08-08T14:40:49.730088+00:00
 private: false
 ---
 
@@ -20,7 +20,7 @@ and drains any spill-to-disk files from the async write queue.
 
 ## Entry points
 
-- `async def main()` (line 287)
+- `async def main()` (line 289)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -40,8 +40,6 @@ and drains any spill-to-disk files from the async write queue.
 
 ## Environment variables read
 
-- `CHATLOG_EMBED_DEADLINE_S`
-- `CHATLOG_EMBED_MAX_PER_RUN`
 - `M3_DATABASE`
 
 ---
@@ -54,6 +52,7 @@ and drains any spill-to-disk files from the async write queue.
 - `embed_sweep_lib (run_embed_loop)`
 - `embedding_utils (pack)`
 - `m3_sdk (add_database_arg)`
+- `m3_sdk (getenv_compat)`
 - `memory_core (_content_hash)`
 - `memory_core (_embed_many)`
 - `memory_core (_pack)`
@@ -64,8 +63,8 @@ and drains any spill-to-disk files from the async write queue.
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 119)
-- `sqlite3.connect()  → `db_path`` (line 365)
+- `sqlite3.connect()  → `db_path`` (line 121)
+- `sqlite3.connect()  → `db_path`` (line 367)
 
 
 ---

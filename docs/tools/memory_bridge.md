@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_bridge.py
-sha1: 0782f1676729
-mtime_utc: 2026-07-19T03:04:59.622394+00:00
-generated_utc: 2026-07-19T19:29:22.593740+00:00
+sha1: 4e8738672c59
+mtime_utc: 2026-08-07T23:53:52.228467+00:00
+generated_utc: 2026-08-08T14:40:49.988710+00:00
 private: false
 ---
 
@@ -39,6 +39,7 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `m3_halt`
 - `m3_memory.installer (load_config)`
 - `m3_sdk (active_database)`
 - `mcp_tool_catalog`
@@ -57,6 +58,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
+- `atexit`
 - `mcp.server.fastmcp (FastMCP)`
 
 ---

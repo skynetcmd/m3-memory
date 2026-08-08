@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: 9c0149b72926
-mtime_utc: 2026-07-19T15:07:24.085774+00:00
-generated_utc: 2026-07-19T19:29:22.636880+00:00
+sha1: c097bbdd9675
+mtime_utc: 2026-08-08T03:47:37.161554+00:00
+generated_utc: 2026-08-08T14:40:50.005200+00:00
 private: false
 ---
 
@@ -18,6 +18,7 @@ Phases (each in its own module under bin/doctor/):
   - cascade_probe      embedding-cascade health (delegates to memory.doctor)
   - embed_server_probe Rust-side `m3-embed-server doctor` subprocess
   - oxidation_probe    m3_core_rs native-extension presence/staleness report
+  - embed_space_probe  mixed embed-space check (vectors from >1 model in one index)
 
 Each phase can be skipped via --skip-*. Exit code is the maximum across
 the non-skipped phases (most-severe wins). The embed-server and oxidation
@@ -31,7 +32,7 @@ tested in isolation.
 
 ## Entry points
 
-- `def main()` (line 33)
+- `def main()` (line 34)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -45,11 +46,18 @@ tested in isolation.
 | `--skip-embed-server` | Skip the Rust-side m3-embed-server doctor subprocess. | `False` |  | store_true |  |
 | `--skip-oxidation` | Skip the m3_core_rs native-extension status report. | `False` |  | store_true |  |
 | `--skip-governor` | Skip the governor scheduled-task migration check. | `False` |  | store_true |  |
+| `--skip-locks` | Skip the single-instance lock health check. | `False` |  | store_true |  |
+| `--skip-embed-space` | Skip the mixed embed-space check (vectors from >1 model in one index). | `False` |  | store_true |  |
 | `--skip-schedule` | Skip the dangling scheduled-task interpreter check. | `False` |  | store_true |  |
 | `--skip-shared-embedder` | Skip the shared-embedder-mode check (config + server + keep-alive task). | `False` |  | store_true |  |
 | `--skip-plugin` | Skip the Claude Code plugin version/enabled check. | `False` |  | store_true |  |
 | `--skip-agent-paths` | Skip the cross-agent dead-path check (Gemini/OpenCode/Hermes/...). | `False` |  | store_true |  |
+| `--skip-entrypoints` | Skip the console-entrypoint check (does `m3` on PATH run this install?). | `False` |  | store_true |  |
+| `--skip-environment` | Skip the hook-wiring check (do the chatlog hooks point at this install?). | `False` |  | store_true |  |
+| `--fix-hooks` | With --fix: also re-wire broken m3 hook entries in ~/.claude/settings.json. OFF by default because that file is the user's own — it holds non-m3 hooks. Backs it up first and touches only m3-owned entries. | `False` |  | store_true |  |
 | `--skip-dashboard` | Skip the web-dashboard liveness check (registry + port probe). | `False` |  | store_true |  |
+| `--skip-cognitive-loop` | Skip the cognitive-loop dormancy check (installed + running + entities extracted?). | `False` |  | store_true |  |
+| `--skip-claude-mcp` | Skip the Claude single-server check (is exactly ONE m3 memory server live — not the direct server AND the plugin's together?). | `False` |  | store_true |  |
 | `--verbose` | Show the full detail (DB-repair steps + each probe's expanded report + model-load logs). Default is a compact one-line-per-check summary of high-yield verdicts. | `False` |  | store_true |  |
 | `--fix` | Run quick-repair mode to auto-fix common deployment issues. | `False` |  | store_true |  |
 | `--dry-run` | Use with --fix to simulate repair steps without making changes. | `False` |  | store_true |  |
@@ -79,10 +87,17 @@ _(no subprocess / http / sqlite calls detected)_
 
 - `doctor (agent_paths_probe)`
 - `doctor (cascade_probe)`
+- `doctor (claude_mcp_probe)`
+- `doctor (cognitive_loop_probe)`
 - `doctor (dashboard_probe)`
 - `doctor (db_repair)`
 - `doctor (embed_server_probe)`
+- `doctor (embed_space_probe)`
+- `doctor (entrypoint_probe)`
+- `doctor (environment_probe)`
+- `doctor (files_extraction_probe)`
 - `doctor (governor_probe)`
+- `doctor (lock_probe)`
 - `doctor (oxidation_probe)`
 - `doctor (plugin_version_probe)`
 - `doctor (schedule_probe)`

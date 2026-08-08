@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_status.py
-sha1: ebce6767fd62
-mtime_utc: 2026-07-19T03:04:59.546388+00:00
-generated_utc: 2026-07-19T19:29:22.055812+00:00
+sha1: ee2a61e3d15a
+mtime_utc: 2026-08-07T23:53:51.798140+00:00
+generated_utc: 2026-08-08T14:40:49.760987+00:00
 private: false
 ---
 
@@ -23,7 +23,7 @@ Cold call <50ms (no full table scans).
 
 ## Entry points
 
-- `def main()` (line 830)
+- `def main()` (line 1034)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -56,21 +56,25 @@ Cold call <50ms (no full table scans).
 
 **subprocess**
 
-- `subprocess.run()  → `cmd`` (line 568)
+- `subprocess.run()  → `cmd`` (line 769)
 
 **sqlite**
 
-- `sqlite3.connect()  → `chatlog_db`` (line 93)
-- `sqlite3.connect()  → `files_db`` (line 125)
-- `sqlite3.connect()  → `main_db`` (line 412)
-- `sqlite3.connect()  → `main_db`` (line 79)
-- `sqlite3.connect()  → `uri`` (line 201)
+- `sqlite3.connect()  → `chatlog_db`` (line 119)
+- `sqlite3.connect()  → `files_db`` (line 187)
+- `sqlite3.connect()  → `main_db`` (line 105)
+- `sqlite3.connect()  → `main_db`` (line 613)
+- `sqlite3.connect()  → `uri`` (line 263)
 
 
 ---
 
 ## Notable external imports
 
+- `doctor (environment_probe)`
+- `files_memory.config (files_table)`
+- `files_memory.db (_db)`
+- `files_memory.db (_is_postgres)`
 - `memory (doctor)`
 - `memory.backends (resolve_backend_name)`
 - `memory.config (FILES_DB_PATH)`
@@ -83,6 +87,7 @@ Cold call <50ms (no full table scans).
 
 ## File dependencies (repo paths referenced)
 
+- `.db`
 - `files_database.db`
 
 ---

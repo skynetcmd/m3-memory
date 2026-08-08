@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_maintenance.py
-sha1: b40ab71dba5f
-mtime_utc: 2026-07-19T17:54:15.993938+00:00
-generated_utc: 2026-07-19T19:29:22.661336+00:00
+sha1: 5fbc5c5f838f
+mtime_utc: 2026-08-07T23:53:52.232450+00:00
+generated_utc: 2026-08-08T14:40:50.019343+00:00
 private: false
 ---
 
@@ -39,7 +39,7 @@ _(no argparse arguments detected)_
 - `audit_trail (write_audit_entry)`
 - `m3_sdk (_LAST_USER_INTERACTION)`
 - `memory_core`
-- `memory_core (ARCHIVE_DB_PATH, DEDUP_LIMIT, DEDUP_THRESHOLD, EMBED_DIM, _content_hash, _cosine, _db, _embed, _get_embed_client, _pack, _unpack, ctx, get_best_llm, m3_core_rs, memory_link_impl)`
+- `memory_core (DEDUP_LIMIT, DEDUP_THRESHOLD, EMBED_DIM, _content_hash, _cosine, _db, _embed, _get_embed_client, _pack, _unpack, ctx, get_best_llm, m3_core_rs, memory_link_impl)`
 - `memory_core (memory_write_impl)`
 - `run_reflector (JSON_RE)`
 - `slm_intent (_call_model, load_profile)`
@@ -50,12 +50,7 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 1058)
-
-**sqlite**
-
-- `sqlite3.connect()  → `ARCHIVE_DB_PATH`` (line 33)
-- `sqlite3.connect()  → `active_path`` (line 615)
+- `httpx.AsyncClient()` (line 1269)
 
 
 ---
@@ -67,7 +62,10 @@ _(no argparse arguments detected)_
 - `memory (confidence)`
 - `memory (trust)`
 - `memory.backends (dialect)`
-- `memory.backends (resolve_backend_name)`
+- `memory.db (savepoint)`
+- `memory.db (tolerant_schema)`
+- `wiki.erasure (restrict_derived_on_erasure)`
+- `wiki.ledger (scan_and_flush_on_erasure)`
 
 ---
 

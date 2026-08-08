@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_decay.py
-sha1: 6f528c2be510
-mtime_utc: 2026-07-19T03:04:59.544388+00:00
-generated_utc: 2026-07-19T19:29:21.995017+00:00
+sha1: 1c3c7d62c4ad
+mtime_utc: 2026-08-07T23:53:51.768387+00:00
+generated_utc: 2026-08-08T14:40:49.725932+00:00
 private: false
 ---
 
@@ -99,7 +99,6 @@ ephemeral regime entirely.
 
 ## Environment variables read
 
-- `CHATLOG_DB`
 - `M3_DATABASE`
 
 ---

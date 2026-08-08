@@ -1,8 +1,8 @@
 ---
 tool: bin/augment_memory.py
-sha1: 39a83eed7fe1
-mtime_utc: 2026-07-02T01:21:24.634473+00:00
-generated_utc: 2026-07-03T20:00:02.958088+00:00
+sha1: 0e874850b04f
+mtime_utc: 2026-08-07T23:53:51.684128+00:00
+generated_utc: 2026-08-08T14:40:49.680359+00:00
 private: false
 ---
 
@@ -82,7 +82,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-_(only stdlib)_
+- `memory.backends (dialect)`
 
 ---
 

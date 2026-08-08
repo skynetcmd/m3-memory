@@ -1,8 +1,8 @@
 ---
 tool: bin/pg_sync.py
-sha1: 8c29cfe2f228
-mtime_utc: 2026-07-19T06:18:23.186355+00:00
-generated_utc: 2026-07-19T20:02:06.274392+00:00
+sha1: 49dee376e885
+mtime_utc: 2026-08-07T23:53:52.242940+00:00
+generated_utc: 2026-08-08T14:40:50.066931+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 1231)
+- `def main()` (line 1308)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -39,7 +39,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_halt (_pid_is_alive)`
+- `m3_halt (pid_is_alive)`
 - `m3_sdk (M3Context, resolve_db_path)`
 - `m3_sdk (resolve_cdw_pg_dsn, resolve_venv_python)`
 - `migrate_memory`
@@ -50,15 +50,16 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 1358)
-- `sqlite3.connect()  → `db_path`` (line 1374)
-- `sqlite3.connect()  → `target.db_path`` (line 1310)
+- `sqlite3.connect()  → `db_path`` (line 1435)
+- `sqlite3.connect()  → `db_path`` (line 1451)
+- `sqlite3.connect()  → `target.db_path`` (line 1387)
 
 
 ---
 
 ## Notable external imports
 
+- `doctor.embed_space_probe (_family)`
 - `psycopg2 (Binary)`
 - `psycopg2.extras (execute_values)`
 - `yaml`

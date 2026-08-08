@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: fd964e639585
-mtime_utc: 2026-07-19T17:41:26.846998+00:00
-generated_utc: 2026-07-19T19:29:22.312006+00:00
+sha1: d78e84b5f9a0
+mtime_utc: 2026-08-07T23:53:52.092318+00:00
+generated_utc: 2026-08-08T14:40:49.880988+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 883)
+- `def main()` (line 1129)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -38,6 +38,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Environment variables read
 
+- `M3_DASHBOARD_PORT`
 - `USERDOMAIN`
 - `USERNAME`
 
@@ -46,6 +47,8 @@ Uses project virtual environment paths and ensures log directories exist.
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (ensure_governor_config)`
+- `m3_sdk (get_m3_engine_root)`
+- `m3_sdk (kill_stale_daemons)`
 
 ---
 
@@ -53,32 +56,34 @@ Uses project virtual environment paths and ensures log directories exist.
 
 **subprocess**
 
-- `subprocess.run()  → `['crontab', '-l']`` (line 59)
-- `subprocess.run()  → `['crontab', tmp_path]`` (line 78)
-- `subprocess.run()  → `['launchctl', 'list']`` (line 815)
-- `subprocess.run()  → `['launchctl', 'load', dest]`` (line 127)
-- `subprocess.run()  → `['launchctl', 'load', dest]`` (line 179)
-- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 126)
-- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 178)
-- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 215)
-- `subprocess.run()  → `['schtasks', '/Create', '/TN', task['name'], '/XML', xml_path, '/F']`` (line 692)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 672)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 762)
-- `subprocess.run()  → `['schtasks', '/Query', '/TN', name, '/XML', 'ONE']`` (line 777)
-- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 143)
-- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 195)
-- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 229)
-- `subprocess.run()  → `['systemctl', '--user', 'disable', '--now', 'm3-cognitive-loop.service']`` (line 223)
-- `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-cognitive-loop.service']`` (line 196)
-- `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-dashboard.service']`` (line 144)
-- `subprocess.run()  → `['systemctl', '--user', 'is-active', unit]`` (line 835)
+- `subprocess.run()  → `['crontab', '-l']`` (line 61)
+- `subprocess.run()  → `['crontab', tmp_path]`` (line 114)
+- `subprocess.run()  → `['launchctl', 'list']`` (line 1061)
+- `subprocess.run()  → `['launchctl', 'load', dest]`` (line 163)
+- `subprocess.run()  → `['launchctl', 'load', dest]`` (line 215)
+- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 162)
+- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 214)
+- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 251)
+- `subprocess.run()  → `['schtasks', '/Create', '/TN', task['name'], '/XML', xml_path, '/F']`` (line 870)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 850)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 980)
+- `subprocess.run()  → `['schtasks', '/Query', '/TN', name, '/XML', 'ONE']`` (line 995)
+- `subprocess.run()  → `['schtasks', '/Run', '/TN', name]`` (line 757)
+- `subprocess.run()  → `['schtasks', '/Run', '/TN', name]`` (line 791)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 179)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 231)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 265)
+- `subprocess.run()  → `['systemctl', '--user', 'disable', '--now', 'm3-cognitive-loop.service']`` (line 259)
+- `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-cognitive-loop.service']`` (line 232)
+- `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-dashboard.service']`` (line 180)
+- `subprocess.run()  → `['systemctl', '--user', 'is-active', unit]`` (line 1081)
 
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core.autonomy (ensure_autonomy_config)`
 
 ---
 

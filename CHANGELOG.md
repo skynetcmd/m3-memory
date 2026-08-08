@@ -19,6 +19,24 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+### None pending
+
+## [2026.8.15.0] — 2026-08-08 — cognitive-loop CPU: bound the chatlog-prune regex scan
+
+### Fixed
+- **Chatlog-prune keep-signal regex scans are bounded to the first 20 000 chars of
+  a turn** (`chatlog_prune._SIGNAL_SCAN_CAP`), matching the file's existing
+  `_is_general_ephemeral` snip. The prune sweep runs several regexes over turn
+  content every cycle; scanning the FULL content of every turn is wasteful, and a
+  single megabyte-scale pasted log / tool dump would run those linear regexes over
+  megabytes on every sweep. The markers they look for (```` ``` ````, "decided",
+  IMPORTANT, TODO, status vocab) appear early, so the bound preserves behaviour for
+  normal turns. Found while diagnosing a cognitive-loop process pegging a CPU core.
+  NOTE: the larger contributor is that the sweep re-classifies every *aged* chat
+  row each cycle (~59k rows / ~7s here) because kept rows stay candidates — a
+  separate, more invasive optimization (skip permanently-kept rows) tracked as a
+  follow-up.
+
 ### Testing
 - Ignore FastMCP's third-party `IncompleteFieldDefinitionWarning` (its
   `Settings.lifespan` field is an unresolved forward ref in pydantic_settings) so

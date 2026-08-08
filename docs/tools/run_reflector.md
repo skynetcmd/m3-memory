@@ -1,8 +1,8 @@
 ---
 tool: bin/run_reflector.py
-sha1: fb5ef73251bf
-mtime_utc: 2026-05-01T09:13:26.346138+00:00
-generated_utc: 2026-05-01T13:05:27.053604+00:00
+sha1: db87937eb01c
+mtime_utc: 2026-08-07T23:53:52.250409+00:00
+generated_utc: 2026-08-08T14:40:50.089350+00:00
 private: false
 ---
 
@@ -35,7 +35,7 @@ Status: Phase D Task 4. Pairs with config/slm/reflector_local.yaml.
 
 ## Entry points
 
-- `def main()` (line 335)
+- `def main()` (line 345)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -53,7 +53,7 @@ Status: Phase D Task 4. Pairs with config/slm/reflector_local.yaml.
 
 ## Environment variables read
 
-- `REFLECTOR_PROFILE`
+_(none detected)_
 
 ---
 
@@ -61,6 +61,7 @@ Status: Phase D Task 4. Pairs with config/slm/reflector_local.yaml.
 
 - `agent_protocol (strip_code_fences)`
 - `auth_utils (get_api_key)`
+- `m3_sdk (getenv_compat)`
 - `memory_core`
 - `slm_intent (load_profile)`
 
@@ -70,8 +71,8 @@ Status: Phase D Task 4. Pairs with config/slm/reflector_local.yaml.
 
 **http**
 
-- `httpx.AsyncClient()` (line 281)
-- `httpx.AsyncClient()` (line 322)
+- `httpx.AsyncClient()` (line 289)
+- `httpx.AsyncClient()` (line 332)
 
 
 ---
@@ -79,6 +80,7 @@ Status: Phase D Task 4. Pairs with config/slm/reflector_local.yaml.
 ## Notable external imports
 
 - `httpx`
+- `memory.backends (dialect)`
 
 ---
 

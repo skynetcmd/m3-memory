@@ -1,8 +1,8 @@
 ---
 tool: bin/split_chatlog_from_core.py
-sha1: 775fdaf7f742
-mtime_utc: 2026-07-03T01:59:49.318036+00:00
-generated_utc: 2026-07-03T20:00:03.921161+00:00
+sha1: f9b291c6f3ac
+mtime_utc: 2026-08-07T23:53:52.255872+00:00
+generated_utc: 2026-08-08T14:40:50.104591+00:00
 private: false
 ---
 
@@ -90,7 +90,6 @@ Take a filesystem backup of both DBs before --commit; this script does not.
 
 ## Environment variables read
 
-- `CHATLOG_DB`
 - `M3_DATABASE`
 
 ---

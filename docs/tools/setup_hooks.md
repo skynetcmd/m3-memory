@@ -1,8 +1,8 @@
 ---
 tool: bin/setup_hooks.py
-sha1: 8cadc2d78d66
-mtime_utc: 2026-05-31T16:08:17.252572+00:00
-generated_utc: 2026-05-31T18:42:52.976908+00:00
+sha1: f51463e861e8
+mtime_utc: 2026-08-07T23:53:52.252405+00:00
+generated_utc: 2026-08-08T14:40:50.092057+00:00
 private: false
 ---
 

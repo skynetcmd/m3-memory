@@ -1,8 +1,8 @@
 ---
 tool: bin/llm_failover.py
-sha1: a1a6959c2479
-mtime_utc: 2026-07-19T03:04:59.588272+00:00
-generated_utc: 2026-07-19T19:29:22.328321+00:00
+sha1: d11ebcc78a46
+mtime_utc: 2026-08-08T12:37:08.144890+00:00
+generated_utc: 2026-08-08T14:40:49.890257+00:00
 private: false
 ---
 
@@ -32,6 +32,7 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
+- `LM_API_TOKEN`
 - `M3_EMBED_DISCOVERY_NEG_TTL`
 - `M3_LLM_CONNECT_TIMEOUT`
 - `M3_LLM_URL`
@@ -40,13 +41,17 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `auth_utils (get_api_key)`
 - `m3_sdk (getenv_compat)`
 
 ---
 
 ## Calls OUT (external side-channels)
 
-_(no subprocess / http / sqlite calls detected)_
+**http**
+
+- `httpx.get()  → `f"{endpoint.rstrip('/')}/models"`` (line 256)
+
 
 ---
 

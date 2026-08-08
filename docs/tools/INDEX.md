@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-07-19T20:02:06.442817+00:00._
+_Generated 2026-08-08T14:40:50.174324+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -30,6 +30,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/chatlog_status.py](chatlog_status.md) | chatlog_status.py — single-call summary of the chat log subsystem state. |  |
 | [bin/chatlog_status_line.py](chatlog_status_line.md) | chatlog_status_line.py — anomaly-only status line generator. |  |
 | [bin/chatlog_strip_framing_backfill.py](chatlog_strip_framing_backfill.md) | chatlog_strip_framing_backfill.py — one-off backfill that removes harness |  |
+| [bin/check_control_chars.py](check_control_chars.md) | Detect stray control characters in text files — the PowerShell backtick trap. |  |
 | [bin/check_tool_catalog_drift.py](check_tool_catalog_drift.md) | Single source of truth for the tool-catalog pre-push drift gate. |  |
 | [bin/cleanup_logs.sh](cleanup_logs_sh.md) | (no docstring) |  |
 | [bin/cli_kb_browse.py](cli_kb_browse.md) | cli_kb_browse.py — Browse knowledge base entries in rank (importance) order. |  |
@@ -56,6 +57,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/gen_mcp_inventory.py](gen_mcp_inventory.md) | gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and mcp_proxy. |  |
 | [bin/gen_star_history.py](gen_star_history.md) | Generate docs/star-history.svg from the GitHub stargazers API. |  |
 | [bin/gen_tool_manifest.py](gen_tool_manifest.md) | Generate a machine-readable tool-catalog manifest at docs/tools/MCP_CATALOG.json. |  |
+| [bin/gen_wiki.py](gen_wiki.md) | gen_wiki.py — compile a browsable wiki from core memories + the files corpus. |  |
 | [bin/generate_configs.py](generate_configs.md) | (no docstring) |  |
 | [bin/governor_cli.py](governor_cli.md) | `m3 governor <status\|migrate>` — inspect and migrate legacy scheduled tasks |  |
 | [bin/grok_bridge.py](grok_bridge.md) | (no docstring) |  |
@@ -98,6 +100,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/pg_sync.sh](pg_sync_sh.md) | (no docstring) |  |
 | [bin/promote_pipeline.py](promote_pipeline.md) | LLM-judged promotion pipeline: tightened candidate selection + SLM judge. |  |
 | [bin/re_embed_all.py](re_embed_all.md) | (no docstring) |  |
+| [bin/reembed_space.py](reembed_space.md) | reembed_space.py — retire vectors from the wrong embedding model. |  |
 | [bin/release_orphan_claims.py](release_orphan_claims.md) | release_orphan_claims — safely release stuck in_progress enrichment_groups rows. |  |
 | [bin/run_observer.py](run_observer.md) | Phase D Mastra-style Observer drainer. |  |
 | [bin/run_reflector.py](run_reflector.md) | Phase D Mastra-style Reflector drainer. |  |
@@ -111,6 +114,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/start_mcp_proxy.sh](start_mcp_proxy_sh.md) | start_mcp_proxy.sh — Launch the MCP Tool Execution Proxy on localhost:9000 |  |
 | [bin/statusline-command.sh](statusline-command_sh.md) | (no docstring) |  |
 | [bin/sync_all.py](sync_all.md) | sync_all.py — Hourly sync runner (SQLite <-> PostgreSQL). |  |
+| [bin/sync_manifest_versions.py](sync_manifest_versions.md) | Sync every version-bearing manifest to the single source of truth: |  |
 | [bin/temporal_utils.py](temporal_utils.md) | Enhanced temporal resolution utility for m3-memory. |  |
 | [bin/test_bulk_parity.py](test_bulk_parity.md) | Real integration tests for memory_write_bulk_impl. |  |
 | [bin/test_debug_agent.py](test_debug_agent.md) | End-to-end test suite for debug_agent_bridge.py. |  |

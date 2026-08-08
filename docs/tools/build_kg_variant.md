@@ -1,8 +1,8 @@
 ---
 tool: bin/build_kg_variant.py
-sha1: fbe9f8130f48
-mtime_utc: 2026-07-02T01:21:24.638658+00:00
-generated_utc: 2026-07-03T20:00:03.030077+00:00
+sha1: a407a59904aa
+mtime_utc: 2026-08-07T23:53:51.718854+00:00
+generated_utc: 2026-08-08T14:40:49.706329+00:00
 private: false
 ---
 
@@ -25,7 +25,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 181)
+- `def main()` (line 182)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -45,13 +45,14 @@ Usage:
 
 ## Environment variables read
 
-- `AGENT_DB`
+_(none detected)_
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (add_database_arg, resolve_db_path)`
+- `m3_sdk (getenv_compat)`
 - `sqlite_pragmas (apply_pragmas, profile_for_db)`
 
 ---
@@ -60,7 +61,7 @@ Usage:
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 193)
+- `sqlite3.connect()  → `db_path`` (line 194)
 
 
 ---

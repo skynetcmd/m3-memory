@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_init.py
-sha1: 7d63facd44b9
-mtime_utc: 2026-06-23T11:28:17.575483+00:00
-generated_utc: 2026-06-26T20:00:03.526177+00:00
+sha1: 869dee95944b
+mtime_utc: 2026-08-07T23:53:51.778138+00:00
+generated_utc: 2026-08-08T14:40:49.742741+00:00
 private: false
 ---
 
@@ -29,7 +29,7 @@ path equality.
 
 ## Entry points
 
-- `def main()` (line 592)
+- `def main()` (line 574)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -51,14 +51,19 @@ path equality.
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_CONFIG_ROOT`
+- `M3_ENGINE_ROOT`
+- `M3_MEMORY_ROOT`
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config (CONFIG_PATH, DEFAULT_DB_PATH, MAIN_DB_PATH, VALID_HOST_AGENTS, ChatlogConfig, CostTrackingSpec, EmbedSweeperSpec, HookSpec, RedactionSpec, resolve_config, save_config)`
+- `generate_configs`
+- `m3_memory.installer (_canonical_memory_server)`
 - `m3_memory.installer (_fix_npm_global_path)`
+- `m3_sdk (get_m3_config_root, get_m3_engine_root)`
 
 ---
 
@@ -68,7 +73,7 @@ _(none detected)_
 
 - `subprocess.run()  → `[sys.executable, install_script, '--add', 'chatlog-embed-sweep']`` (line 263)
 - `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 238)
-- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 716)
+- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 698)
 
 
 ---

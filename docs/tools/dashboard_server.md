@@ -1,8 +1,8 @@
 ---
 tool: bin/dashboard_server.py
-sha1: 87713558dd6c
-mtime_utc: 2026-07-19T18:30:29.306717+00:00
-generated_utc: 2026-07-19T19:29:22.162352+00:00
+sha1: fd70bdd75839
+mtime_utc: 2026-08-07T23:53:51.859050+00:00
+generated_utc: 2026-08-08T14:40:49.809933+00:00
 private: false
 ---
 
@@ -89,6 +89,7 @@ you intend to launch the server with (typically ``.venv``).
 - `chatlog_config (DEFAULT_DB_PATH)`
 - `chatlog_config (resolve_config)`
 - `m3_halt`
+- `m3_sdk (acquire_or_exit)`
 - `m3_sdk (active_database)`
 - `m3_sdk (resolve_db_path)`
 - `memory_core (memory_delete_impl)`
@@ -101,26 +102,32 @@ you intend to launch the server with (typically ``.venv``).
 
 **subprocess**
 
-- `subprocess.Popen()  → `[exe, script, '--foreground']`` (line 2305)
-- `subprocess.Popen()  → `[sys.executable, script, '--foreground']`` (line 2315)
-- `subprocess.Popen()  → `cmd`` (line 2028)
-- `subprocess.run()  → `['powershell', '-NoProfile', '-Command', ps]`` (line 2185)
-- `subprocess.run()  → `['taskkill', '/F', '/PID', str(pid)]`` (line 2220)
+- `subprocess.Popen()  → `[exe, script, '--foreground']`` (line 2864)
+- `subprocess.Popen()  → `[sys.executable, script, '--foreground']`` (line 2874)
+- `subprocess.Popen()  → `cmd`` (line 2585)
+- `subprocess.run()  → `['powershell', '-NoProfile', '-Command', ps]`` (line 2744)
+- `subprocess.run()  → `['taskkill', '/F', '/PID', str(pid)]`` (line 2779)
 
 
 ---
 
 ## Notable external imports
 
+- `base64`
 - `dashboard.health (_backend_display)`
 - `dashboard.health (collect_health)`
 - `dashboard.queue_stats (_entity_backlog_count)`
 - `dashboard.queue_stats (collect_governor, collect_pipeline_stats)`
-- `dashboard.templates (AUDIT_HTML, BROWSE_HTML, HEADER_HTML, INDEX_HTML, STYLE_CSS)`
+- `dashboard.templates (_WIKI_PAGE_HTML, AUDIT_HTML, BROWSE_HTML, HEADER_HTML, INDEX_HTML, STYLE_CSS)`
 - `difflib`
 - `fastapi (FastAPI, Form, HTTPException, Request)`
-- `fastapi.responses (HTMLResponse, JSONResponse, StreamingResponse)`
+- `fastapi.responses (FileResponse, HTMLResponse, JSONResponse, StreamingResponse)`
+- `files_memory.config (files_table)`
+- `files_memory.db (_db)`
+- `files_memory.db (_is_postgres)`
 - `files_memory.search (files_search)`
+- `html`
+- `m3_core.paths (get_m3_engine_root)`
 - `memory.backends (active_backend)`
 - `memory.config (FILES_DB_PATH)`
 - `memory.db (_db)`

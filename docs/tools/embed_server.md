@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_server.py
-sha1: f89f1b05e56d
-mtime_utc: 2026-07-02T01:21:24.671611+00:00
-generated_utc: 2026-07-03T20:00:03.304124+00:00
+sha1: 001803b150a5
+mtime_utc: 2026-08-07T23:53:51.896370+00:00
+generated_utc: 2026-08-08T14:40:49.824252+00:00
 private: false
 ---
 
@@ -35,20 +35,20 @@ Usage:
 |---|---|---|---|---|---|
 | `--model` | HuggingFace model ID | `DEFAULT_MODEL_ID` | Loads Qwen/Qwen3-Embedding-0.6B via SentenceTransformer | str | Loads specified HuggingFace model instead |
 | `--port` | Port to serve on | `1234` | Serves /v1/embeddings endpoint on localhost:1234 | int | Serves on specified port |
-| `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `os.environ.get('EMBED_SERVER_HOST', '127.0.0.1')` | Binds only to 127.0.0.1 (localhost only) | str | Binds to specified host (0.0.0.0 for LAN access) |
+| `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `getenv_compat('M3_EMBED_SERVER_HOST', 'EMBED_SERVER_HOST', '127.0.0.1')` | Binds only to 127.0.0.1 (localhost only) | str | Binds to specified host (0.0.0.0 for LAN access) |
 | `--device` | Device to use (e.g. cuda:0, cpu) | None | Auto-detects: picks cuda:0 if torch.cuda.is_available() else CPU. | str | Forces the SentenceTransformer onto the specified device. |
 
 ---
 
 ## Environment variables read
 
-- `EMBED_SERVER_HOST`
+_(none detected)_
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_sdk (getenv_compat)`
 
 ---
 
@@ -61,9 +61,9 @@ _(no subprocess / http / sqlite calls detected)_
 ## Notable external imports
 
 - `fastapi (FastAPI)`
+- `m3_core.gpu (torch_device)`
 - `pydantic (BaseModel, Field)`
 - `sentence_transformers (SentenceTransformer)`
-- `torch`
 - `uvicorn`
 
 ---
