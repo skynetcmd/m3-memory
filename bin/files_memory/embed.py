@@ -30,9 +30,9 @@ logger = logging.getLogger("files_memory.embed")
 def embed_texts(texts: list[str]) -> list[tuple[Optional[list[float]], str]]:
     """Embed a batch of texts via the m3-memory cascade.
 
-    Synchronous wrapper around the async _embed_many. Runs in a private
-    event loop if no loop is active (typical for CLI calls); reuses the
-    current loop if invoked from async context.
+    Synchronous wrapper around the async ``_embed_many``. Runs in a private event
+    loop when no loop is active (the direct-call / standalone-CLI case); bridges
+    through a worker thread when a loop is already running on THIS thread.
     """
     if not texts:
         return []
@@ -40,17 +40,26 @@ def embed_texts(texts: list[str]) -> list[tuple[Optional[list[float]], str]]:
     from memory.embed import _embed_many
 
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
+        loop_running = True
     except RuntimeError:
-        loop = None
+        loop_running = False
 
-    if loop is None or loop.is_closed():
+    if not loop_running:
         return asyncio.run(_embed_many(texts))
 
-    # In an async context — run a nested loop. This is rare for the
-    # ingester (which is its own CLI) but safe.
-    fut = asyncio.run_coroutine_threadsafe(_embed_many(texts), loop)
-    return fut.result()
+    # A loop is already running ON THIS THREAD — asyncio.get_running_loop() only
+    # ever returns the current thread's loop. We were called synchronously from
+    # inside it: the human CLI runs the SYNC files_ingest impl directly on the
+    # event-loop thread (asyncio.run(execute_tool_structured(...)) -> dispatch
+    # calls spec.impl() inline), so that loop is BLOCKED on us right now.
+    # run_coroutine_threadsafe(coro, loop).result() would deadlock — the loop
+    # cannot step the coroutine while it is frozen here (this was the "files_ingest
+    # hangs / commits nothing" bug). Bridge through a private loop on a worker
+    # thread instead; the shared embed client rebinds per-loop (_get_embed_client).
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(lambda: asyncio.run(_embed_many(texts))).result()
 
 
 def write_leaf_embedding(

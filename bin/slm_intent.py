@@ -56,6 +56,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -281,6 +282,34 @@ def load_profile(name: str) -> Optional[Profile]:
     with _PROFILE_CACHE_LOCK:
         _PROFILE_CACHE[name] = prof
     return prof
+
+
+def _is_loopback(url: str) -> bool:
+    """True when ``url`` targets a loopback host — the case where the endpoint
+    should follow the shared local-LLM seam rather than a pinned wire format."""
+    return (urlparse(url).hostname or "").lower() in ("localhost", "127.0.0.1", "::1")
+
+
+def localize_endpoint(url: str, backend: str) -> "tuple[str, str]":
+    """Normalize a LOCAL profile's ``(url, backend)`` to the shared LLM seam.
+
+    A profile pinned at a loopback ``/v1/messages`` (Anthropic-compat) only works
+    on LM Studio — Ollama serves no such endpoint, so every request 404s there. So
+    for a loopback profile we follow ``llm_failover``'s resolved OpenAI-compatible
+    endpoint (``/v1/chat/completions``, served by LM Studio :1234 AND Ollama
+    :11434) and force ``backend='openai'``. A remote/pinned profile is returned
+    unchanged — explicit non-local config wins. Falls back to the given values if
+    the shared seam resolves nothing (keeps prior behaviour)."""
+    if not _is_loopback(url):
+        return url, backend
+    try:
+        from llm_failover import LLM_ENDPOINTS
+        base = (LLM_ENDPOINTS or [None])[0]
+    except Exception:  # noqa: BLE001 — advisory; keep the profile's own url
+        base = None
+    if not base:
+        return url, backend
+    return f"{base.rstrip('/')}/chat/completions", "openai"
 
 
 # ── Classification ────────────────────────────────────────────────────────────

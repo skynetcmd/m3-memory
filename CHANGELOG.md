@@ -21,6 +21,27 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.9.0] — 2026-08-08 — Ollama-safe local extraction; files ingest deadlock + cascade-delete orphans fixed
+
+### Fixed
+- **Entity extraction works against Ollama, not just LM Studio.** Local entity
+  profiles pinned the Anthropic-compat `/v1/messages` path, which Ollama does not
+  serve, so every extraction request 404'd there. A loopback profile now follows
+  the shared `llm_failover` seam over the universal `/v1/chat/completions` endpoint
+  (served by LM Studio :1234 AND Ollama :11434) via the new
+  `slm_intent.localize_endpoint`; a remote/pinned profile is respected verbatim.
+- **`files_ingest` no longer hangs and commits nothing from the CLI.** The human
+  CLI runs the sync ingest impl directly on the event-loop thread; the embed
+  bridge then tried to schedule its coroutine back onto that already-blocked loop
+  (`run_coroutine_threadsafe(...).result()`) and deadlocked. `embed_texts` now
+  bridges through a private loop on a worker thread when a loop is already running
+  on the calling thread. Ingest completes and writes leaves + embeddings.
+- **`files_corpus_delete --cascade` no longer leaves orphans.** SQLite's
+  `foreign_keys` pragma is OFF by default and per-connection, so the schema's
+  `ON DELETE CASCADE` clauses silently no-op'd and deleting a corpus stranded
+  orphaned leaves, ingestion_runs, facts and embeddings. The files-store
+  connection now enables `PRAGMA foreign_keys = ON`, so the declared cascades run.
+
 ## [2026.8.8.0] — 2026-08-08 — entity-extraction model hardening; doctor reasoning-model warning
 
 ### Fixed

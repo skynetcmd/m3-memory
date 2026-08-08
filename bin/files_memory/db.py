@@ -96,6 +96,13 @@ def _new_connection(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=30.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 30000")
+    # foreign_keys is OFF by default in SQLite and is a PER-CONNECTION setting —
+    # the `PRAGMA foreign_keys = ON` in the schema DDL only applies while the
+    # schema is built, not to later connections. Without this, every
+    # `ON DELETE CASCADE` in the schema silently no-ops, so corpus_delete(cascade)
+    # (and any parent delete) leaves orphaned leaves / facts / ingestion_runs /
+    # embeddings behind. Enable it so the schema's declared cascades actually run.
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 

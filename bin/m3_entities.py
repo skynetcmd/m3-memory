@@ -63,7 +63,7 @@ import memory_core as mc  # noqa: E402
 from agent_protocol import strip_code_fences  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
 from m3_sdk import get_m3_root
-from slm_intent import Profile, load_profile  # noqa: E402
+from slm_intent import Profile, load_profile, localize_endpoint  # noqa: E402
 
 DEFAULT_PROFILE = "entities_local_qwen"
 DEFAULT_VOCAB_YAML = REPO_ROOT / "config" / "lists" / "entity_graph_m3.yaml"
@@ -219,6 +219,15 @@ def _build_extractor(
     The returned callable is exactly the shape memory_core's
     _run_entity_extractor expects.
     """
+    # A LOCAL profile must follow the shared LLM seam, not a pinned wire format:
+    # localize_endpoint() resolves the OpenAI-compatible /chat/completions endpoint
+    # from llm_failover so entity extraction works against LM Studio (:1234) AND
+    # Ollama (:11434, opt-in). Ollama serves no Anthropic /v1/messages, so a pinned
+    # `backend: anthropic` local profile would HTTP-fail every row there. A
+    # remote/pinned profile is respected verbatim — explicit config wins.
+    eff_url, eff_backend = localize_endpoint(
+        profile.url, getattr(profile, "backend", "openai") or "openai")
+
     # Resolve the effective model ONCE per pass (this factory is rebuilt each
     # pass in _run_db). A blank/sentinel model means "follow the loaded model":
     # discovered BY NAME (see _discover_loaded_model_async) so it survives >1
@@ -233,7 +242,7 @@ def _build_extractor(
         if m:
             return m
         if "v" not in _resolved:
-            _resolved["v"] = await _discover_loaded_model_async(client, profile.url, token) or ""
+            _resolved["v"] = await _discover_loaded_model_async(client, eff_url, token) or ""
         return _resolved["v"]
 
     async def call(content: str) -> dict:
@@ -261,7 +270,7 @@ def _build_extractor(
         # model; the key is always present since some builds 400 on its
         # absence. (Non-local backends should pin a real id in the profile.)
         _model = await _effective_model()  # resolved once per pass; follows the loaded model
-        backend = getattr(profile, "backend", "anthropic") or "anthropic"
+        backend = eff_backend
         if backend == "openai":
             messages = []
             if profile.system:
@@ -286,7 +295,7 @@ def _build_extractor(
                        "anthropic-version": getattr(profile, "anthropic_version", "2023-06-01")}
 
         try:
-            r = await client.post(profile.url, json=payload, headers=headers, timeout=profile.timeout_s)
+            r = await client.post(eff_url, json=payload, headers=headers, timeout=profile.timeout_s)
         except (httpx.HTTPError, TimeoutError) as e:
             raise RuntimeError(f"http error: {type(e).__name__}: {e}")
         if r.status_code != 200:

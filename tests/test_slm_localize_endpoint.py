@@ -1,0 +1,64 @@
+"""Loopback profiles follow the shared LLM seam (LM Studio OR Ollama).
+
+An SLM profile pinned at a loopback ``/v1/messages`` (Anthropic-compat) only works
+on LM Studio — Ollama serves no such endpoint, so every enrich/entity/observer/
+reflector request 404s there. ``slm_intent.localize_endpoint`` normalizes a
+loopback profile to ``llm_failover``'s resolved OpenAI-compatible
+``/v1/chat/completions`` (served by both) and forces ``backend='openai'``, while
+leaving a remote/pinned profile untouched. Hermetic — patches ``LLM_ENDPOINTS``,
+no server.
+"""
+import sys
+from pathlib import Path
+
+_BIN = str(Path(__file__).resolve().parents[1] / "bin")
+if _BIN not in sys.path:
+    sys.path.insert(0, _BIN)
+
+import llm_failover as LF  # noqa: E402
+import slm_intent as SI  # noqa: E402
+
+
+def _with_endpoints(monkeypatch, endpoints):
+    monkeypatch.setattr(LF, "LLM_ENDPOINTS", endpoints, raising=False)
+
+
+def test_loopback_anthropic_becomes_shared_openai(monkeypatch):
+    _with_endpoints(monkeypatch, ["http://localhost:1234/v1"])
+    url, backend = SI.localize_endpoint("http://127.0.0.1:1234/v1/messages", "anthropic")
+    assert url == "http://localhost:1234/v1/chat/completions"
+    assert backend == "openai"
+
+
+def test_loopback_follows_ollama_port(monkeypatch):
+    # Ollama enabled -> the seam resolves :11434; localize must follow the PORT,
+    # not just swap the path on the pinned :1234.
+    _with_endpoints(monkeypatch, ["http://localhost:11434/v1"])
+    url, backend = SI.localize_endpoint("http://127.0.0.1:1234/v1/messages", "anthropic")
+    assert url == "http://localhost:11434/v1/chat/completions"
+    assert backend == "openai"
+
+
+def test_remote_profile_untouched(monkeypatch):
+    _with_endpoints(monkeypatch, ["http://localhost:1234/v1"])
+    url, backend = SI.localize_endpoint("https://api.anthropic.com/v1/messages", "anthropic")
+    assert url == "https://api.anthropic.com/v1/messages"
+    assert backend == "anthropic"
+
+
+def test_empty_seam_keeps_profile(monkeypatch):
+    # No local LLM resolved -> keep the profile as-is (nothing is listening
+    # anyway; don't invent an endpoint).
+    _with_endpoints(monkeypatch, [])
+    url, backend = SI.localize_endpoint("http://localhost:1234/v1/messages", "anthropic")
+    assert url == "http://localhost:1234/v1/messages"
+    assert backend == "anthropic"
+
+
+def test_loopback_openai_normalized_to_shared(monkeypatch):
+    # Already openai + loopback but pinned to a stale port -> still re-homed to
+    # the shared endpoint so it follows the live server.
+    _with_endpoints(monkeypatch, ["http://localhost:11434/v1"])
+    url, backend = SI.localize_endpoint("http://localhost:1234/v1/chat/completions", "openai")
+    assert url == "http://localhost:11434/v1/chat/completions"
+    assert backend == "openai"
