@@ -420,6 +420,16 @@ filterwarnings = [
     # StarletteDeprecationWarning; match by message to avoid importing starlette to
     # resolve the class path (the drift-check CI job runs without the web deps).
     "ignore:.*Using .httpx. with .starlette.testclient. is deprecated.*",
+    # FastMCP's Settings model (mcp.server.fastmcp.server) declares a `lifespan`
+    # field whose annotation is a forward reference pydantic_settings can't resolve
+    # at import, so it emits IncompleteFieldDefinitionWarning when memory_bridge
+    # constructs the server (import time). Third-party (mcp + pydantic_settings) —
+    # not fixable in our code; resolved when FastMCP calls model_rebuild() or drops
+    # the forward ref. Without this, `error` makes test_bridge_timeout_pop and
+    # test_lazy_tool_loading un-collectable though memory_bridge imports fine at
+    # runtime. Match by message to avoid importing pydantic_settings.exceptions to
+    # resolve the class (the drift-check CI job runs without that dep).
+    "ignore:.*Field .lifespan. has an incomplete definition.*",
     # ── (B) our own process-lifetime singletons (by design; not per-test leaks) ─
     # M3Client's shared daemon asyncio loop-thread (§8) is alive at test end by
     # design (torn down at interpreter exit). See tests/test_langchain_*.py comments.

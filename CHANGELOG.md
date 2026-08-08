@@ -19,7 +19,12 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-### None pending
+### Testing
+- Ignore FastMCP's third-party `IncompleteFieldDefinitionWarning` (its
+  `Settings.lifespan` field is an unresolved forward ref in pydantic_settings) so
+  `test_bridge_timeout_pop` and `test_lazy_tool_loading` are collectable again —
+  `memory_bridge` imports fine at runtime; the warning-as-error only broke pytest
+  collection. Test-config only, no runtime change.
 
 ## [2026.8.14.0] — 2026-08-08 — extraction fails LOUD when a reasoning model yields nothing; files path gets the same auto-fix
 
