@@ -385,6 +385,48 @@ def _fix_register_task() -> bool:
     return rc == 0
 
 
+def _norm_model_tag(tag: str) -> str:
+    """Collapse known-equivalent embedder tags to a family key. The store
+    legitimately holds two bge-m3 aliases (the GGUF filename and the API/space
+    tag) for the SAME weights, so they must compare equal; only a genuinely
+    different family (e.g. nomic-embed) counts as a mismatch."""
+    t = (tag or "").strip().lower()
+    return "bge-m3" if ("bge-m3" in t or "bge_m3" in t) else t
+
+
+def _classify_embed_model(cfg: "dict | None", body: dict) -> "tuple[str | None, list[str]]":
+    """Compare the PINNED embed_model (env ``M3_EMBED_MODEL`` > the seeded
+    ``embed_model`` in .embed_config.json) against what the server actually
+    serves. The pin is the store's contract for which model owns its vector
+    space, so a served model in a different family means new embeds land in a
+    foreign space — the mismatch the user asked doctor to catch.
+
+    Deterministic + hermetic on purpose: it reads only the config/env and the
+    server-health body already fetched by run() — NEVER the live DB (a real-DB
+    read here would make the probe's verdict depend on machine state, §3). When no
+    model is pinned there is nothing to compare, so it stays quiet. Returns
+    (token, lines): token in {'model-mismatch', None}; lines are printable rows."""
+    pinned = ((os.environ.get("M3_EMBED_MODEL") or "").strip()
+              or (cfg or {}).get("embed_model") or "").strip()
+    served = str((body or {}).get("model") or "").strip()
+    try:
+        served_dim = int((body or {}).get("dim") or 0)
+    except (TypeError, ValueError):
+        served_dim = 0
+
+    if pinned and served and _norm_model_tag(pinned) != _norm_model_tag(served):
+        return "model-mismatch", [
+            f"  model    : [WARN] pinned embed_model='{pinned}' but the server serves "
+            f"'{served}' — a foreign model writes an INCOMPATIBLE vector space.",
+            "             fix: point the shared server at the model your store was "
+            "built with (embed_model in .embed_config.json / M3_EMBED_MODEL), or re-embed.",
+        ]
+    if pinned and served:
+        return None, [f"  model    : OK — server '{served}' matches pin '{pinned}' "
+                      f"(dim={served_dim or '?'})."]
+    return None, []
+
+
 def run(brief: bool = False, fix: bool = False) -> int:
     """Check config + server + keep-alive task. Return non-zero if shared mode is
     not fully healthy. With fix=True, repair what's repairable first."""
@@ -404,6 +446,12 @@ def run(brief: bool = False, fix: bool = False) -> int:
     health, body = _server_health(url)
     if health in ("down", "bad-scheme"):
         problems.append("server-down")
+
+    # 2b. Embedder-model identity: does the served model match the stored vector
+    #     space? A foreign model silently writes an incompatible space — tracked
+    #     SEPARATELY from `problems` because it is not `--fix`-repairable (it needs
+    #     a repoint or a re-embed, not a config rewrite).
+    model_token, model_lines = _classify_embed_model(cfg, body)
 
     # 3. Keep-alive: a Rust OS service OR the Python scheduled task must exist so
     #    the server survives a crash/reboot. Flag only if NEITHER is present.
@@ -491,6 +539,8 @@ def run(brief: bool = False, fix: bool = False) -> int:
     else:
         print(f"  server   : OK (model={body.get('model')}, dim={body.get('dim')}, "
               f"status={health})")
+        for _ln in model_lines:
+            print(_ln)
 
     if ka_kind == "rust-service":
         print("  keepalive: OK — Rust m3-embed-server OS service "
@@ -525,8 +575,13 @@ def run(brief: bool = False, fix: bool = False) -> int:
     else:
         print("  inproc   : OK — no M3_EMBED_GGUF leak (clients defer to the server).")
 
-    if healthy:
+    if healthy and model_token is None:
         print("  status   : OK — shared mode fully configured and serving.")
+    elif healthy and model_token is not None:
+        # Config/server/keep-alive are fine; the embedder MODEL is the concern.
+        # Not `--fix`-repairable — it needs a repoint or a re-embed (see above).
+        print("  status   : [WARN] shared mode wired, but embedder-model mismatch "
+              "(see model line above) — not auto-fixable.")
     elif manual_only:
         # Don't tell the user to run --fix for the one thing it can't fix; the
         # exact manual command is printed in the inproc block above.
@@ -536,4 +591,7 @@ def run(brief: bool = False, fix: bool = False) -> int:
     elif not fix:
         print()
         print("  Run `m3 doctor --fix` to repair the above automatically.")
-    return 0 if healthy else 1
+    # A model mismatch is a real problem even when config/server/keep-alive pass,
+    # so it lowers the verbose exit code — but it is reported (above), never
+    # folded into the `--fix` problem list it cannot repair.
+    return 0 if (healthy and model_token is None) else 1

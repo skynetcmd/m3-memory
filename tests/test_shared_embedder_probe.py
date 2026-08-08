@@ -19,6 +19,16 @@ if _BIN not in sys.path:
 from doctor import shared_embedder_probe as P  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _clear_embed_env(monkeypatch):
+    """Keep these verdict tests hermetic (§3): the probe's model cross-check reads
+    M3_EMBED_MODEL, and a developer shell may export the shared-embedder pins
+    (M3_EMBED_URL/M3_EMBED_MODEL). Clear them so the config the test writes — not
+    the ambient environment — decides the outcome."""
+    for var in ("M3_EMBED_MODEL", "M3_EMBED_URL"):
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture
 def cfg_root(monkeypatch, tmp_path):
     monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path))

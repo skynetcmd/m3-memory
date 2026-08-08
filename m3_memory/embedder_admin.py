@@ -809,6 +809,9 @@ def seed_shared_config(
       server instead of opening its own CUDA context.
     - Records ``fallback_url`` (where the shared server listens) and, when known,
       ``gguf_path`` (which model the SERVER should load — clients never load it).
+    - Records ``embed_model`` (the tag the shared server serves) so ``m3 doctor``
+      can flag an embedder-model mismatch (a foreign model would write an
+      incompatible vector space).
     - overwrite=False (default) preserves an existing file's keys, only filling in
       what's missing, so a hand-tuned config is never clobbered.
 
@@ -833,8 +836,18 @@ def seed_shared_config(
     desired = dict(existing)
     desired["disable_inproc_embedder"] = True
     desired.setdefault("fallback_url", url)
+    # Record the model the shared server serves so `m3 doctor` can catch an
+    # embedder-model mismatch (a foreign model silently writes an incompatible
+    # vector space). NOTE: we deliberately do NOT pin a primary `embed_url` here —
+    # the shared :8082 server is the tier-2 fallback (spoken via /embedding); the
+    # primary HTTP tier posts to /embeddings, which :8082 does not serve, so
+    # pinning the primary at :8082 would 404 and break the real fallback. Keeping
+    # :8082 supervised (launchd KeepAlive) is what keeps embedding on it.
     if gguf_path:
         desired.setdefault("gguf_path", gguf_path.replace("\\", "/"))
+        desired.setdefault("embed_model", os.path.basename(gguf_path))
+    else:
+        desired.setdefault("embed_model", "bge-m3-GGUF-Q4_K_M.gguf")
     desired["_comment"] = (
         "Route all m3 processes to the shared GPU embedder "
         "(bin/embed_server_inproc.py) so only ONE CUDA context exists. "
