@@ -178,6 +178,33 @@ def _load_vocab(path: Optional[Path]) -> tuple[frozenset[str], frozenset[str]]:
     return mc.load_entity_vocab(str(path))
 
 
+async def _discover_loaded_model_async(
+    client: httpx.AsyncClient, url: str, token: "str | None"
+) -> "str | None":
+    """Id of a model currently loaded at ``url``'s server, so a blank-model
+    profile can follow the loaded model BY NAME.
+
+    A blank ``model`` only works on LM Studio when exactly ONE model is loaded AND
+    JIT loading is on; with several loaded, or JIT off, the server rejects it
+    (``Invalid model identifier ""`` -> 404) and every extraction pass HTTP-fails.
+    Sending the discovered name is robust to both. Delegates to the shared
+    ``llm_failover.discover_model_async`` seam (fresh=True, so a model swap between
+    passes is picked up; same embedder-filtering + largest-model pick as
+    everywhere else). Derives the OpenAI-style base from the profile url (which
+    ends in /messages for anthropic or /chat/completions for openai). Returns None
+    on any failure so the caller keeps the blank model."""
+    base = url.rstrip("/")
+    for suffix in ("/chat/completions", "/messages"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    try:
+        from llm_failover import discover_model_async
+        return await discover_model_async(client, base, token, fresh=True)
+    except Exception:  # noqa: BLE001 — discovery is advisory; keep the blank model
+        return None
+
+
 def _build_extractor(
     profile: Profile,
     token: str,
@@ -192,6 +219,22 @@ def _build_extractor(
     The returned callable is exactly the shape memory_core's
     _run_entity_extractor expects.
     """
+    # Resolve the effective model ONCE per pass (this factory is rebuilt each
+    # pass in _run_db). A blank/sentinel model means "follow the loaded model":
+    # discovered BY NAME (see _discover_loaded_model_async) so it survives >1
+    # loaded model / JIT-off, which reject an empty model id. Lazy + cached for
+    # this pass's rows; falls back to "" (prior behaviour) when discovery fails.
+    _resolved: dict[str, str] = {}
+
+    async def _effective_model() -> str:
+        m = (profile.model or "").strip()
+        if m.lower() in ("default", "auto", "loaded", "any"):
+            m = ""
+        if m:
+            return m
+        if "v" not in _resolved:
+            _resolved["v"] = await _discover_loaded_model_async(client, profile.url, token) or ""
+        return _resolved["v"]
 
     async def call(content: str) -> dict:
         if not content or len(content.strip()) < 8:
@@ -217,9 +260,7 @@ def _build_extractor(
         # it. LM Studio accepts an empty `model` field and serves the loaded
         # model; the key is always present since some builds 400 on its
         # absence. (Non-local backends should pin a real id in the profile.)
-        _model = (profile.model or "").strip()
-        if _model.lower() in ("default", "auto", "loaded", "any"):
-            _model = ""
+        _model = await _effective_model()  # resolved once per pass; follows the loaded model
         backend = getattr(profile, "backend", "anthropic") or "anthropic"
         if backend == "openai":
             messages = []

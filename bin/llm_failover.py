@@ -222,9 +222,24 @@ def discover_model_sync(
     except Exception as e:  # noqa: BLE001 — discovery is best-effort by contract
         logger.warning(f"[llm_failover] sync discovery {endpoint}: {type(e).__name__}: {e}")
         return None
-    # Both OpenAI-shaped servers and Ollama return {"data": [...]}; Ollama's
-    # native (non-/v1) listing uses {"models": [...]}. Accept either rather than
-    # asserting a shape we have not verified against every server.
+    best = _pick_best_model(data)
+    if best is None:
+        logger.warning(f"[llm_failover] sync discovery {endpoint}: no usable models")
+        return None
+    _SYNC_MODEL_CACHE[endpoint] = best
+    logger.info(f"[llm_failover] sync discovery {endpoint} -> {best}")
+    return best
+
+
+def _pick_best_model(data: dict) -> Optional[str]:
+    """From a /models response, return the largest usable GENERATIVE model id, or
+    None. Embedders (EMBED_EXCLUSIONS) and LLM_EXCLUSIONS are filtered out and the
+    winner is the largest by :func:`parse_model_size`. Shared by
+    discover_model_sync and discover_model_async so the two cannot drift (§10a).
+
+    Both OpenAI-shaped servers and Ollama return {"data": [...]}; Ollama's native
+    (non-/v1) listing uses {"models": [...]}. Accept either rather than asserting a
+    shape we have not verified against every server."""
     models = data.get("data", data.get("models", [])) or []
     usable = []
     for m in models:
@@ -237,11 +252,49 @@ def discover_model_sync(
             continue
         usable.append(mid)
     if not usable:
-        logger.warning(f"[llm_failover] sync discovery {endpoint}: no usable models")
         return None
-    best = max(usable, key=parse_model_size)
-    _SYNC_MODEL_CACHE[endpoint] = best
-    logger.info(f"[llm_failover] sync discovery {endpoint} -> {best}")
+    return max(usable, key=parse_model_size)
+
+
+async def discover_model_async(
+    client: "httpx.AsyncClient",
+    endpoint: str,
+    token: Optional[str] = None,
+    *,
+    timeout: float = 5.0,
+    fresh: bool = False,
+) -> Optional[str]:
+    """Async sibling of :func:`discover_model_sync` — pick the largest usable
+    model on ``endpoint`` by asking it, over the caller's AsyncClient so it does
+    NOT block the event loop. Same filter/pick contract (shared _pick_best_model)
+    and same token/auth handling (default LM_API_TOKEN, header omitted when
+    absent).
+
+    ``fresh=True`` bypasses the per-endpoint cache and re-queries every call — for
+    a long-running loop that must follow a model swapped mid-run (e.g. the entity
+    extractor's per-pass resolution). ``fresh=False`` (default) caches per-endpoint
+    like the sync version. Returns None when unreachable / nothing usable —
+    "caller decides"; never turn None back into a hardcoded name."""
+    if not fresh:
+        cached = _SYNC_MODEL_CACHE.get(endpoint)
+        if cached is not None:
+            return cached
+    try:
+        tok = token if token is not None else _default_lm_token()
+        headers = _auth_headers(tok)
+        r = await client.get(f"{endpoint.rstrip('/')}/models", headers=headers, timeout=timeout)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:  # noqa: BLE001 — discovery is best-effort by contract
+        logger.warning(f"[llm_failover] async discovery {endpoint}: {type(e).__name__}: {e}")
+        return None
+    best = _pick_best_model(data)
+    if best is None:
+        logger.warning(f"[llm_failover] async discovery {endpoint}: no usable models")
+        return None
+    if not fresh:
+        _SYNC_MODEL_CACHE[endpoint] = best
+    logger.info(f"[llm_failover] async discovery {endpoint} -> {best}")
     return best
 
 
