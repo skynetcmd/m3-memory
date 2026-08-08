@@ -172,29 +172,52 @@ def _llm_call(content: str, max_tokens: int = 1024) -> Optional[str]:
         return None
 
     url = chat_completions_url(endpoint)
+    # Reasoning models route the answer to the reasoning channel and leave
+    # `content` empty → 0 facts. LM Studio / Ollama honor reasoning_effort="none"
+    # to turn thinking OFF (same auto-fix as the entity path); gated to those local
+    # runtimes since "none" 400s on real OpenAI cloud.
+    try:
+        from llm_failover import suppresses_thinking_via_effort
+        _suppress = suppresses_thinking_via_effort(endpoint)
+    except Exception:  # noqa: BLE001
+        _suppress = False
+    payload: dict = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _EXTRACT_PROMPT},
+            {"role": "user", "content": content},
+        ],
+        "temperature": 0.0,
+        "max_tokens": max_tokens,
+        # No response_format hint: some OpenAI-compat servers (e.g. LM Studio's
+        # ministral build) HARD-REJECT {"type":"json_object"} with HTTP 400 rather
+        # than ignoring it. The prompt already asks for JSON and _parse_facts_json
+        # is fence-tolerant, so we don't need the hint.
+    }
+    if _suppress:
+        payload["reasoning_effort"] = "none"
     try:
         with httpx.Client(timeout=60.0) as client:
-            resp = client.post(
-                url,
-                headers=llm_auth_headers(),
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": _EXTRACT_PROMPT},
-                        {"role": "user", "content": content},
-                    ],
-                    "temperature": 0.0,
-                    "max_tokens": max_tokens,
-                    # No response_format hint: some OpenAI-compat servers (e.g.
-                    # LM Studio's ministral build) HARD-REJECT
-                    # {"type":"json_object"} with HTTP 400 rather than ignoring
-                    # it. The prompt already asks for JSON and _parse_facts_json
-                    # is fence-tolerant, so we don't need the hint.
-                },
-            )
+            resp = client.post(url, headers=llm_auth_headers(), json=payload)
             resp.raise_for_status()
-            data = resp.json()
-            return (data["choices"][0]["message"]["content"] or "").strip()
+            msg = resp.json()["choices"][0]["message"]
+            text = (msg.get("content") or "").strip()
+            # FAIL LOUD (§3): a reasoning model gave us only reasoning + empty
+            # content → 0 facts. Never silent: say why + how to fix.
+            if not text and (msg.get("reasoning") or msg.get("reasoning_content")):
+                if _suppress:
+                    logger.warning(
+                        "files extract: %r at %s returned only reasoning (empty "
+                        "content) despite reasoning_effort='none' — it did not honor "
+                        "suppression -> 0 facts. Disable thinking or use a "
+                        "non-reasoning instruct model.", model, endpoint)
+                else:
+                    logger.warning(
+                        "files extract: %r at %s returned only reasoning (empty "
+                        "content) -> 0 facts. Reasoning model on an endpoint m3 can't "
+                        "auto-suppress (only local LM Studio/Ollama). Disable thinking "
+                        "or use a non-reasoning instruct model.", model, endpoint)
+            return text
     except Exception as e:
         logger.debug("extract LLM call failed: %s", e)
         return None

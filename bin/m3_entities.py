@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import re
 import shutil
@@ -64,6 +65,8 @@ from agent_protocol import strip_code_fences  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
 from m3_sdk import get_m3_root
 from slm_intent import Profile, load_profile, localize_endpoint  # noqa: E402
+
+logger = logging.getLogger("m3_entities")
 
 DEFAULT_PROFILE = "entities_local_qwen"
 DEFAULT_VOCAB_YAML = REPO_ROOT / "config" / "lists" / "entity_graph_m3.yaml"
@@ -240,6 +243,7 @@ def _build_extractor(
     # loaded model / JIT-off, which reject an empty model id. Lazy + cached for
     # this pass's rows; falls back to "" (prior behaviour) when discovery fails.
     _resolved: dict[str, str] = {}
+    _warned: dict[str, bool] = {}  # once-per-pass loud warnings (avoid per-row spam)
 
     async def _effective_model() -> str:
         m = (profile.model or "").strip()
@@ -335,6 +339,30 @@ def _build_extractor(
         if backend == "openai":
             choices = data.get("choices") or []
             msg = (choices[0].get("message") or {}) if choices else {}
+            # FAIL LOUD (§3): a reasoning model that emits only reasoning and empty
+            # `content` yields 0 facts. On LM Studio/Ollama m3 auto-suppresses via
+            # reasoning_effort="none"; if `content` is STILL empty here the
+            # answer is unreachable — either the auto-fix didn't take, or this is
+            # an endpoint m3 can't suppress. Warn ONCE per pass with the actionable
+            # fix so the 0-fact outcome is never silent.
+            if (not str(msg.get("content") or "").strip()
+                    and (msg.get("reasoning") or msg.get("reasoning_content"))
+                    and not _warned.get("reasoning")):
+                _warned["reasoning"] = True
+                if eff_suppress_reasoning:
+                    logger.warning(
+                        "entity extraction: %r at %s returned only reasoning output "
+                        "(empty content) despite reasoning_effort='none' — the model "
+                        "did not honor suppression -> 0 facts. Disable thinking for "
+                        "this model or use a non-reasoning instruct model.",
+                        _model, eff_url)
+                else:
+                    logger.warning(
+                        "entity extraction: %r at %s returned only reasoning output "
+                        "(empty content) -> 0 facts. It's a reasoning model and this "
+                        "endpoint isn't one m3 can auto-suppress (only local LM "
+                        "Studio/Ollama). Disable thinking or use a non-reasoning "
+                        "instruct model.", _model, eff_url)
             # some reasoning models (gpt-oss) leave the answer in `reasoning`
             text = msg.get("content") or msg.get("reasoning") or ""
             # strip a <think>...</think> reasoning block if present

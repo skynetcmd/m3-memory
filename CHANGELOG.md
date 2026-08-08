@@ -21,6 +21,22 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.14.0] — 2026-08-08 — extraction fails LOUD when a reasoning model yields nothing; files path gets the same auto-fix
+
+### Fixed
+- **File fact-extraction now gets the same reasoning auto-fix as entities.**
+  `files_memory.extract._llm_call` read only `content`, so a reasoning model
+  silently produced `""` (0 facts) even on LM Studio / Ollama. It now sends
+  `reasoning_effort="none"` on those runtimes (via `suppresses_thinking_via_effort`)
+  to suppress thinking — matching the entity path.
+- **Reasoning-model dead-ends now fail LOUD (§3), not silent.** When a reasoning
+  model returns only its reasoning channel with empty `content` → 0 facts, BOTH
+  the entity extractor and the files extractor now log a WARNING (once per pass)
+  naming the model + endpoint and the fix — distinguishing "auto-suppression
+  didn't take" (LM Studio/Ollama) from "endpoint m3 can't auto-suppress"
+  (OpenAI cloud, vLLM: disable thinking or use a non-reasoning model). Previously
+  the 0-fact outcome was swallowed with no explanation.
+
 ## [2026.8.13.0] — 2026-08-08 — doctor reasoning check is auto-fix-aware (no false alarms, warns only when action is needed)
 
 ### Fixed
