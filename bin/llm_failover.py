@@ -43,6 +43,17 @@ _LMSTUDIO_ENDPOINT = "http://localhost:1234/v1"
 _OLLAMA_ENDPOINT = "http://localhost:11434/v1"
 
 
+def is_ollama_url(url: str) -> bool:
+    """True when ``url`` points at an Ollama server (its fixed default port
+    11434). Ollama serves only the OpenAI-compatible API — no Anthropic
+    ``/v1/messages`` — so callers use this to pick a wire format that works."""
+    try:
+        from urllib.parse import urlparse
+        return urlparse(url).port == 11434
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _flag(name: str, default: bool) -> bool:
     v = os.environ.get(name, "").strip().lower()
     if not v:

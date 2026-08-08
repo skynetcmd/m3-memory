@@ -21,6 +21,25 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.10.0] — 2026-08-08 — Ollama-safe enrich/observer/reflector; sync tools are timeout-bounded
+
+### Fixed
+- **enrich / observer / reflector also work against Ollama.** Their SLM profiles
+  use the Anthropic `/v1/messages` wire format for LM Studio's prompt caching, but
+  Ollama serves no such endpoint. `slm_intent._call_model` now localizes a loopback
+  profile through the shared `llm_failover` seam and, via
+  `localize_endpoint(prefer_native=True)`, keeps the native Anthropic format on
+  LM Studio (cache preserved) while downgrading to OpenAI `/v1/chat/completions`
+  only when the resolved server is Ollama (detected by its fixed port 11434 —
+  `llm_failover.is_ollama_url`). Completes the local-extraction Ollama coverage
+  begun for entity extraction in 2026.8.9.0.
+- **Sync tool impls are now timeout-bounded (§3/§6).** The dispatcher enforced the
+  per-call timeout only on async impls, so a blocking synchronous tool could hang
+  forever instead of failing loud. Sync impls now run via `asyncio.to_thread`
+  (which propagates the `active_database` ContextVar, preserving DB routing — the
+  same pattern the MCP bridge already uses), so the timeout applies and the event
+  loop is never frozen. A hang surfaces as a `ToolTimeout` naming the tool + budget.
+
 ## [2026.8.9.0] — 2026-08-08 — Ollama-safe local extraction; files ingest deadlock + cascade-delete orphans fixed
 
 ### Fixed

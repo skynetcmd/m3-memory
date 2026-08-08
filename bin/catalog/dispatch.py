@@ -91,21 +91,31 @@ class ToolTimeout(Exception):
 
 
 async def _run_impl_bounded(spec: ToolSpec, args: dict, timeout: float | None) -> Any:
-    """Invoke spec.impl, enforcing `timeout` on async impls. Fails loud (§3):
-    a timeout raises ToolTimeout with the tool name and budget, not a silent
-    hang or a bare None."""
+    """Invoke spec.impl, enforcing `timeout` on BOTH async and sync impls. Fails
+    loud (§3/§6): a timeout raises ToolTimeout with the tool name and budget, not a
+    silent hang or a bare None.
+
+    A sync impl is run OFF the event-loop thread via asyncio.to_thread so that
+    (a) the same `timeout` bounds it — a blocking sync tool can't hang forever,
+    and (b) it can't freeze the loop. asyncio.to_thread copies the current context
+    into the worker thread, so the active_database ContextVar (DB routing) is
+    preserved (same pattern as memory_bridge). It also means a sync impl that
+    internally calls asyncio.run (e.g. files-ingest's embed bridge) works, since
+    the worker thread has no running loop of its own."""
     if spec.is_async:
-        if timeout is None:
-            return await spec.impl(**args)
-        try:
-            return await asyncio.wait_for(spec.impl(**args), timeout=timeout)
-        except (asyncio.TimeoutError, TimeoutError) as e:
-            raise ToolTimeout(
-                f"{spec.name} exceeded {timeout:g}s timeout "
-                f"(raise with a larger `timeout` arg or M3_TOOL_TIMEOUT, "
-                f"or set <=0 to disable)"
-            ) from e
-    return spec.impl(**args)
+        awaitable = spec.impl(**args)
+    else:
+        awaitable = asyncio.to_thread(spec.impl, **args)
+    if timeout is None:
+        return await awaitable
+    try:
+        return await asyncio.wait_for(awaitable, timeout=timeout)
+    except (asyncio.TimeoutError, TimeoutError) as e:
+        raise ToolTimeout(
+            f"{spec.name} exceeded {timeout:g}s timeout "
+            f"(raise with a larger `timeout` arg or M3_TOOL_TIMEOUT, "
+            f"or set <=0 to disable)"
+        ) from e
 
 
 async def execute_tool(spec: ToolSpec, args: dict, agent_id: str) -> str:

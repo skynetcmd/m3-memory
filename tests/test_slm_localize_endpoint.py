@@ -62,3 +62,42 @@ def test_loopback_openai_normalized_to_shared(monkeypatch):
     url, backend = SI.localize_endpoint("http://localhost:1234/v1/chat/completions", "openai")
     assert url == "http://localhost:11434/v1/chat/completions"
     assert backend == "openai"
+
+
+# ── prefer_native (the _call_model path: enrich / observer / reflector) ────────
+# Keep LM Studio's Anthropic wire format (prompt caching); downgrade to OpenAI
+# ONLY when the resolved local server is Ollama (no /v1/messages).
+
+def test_prefer_native_keeps_anthropic_on_lmstudio(monkeypatch):
+    _with_endpoints(monkeypatch, ["http://localhost:1234/v1"])
+    url, backend = SI.localize_endpoint(
+        "http://127.0.0.1:1234/v1/messages", "anthropic", prefer_native=True)
+    # LM Studio serves /v1/messages -> unchanged, so prompt caching is preserved.
+    assert url == "http://127.0.0.1:1234/v1/messages"
+    assert backend == "anthropic"
+
+
+def test_prefer_native_downgrades_anthropic_on_ollama(monkeypatch):
+    _with_endpoints(monkeypatch, ["http://localhost:11434/v1"])
+    url, backend = SI.localize_endpoint(
+        "http://127.0.0.1:1234/v1/messages", "anthropic", prefer_native=True)
+    # Ollama has no /v1/messages -> must switch to the OpenAI-compatible path
+    # AND follow Ollama's port.
+    assert url == "http://localhost:11434/v1/chat/completions"
+    assert backend == "openai"
+
+
+def test_prefer_native_openai_loopback_follows_shared(monkeypatch):
+    _with_endpoints(monkeypatch, ["http://localhost:11434/v1"])
+    url, backend = SI.localize_endpoint(
+        "http://localhost:1234/v1/chat/completions", "openai", prefer_native=True)
+    assert url == "http://localhost:11434/v1/chat/completions"
+    assert backend == "openai"
+
+
+def test_prefer_native_remote_anthropic_untouched(monkeypatch):
+    _with_endpoints(monkeypatch, ["http://localhost:11434/v1"])
+    url, backend = SI.localize_endpoint(
+        "https://api.anthropic.com/v1/messages", "anthropic", prefer_native=True)
+    assert url == "https://api.anthropic.com/v1/messages"
+    assert backend == "anthropic"

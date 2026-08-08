@@ -290,26 +290,41 @@ def _is_loopback(url: str) -> bool:
     return (urlparse(url).hostname or "").lower() in ("localhost", "127.0.0.1", "::1")
 
 
-def localize_endpoint(url: str, backend: str) -> "tuple[str, str]":
+def localize_endpoint(url: str, backend: str, *, prefer_native: bool = False) -> "tuple[str, str]":
     """Normalize a LOCAL profile's ``(url, backend)`` to the shared LLM seam.
 
-    A profile pinned at a loopback ``/v1/messages`` (Anthropic-compat) only works
-    on LM Studio — Ollama serves no such endpoint, so every request 404s there. So
-    for a loopback profile we follow ``llm_failover``'s resolved OpenAI-compatible
-    endpoint (``/v1/chat/completions``, served by LM Studio :1234 AND Ollama
-    :11434) and force ``backend='openai'``. A remote/pinned profile is returned
-    unchanged — explicit non-local config wins. Falls back to the given values if
-    the shared seam resolves nothing (keeps prior behaviour)."""
+    A loopback profile follows ``llm_failover``'s resolved endpoint so it targets
+    whatever local server is actually up (LM Studio :1234 OR Ollama :11434), not a
+    pinned url that may point at a server that isn't running. A remote/pinned
+    profile is returned unchanged — explicit non-local config wins. Falls back to
+    the given values if the shared seam resolves nothing (keeps prior behaviour).
+
+    Wire format:
+      - Default (``prefer_native=False``, the entity path): always the
+        OpenAI-compatible ``/v1/chat/completions`` (served by both LM Studio and
+        Ollama). Simple + universal; entity extraction doesn't lean on Anthropic
+        prompt caching.
+      - ``prefer_native=True`` (the ``_call_model`` path — enrich/observer/
+        reflector): keep an Anthropic-backend profile on its native
+        ``/v1/messages`` so LM Studio's prompt caching is preserved, UNLESS the
+        resolved server is Ollama, which serves no ``/v1/messages`` — only then
+        downgrade to OpenAI. Closes the Ollama gap without costing LM Studio its
+        cache."""
     if not _is_loopback(url):
         return url, backend
     try:
-        from llm_failover import LLM_ENDPOINTS
+        from llm_failover import LLM_ENDPOINTS, is_ollama_url
         base = (LLM_ENDPOINTS or [None])[0]
     except Exception:  # noqa: BLE001 — advisory; keep the profile's own url
         base = None
     if not base:
         return url, backend
-    return f"{base.rstrip('/')}/chat/completions", "openai"
+    base = base.rstrip("/")
+    if prefer_native and backend == "anthropic":
+        if is_ollama_url(base):
+            return f"{base}/chat/completions", "openai"
+        return url, backend  # LM Studio (or other): keep native Anthropic + caching
+    return f"{base}/chat/completions", "openai"
 
 
 # ── Classification ────────────────────────────────────────────────────────────
@@ -346,8 +361,13 @@ async def _call_model(
     """
     token = _resolve_api_key(prof.api_key_service)
     headers = {"Content-Type": "application/json"}
+    # A loopback profile follows the shared LLM seam so it hits the local server
+    # that is actually running. prefer_native keeps LM Studio's Anthropic wire
+    # format (prompt caching) but downgrades to OpenAI when the server is Ollama,
+    # which serves no /v1/messages.
+    url, backend = localize_endpoint(prof.url, prof.backend, prefer_native=True)
 
-    if prof.backend == "anthropic":
+    if backend == "anthropic":
         # Anthropic wants x-api-key, not Authorization: Bearer.
         if token:
             headers["x-api-key"] = token
@@ -371,7 +391,7 @@ async def _call_model(
             "messages": [{"role": "user", "content": user_text}],
             "temperature": prof.temperature,
         }
-        resp = await client.post(prof.url, headers=headers, json=payload, timeout=prof.timeout_s)
+        resp = await client.post(url, headers=headers, json=payload, timeout=prof.timeout_s)
         resp.raise_for_status()
         data = resp.json()
         # Anthropic: content is a list of content blocks. Concat all text blocks.
@@ -391,7 +411,7 @@ async def _call_model(
         "temperature": prof.temperature,
         "max_tokens": prof.max_tokens,
     }
-    resp = await client.post(prof.url, headers=headers, json=payload, timeout=prof.timeout_s)
+    resp = await client.post(url, headers=headers, json=payload, timeout=prof.timeout_s)
     resp.raise_for_status()
     data = resp.json()
     return data["choices"][0]["message"]["content"]

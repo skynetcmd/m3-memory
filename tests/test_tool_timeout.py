@@ -1,8 +1,10 @@
 """Tests for the universal per-call MCP tool timeout (§6 hardening).
 
 Every tool call is bounded: per-call `timeout` arg > M3_TOOL_TIMEOUT env > 30s
-default; <= 0 disables. Only async impls are bounded. A timeout fails loud (§3)
-with a ToolTimeout naming the tool and budget — never a silent hang.
+default; <= 0 disables. BOTH async and sync impls are bounded — a sync impl runs
+via asyncio.to_thread so the same timeout applies (a blocking sync tool can't hang
+forever). A timeout fails loud (§3) with a ToolTimeout naming the tool and budget
+— never a silent hang.
 """
 from __future__ import annotations
 
@@ -94,6 +96,29 @@ def test_execute_tool_times_out_loud():
 def test_execute_tool_fast_under_budget():
     r = asyncio.run(C.execute_tool(_spec(_fast), {"timeout": 5}, "agent"))
     assert r == "quick"
+
+
+def _slow_sync(**_):
+    import time
+    time.sleep(5)
+    return "done"
+
+
+def _fast_sync(**_):
+    return "quick-sync"
+
+
+def test_sync_impl_times_out_loud():
+    # A blocking SYNC tool must also fail loud, not hang: it runs via to_thread so
+    # the timeout applies (previously only async impls were bounded).
+    r = asyncio.run(C.execute_tool(_spec(_slow_sync, is_async=False), {"timeout": 1}, "agent"))
+    assert "ToolTimeout" in r
+    assert "fake_tool" in r
+
+
+def test_sync_impl_fast_under_budget():
+    r = asyncio.run(C.execute_tool(_spec(_fast_sync, is_async=False), {"timeout": 5}, "agent"))
+    assert r == "quick-sync"
 
 
 def test_structured_timeout_disabled_runs_to_completion():
