@@ -11,11 +11,15 @@ reporting "no LLM" (leaves marked extraction_status='failed') even though the re
 of m3 (cognitive loop, enrichment) reaches an LLM fine. It reads only config/env
 + a couple of HTTP calls (never the live DB), and never crashes the doctor.
 
-It ALSO warns when the loaded model is a REASONING model with thinking on — the
-answer goes to the model's reasoning channel instead of JSON content, so
-extraction is slow and often yields 0 facts. Detection is by OUTPUT (an active
-one-shot probe), not the model name, and works against any OpenAI-compatible
-server — LM Studio AND Ollama — so the readiness check is provider-agnostic.
+It ALSO checks the REASONING-model failure mode: a thinking-on model routes its
+answer to the reasoning channel instead of JSON content, so extraction yields 0
+facts. Detection is by OUTPUT (an active one-shot probe), not the model name. The
+probe is aware of m3's auto-fix: on LM Studio / Ollama m3 sends
+``reasoning_effort="none"`` to suppress thinking, so the probe sends the SAME thing
+and warns only if it did NOT take (auto-fix couldn't fix). On servers m3 can't
+auto-suppress (OpenAI cloud, vLLM) it warns on a bare thinking-on result. So the
+warning fires only when the operator actually needs to act — no false alarms for
+the auto-handled case, and one bounded probe (no redundant testing).
 """
 from __future__ import annotations
 
@@ -100,18 +104,24 @@ def _classify_thinking(body: dict) -> "str | None":
     return "off"
 
 
-def _detect_thinking(endpoint: str, model: str, headers: dict, timeout: float = 20.0) -> "str | None":
+def _detect_thinking(endpoint: str, model: str, headers: dict, timeout: float = 20.0,
+                     reasoning_effort: "str | None" = None) -> "str | None":
     """Active probe: send ONE tiny chat request and classify whether the loaded
     model reasons. Works against any OpenAI-compatible server (LM Studio, Ollama,
-    vLLM, …) at ``{endpoint}/chat/completions``. Returns 'on'|'off'|None; None on
-    any error (never a false alarm)."""
+    vLLM, …) at ``{endpoint}/chat/completions``. When ``reasoning_effort`` is given
+    it is sent in the payload — pass ``"none"`` to MIRROR what extraction does on
+    runtimes that honor it, so the probe reflects the real post-suppression state.
+    Returns 'on'|'off'|None; None on any error (never a false alarm)."""
     import json
-    payload = json.dumps({
+    body: dict = {
         "model": model,
         "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
         "max_tokens": 200,
         "temperature": 0,
-    }).encode("utf-8")
+    }
+    if reasoning_effort is not None:
+        body["reasoning_effort"] = reasoning_effort
+    payload = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         f"{endpoint.rstrip('/')}/chat/completions", data=payload,
         headers={**headers, "Content-Type": "application/json"}, method="POST")
@@ -120,6 +130,18 @@ def _detect_thinking(endpoint: str, model: str, headers: dict, timeout: float = 
             return _classify_thinking(json.loads(r.read().decode("utf-8", "replace")))
     except Exception:  # noqa: BLE001 — diagnostic best-effort
         return None
+
+
+def _suppressible(endpoint: str) -> bool:
+    """Whether m3 auto-suppresses reasoning on this endpoint via
+    ``reasoning_effort="none"`` (LM Studio / Ollama). Mirrors the extraction gate
+    so the probe warns only when the auto-fix does NOT apply or does NOT work."""
+    try:
+        _ensure_path()
+        from llm_failover import suppresses_thinking_via_effort
+        return suppresses_thinking_via_effort(endpoint)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def run(brief: bool = False, fix: bool = False) -> int:
@@ -149,22 +171,34 @@ def run(brief: bool = False, fix: bool = False) -> int:
         print(f"{glyph} file-extraction LLM: {endpoint} reachable ({shown})"
               + ("" if models else " — load a chat/instruct model to enable extraction."))
         if models:
-            # Reasoning/thinking ON = extraction is slow and often yields 0
-            # parseable facts (the answer goes to the reasoning channel, not the
-            # JSON content). Detect it live (works for LM Studio AND Ollama) and
-            # warn — a model choice, not an m3 defect, so it doesn't fail the exit.
+            # Reasoning/thinking ON = extraction gets 0 parseable facts (the answer
+            # goes to the reasoning channel, not the JSON content). m3 auto-fixes
+            # this on LM Studio / Ollama by sending reasoning_effort="none", so the
+            # probe MIRRORS that: on those runtimes it probes WITH the suppression
+            # and only warns if it did NOT take (auto-fix couldn't fix). On other
+            # servers (OpenAI cloud, vLLM) m3 can't safely suppress, so a bare probe
+            # + warning is correct. A model choice, not an m3 defect → never fails exit.
             _ensure_path()
             try:
                 from files_memory.config import llm_auth_headers
                 _hdr = llm_auth_headers()
             except Exception:  # noqa: BLE001
                 _hdr = {}
-            if _detect_thinking(endpoint, models[0], _hdr) == "on":
-                print(f"⚠️  reasoning/thinking is ON for '{models[0]}' — fact "
-                      "extraction (files + entities) will be SLOW and may yield 0 "
-                      "parseable facts.")
-                print("   fix: disable thinking for this model in LM Studio / Ollama, "
-                      "or load a non-reasoning instruct model.")
+            supp = _suppressible(endpoint)
+            effort = "none" if supp else None
+            if _detect_thinking(endpoint, models[0], _hdr, reasoning_effort=effort) == "on":
+                if supp:
+                    print(f"⚠️  reasoning/thinking is ON for '{models[0]}' and "
+                          "reasoning_effort='none' did NOT suppress it — extraction "
+                          "(files + entities) will yield 0 parseable facts.")
+                    print("   fix: disable thinking for this model in LM Studio / "
+                          "Ollama, or load a non-reasoning instruct model.")
+                else:
+                    print(f"⚠️  reasoning/thinking is ON for '{models[0]}' and this "
+                          "endpoint isn't one m3 can auto-suppress — extraction "
+                          "(files + entities) will yield 0 parseable facts.")
+                    print("   fix: disable thinking / use a non-reasoning instruct "
+                          "model (m3 auto-suppresses only on local LM Studio / Ollama).")
         return 0 if models else 1
     if state == "auth":
         print(f"⚠️  file-extraction LLM: {endpoint} needs auth and the token didn't "

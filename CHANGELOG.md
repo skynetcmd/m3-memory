@@ -21,7 +21,21 @@ the policy is forward-going only.
 
 ### None pending
 
-## [2026.8.12.0] — 2026-08-08 — reasoning-model auto-suppression extended to LM Studio (both local runtimes)
+## [2026.8.13.0] — 2026-08-08 — doctor reasoning check is auto-fix-aware (no false alarms, warns only when action is needed)
+
+### Fixed
+- **`m3 doctor` no longer false-alarms about reasoning models that m3 already
+  auto-handles.** The reasoning-model check (2026.8.8.0) predated the
+  `reasoning_effort="none"` auto-suppression (2026.8.11/12), so on LM Studio /
+  Ollama it warned "will yield 0 facts" about a case extraction now fixes
+  automatically. The probe now MIRRORS extraction: on runtimes m3 can suppress
+  (`suppresses_thinking_via_effort`) it sends `reasoning_effort="none"` in the
+  probe and warns only if thinking is STILL on (auto-fix couldn't fix it); on
+  servers m3 can't suppress (OpenAI cloud, vLLM) it warns on a bare thinking-on
+  result. So the warning fires only when the operator actually needs to act —
+  disable thinking or switch models — and it stays a single bounded probe (no
+  redundant testing). Verified live: thinking-on gemma on LM Studio → probe now
+  silent (auto-fix works).
 
 ### Fixed
 - **Reasoning-model fact extraction now auto-works on LM Studio too, not just

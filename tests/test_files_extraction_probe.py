@@ -49,3 +49,42 @@ def test_empty_reasoning_is_not_on():
 def test_unrecognizable_shape_is_none():
     assert P._classify_thinking({"choices": []}) == "off"          # no message -> plain
     assert P._classify_thinking({"choices": [{"message": "nope"}]}) is None  # message not a dict
+
+
+# ── suppression-awareness: the probe mirrors extraction's reasoning_effort ─────
+
+def test_suppressible_matches_local_runtimes():
+    # delegates to the shared gate: LM Studio + Ollama yes, others no
+    assert P._suppressible("http://localhost:1234/v1") is True
+    assert P._suppressible("http://localhost:11434/v1") is True
+    assert P._suppressible("http://localhost:8000/v1") is False
+    assert P._suppressible("https://api.openai.com/v1") is False
+
+
+def _capture_detect_payload(monkeypatch, **kwargs):
+    """Run _detect_thinking with urlopen stubbed; return the JSON body it POSTed."""
+    import io
+    import json
+    captured = {}
+
+    class _Resp(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake_urlopen(req, timeout=None):  # noqa: ARG001
+        captured["body"] = json.loads(req.data.decode())
+        return _Resp(json.dumps({"choices": [{"message": {"content": "OK"}}]}).encode())
+
+    monkeypatch.setattr(P.urllib.request, "urlopen", fake_urlopen)
+    P._detect_thinking("http://localhost:1234/v1", "m", {}, **kwargs)
+    return captured["body"]
+
+
+def test_detect_thinking_sends_reasoning_effort_when_asked(monkeypatch):
+    body = _capture_detect_payload(monkeypatch, reasoning_effort="none")
+    assert body.get("reasoning_effort") == "none"
+
+
+def test_detect_thinking_omits_reasoning_effort_by_default(monkeypatch):
+    body = _capture_detect_payload(monkeypatch)
+    assert "reasoning_effort" not in body
