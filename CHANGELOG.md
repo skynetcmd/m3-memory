@@ -21,6 +21,24 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.16.0] — 2026-08-08 — cognitive loop stops pegging a CPU core (idle when idle)
+
+### Fixed
+- **The loop now actually goes idle instead of re-ticking every ~1s.** Root cause:
+  its entity work-gate (`_entity_work_sql`) counted every link-less row as "work"
+  but did NOT exclude rows the extractor already recorded terminal in
+  `entity_extraction_queue` ('done' — which includes turns that legitimately
+  extract to ZERO entities — 'ctx_error', 'failed' past the attempt cap). So ~9.7k
+  empty-but-done rows read as a perpetual backlog (real work here: 108),
+  `has_entity_work` never went False, and the idle-backlog-drain re-ran every
+  CPU-heavy pass back-to-back — pegging a core for hours. The gate now mirrors the
+  extractor's own exclusion, so it reports work only when work genuinely remains.
+- **Chatlog-prune is throttled to once per `--interval`.** It's a CPU-heavy
+  maintenance sweep (~8s: re-classifies every aged chat row), not a backlog drain,
+  and under the short-tick it re-ran every tick pruning nothing. Gated by the same
+  `_due` min-interval mechanism the time-driven passes use. (The 2026.8.15.0
+  regex-scan bound stands; this caps how OFTEN the sweep runs.)
+
 ## [2026.8.15.0] — 2026-08-08 — cognitive-loop CPU: bound the chatlog-prune regex scan
 
 ### Fixed

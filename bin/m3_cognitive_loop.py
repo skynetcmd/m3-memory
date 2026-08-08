@@ -372,18 +372,33 @@ def _conn_for_pass(db_path: Optional[str]):
 _ENTITY_WORK_TYPES_SQL = ", ".join(f"'{t}'" for t in m3_entities.DEFAULT_TYPES)
 
 
-def _entity_work_sql(items_tbl: str, link_tbl: str) -> str:
+def _entity_work_sql(items_tbl: str, link_tbl: str, queue_tbl: str = "entity_extraction_queue") -> str:
     """The un-entitized-rows probe over a given items + item-entities table pair.
     Same SQL shape for core (memory_items/memory_item_entities) and chatlog
     (chat_log_items/chat_log_item_entities on PG). The `type IN (...)` list is
     derived from m3_entities.DEFAULT_TYPES (see _ENTITY_WORK_TYPES_SQL) so the
-    gate only counts rows the extractor will actually process."""
+    gate only counts rows the extractor will actually process.
+
+    Crucially it ALSO excludes rows the extractor has recorded as terminal in
+    entity_extraction_queue (status 'done' — which includes EMPTY extractions —
+    'ctx_error', or 'failed' past the attempt cap), exactly as m3_entities' own
+    selection does. Without this, a turn that legitimately extracts to ZERO
+    entities has no link row and reads as "work" FOREVER: has_entity_work stays
+    True, so the loop's idle-backlog-drain re-ticks every ~1s instead of sleeping
+    the interval, re-running every CPU-heavy pass (chatlog-prune ~8s) back-to-back
+    and pegging a core. Mirroring the exclusion lets the loop actually go idle."""
+    max_att = int(getattr(m3_entities, "MAX_ENTITY_ATTEMPTS", 3))
     return f"""
         SELECT 1 FROM {items_tbl} mi
         LEFT JOIN {link_tbl} mie ON mi.id = mie.memory_id
         WHERE mi.is_deleted = 0
           AND mi.type IN ({_ENTITY_WORK_TYPES_SQL})
           AND mie.memory_id IS NULL
+          AND mi.id NOT IN (
+              SELECT memory_id FROM {queue_tbl}
+              WHERE status IN ('done', 'ctx_error')
+                 OR (status = 'failed' AND attempts >= {max_att})
+          )
         LIMIT 1
     """
 
@@ -462,7 +477,8 @@ def has_entity_work(core_db: Optional[str], chatlog_db: Optional[str]) -> bool:
             # PG: chat_log_* tables in the same DB — probe them via the pool.
             import memory_core as mc
             cl_sql = _entity_work_sql(
-                chatlog_table("items"), chatlog_table("item_entities")
+                chatlog_table("items"), chatlog_table("item_entities"),
+                chatlog_table("entity_extraction_queue"),
             )
             with mc._db() as db:
                 if len(db.execute(cl_sql).fetchall()) > 0:
@@ -993,6 +1009,14 @@ async def run_chatlog_prune_pass(args):
                                   args.chatlog_prune_threshold):
         logger.debug("No chatlog-prune work (no aged backlog over threshold). Skipping.")
         return
+    # Throttle: prune is a CPU-heavy maintenance SWEEP (re-classifies every aged
+    # chat row with several regexes — seconds per run), NOT a backlog drain. Under
+    # the idle-backlog-drain short-tick it would otherwise re-run every ~1s and peg
+    # a core while pruning nothing (kept rows stay candidates). Cap it to at most
+    # once per --interval via the same min-interval gate the time-driven passes use.
+    if not _due("chatlog_prune", float(getattr(args, "interval", 300) or 300)):
+        logger.debug("chatlog-prune: throttled (ran within the last interval). Skipping.")
+        return
     # Config file > env > default (see consolidate_beliefs): a bare env gate is
     # dead under launchd/systemd, which don't inherit shell env (DESIGN §3).
     from m3_core.autonomy import autonomy_flag
@@ -1013,6 +1037,7 @@ async def run_chatlog_prune_pass(args):
             max_actions=args.chatlog_prune_max_actions,
             no_generic=False, apply=apply)
         summary = chatlog_prune.run(args.chatlog_db, opts)
+        _record_pass_run("chatlog_prune")  # stamp for the min-interval throttle
         logger.info("Chatlog-prune pass: suppress=%s soft-delete=%s capped=%s (apply=%s)",
                     summary.get("writes_decay"), summary.get("writes_prune"),
                     summary.get("capped"), apply)
