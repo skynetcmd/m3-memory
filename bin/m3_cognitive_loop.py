@@ -339,7 +339,12 @@ def _probe_core(db_path: Optional[str], sql: str, params: tuple = ()) -> list:
     the fetched rows (len()>0 == "there is work")."""
     from memory.backends import active_backend
     if active_backend().name == "sqlite":
-        return M3Context(db_path).query_memory(sql, params)
+        # for_db (NOT the raw M3Context ctor): the raw ctor builds a fresh
+        # M3_DB_POOL_SIZE-connection pool that is never cached or closed, so these
+        # per-cycle work-gate probes leaked ~5 SQLite connections (≈15 FDs) each
+        # until the daemon hit "Too many open files". for_db is LRU-cached +
+        # closed on eviction/atexit, and still skips lazy-init/migrations.
+        return M3Context.for_db(db_path).query_memory(sql, params)
     import memory_core as mc
     with mc._db() as db:
         return db.execute(sql, params).fetchall()
@@ -354,7 +359,9 @@ def _conn_for_pass(db_path: Optional[str]):
     with a `with ... as conn:` block; conn.execute/commit work on both."""
     from memory.backends import active_backend
     if active_backend().name == "sqlite":
-        return M3Context(db_path).get_sqlite_conn()
+        # for_db, not the raw ctor — see _probe_core: the raw ctor leaks an
+        # uncached 5-connection pool per call.
+        return M3Context.for_db(db_path).get_sqlite_conn()
     import memory_core as mc
     return mc._db()
 
@@ -517,9 +524,11 @@ def has_entity_work(core_db: Optional[str], chatlog_db: Optional[str]) -> bool:
                                       chatlog_table("items"), chatlog_table("item_entities"),
                                       chatlog_table("extraction_queue"))) > 0:
                 return True
-        elif chatlog_db and os.path.abspath(chatlog_db) != os.path.abspath(M3Context(core_db).db_path):
+        elif chatlog_db and os.path.abspath(chatlog_db) != os.path.abspath(M3Context.for_db(core_db).db_path):
             # SQLite: a SEPARATE chatlog file with the same table names.
-            ctx_chat = M3Context(chatlog_db)
+            # for_db (cached), not the raw ctor — the raw ctor leaked a 5-connection
+            # pool here every probe (both just to read .db_path and for ctx_chat).
+            ctx_chat = M3Context.for_db(chatlog_db)
             if len(_probe_entity_work(lambda sql, params=(): ctx_chat.query_memory(sql, params),
                                       "memory_items", "memory_item_entities",
                                       "entity_extraction_queue")) > 0:
@@ -1469,6 +1478,31 @@ async def main_loop(args):
 
     logger.info("Cognitive Loop stopped.")
 
+def _raise_fd_limit(target: int = 4096) -> None:
+    """Best-effort raise this process's open-file limit — a cross-OS backstop
+    behind the connection-pool reuse (the real leak fix). ONE mechanism for all
+    three supported OSes: POSIX (macOS + Linux) via resource.setrlimit; Windows
+    (which has no RLIMIT_NOFILE) via the C-runtime stdio cap _setmaxstdio. Done
+    in-process because the OS schedulers don't share one knob — launchd/systemd
+    can set it, Windows Task Scheduler cannot. Silent on failure."""
+    try:
+        import resource  # POSIX only
+    except ImportError:
+        try:  # Windows: raise the CRT stdio cap (default 512, hard max 8192)
+            import ctypes
+            ctypes.cdll.msvcrt._setmaxstdio(min(target, 8192))
+        except Exception:
+            pass
+        return
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        ceiling = target if hard == resource.RLIM_INFINITY else min(target, hard)
+        if soft < ceiling:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (ceiling, hard))
+    except (ValueError, OSError):
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser(description="m3-memory Cognitive Loop")
     parser.add_argument("--interval", type=int, default=300,
@@ -1590,6 +1624,10 @@ def main():
         _fh.setFormatter(logging.Formatter(
             "%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         logging.getLogger().addHandler(_fh)
+
+    # Cross-OS FD headroom (backstop behind the pool-reuse fix; covers Windows,
+    # which the launchd/systemd rlimit knobs cannot).
+    _raise_fd_limit()
 
     # Resolve paths once to normalize env vs flag
     if args.database:

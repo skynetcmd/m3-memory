@@ -23,6 +23,10 @@ Type=simple
 ExecStart=[M3_PYTHON] [M3_MEMORY_ROOT]/bin/m3_cognitive_loop.py --interval 300 --log-file [M3_MEMORY_ROOT]/logs/cognitive_loop.log
 Restart=always
 RestartSec=10
+# File-descriptor headroom (defense-in-depth; the real fix is connection-pool
+# reuse in the loop). systemd's default (often 1024) let FD growth escalate to
+# "Too many open files".
+LimitNOFILE=4096
 # Exit code 4 = EXIT_ALREADY_RUNNING (another instance already holds the
 # single-instance lock). Treat it as a CLEAN exit so systemd does NOT restart
 # (Restart=always would otherwise respawn-loop on it). This is the reciprocal

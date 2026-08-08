@@ -26,6 +26,19 @@
     </array>
     <key>RunAtLoad</key>
     <true/>
+    <!-- File-descriptor headroom (defense-in-depth). The real protection is the
+         connection-pool reuse fix in the loop; launchd's default soft limit (256)
+         is what turned any FD growth into a fast "Too many open files" collapse. -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
     <!-- KeepAlive restarts only on an ABNORMAL (crash/signal) exit, NOT on a
          clean exit. A clean exit 4 = EXIT_ALREADY_RUNNING (another instance
          holds the single-instance lock); unconditional KeepAlive=true would

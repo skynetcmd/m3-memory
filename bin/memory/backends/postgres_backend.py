@@ -242,7 +242,9 @@ def _resolve_dsn() -> str:
         try:
             from m3_core.context import M3Context
 
-            secret = M3Context().get_secret("M3_PRIMARY_PG_URL")
+            # for_db (cached) not the raw ctor — the raw ctor spins up a throwaway
+            # 5-connection SQLite pool just to read one secret, even on PG.
+            secret = M3Context.for_db().get_secret("M3_PRIMARY_PG_URL")
             if secret:
                 url = secret.strip()
         except Exception:
@@ -299,7 +301,8 @@ def _resolve_warehouse_dsn_for_guard() -> str:
     try:
         from m3_core.context import M3Context
 
-        secret = M3Context().get_secret("PG_URL")
+        # for_db (cached) not the raw ctor — avoid a throwaway SQLite pool per call.
+        secret = M3Context.for_db().get_secret("PG_URL")
         if secret:
             return secret.strip()
     except Exception:

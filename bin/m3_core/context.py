@@ -147,6 +147,14 @@ class M3Context:
                     pool.put(conn)
                 except sqlite3.Error as e:
                     logger.error(f"Failed to create SQLite connection for {self.db_path}: {e}")
+                    # Close the connections already opened into the local pool before
+                    # raising — otherwise a mid-init failure (e.g. FD exhaustion) leaks
+                    # the partial pool and worsens the exhaustion it was caused by.
+                    while not pool.empty():
+                        try:
+                            pool.get_nowait().close()
+                        except Exception:
+                            pass
                     raise
             self._pool = pool
             try:
