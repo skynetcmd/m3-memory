@@ -488,50 +488,18 @@ def has_pending_extraction(db_path: "Optional[str]" = None) -> bool:
     """True iff the files store EXISTS and holds a leaf with
     ``extraction_status='pending'``.
 
-    Side-effect-free and backend/OS-agnostic: it NEVER creates or migrates the
-    store, so it is a cheap, silent no-op on installs (or backends) where file
-    ingestion was never used — the contract the cognitive-loop drain pass relies
-    on to stay near-zero-cost when there are no files.
-
-    - SQLite (any OS): a missing DB file means "no store" → return False WITHOUT
-      opening it (opening would create + migrate an empty DB). The existence check
-      uses ``os.path.exists`` (cross-platform) and we only ever SELECT.
-    - PostgreSQL: files tables live in the primary DB's schema. Probe the primary
-      pool (which does NOT run the files-schema migration); a missing table
-      (never ingested) reads as "no store".
-    - Any other/unknown backend or any error → False (safe: the pass no-ops).
-    """
-    from . import db as _dbmod
-    try:
-        if _dbmod._is_postgres():
-            import memory_core as mc
-
-            from .config import files_table
-            try:
-                with mc._db() as conn:
-                    row = conn.execute(
-                        f"SELECT 1 FROM {files_table('leaves')} "
-                        "WHERE extraction_status = 'pending' LIMIT 1"
-                    ).fetchone()
-                return bool(row)
-            except Exception:  # noqa: BLE001 — missing files schema/table → no work
-                return False
-        # File-based backend (SQLite): don't touch a store that isn't there.
-        path = _dbmod._resolve_path(db_path)
-        if not path or not os.path.exists(path):
-            return False
-        conn = sqlite3.connect(path)  # file exists → opens, never creates; SELECT-only
-        try:
-            row = conn.execute(
-                "SELECT 1 FROM leaves WHERE extraction_status = 'pending' LIMIT 1"
-            ).fetchone()
-            return bool(row)
-        except sqlite3.OperationalError:  # leaves table not created yet
-            return False
-        finally:
-            conn.close()
-    except Exception:  # noqa: BLE001 — resolution/backend error → safe no-op
-        return False
+    Side-effect-free, backend/OS-agnostic, and cheap: it never creates or migrates
+    the store, so it's a silent no-op on installs (or backends) where file
+    ingestion was never used — the contract the cognitive-loop drain pass relies on
+    to stay near-zero-cost when there are no files. Backend routing lives in the
+    files-container seam (``db.readonly_probe``), and the table name is
+    dialect-resolved via ``files_table`` — no backend-name branch or raw connection
+    in this feature function."""
+    from .db import readonly_probe
+    return bool(readonly_probe(
+        f"SELECT 1 FROM {files_table('leaves')} WHERE extraction_status = 'pending' LIMIT 1",
+        db_path=db_path,
+    ))
 
 
 def extract_for_pending_leaves(

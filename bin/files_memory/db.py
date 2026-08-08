@@ -85,6 +85,44 @@ def _is_postgres() -> bool:
         return False
 
 
+def readonly_probe(sql: str, params: tuple = (), *, db_path: str | None = None) -> list:
+    """Run a SIDE-EFFECT-FREE read against the files store; return its rows, or []
+    if the store (or the queried table) does not exist yet.
+
+    The files-container analogue of a work-gate probe. It must NEVER create or
+    migrate the store, so it stays a cheap, silent no-op on installs that don't use
+    file ingestion. Backend routing lives HERE (the files store's db layer), not in
+    feature code — the caller passes backend-neutral SQL (use ``files_table()`` for
+    names) and this method picks the connection:
+      - SQLite: a separate DB FILE. If the file is absent there is no store —
+        return [] WITHOUT opening it (opening would create + migrate an empty DB).
+        Otherwise open and SELECT, tolerating a not-yet-created table.
+      - PostgreSQL / other SQL backends: the files tables live in the ``files``
+        schema of the primary DB; probe via the primary pool WITHOUT running the
+        files-schema migration, tolerating a missing table.
+    Any error (no store, locked, unknown backend) → [] (safe no-op)."""
+    try:
+        if _is_postgres():
+            from memory.db import _db as _seam_db  # primary pool; no files-schema init
+            try:
+                with _seam_db() as conn:
+                    return list(conn.execute(sql, params).fetchall())
+            except Exception:  # noqa: BLE001 — missing files schema/table → no rows
+                return []
+        path = _resolve_path(db_path)
+        if not path or not os.path.exists(path):
+            return []
+        conn = sqlite3.connect(path)  # file exists → opens, never creates; SELECT-only
+        try:
+            return list(conn.execute(sql, params).fetchall())
+        except sqlite3.OperationalError:  # table not created yet
+            return []
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — resolution/backend error → safe no-op
+        return []
+
+
 def _new_connection(db_path: str) -> sqlite3.Connection:
     """Open a fresh SQLite connection to the separate files DB file.
 

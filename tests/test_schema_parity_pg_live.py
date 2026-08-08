@@ -188,3 +188,41 @@ def test_chroma_tables_absent_on_both(pg):
         cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public'")
         pg_tables = {r[0] for r in cur.fetchall()}
     assert not (chroma & pg_tables), f"chroma tables still in PG schema: {chroma & pg_tables}"
+
+
+def test_chatlog_clones_mirror_core_columns(pg):
+    """The chatlog container's chat_log_* clones must carry EVERY column their core
+    counterpart has.
+
+    pg_043 clones the core tables into chat_log_* on PG; a column added to a core
+    table AFTER that clone (like `status` on entity_extraction_queue via pg_041)
+    silently didn't reach the chatlog clone (chat_log_extraction_queue), so a ported
+    tool hit a missing column on PG only — chatlog entity extraction couldn't mark a
+    turn terminal, so the cognitive loop couldn't idle on PG (fixed by pg_049). This
+    guards the whole class: a chat_log_* clone may ADD columns (e.g. search_vector),
+    but must never be MISSING one its core source has.
+    """
+    from memory.backends.dialect import _CHATLOG_TABLES
+
+    def _cols(cur, tbl: str) -> set:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema='public' AND table_name=%s",
+            (tbl,),
+        )
+        return {r[0] for r in cur.fetchall()}
+
+    dropped: dict = {}
+    with pg.connection() as c:
+        cur = c.cursor()
+        for _role, (core_name, chat_log_name) in _CHATLOG_TABLES.items():
+            core_cols = _cols(cur, core_name)
+            cl_cols = _cols(cur, chat_log_name)
+            if not core_cols or not cl_cols:
+                continue  # a table absent on this build is covered by other tests
+            missing = core_cols - cl_cols
+            if missing:
+                dropped[chat_log_name] = sorted(missing)
+    assert not dropped, (
+        f"chatlog clone(s) missing core columns (PG-only parity gap): {dropped}"
+    )

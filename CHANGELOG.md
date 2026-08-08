@@ -21,6 +21,28 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.0] — 2026-08-08 — files gate through the store seam; chatlog-clone schema parity guarded
+
+### Added
+- **`files_memory.db.readonly_probe(sql, params, db_path=)`** — the files-container
+  seam primitive for a SIDE-EFFECT-FREE read that never creates or migrates the
+  store (absent SQLite file / missing PG table → `[]`). `has_pending_extraction`
+  now routes through it, so the files work-gate has NO backend-name branch or raw
+  `sqlite3.connect` in feature code — the backend routing lives in the store's db
+  layer, matching how the core/chatlog gates use the shared seam. Verified on
+  SQLite and PostgreSQL.
+- **`test_chatlog_clones_mirror_core_columns` (PG-live)** — guards the whole class
+  of "chat_log_* clone drifted from its core source" bug: every `chat_log_*` table
+  must carry every column its core counterpart has. It immediately caught a second
+  gap beyond pg_049.
+
+### Fixed
+- **PostgreSQL chatlog parity: `chat_log_entities` was missing the entity-coalesce
+  columns** (`coalesce_state`, `cluster_id`, `resolution_run`) that pg_048 added to
+  core `entities`. New forward migration `pg_050` adds them (mirrors pg_048), so
+  chatlog entity coalescing works on PG. (SQLite's separate chatlog file already
+  gets them via the shared migration chain.)
+
 ## [2026.8.18.0] — 2026-08-08 — entity work-gate goes through the storage seam (verified on SQLite AND PostgreSQL)
 
 ### Added
