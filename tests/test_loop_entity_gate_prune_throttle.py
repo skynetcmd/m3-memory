@@ -61,6 +61,43 @@ def test_gate_goes_empty_once_fresh_row_is_done(tmp_path):
     assert c.execute(sql).fetchone() is None  # no work left -> loop can go idle
 
 
+def _probe(conn, items="memory_items", links="memory_item_entities", queue="entity_extraction_queue"):
+    return len(L._probe_entity_work(lambda s: conn.execute(s).fetchall(), items, links, queue))
+
+
+def _mini_db(path, *, with_queue=True, with_status=True):
+    c = sqlite3.connect(path)
+    c.execute("CREATE TABLE memory_items(id INTEGER PRIMARY KEY, type TEXT, content TEXT, is_deleted INT DEFAULT 0)")
+    c.execute("CREATE TABLE memory_item_entities(memory_id INTEGER)")
+    t = ME.DEFAULT_TYPES[0]
+    c.execute("INSERT INTO memory_items(id,type,content) VALUES (1,?,'a'),(2,?,'b')", (t, t))
+    if with_queue:
+        cols = "memory_id INTEGER" + (", status TEXT, attempts INT DEFAULT 0" if with_status else "")
+        c.execute(f"CREATE TABLE entity_extraction_queue({cols})")
+    c.commit()
+    return c
+
+
+def test_exclusion_applies_when_queue_status_present(tmp_path):
+    c = _mini_db(str(tmp_path / "m.db"))
+    c.execute("INSERT INTO entity_extraction_queue(memory_id,status) VALUES (1,'done'),(2,'done')")
+    c.commit()
+    assert _probe(c) == 0  # both done -> no work (exclusion works, loop can idle)
+
+
+def test_degrades_to_link_only_when_status_column_missing(tmp_path):
+    # Brand-new DB: queue table exists but no status column yet (before first
+    # extraction adds it). Must NOT raise, must NOT fail-open incorrectly — it
+    # degrades to link-only, which is correct (nothing recorded terminal yet).
+    c = _mini_db(str(tmp_path / "m.db"), with_status=False)
+    assert _probe(c) > 0  # returns (no exception) -> link-only says there's work
+
+
+def test_degrades_to_link_only_when_queue_table_missing(tmp_path):
+    c = _mini_db(str(tmp_path / "m.db"), with_queue=False)
+    assert _probe(c) > 0  # no queue table at all -> link-only, no exception
+
+
 def test_prune_throttle_due_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(L, "get_m3_config_root", lambda: str(tmp_path), raising=False)
     assert L._due("chatlog_prune", 300.0) is True   # never run -> due

@@ -21,6 +21,32 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.17.0] — 2026-08-08 — autonomous file-extraction drain in the cognitive loop
+
+### Added
+- **The cognitive loop now drains queued file fact-extraction automatically.** A
+  new governor-paced `files_extract` pass (on by default) drains leaves left with
+  `extraction_status='pending'` by `extract_mode='queue'` ingests — the files
+  analogue of the entity/enrich passes. It inherits the shared extract seam
+  (`llm_failover` endpoint, `reasoning_effort="none"` suppression on LM Studio/
+  Ollama, fail-loud reasoning warning), runs the sync extractor off the event loop
+  (`to_thread`), and marks every leaf terminal so it can't re-appear as work.
+  Skip with `--skip-files-extract`.
+- **The gate is a silent, near-zero-cost no-op when there is no files store.**
+  `files_memory.extract.has_pending_extraction()` is backend- and OS-agnostic and
+  side-effect-free: on SQLite an absent DB file returns False WITHOUT creating or
+  migrating one; on PostgreSQL it probes the primary schema and treats a missing
+  table as "no work"; any other/unknown backend or error → False. So installs
+  that never use file ingestion pay nothing.
+
+### Fixed
+- **Entity work-gate degrades explicitly (rigor parity with the 2026.8.16.0 fix).**
+  When the `entity_extraction_queue` table or its `status` column isn't present yet
+  (a brand-new store before the first extraction adds it, or a backend without the
+  queue), the gate now degrades to a link-only probe via `_probe_entity_work`
+  rather than erroring into the coarse fail-open — the correct behaviour on both
+  SQLite and PostgreSQL. Portable SQL throughout.
+
 ## [2026.8.16.0] — 2026-08-08 — cognitive loop stops pegging a CPU core (idle when idle)
 
 ### Fixed

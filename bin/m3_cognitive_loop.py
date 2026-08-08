@@ -372,7 +372,8 @@ def _conn_for_pass(db_path: Optional[str]):
 _ENTITY_WORK_TYPES_SQL = ", ".join(f"'{t}'" for t in m3_entities.DEFAULT_TYPES)
 
 
-def _entity_work_sql(items_tbl: str, link_tbl: str, queue_tbl: str = "entity_extraction_queue") -> str:
+def _entity_work_sql(items_tbl: str, link_tbl: str, queue_tbl: str = "entity_extraction_queue",
+                     *, exclude_queue: bool = True) -> str:
     """The un-entitized-rows probe over a given items + item-entities table pair.
     Same SQL shape for core (memory_items/memory_item_entities) and chatlog
     (chat_log_items/chat_log_item_entities on PG). The `type IN (...)` list is
@@ -386,21 +387,44 @@ def _entity_work_sql(items_tbl: str, link_tbl: str, queue_tbl: str = "entity_ext
     entities has no link row and reads as "work" FOREVER: has_entity_work stays
     True, so the loop's idle-backlog-drain re-ticks every ~1s instead of sleeping
     the interval, re-running every CPU-heavy pass (chatlog-prune ~8s) back-to-back
-    and pegging a core. Mirroring the exclusion lets the loop actually go idle."""
+    and pegging a core. Mirroring the exclusion lets the loop actually go idle.
+
+    ``exclude_queue=False`` drops the queue clause (link-only) for the degraded
+    path used when the queue table or its ``status`` column isn't present yet — see
+    ``_probe_entity_work``. Backend-portable SQL (SQLite + PostgreSQL); the queue
+    table name is passed backend-qualified by the caller."""
     max_att = int(getattr(m3_entities, "MAX_ENTITY_ATTEMPTS", 3))
+    queue_clause = "" if not exclude_queue else f"""
+          AND mi.id NOT IN (
+              SELECT memory_id FROM {queue_tbl}
+              WHERE status IN ('done', 'ctx_error')
+                 OR (status = 'failed' AND attempts >= {max_att})
+          )"""
     return f"""
         SELECT 1 FROM {items_tbl} mi
         LEFT JOIN {link_tbl} mie ON mi.id = mie.memory_id
         WHERE mi.is_deleted = 0
           AND mi.type IN ({_ENTITY_WORK_TYPES_SQL})
-          AND mie.memory_id IS NULL
-          AND mi.id NOT IN (
-              SELECT memory_id FROM {queue_tbl}
-              WHERE status IN ('done', 'ctx_error')
-                 OR (status = 'failed' AND attempts >= {max_att})
-          )
+          AND mie.memory_id IS NULL{queue_clause}
         LIMIT 1
     """
+
+
+def _probe_entity_work(run_sql, items_tbl: str, link_tbl: str, queue_tbl: str):
+    """Run the entity work-gate via ``run_sql(sql) -> list``, degrading EXPLICITLY
+    to a link-only probe if the queue table / its ``status`` column isn't available.
+
+    A brand-new store (before the first extraction pass adds the status column via
+    m3_entities' runtime DDL), or any backend that lacks the queue, would otherwise
+    error the full query and bubble to has_entity_work's coarse fail-open=True —
+    which would silently re-trigger the pegged-core spin. Link-only is the CORRECT
+    degradation there (nothing has been recorded terminal yet, so every un-linked
+    row is genuinely work). Same-envs-covered: SQLite + PostgreSQL; the retry runs
+    at most once, and only on the rare error path."""
+    try:
+        return run_sql(_entity_work_sql(items_tbl, link_tbl, queue_tbl, exclude_queue=True))
+    except Exception:  # noqa: BLE001 — queue table/status column absent → link-only
+        return run_sql(_entity_work_sql(items_tbl, link_tbl, queue_tbl, exclude_queue=False))
 
 
 # ── Per-pass min-interval gate ────────────────────────────────────────────────
@@ -468,26 +492,26 @@ def has_entity_work(core_db: Optional[str], chatlog_db: Optional[str]) -> bool:
         _backend = active_backend()
 
         # 1. Core store.
-        core_sql = _entity_work_sql("memory_items", "memory_item_entities")
-        if len(_probe_core(core_db, core_sql)) > 0:
+        if len(_probe_entity_work(lambda s: _probe_core(core_db, s),
+                                  "memory_items", "memory_item_entities",
+                                  "entity_extraction_queue")) > 0:
             return True
 
         # 2. Chatlog store.
         if _backend.name != "sqlite":
             # PG: chat_log_* tables in the same DB — probe them via the pool.
             import memory_core as mc
-            cl_sql = _entity_work_sql(
-                chatlog_table("items"), chatlog_table("item_entities"),
-                chatlog_table("entity_extraction_queue"),
-            )
             with mc._db() as db:
-                if len(db.execute(cl_sql).fetchall()) > 0:
+                if len(_probe_entity_work(lambda s: db.execute(s).fetchall(),
+                                          chatlog_table("items"), chatlog_table("item_entities"),
+                                          chatlog_table("entity_extraction_queue"))) > 0:
                     return True
         elif chatlog_db and os.path.abspath(chatlog_db) != os.path.abspath(M3Context(core_db).db_path):
             # SQLite: a SEPARATE chatlog file with the same table names.
             ctx_chat = M3Context(chatlog_db)
-            sql = _entity_work_sql("memory_items", "memory_item_entities")
-            if len(ctx_chat.query_memory(sql)) > 0:
+            if len(_probe_entity_work(lambda s: ctx_chat.query_memory(s),
+                                      "memory_items", "memory_item_entities",
+                                      "entity_extraction_queue")) > 0:
                 return True
 
         return False
@@ -508,6 +532,21 @@ def has_enrich_work(core_db: Optional[str]) -> bool:
     except Exception as e:
         logger.debug(f"Enrich work check failed (non-fatal): {e}")
         return True
+
+
+def has_files_extract_work(files_db: Optional[str] = None) -> bool:
+    """Cheap, SILENT gate: are there queued file-extraction leaves to drain?
+
+    Delegates to files_memory's backend/OS-agnostic, side-effect-free probe — it
+    never creates or migrates the files store, so this is near-zero-cost and quiet
+    on installs (or backends) that don't use file ingestion. Any error (files_memory
+    absent, store missing) reads as "no work" so the pass simply no-ops."""
+    try:
+        from files_memory.extract import has_pending_extraction
+        return has_pending_extraction(files_db)
+    except Exception as e:  # noqa: BLE001 — no files store / import issue → no work
+        logger.debug(f"Files-extract work check failed (non-fatal): {e}")
+        return False
 
 
 def has_consolidate_work(core_db: Optional[str], source_type: str,
@@ -569,6 +608,39 @@ async def run_entity_pass(args):
         await m3_entities._main_async(ent_args)
     except Exception as e:
         logger.error(f"Entity pass error: {type(e).__name__}: {e}")
+
+async def run_files_extract_pass(args):
+    """Drain queued file-extraction leaves (extraction_status='pending') through the
+    LLM fact extractor — governor-paced, on by default.
+
+    Files ingested with extract_mode='queue' defer their fact extraction; this is
+    the autonomous drainer (the memory-side analogue of run_entity_pass). Fast +
+    SILENT no-op when there is no files store (has_files_extract_work never creates
+    it). The extractor is synchronous (sync httpx), so it runs off the event loop
+    via to_thread — the loop stays responsive. It inherits the shared extract seam:
+    llm_failover endpoint resolution, reasoning_effort='none' suppression on LM
+    Studio/Ollama, and the fail-loud reasoning warning. Each leaf is marked terminal
+    (ok/failed/skipped) so it can't perpetually re-appear as work."""
+    files_db = getattr(args, "files_db", None)
+    if args.skip_files_extract or not has_files_extract_work(files_db):
+        logger.debug("No pending file-extraction work (or no files store). Skipping.")
+        return
+    logger.info("Starting file-extraction drain pass...")
+    try:
+        from files_memory.extract import extract_for_pending_leaves
+        res = await asyncio.to_thread(
+            extract_for_pending_leaves, limit=args.limit_per_pass, db_path=files_db)
+        if res.get("error"):
+            # e.g. "no LLM endpoint configured" — quiet (the doctor flags LLM
+            # reachability loudly; don't spam the loop log every cycle).
+            logger.debug("File-extraction pass: %s", res["error"])
+        else:
+            logger.info("File-extraction pass: ok=%s failed=%s skipped=%s model=%s",
+                        res.get("ok"), res.get("failed"), res.get("skipped"),
+                        res.get("model_id"))
+    except Exception as e:  # noqa: BLE001
+        logger.error("File-extraction pass error: %s: %s", type(e).__name__, e)
+
 
 async def run_enrich_pass(args):
     """Run incremental Observation + Reflection pass."""
@@ -1275,6 +1347,10 @@ async def main_loop(args):
         passes = [
             {"name": "entities",   "skip": args.skip_entities,      "gpu": entity_local,      "sets_limit": True,  "run": run_entity_pass},
             {"name": "enrich",     "skip": args.skip_enrich,        "gpu": enrich_local,      "sets_limit": True,  "run": run_enrich_pass},
+            # File fact-extraction drain (extract_mode='queue'). LLM pass on the
+            # shared local endpoint → GPU-gated + batch-shrunk under throttle, like
+            # entities/enrich. No-op (silent, cheap) when there's no files store.
+            {"name": "files_extract", "skip": args.skip_files_extract, "gpu": True,           "sets_limit": True,  "run": run_files_extract_pass},
             {"name": "embed",      "skip": args.skip_embed,         "gpu": True,              "sets_limit": True,  "run": run_embed_pass},
             {"name": "classify",   "skip": args.skip_classify,      "gpu": enrich_local,      "sets_limit": True,  "run": run_classify_pass},
             {"name": "consolidate","skip": args.skip_consolidate,   "gpu": consolidate_local, "sets_limit": False, "run": run_consolidate_pass},
@@ -1307,6 +1383,7 @@ async def main_loop(args):
         if active:
             work_map = {
                 "entities":    not args.skip_entities and has_entity_work(args.database, args.chatlog_db),
+                "files_extract": not args.skip_files_extract and has_files_extract_work(getattr(args, "files_db", None)),
                 "enrich":      not args.skip_enrich and has_enrich_work(args.database),
                 "embed":       not args.skip_embed and has_embed_work(args.database),
                 "classify":    not args.skip_classify and has_classify_work(args.database),
@@ -1414,6 +1491,10 @@ def main():
     parser.add_argument("--profile-enrich", default="enrich_local_qwen", help="Profile for enrichment")
     parser.add_argument("--reflector-threshold", type=int, default=5, help="Min observations before Reflector (default: 5)")
     parser.add_argument("--skip-entities", action="store_true", help="Skip entity extraction")
+    parser.add_argument("--skip-files-extract", action="store_true",
+                        help="Skip draining queued file-extraction leaves (extract_mode='queue')")
+    parser.add_argument("--files-db", default=None,
+                        help="Files DB path override (default: M3_FILES_DB_PATH env / config)")
     parser.add_argument("--skip-enrich", action="store_true", help="Skip enrichment pass")
     parser.add_argument("--skip-embed", action="store_true",
                         help="Skip embed-backfill pass (draining deferred zero-lag-write vectors)")
