@@ -62,7 +62,8 @@ def test_gate_goes_empty_once_fresh_row_is_done(tmp_path):
 
 
 def _probe(conn, items="memory_items", links="memory_item_entities", queue="entity_extraction_queue"):
-    return len(L._probe_entity_work(lambda s: conn.execute(s).fetchall(), items, links, queue))
+    return len(L._probe_entity_work(
+        lambda sql, params=(): conn.execute(sql, params).fetchall(), items, links, queue))
 
 
 def _mini_db(path, *, with_queue=True, with_status=True):

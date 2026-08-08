@@ -658,6 +658,27 @@ class Dialect:
         """Backend fragment for :meth:`columns_of` (post-validation)."""
         raise NotImplementedError("subclass must implement _columns_of_query()")
 
+    def column_exists(self, table: str, column: str) -> tuple[str, tuple]:
+        """A (sql, params) pair whose result is truthy iff ``table`` has ``column``.
+
+        The seam answer to "does this column exist?" — use it INSTEAD of running a
+        query that references the column and catching the error. On PostgreSQL an
+        ``UndefinedColumn`` error aborts the whole transaction, so any fallback
+        query on the same connection then dies with ``InFailedSqlTransaction``;
+        an up-front existence check has no such hazard and is backend-uniform. A
+        missing table returns zero rows (no error), so this also covers "table not
+        present yet". Caller pattern: ``bool(db.execute(sql, params).fetchall())``.
+        """
+        if not table.isidentifier():
+            raise ValueError(f"table name must be a bare identifier: {table!r}")
+        if not column.isidentifier():
+            raise ValueError(f"column name must be a bare identifier: {column!r}")
+        return self._column_exists_query(table, column)
+
+    def _column_exists_query(self, table: str, column: str) -> tuple[str, tuple]:
+        """Backend fragment for :meth:`column_exists` (post-validation)."""
+        raise NotImplementedError("subclass must implement _column_exists_query()")
+
     # -- schema namespacing --------------------------------------------------
     def qualified_table(self, name: str, *, schema: str) -> str:
         """Qualify a table name that lives in a SEPARATE logical store.

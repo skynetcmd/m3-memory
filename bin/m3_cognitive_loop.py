@@ -411,20 +411,22 @@ def _entity_work_sql(items_tbl: str, link_tbl: str, queue_tbl: str = "entity_ext
 
 
 def _probe_entity_work(run_sql, items_tbl: str, link_tbl: str, queue_tbl: str):
-    """Run the entity work-gate via ``run_sql(sql) -> list``, degrading EXPLICITLY
-    to a link-only probe if the queue table / its ``status`` column isn't available.
+    """Entity work-gate for one store, via the storage seam — ``run_sql(sql,
+    params=()) -> list`` opening a fresh transaction per call.
 
-    A brand-new store (before the first extraction pass adds the status column via
-    m3_entities' runtime DDL), or any backend that lacks the queue, would otherwise
-    error the full query and bubble to has_entity_work's coarse fail-open=True —
-    which would silently re-trigger the pegged-core spin. Link-only is the CORRECT
-    degradation there (nothing has been recorded terminal yet, so every un-linked
-    row is genuinely work). Same-envs-covered: SQLite + PostgreSQL; the retry runs
-    at most once, and only on the rare error path."""
-    try:
-        return run_sql(_entity_work_sql(items_tbl, link_tbl, queue_tbl, exclude_queue=True))
-    except Exception:  # noqa: BLE001 — queue table/status column absent → link-only
-        return run_sql(_entity_work_sql(items_tbl, link_tbl, queue_tbl, exclude_queue=False))
+    Asks the dialect's ``column_exists`` primitive whether the queue's ``status``
+    column is present, then runs ONE probe with the queue-terminal exclusion
+    applied only when it is. Using an up-front existence check (not a query that
+    references ``status`` + an error-catch fallback) is deliberate: on PostgreSQL
+    an ``UndefinedColumn`` error aborts the whole transaction, so a fallback query
+    on the same connection would die with ``InFailedSqlTransaction``. Link-only is
+    the correct behaviour when the column/table is absent (a brand-new store before
+    the first extraction adds it, or a backend that lacks the queue) — nothing has
+    been recorded terminal yet, so every un-linked row is genuinely work. Verified
+    on BOTH SQLite and PostgreSQL."""
+    from memory.backends import active_backend
+    has_status = bool(run_sql(*active_backend().dialect().column_exists(queue_tbl, "status")))
+    return run_sql(_entity_work_sql(items_tbl, link_tbl, queue_tbl, exclude_queue=has_status))
 
 
 # ── Per-pass min-interval gate ────────────────────────────────────────────────
@@ -491,25 +493,34 @@ def has_entity_work(core_db: Optional[str], chatlog_db: Optional[str]) -> bool:
         from memory.backends import active_backend, chatlog_table
         _backend = active_backend()
 
+        # Each run_sql opens a FRESH transaction per call (via _probe_core /
+        # mc._db() / query_memory), so the column_exists probe and the work probe
+        # never share an aborted PG transaction. The store-topology fork below
+        # (separate SQLite chatlog FILE vs PG chat_log_* tables in the one DB) is
+        # structural, not a dialect leak.
         # 1. Core store.
-        if len(_probe_entity_work(lambda s: _probe_core(core_db, s),
+        if len(_probe_entity_work(lambda sql, params=(): _probe_core(core_db, sql, params),
                                   "memory_items", "memory_item_entities",
                                   "entity_extraction_queue")) > 0:
             return True
 
         # 2. Chatlog store.
         if _backend.name != "sqlite":
-            # PG: chat_log_* tables in the same DB — probe them via the pool.
+            # PG: chat_log_* tables live in the same DB — probe via the pool.
             import memory_core as mc
-            with mc._db() as db:
-                if len(_probe_entity_work(lambda s: db.execute(s).fetchall(),
-                                          chatlog_table("items"), chatlog_table("item_entities"),
-                                          chatlog_table("entity_extraction_queue"))) > 0:
-                    return True
+
+            def _cl_run(sql, params=()):
+                with mc._db() as db:
+                    return db.execute(sql, params).fetchall()
+
+            if len(_probe_entity_work(_cl_run,
+                                      chatlog_table("items"), chatlog_table("item_entities"),
+                                      chatlog_table("extraction_queue"))) > 0:
+                return True
         elif chatlog_db and os.path.abspath(chatlog_db) != os.path.abspath(M3Context(core_db).db_path):
             # SQLite: a SEPARATE chatlog file with the same table names.
             ctx_chat = M3Context(chatlog_db)
-            if len(_probe_entity_work(lambda s: ctx_chat.query_memory(s),
+            if len(_probe_entity_work(lambda sql, params=(): ctx_chat.query_memory(sql, params),
                                       "memory_items", "memory_item_entities",
                                       "entity_extraction_queue")) > 0:
                 return True

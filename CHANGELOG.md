@@ -21,6 +21,34 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.18.0] — 2026-08-08 — entity work-gate goes through the storage seam (verified on SQLite AND PostgreSQL)
+
+### Added
+- **`Dialect.column_exists(table, column)` seam primitive** (SQLite + PostgreSQL).
+  The backend-uniform answer to "does this column exist?" — use it INSTEAD of
+  running a query that references a maybe-absent column and catching the error.
+  On PostgreSQL an `UndefinedColumn` aborts the whole transaction, so a fallback
+  query on the same connection then dies with `InFailedSqlTransaction`; an
+  up-front existence check has no such hazard. A missing table returns zero rows.
+
+### Fixed
+- **The entity work-gate now routes its queue-terminal exclusion through the seam,
+  not a backend-specific hack.** The 2026.8.16.0 gate used a try-query-then-retry
+  pattern that only worked on SQLite: on PostgreSQL the first (exclusion) query's
+  error aborted the transaction and the link-only retry died. It now asks
+  `column_exists` up front and builds ONE query — no error-catch/retry, no
+  transaction hazard, no backend-name branch for the degradation. Verified on a
+  live PostgreSQL cluster (exclusion + degradation), which SQLite-only testing had
+  missed — per the DESIGN PHILOSOPHIES "test on a real second backend" rule.
+- **PG chatlog probe used an invalid `chatlog_table` role.** `has_entity_work`
+  passed `chatlog_table("entity_extraction_queue")` (not a role key → `KeyError`
+  → the gate fail-opened to "has work" forever on PG). Fixed to `"extraction_queue"`.
+- **PostgreSQL schema parity: `chat_log_extraction_queue` was missing `status`.**
+  pg_041 added `status` to the core queue; pg_043 cloned the chatlog queue from a
+  pre-`status` definition, so the chatlog container's queue diverged — chatlog
+  entity extraction on PG could never mark a turn terminal, so the loop couldn't
+  idle. New forward migration `pg_049` adds it (mirrors pg_041).
+
 ## [2026.8.17.0] — 2026-08-08 — autonomous file-extraction drain in the cognitive loop
 
 ### Added

@@ -459,6 +459,13 @@ class PostgresDialect(Dialect):
         )
         return (sql, (table,))
 
+    def _column_exists_query(self, table: str, column: str) -> "tuple[str, tuple]":
+        sql = (
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = %s AND column_name = %s"
+        )
+        return (sql, (table, column))
+
     def _qualified_table_expr(self, name: str, schema: str) -> str:
         # A separate logical store is a SCHEMA namespace in the one primary
         # database on PG (single DSN) — qualify the name so it resolves there

@@ -118,6 +118,11 @@ class SqliteDialect(Dialect):
         # its `name` column is the column name. Caller reads row[0].
         return (f"SELECT name FROM pragma_table_info('{table}')", ())
 
+    def _column_exists_query(self, table: str, column: str) -> "tuple[str, tuple]":
+        # pragma_table_info takes the table inline (can't bind); the column name
+        # IS bound. Zero rows for a missing table or missing column.
+        return (f"SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?", (column,))
+
     def _glob_fragment(self, column: str, placeholder: str, pattern: str) -> "tuple[str, str]":
         # SQLite has a native case-sensitive GLOB; the pattern passes through.
         return (f"{column} GLOB {placeholder}", pattern)

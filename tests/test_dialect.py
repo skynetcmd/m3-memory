@@ -325,3 +325,37 @@ class TestNowMinusDays:
 
     def test_no_sqlite_datetime_leaks_to_pg(self):
         assert "datetime(" not in POSTGRES.now_minus_days("%s")
+
+
+class TestColumnExists:
+    """The column_exists seam primitive — the up-front existence check that lets
+    callers avoid referencing a maybe-absent column and catching the error (which
+    on PostgreSQL aborts the whole transaction). Asserted for BOTH backends."""
+
+    def test_sqlite_fragment(self):
+        sql, params = SQLITE.column_exists("entity_extraction_queue", "status")
+        assert "pragma_table_info('entity_extraction_queue')" in sql
+        assert "name = ?" in sql
+        assert params == ("status",)
+
+    def test_postgres_fragment(self):
+        sql, params = POSTGRES.column_exists("entity_extraction_queue", "status")
+        assert "information_schema.columns" in sql
+        assert "table_name = %s" in sql and "column_name = %s" in sql
+        assert params == ("entity_extraction_queue", "status")
+
+    @pytest.mark.parametrize("d", [SQLITE, POSTGRES])
+    def test_rejects_non_identifier(self, d: Dialect):
+        with pytest.raises(ValueError):
+            d.column_exists("bad table", "status")
+        with pytest.raises(ValueError):
+            d.column_exists("t", "bad col")
+
+    def test_sqlite_executes_against_real_table(self):
+        import sqlite3
+        c = sqlite3.connect(":memory:")
+        c.execute("CREATE TABLE q(memory_id TEXT, status TEXT)")
+        assert bool(c.execute(*SQLITE.column_exists("q", "status")).fetchall()) is True
+        assert bool(c.execute(*SQLITE.column_exists("q", "nope")).fetchall()) is False
+        # missing table -> zero rows, no error (covers "table not present yet")
+        assert bool(c.execute(*SQLITE.column_exists("missing", "status")).fetchall()) is False
