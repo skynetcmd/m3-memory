@@ -21,6 +21,21 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.12.0] — 2026-08-08 — reasoning-model auto-suppression extended to LM Studio (both local runtimes)
+
+### Fixed
+- **Reasoning-model fact extraction now auto-works on LM Studio too, not just
+  Ollama.** LM Studio also honors `reasoning_effort="none"` to turn a reasoning
+  model's thinking off (verified live: gemma-4-26b with thinking on → reasoning
+  channel emptied, answer in `content`, HTTP 200). So the `reasoning_effort="none"`
+  suppression (2026.8.11.0) is now gated to BOTH local runtimes via the new
+  `llm_failover.suppresses_thinking_via_effort` (LM Studio :1234 OR Ollama :11434),
+  in `m3_entities` + `slm_intent`. Real OpenAI cloud (which 400s on `"none"`) and
+  other unverified local servers (vLLM, …) are still excluded. This turns the
+  2026.8.8.0 doctor reasoning *warning* into an automatic *fix* on the two dominant
+  local backends — verified end-to-end: entities extract from a thinking-on model
+  on LM Studio AND Ollama where before both returned nothing.
+
 ## [2026.8.11.0] — 2026-08-08 — Ollama reasoning-model extraction actually works (validated live); correct local wire-format policy
 
 ### Fixed

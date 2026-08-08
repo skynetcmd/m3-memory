@@ -58,6 +58,16 @@ def is_ollama_url(url: str) -> bool:
         return False
 
 
+def suppresses_thinking_via_effort(url: str) -> bool:
+    """True for local runtimes verified to honor ``reasoning_effort="none"`` to turn
+    a reasoning model's thinking OFF: LM Studio (:1234) and Ollama (:11434). Both
+    return 200 and empty the reasoning channel (so the answer lands in ``content``
+    and fact extraction parses). Real OpenAI cloud 400s on ``"none"`` (only
+    minimal/low/medium/high are valid), and other local servers (vLLM, …) are
+    unverified — so callers send ``reasoning_effort="none"`` ONLY when this is True."""
+    return is_lmstudio_url(url) or is_ollama_url(url)
+
+
 def is_lmstudio_url(url: str) -> bool:
     """True when ``url`` points at an LM Studio server (its default port 1234).
 

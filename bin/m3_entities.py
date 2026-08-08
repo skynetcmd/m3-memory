@@ -229,10 +229,10 @@ def _build_extractor(
     eff_url, eff_backend = localize_endpoint(
         profile.url, getattr(profile, "backend", "openai") or "openai")
     try:
-        from llm_failover import is_ollama_url
-        eff_is_ollama = is_ollama_url(eff_url)
+        from llm_failover import suppresses_thinking_via_effort
+        eff_suppress_reasoning = suppresses_thinking_via_effort(eff_url)
     except Exception:  # noqa: BLE001
-        eff_is_ollama = False
+        eff_suppress_reasoning = False
 
     # Resolve the effective model ONCE per pass (this factory is rebuilt each
     # pass in _run_db). A blank/sentinel model means "follow the loaded model":
@@ -285,12 +285,12 @@ def _build_extractor(
             payload = {"model": _model, "max_tokens": profile.max_tokens, "messages": messages}
             if profile.temperature is not None:
                 payload["temperature"] = profile.temperature
-            # On Ollama, a reasoning model burns the whole token budget "thinking"
-            # and never emits the JSON in `content` (0 parseable facts). Ollama's
-            # OpenAI endpoint honors reasoning_effort="none" to turn thinking OFF
-            # (verified). Gated to Ollama — "none" is non-standard and 400s on
-            # OpenAI/LM Studio.
-            if eff_is_ollama:
+            # A reasoning model burns the whole token budget "thinking" and never
+            # emits the JSON in `content` (0 parseable facts). LM Studio AND Ollama
+            # honor reasoning_effort="none" to turn thinking OFF (both verified —
+            # 200, reasoning channel emptied). Gated to those local runtimes: "none"
+            # is non-standard and 400s on real OpenAI cloud; other servers unverified.
+            if eff_suppress_reasoning:
                 payload["reasoning_effort"] = "none"
             # Only send Authorization when a token actually resolved. Local servers
             # that need no auth (Ollama) return an empty token, and an empty

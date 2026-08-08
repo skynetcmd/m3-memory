@@ -411,13 +411,14 @@ async def _call_model(
         "temperature": prof.temperature,
         "max_tokens": prof.max_tokens,
     }
-    # On Ollama, turn a reasoning model's thinking OFF so the answer lands in
-    # `content` instead of the reasoning channel (otherwise it burns the token
-    # budget thinking and returns nothing usable). Ollama's OpenAI endpoint honors
-    # reasoning_effort="none"; gated to Ollama since it's non-standard elsewhere.
+    # Turn a reasoning model's thinking OFF so the answer lands in `content`
+    # instead of the reasoning channel (otherwise it burns the token budget
+    # thinking and returns nothing usable). LM Studio AND Ollama honor
+    # reasoning_effort="none" (both verified); gated to those local runtimes since
+    # "none" 400s on real OpenAI cloud and is unverified on other servers.
     try:
-        from llm_failover import is_ollama_url
-        if is_ollama_url(url):
+        from llm_failover import suppresses_thinking_via_effort
+        if suppresses_thinking_via_effort(url):
             payload["reasoning_effort"] = "none"
     except Exception:  # noqa: BLE001
         pass

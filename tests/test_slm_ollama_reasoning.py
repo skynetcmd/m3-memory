@@ -1,12 +1,13 @@
-"""On Ollama, a reasoning model's thinking is suppressed so extraction works.
+"""A reasoning model's thinking is suppressed on local runtimes so extraction works.
 
-A reasoning model (e.g. Qwen3.5) burns its whole token budget in the reasoning
-channel and emits nothing in `content`, so m3's fact extraction parses 0 facts.
-Ollama's OpenAI-compatible endpoint honors ``reasoning_effort="none"`` to turn
-thinking OFF (verified live) — but ``"none"`` is non-standard and 400s on OpenAI /
-LM Studio, so ``slm_intent._call_model`` sends it ONLY when the resolved server is
-Ollama. These pin that the payload carries ``reasoning_effort`` for Ollama and NOT
-for other servers. Hermetic — MockTransport captures the request, no server.
+A reasoning model (e.g. Qwen3.5, gemma-with-thinking) burns its whole token budget
+in the reasoning channel and emits nothing in `content`, so m3's fact extraction
+parses 0 facts. Both LM Studio AND Ollama honor ``reasoning_effort="none"`` to turn
+thinking OFF (verified live — 200, reasoning channel emptied). ``"none"`` is
+non-standard and 400s on real OpenAI cloud and is unverified on other servers, so
+``slm_intent._call_model`` sends it ONLY for those two local runtimes. These pin
+that the payload carries ``reasoning_effort`` for LM Studio + Ollama and NOT for
+other servers. Hermetic — MockTransport captures the request, no server.
 """
 import sys
 from pathlib import Path
@@ -62,13 +63,16 @@ async def test_ollama_gets_reasoning_effort_none(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lmstudio_openai_does_not_get_reasoning_effort(tmp_path, monkeypatch):
-    # LM Studio (and OpenAI) 400 on reasoning_effort="none" -> must NOT be sent.
+async def test_lmstudio_openai_gets_reasoning_effort(tmp_path, monkeypatch):
+    # LM Studio ALSO honors reasoning_effort="none" (verified live) -> send it.
     cap = await _capture_payload(monkeypatch, tmp_path, ["http://localhost:1234/v1"])
-    assert "reasoning_effort" not in cap["json"]
+    assert cap["url"] == "http://localhost:1234/v1/chat/completions"
+    assert cap["json"].get("reasoning_effort") == "none"
 
 
 @pytest.mark.asyncio
 async def test_other_openai_server_does_not_get_reasoning_effort(tmp_path, monkeypatch):
+    # A non-LMStudio/non-Ollama server (vLLM :8000) is unverified — must NOT get
+    # reasoning_effort (it may 400, like real OpenAI cloud does on "none").
     cap = await _capture_payload(monkeypatch, tmp_path, ["http://localhost:8000/v1"])
     assert "reasoning_effort" not in cap["json"]
