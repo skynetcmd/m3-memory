@@ -181,32 +181,26 @@ def _load_vocab(path: Optional[Path]) -> tuple[frozenset[str], frozenset[str]]:
 async def _discover_loaded_model_async(
     client: httpx.AsyncClient, url: str, token: "str | None"
 ) -> "str | None":
-    """Best-effort id of a model currently loaded at ``url``'s server, so a
-    blank-model profile can follow the loaded model BY NAME.
+    """Id of a model currently loaded at ``url``'s server, so a blank-model
+    profile can follow the loaded model BY NAME.
 
-    A blank ``model`` only works on LM Studio when exactly ONE model is loaded
-    AND JIT loading is on; with several loaded, or JIT off, the server rejects it
+    A blank ``model`` only works on LM Studio when exactly ONE model is loaded AND
+    JIT loading is on; with several loaded, or JIT off, the server rejects it
     (``Invalid model identifier ""`` -> 404) and every extraction pass HTTP-fails.
-    Sending the discovered name is robust to both. Queries ``{base}/models``
-    FRESH (no cache) via the async client so a model swap between passes is picked
-    up; returns None on any failure so the caller keeps the blank model (never
-    worse than before). ``base`` is derived from the profile url, which ends in
-    /messages (anthropic) or /chat/completions (openai)."""
+    Sending the discovered name is robust to both. Delegates to the shared
+    ``llm_failover.discover_model_async`` seam (fresh=True, so a model swap between
+    passes is picked up; same embedder-filtering + largest-model pick as
+    everywhere else). Derives the OpenAI-style base from the profile url (which
+    ends in /messages for anthropic or /chat/completions for openai). Returns None
+    on any failure so the caller keeps the blank model."""
+    base = url.rstrip("/")
+    for suffix in ("/chat/completions", "/messages"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
     try:
-        base = url.rstrip("/")
-        for suffix in ("/chat/completions", "/messages"):
-            if base.endswith(suffix):
-                base = base[: -len(suffix)]
-                break
-        headers: dict[str, str] = {}
-        tok = (token or "").strip()
-        if tok:
-            headers["Authorization"] = f"Bearer {tok}"
-        r = await client.get(f"{base}/models", headers=headers, timeout=5.0)
-        r.raise_for_status()
-        ids = [m.get("id") for m in (r.json().get("data") or [])
-               if isinstance(m, dict) and m.get("id")]
-        return ids[0] if ids else None
+        from llm_failover import discover_model_async
+        return await discover_model_async(client, base, token, fresh=True)
     except Exception:  # noqa: BLE001 — discovery is advisory; keep the blank model
         return None
 
