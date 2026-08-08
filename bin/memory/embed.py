@@ -1098,6 +1098,14 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                     return emb, model
                 except Exception as e:
                     last_exc = e
+                    # A connection-level failure (refused / DNS / connect-timeout)
+                    # means the server isn't there — retrying with 2s/4s backoff
+                    # can't bring it up and just stalls the COLD cascade (the
+                    # historical "no tier reachable takes ~minutes" headache). Fail
+                    # fast on those; keep the backoff only for genuinely transient
+                    # failures (read timeout, 5xx) where a retry can actually help.
+                    if isinstance(e, (_httpx.ConnectError, _httpx.ConnectTimeout)):
+                        break
                     if attempt < 2:
                         wait = 2 * (2 ** attempt)
                         logger.warning(

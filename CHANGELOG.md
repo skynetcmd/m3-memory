@@ -21,6 +21,22 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.1] — 2026-08-08 — cold embed cascade fails fast on a dead server
+
+### Fixed
+- **The embed cascade no longer burns ~6s of retry backoff when the primary LLM
+  server isn't there.** The primary HTTP tier retried 3× with 2s/4s exponential
+  backoff on ANY error — including a `ConnectError` (connection refused / DNS /
+  connect-timeout), where the server is definitively down and a retry can't bring
+  it up. It now fails fast on connection-level errors and keeps the backoff only
+  for genuinely transient failures (read timeout, 5xx). Restores the cold-cascade
+  "no tier reachable → return in <5s" SLO (was ~6s).
+
+_(Versioning note: this is same-day work after 2026.8.19.0; per CalVer YYYY.M.D.MICRO
+it bumps MICRO. The 2026.8.9.0–2026.8.19.0 series were all 2026-08-08 releases
+mis-numbered in the day field — accepted as-is; proper dated versioning resumes once
+local date ≥ 2026-08-20.)_
+
 ## [2026.8.19.0] — 2026-08-08 — files gate through the store seam; chatlog-clone schema parity guarded
 
 ### Added
