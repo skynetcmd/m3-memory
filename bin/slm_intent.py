@@ -300,30 +300,30 @@ def localize_endpoint(url: str, backend: str, *, prefer_native: bool = False) ->
     the given values if the shared seam resolves nothing (keeps prior behaviour).
 
     Wire format:
-      - Default (``prefer_native=False``, the entity path): always the
-        OpenAI-compatible ``/v1/chat/completions`` (served by both LM Studio and
-        Ollama). Simple + universal; entity extraction doesn't lean on Anthropic
-        prompt caching.
+      - Default (``prefer_native=False``, the entity path): always the universal
+        OpenAI-compatible ``/v1/chat/completions``. Simple + works on every local
+        server (LM Studio, Ollama, vLLM, llama.cpp, …); entity extraction doesn't
+        lean on Anthropic prompt caching.
       - ``prefer_native=True`` (the ``_call_model`` path — enrich/observer/
         reflector): keep an Anthropic-backend profile on its native
-        ``/v1/messages`` so LM Studio's prompt caching is preserved, UNLESS the
-        resolved server is Ollama, which serves no ``/v1/messages`` — only then
-        downgrade to OpenAI. Closes the Ollama gap without costing LM Studio its
-        cache."""
+        ``/v1/messages`` ONLY when the resolved server is LM Studio, where that
+        format buys prompt caching for the large reused system prompt. Every other
+        local server routes through OpenAI ``/v1/chat/completions`` — some don't
+        implement ``/v1/messages`` (older Ollama, vLLM, llama.cpp), and those that
+        do (current Ollama) gain no caching from it, so OpenAI is the safe
+        lowest-common-denominator."""
     if not _is_loopback(url):
         return url, backend
     try:
-        from llm_failover import LLM_ENDPOINTS, is_ollama_url
+        from llm_failover import LLM_ENDPOINTS, is_lmstudio_url
         base = (LLM_ENDPOINTS or [None])[0]
     except Exception:  # noqa: BLE001 — advisory; keep the profile's own url
         base = None
     if not base:
         return url, backend
     base = base.rstrip("/")
-    if prefer_native and backend == "anthropic":
-        if is_ollama_url(base):
-            return f"{base}/chat/completions", "openai"
-        return url, backend  # LM Studio (or other): keep native Anthropic + caching
+    if prefer_native and backend == "anthropic" and is_lmstudio_url(base):
+        return url, backend  # LM Studio: keep native Anthropic (prompt caching)
     return f"{base}/chat/completions", "openai"
 
 
@@ -362,9 +362,9 @@ async def _call_model(
     token = _resolve_api_key(prof.api_key_service)
     headers = {"Content-Type": "application/json"}
     # A loopback profile follows the shared LLM seam so it hits the local server
-    # that is actually running. prefer_native keeps LM Studio's Anthropic wire
-    # format (prompt caching) but downgrades to OpenAI when the server is Ollama,
-    # which serves no /v1/messages.
+    # that is actually running (not a pinned port that may be dead). prefer_native
+    # keeps LM Studio's Anthropic wire format for its prompt caching, but routes
+    # every other local server (Ollama, vLLM, …) through the universal OpenAI path.
     url, backend = localize_endpoint(prof.url, prof.backend, prefer_native=True)
 
     if backend == "anthropic":
@@ -411,6 +411,16 @@ async def _call_model(
         "temperature": prof.temperature,
         "max_tokens": prof.max_tokens,
     }
+    # On Ollama, turn a reasoning model's thinking OFF so the answer lands in
+    # `content` instead of the reasoning channel (otherwise it burns the token
+    # budget thinking and returns nothing usable). Ollama's OpenAI endpoint honors
+    # reasoning_effort="none"; gated to Ollama since it's non-standard elsewhere.
+    try:
+        from llm_failover import is_ollama_url
+        if is_ollama_url(url):
+            payload["reasoning_effort"] = "none"
+    except Exception:  # noqa: BLE001
+        pass
     resp = await client.post(url, headers=headers, json=payload, timeout=prof.timeout_s)
     resp.raise_for_status()
     data = resp.json()

@@ -220,13 +220,19 @@ def _build_extractor(
     _run_entity_extractor expects.
     """
     # A LOCAL profile must follow the shared LLM seam, not a pinned wire format:
-    # localize_endpoint() resolves the OpenAI-compatible /chat/completions endpoint
-    # from llm_failover so entity extraction works against LM Studio (:1234) AND
-    # Ollama (:11434, opt-in). Ollama serves no Anthropic /v1/messages, so a pinned
-    # `backend: anthropic` local profile would HTTP-fail every row there. A
-    # remote/pinned profile is respected verbatim — explicit config wins.
+    # localize_endpoint() resolves the universal OpenAI-compatible /chat/completions
+    # endpoint from llm_failover so entity extraction works against whatever local
+    # server is actually up — LM Studio (:1234), Ollama (:11434, opt-in), vLLM, etc.
+    # (A pinned :1234 anthropic profile would hit a dead port on an Ollama-only box;
+    # and /v1/chat/completions is the one path every OpenAI-compatible server
+    # serves.) A remote/pinned profile is respected verbatim — explicit config wins.
     eff_url, eff_backend = localize_endpoint(
         profile.url, getattr(profile, "backend", "openai") or "openai")
+    try:
+        from llm_failover import is_ollama_url
+        eff_is_ollama = is_ollama_url(eff_url)
+    except Exception:  # noqa: BLE001
+        eff_is_ollama = False
 
     # Resolve the effective model ONCE per pass (this factory is rebuilt each
     # pass in _run_db). A blank/sentinel model means "follow the loaded model":
@@ -279,7 +285,20 @@ def _build_extractor(
             payload = {"model": _model, "max_tokens": profile.max_tokens, "messages": messages}
             if profile.temperature is not None:
                 payload["temperature"] = profile.temperature
-            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+            # On Ollama, a reasoning model burns the whole token budget "thinking"
+            # and never emits the JSON in `content` (0 parseable facts). Ollama's
+            # OpenAI endpoint honors reasoning_effort="none" to turn thinking OFF
+            # (verified). Gated to Ollama — "none" is non-standard and 400s on
+            # OpenAI/LM Studio.
+            if eff_is_ollama:
+                payload["reasoning_effort"] = "none"
+            # Only send Authorization when a token actually resolved. Local servers
+            # that need no auth (Ollama) return an empty token, and an empty
+            # `Bearer ` is an ILLEGAL header value (httpx LocalProtocolError) — it
+            # would fail every request. LM Studio-with-auth still gets its token.
+            headers = {"Content-Type": "application/json"}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
         else:  # anthropic (default — preserves prior behaviour)
             payload = {"model": _model, "max_tokens": profile.max_tokens,
                        "messages": [{"role": "user", "content": body}]}
@@ -291,8 +310,10 @@ def _build_extractor(
                     payload["system"] = profile.system
             if profile.temperature is not None:
                 payload["temperature"] = profile.temperature
-            headers = {"Content-Type": "application/json", "x-api-key": token,
+            headers = {"Content-Type": "application/json",
                        "anthropic-version": getattr(profile, "anthropic_version", "2023-06-01")}
+            if token:
+                headers["x-api-key"] = token
 
         try:
             r = await client.post(eff_url, json=payload, headers=headers, timeout=profile.timeout_s)

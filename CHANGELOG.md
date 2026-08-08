@@ -21,6 +21,31 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.11.0] — 2026-08-08 — Ollama reasoning-model extraction actually works (validated live); correct local wire-format policy
+
+### Fixed
+- **Fact extraction works on Ollama reasoning models.** A reasoning model (e.g.
+  Qwen3.5) sends its whole answer to the reasoning channel and leaves `content`
+  empty over the OpenAI endpoint, so extraction parsed 0 facts. m3 now sends
+  `reasoning_effort="none"` — which Ollama's OpenAI endpoint honors to turn
+  thinking off — gated to Ollama (`llm_failover.is_ollama_url`, since `"none"` is
+  non-standard and 400s on OpenAI/LM Studio). In both `m3_entities` and
+  `slm_intent._call_model`. Verified end-to-end against a live Ollama (MLX
+  Qwen3.5-9B): entities now extract where before it returned nothing.
+- **No empty auth header to keyless local servers.** The entity extractor sent
+  `Authorization: Bearer ` / `x-api-key:` unconditionally; against a keyless
+  server (Ollama) the empty `Bearer ` is an illegal header value (httpx
+  `LocalProtocolError`) that failed every request. Now sent only when a token
+  resolved (matches `slm_intent`).
+- **Correct local wire-format policy (premise fix).** The prior release downgraded
+  the Anthropic format specifically "because Ollama serves no `/v1/messages`" —
+  but current Ollama *does* serve it (official Anthropic-compatibility API). The
+  Anthropic format's only real benefit is LM Studio's prompt caching, so
+  `localize_endpoint(prefer_native=True)` now keeps Anthropic ONLY for LM Studio
+  (`is_lmstudio_url`) and routes every other local server — Ollama, vLLM,
+  llama.cpp — through the universal OpenAI path (fixes servers that lack
+  `/v1/messages` entirely, which the Ollama-specific check missed).
+
 ## [2026.8.10.0] — 2026-08-08 — Ollama-safe enrich/observer/reflector; sync tools are timeout-bounded
 
 ### Fixed

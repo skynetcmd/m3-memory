@@ -44,12 +44,32 @@ _OLLAMA_ENDPOINT = "http://localhost:11434/v1"
 
 
 def is_ollama_url(url: str) -> bool:
-    """True when ``url`` points at an Ollama server (its fixed default port
-    11434). Ollama serves only the OpenAI-compatible API — no Anthropic
-    ``/v1/messages`` — so callers use this to pick a wire format that works."""
+    """True when ``url`` points at an Ollama server (its fixed default port 11434).
+
+    Ollama's OpenAI-compatible endpoint honors ``reasoning_effort: "none"`` to turn
+    OFF a reasoning model's thinking (verified live) — the answer then lands in
+    ``content`` instead of the reasoning channel, so fact extraction actually
+    parses. ``"none"`` is non-standard for OpenAI/LM Studio (they 400 on it), so
+    callers send it only when this returns True."""
     try:
         from urllib.parse import urlparse
         return urlparse(url).port == 11434
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def is_lmstudio_url(url: str) -> bool:
+    """True when ``url`` points at an LM Studio server (its default port 1234).
+
+    LM Studio is the one local server where the Anthropic ``/v1/messages`` wire
+    format buys something — prompt caching for a large reused system prompt. Every
+    other local OpenAI-compatible server (Ollama, vLLM, llama.cpp, LocalAI) is
+    better served by the universal ``/v1/chat/completions`` path: some don't
+    implement ``/v1/messages`` at all, and those that do (e.g. current Ollama) gain
+    no caching from it. Callers use this to keep Anthropic only where it pays off."""
+    try:
+        from urllib.parse import urlparse
+        return urlparse(url).port == 1234
     except Exception:  # noqa: BLE001
         return False
 
