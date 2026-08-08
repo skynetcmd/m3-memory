@@ -21,6 +21,25 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.7.0] — 2026-08-07 — file fact-extraction uses the shared LLM seam; canonical secret resolver; embedder-model mismatch check
+
+### Fixed
+- **File fact-extraction now reaches the same LLM the rest of m3 uses.** It no
+  longer reports "no LLM" when the optional `M3_FILES_*` override vars are unset:
+  the extractor falls back to the shared `llm_failover` resolution (which
+  auto-discovers a local LLM), and authenticates via the shared, headless-safe
+  token resolver rather than reading the environment alone — so it works in
+  headless launchers (launchd/systemd/task) that don't inherit the shell env.
+
+### Added
+- **`m3_sdk.get_secret`** — one canonical, cross-platform, headless-safe
+  secret/API-token resolver (env → keyring → keychain → encrypted vault).
+  Migrated the previously env-only / hand-rolled token lookups across the tree to
+  it, with a guard test preventing regressions.
+- **`m3 doctor`**: a file-extraction LLM reachability check, and an
+  embedder-model mismatch check (warns when the shared server serves a different
+  model than the store's vectors were built with).
+
 ## [2026.7.31.1] — 2026-07-31 — inline UAC on every privileged install step; AWS STS redaction
 
 ### Fixed
