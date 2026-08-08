@@ -21,6 +21,26 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.8.0] — 2026-08-08 — entity-extraction model hardening; doctor reasoning-model warning
+
+### Fixed
+- **Entity extraction follows the loaded model by name** instead of failing on a
+  blank/sentinel profile model. When a profile leaves the model unset, the
+  extractor now discovers the loaded model once per pass through the shared
+  `llm_failover` discovery seam (new `discover_model_async`, `fresh=True` bypasses
+  the stale per-endpoint cache). This is robust to multi-model servers and to JIT
+  being off — the case that previously produced `Invalid model identifier ""`
+  (404) and silently extracted nothing. (#107)
+
+### Added
+- **Doctor warns when the extraction model is reasoning with thinking ON.** A
+  reasoning model routes its answer to the reasoning channel instead of JSON
+  `content`, so file + entity extraction is slow and typically yields 0 parseable
+  facts. `files_extraction_probe` now detects this **by output** (a one-shot chat
+  probe classifying `reasoning_content` / `thinking` / `reasoning` / inline
+  `<think>`), so it works for LM Studio **and** Ollama regardless of model name.
+  Advisory — it warns, it doesn't fail the exit. (#108)
+
 ## [2026.8.7.0] — 2026-08-07 — file fact-extraction uses the shared LLM seam; canonical secret resolver; embedder-model mismatch check
 
 ### Fixed
