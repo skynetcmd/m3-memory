@@ -261,10 +261,17 @@ def llm_auth_headers() -> dict[str, str]:
     """Authorization headers for the OpenAI-compat LLM endpoint.
 
     LM Studio with API auth enabled rejects (or silently empties) requests
-    that omit `Authorization: Bearer <token>`. The token lives in env var
-    LM_API_TOKEN (mirrored from the OS keyring at session start). Returns an
-    empty dict when no token is set, so tokenless endpoints (Ollama, an
-    auth-disabled LM Studio) keep working unchanged.
+    that omit `Authorization: Bearer <token>`. Resolve the token through the
+    SHARED, headless-safe resolver (env -> OS keyring -> keychain -> vault, with
+    the LM_STUDIO_API_KEY alias) rather than reading os.environ alone: launchd/
+    systemd/task launchers do NOT inherit the shell's LM_API_TOKEN (§3), so an
+    env-only read 401s in every background context (cognitive loop, MCP server).
+    Returns an empty dict when no token resolves, so tokenless endpoints (Ollama,
+    an auth-disabled LM Studio) keep working unchanged.
     """
-    token = (os.environ.get("LM_API_TOKEN") or "").strip()
+    try:
+        from auth_utils import get_api_key  # canonical resolver (see m3_sdk.get_secret)
+        token = (get_api_key("LM_API_TOKEN") or "").strip()
+    except Exception:  # noqa: BLE001 — resolver import failure -> fall back to env
+        token = (os.environ.get("LM_API_TOKEN") or "").strip()
     return {"Authorization": f"Bearer {token}"} if token else {}

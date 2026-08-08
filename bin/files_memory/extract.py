@@ -92,13 +92,33 @@ Rules:
 
 
 def _llm_endpoint() -> Optional[str]:
-    """Read LLM endpoint from env. None = no LLM available."""
-    return (
+    """Resolve the extraction LLM endpoint.
+
+    Explicit per-purpose overrides win (M3_FILES_EXTRACT_URL > M3_FILES_SUMMARY_URL
+    > M3_LMSTUDIO_URL). Otherwise fall back to m3's SHARED ``llm_failover``
+    resolution — which auto-probes LM Studio (:1234) by default and honors
+    M3_LLM_URL / LLM_ENDPOINTS_CSV — so file extraction uses the SAME LLM the rest
+    of m3 (cognitive loop, enrichment) already does, instead of reporting "no LLM"
+    whenever the optional overrides are unset. The fallback is headless-safe: the
+    LM Studio default is a code constant in llm_failover, not a shell env var, so
+    launchd/systemd/task launchers resolve it too (§3). None only when no endpoint
+    is configured or discoverable anywhere."""
+    override = (
         os.environ.get("M3_FILES_EXTRACT_URL")
         or os.environ.get("M3_FILES_SUMMARY_URL")
         or os.environ.get("M3_LMSTUDIO_URL")
-        or None
     )
+    if override:
+        return override
+    try:
+        import sys as _sys
+        _bin = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if _bin not in _sys.path:
+            _sys.path.insert(0, _bin)
+        from llm_failover import LLM_ENDPOINTS
+        return LLM_ENDPOINTS[0] if LLM_ENDPOINTS else None
+    except Exception:  # noqa: BLE001 — resolver import/probe failure -> no LLM
+        return None
 
 
 def _llm_model() -> Optional[str]:

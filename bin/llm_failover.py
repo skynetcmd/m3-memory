@@ -146,6 +146,20 @@ def _auth_headers(token: str | None) -> dict:
     return {"Authorization": f"Bearer {tok}"} if tok else {}
 
 
+def _default_lm_token() -> "str | None":
+    """The default LM token when a caller passes none — resolved through the
+    SHARED, headless-safe resolver (env -> keyring -> keychain -> vault, with the
+    LM_STUDIO_API_KEY alias), NOT os.environ alone. Headless launchers (launchd/
+    systemd/task) don't inherit the shell's LM_API_TOKEN (§3), so an env-only
+    default 401s against an auth-enabled LM Studio in every background context —
+    the exact failure mode that motivated m3_sdk.get_secret."""
+    try:
+        from auth_utils import get_api_key  # lazy: auth_utils vault reads route via M3Context
+        return get_api_key("LM_API_TOKEN")
+    except Exception:  # noqa: BLE001 — resolver failure -> env fallback
+        return os.environ.get("LM_API_TOKEN")
+
+
 def discover_model_sync(
     endpoint: str,
     token: Optional[str] = None,
@@ -196,7 +210,7 @@ def discover_model_sync(
     try:
         import httpx
 
-        tok = token if token is not None else os.environ.get("LM_API_TOKEN")
+        tok = token if token is not None else _default_lm_token()
         headers = _auth_headers(tok)
         r = httpx.get(
             f"{endpoint.rstrip('/')}/models",

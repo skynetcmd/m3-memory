@@ -73,25 +73,14 @@ if IS_WIN:
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 def get_api_token() -> str | None:
-    token = os.getenv("LM_API_TOKEN") or os.getenv("LM_STUDIO_API_KEY")
-    if token:
-        return token
-    if IS_MAC:
-        try:
-            return subprocess.check_output(
-                ["security", "find-generic-password", "-s", "LM_STUDIO_API_KEY", "-w"],
-                stderr=subprocess.DEVNULL,
-            ).decode().strip()
-        except Exception:
-            pass
+    # Shared, headless-safe resolver (env -> keyring -> keychain -> vault, with
+    # the LM_STUDIO_API_KEY alias) — replaces a hand-rolled env + `security` +
+    # keyring path (§1/§4 — don't reinvent the secret seam; see m3_sdk.get_secret).
     try:
-        import keyring
-        val = keyring.get_password("LM_STUDIO_API_KEY", "LM_STUDIO_API_KEY")
-        if val:
-            return val
-    except Exception:
-        pass
-    return None
+        from m3_sdk import get_secret
+        return get_secret("LM_API_TOKEN")
+    except Exception:  # noqa: BLE001 — resolver import failure -> env fallback
+        return os.getenv("LM_API_TOKEN") or os.getenv("LM_STUDIO_API_KEY")
 
 
 API_TOKEN = None

@@ -19,7 +19,7 @@ import urllib.parse
 import urllib.request
 from collections import defaultdict
 
-from m3_sdk import getenv_compat
+from m3_sdk import get_secret, getenv_compat
 
 cp = importlib.util.module_from_spec(
     s := importlib.util.spec_from_file_location("cp", os.path.join(os.path.dirname(__file__), "chatlog_prune.py")))
@@ -44,7 +44,9 @@ DISQUALIFY = re.compile(r"\b(ETA|r/s|tok/s|windows? done|poll(ing)?|workers? ali
 
 LM_URL = getenv_compat("M3_LM_URL", "LM_URL", "http://localhost:1234/v1/chat/completions")
 LM_MODEL = getenv_compat("M3_LM_MODEL", "LM_MODEL", "google/gemma-4-26b-a4b")
-LM_TOKEN = os.environ.get("LM_API_TOKEN", "")
+# Headless-safe token via the shared resolver (env -> keyring -> vault), not
+# os.environ alone — a launchd/systemd promotion run lacks the shell env (§3).
+LM_TOKEN = get_secret("LM_API_TOKEN") or ""
 
 
 def select(db: str, min_age=14.0, lo=120, hi=4000):
