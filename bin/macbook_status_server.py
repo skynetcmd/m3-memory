@@ -41,17 +41,15 @@ def get_iface_ip(iface: str):
 
 
 def get_lm_token() -> str:
-    """Resolve LM Studio API token from env or keychain."""
-    token = os.environ.get("LM_API_TOKEN") or os.environ.get("LM_STUDIO_API_KEY")
-    if not token:
-        try:
-            token = subprocess.run(
-                ["security", "find-generic-password", "-s", "LM_STUDIO_API_KEY", "-w"],
-                capture_output=True, text=True, timeout=3
-            ).stdout.strip()
-        except Exception:
-            pass
-    return token or ""
+    """Resolve LM Studio API token via the shared, headless-safe resolver
+    (m3_sdk.get_secret: env -> keyring -> keychain -> vault, LM_STUDIO_API_KEY
+    alias). Replaces a hand-rolled env + `security find-generic-password` path
+    that was macOS-only and env-first (§1/§4 — don't reinvent the secret seam)."""
+    try:
+        from m3_sdk import get_secret
+        return get_secret("LM_API_TOKEN") or ""
+    except Exception:  # noqa: BLE001 — resolver import failure -> env fallback
+        return os.environ.get("LM_API_TOKEN") or os.environ.get("LM_STUDIO_API_KEY") or ""
 
 
 def check_lm_studio():

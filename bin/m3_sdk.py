@@ -134,6 +134,24 @@ from m3_halt import (  # noqa: E402,F401
     register_process,
 )
 
+
+def get_secret(service: str) -> "str | None":
+    """Canonical, headless-safe secret/API-token resolver — the ONE entry point
+    every m3 caller should use for LM_API_TOKEN and friends.
+
+    Resolves env -> OS keyring -> native keychain -> encrypted SQLite vault (with
+    the LM_API_TOKEN->LM_STUDIO_API_KEY alias), so it works in headless launchers
+    (launchd/systemd/task) that never inherit the shell env (§3). Do NOT read
+    os.environ for a token directly or shell out to `security find-generic-
+    password` — that reinvents this seam env-only and breaks headless (§1/§4).
+
+    Lazy re-export of auth_utils.get_api_key (lazy because auth_utils routes vault
+    reads back through M3Context — a top-level import would cycle); this mirrors
+    M3Context.get_secret, which is the context-bound wrapper around the same fn."""
+    from auth_utils import get_api_key
+    return get_api_key(service)
+
+
 # name -> submodules whose namespace must observe a rebind of that name. The
 # first entry is the canonical read source used by the facade's own __getattr__.
 _ROUTED = {

@@ -233,6 +233,14 @@ def main() -> int:
         from doctor import cascade_probe
         exit_code = max(exit_code, cascade_probe.run(brief=brief))
 
+        # File fact-extraction reaches an LLM? (Surfaces the previously-silent
+        # "file-extraction says no LLM while the main path has one" gap.)
+        try:
+            from doctor import files_extraction_probe
+            exit_code = max(exit_code, files_extraction_probe.run(brief=brief))
+        except Exception:  # noqa: BLE001 — a probe must never crash the doctor
+            pass
+
     if not args.skip_embed_server:
         from doctor import embed_server_probe
         # Rust-side probe doesn't bump exit code on its own — operators
