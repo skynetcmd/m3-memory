@@ -39,7 +39,8 @@ Hardening:
   - Hard runtime cap (--max-runtime-min)
   - Auto-abort after N consecutive batch failures (--max-consecutive-fails)
   - Dim validation (--expected-dim) — won't write malformed embeddings
-  - Per-row size cap (--max-row-bytes) — skips oversize content
+  - Per-row size cap (--max-row-bytes) — oversize content is subdivided and
+    mean-pooled by default (--no-subdivide-oversize restores skipping)
   - Optional lockfile to prevent two sweepers racing on the same DB
 
 This script is read-mostly + small bulk writes; safe to run alongside
@@ -200,8 +201,12 @@ def _build_query(
     # for octet_length(mi.content); the backend-agnostic protection against the
     # same livelock is _MAX_DRAIN_TICKS in m3_cognitive_loop, which bounds the
     # idle-drain burst no matter which store reports the un-drainable work.
+    # Only exclude them when the sweep would genuinely drop them. With
+    # --subdivide-oversize (the default) they ARE drainable — embed_many splits
+    # and mean-pools them — so they must stay in the candidate set and in
+    # _count_pending, or the loop would never wake up to process them.
     max_row_bytes = getattr(args, "max_row_bytes", None)
-    if max_row_bytes:
+    if max_row_bytes and not getattr(args, "subdivide_oversize", False):
         where.append("LENGTH(CAST(mi.content AS BLOB)) <= ?")
         params.append(int(max_row_bytes))
 
@@ -260,14 +265,15 @@ def _count_pending(db_path: Path, args: argparse.Namespace) -> int:
 def count_oversize_excluded(db_path: Path, args: argparse.Namespace) -> int:
     """Rows with no embedding that the size cap excludes from _count_pending.
 
-    These are a real, permanent gap in embedding coverage — they are simply not
-    a *drainable* backlog, which is why the work-gate must not count them. Kept
-    visible here so "pending: 0" never silently means "3 rows we gave up on".
-    Embedding them needs the subdivide path (_recover_oversized_single in
-    memory/embed.py), which the byte cap short-circuits today.
+    Only meaningful in --no-subdivide-oversize mode, where such a row is a real,
+    permanent gap in embedding coverage: not a *drainable* backlog, which is why
+    the work-gate must not count it, but visible here so "pending: 0" never
+    silently means "rows we gave up on". With the default --subdivide-oversize
+    these rows are drainable (embed_many subdivides and mean-pools them), so
+    they count as ordinary pending work and this returns 0.
     """
     max_row_bytes = getattr(args, "max_row_bytes", None)
-    if not max_row_bytes:
+    if not max_row_bytes or getattr(args, "subdivide_oversize", False):
         return 0
     sql = """
         SELECT COUNT(*) FROM memory_items mi
@@ -367,6 +373,8 @@ async def _run_sweep(args: argparse.Namespace, counters: Counters) -> int:
         deadline_s=deadline,
         max_consecutive_fails=args.max_consecutive_fails,
         max_row_bytes=args.max_row_bytes,
+        oversize_mode=("subdivide" if getattr(args, "subdivide_oversize", False)
+                       else "skip"),
         expected_dim=(args.expected_dim if args.expected_dim else None),
         limit=args.limit,
         log=_log,
@@ -406,6 +414,9 @@ def _print_report(counters: Counters, started_at: float, db_path: Path,
     print(f"  embedded:          {counters.embedded}")
     print(f"  skipped (empty):   {counters.skipped_empty}")
     print(f"  skipped (oversize):{counters.skipped_oversize}")
+    if getattr(counters, "oversize_subdivided", 0):
+        print(f"  subdivided (big):  {counters.oversize_subdivided}"
+              f"  <- embedded via split + mean-pool")
     print(f"  skipped (bad dim): {counters.skipped_bad_dim}")
     _excluded = count_oversize_excluded(db_path, args) if args is not None else 0
     if _excluded:
@@ -480,8 +491,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                      help=f"Abort after N back-to-back batch fails. "
                           f"Default: {DEFAULT_MAX_CONSEC_FAILS}.")
     res.add_argument("--max-row-bytes", type=int, default=DEFAULT_MAX_ROW_BYTES,
-                     help=f"Skip rows whose content > N bytes. "
-                          f"Default: {DEFAULT_MAX_ROW_BYTES} (bge-m3 ctx limit).")
+                     help=f"Size threshold for a row's post-transform text. "
+                          f"Default: {DEFAULT_MAX_ROW_BYTES} (bge-m3 ctx limit). "
+                          f"See --subdivide-oversize for what happens above it.")
+    res.add_argument("--subdivide-oversize", dest="subdivide_oversize",
+                     action="store_true", default=True,
+                     help="Embed rows over --max-row-bytes by splitting them "
+                          "and mean-pooling the sub-vectors, instead of "
+                          "skipping them. Default: on.")
+    res.add_argument("--no-subdivide-oversize", dest="subdivide_oversize",
+                     action="store_false",
+                     help="Drop rows over --max-row-bytes (pre-2026.8.19.5 "
+                          "behaviour). They are then excluded from the pending "
+                          "count so they cannot livelock the cognitive loop, "
+                          "and reported separately as EXCLUDED oversize.")
     res.add_argument("--expected-dim", type=int, default=DEFAULT_EXPECTED_DIM,
                      help=f"Skip embeddings whose dim != N. "
                           f"Default: {DEFAULT_EXPECTED_DIM}. Pass 0 to disable.")

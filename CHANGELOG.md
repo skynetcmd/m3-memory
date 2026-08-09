@@ -21,6 +21,32 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.5] — 2026-08-09 — embed oversize rows instead of dropping them
+
+### Fixed
+- **Rows over `--max-row-bytes` are now embedded, not silently dropped.** The
+  subdivide + mean-pool recovery has existed in `memory/embed.py` at every tier
+  (`_recover_oversized_single`, `_embedded_bulk_with_subdivide`,
+  `_http_bulk_with_subdivide`) — but `embed_backfill`'s own per-row size
+  **pre-filter** dropped those rows before they could ever reach it, so the
+  recovery path was unreachable from the sweeper. Such a row was invisible to
+  semantic search permanently, and (before 2026.8.19.4) also kept the cognitive
+  loop's embed work-gate stuck on "has work" forever.
+
+  `embed_sweep_lib.run_embed_loop` gains `oversize_mode`. With the new default
+  (`--subdivide-oversize`), an oversize row is sent to `embed_many` **alone**, so
+  the lone-row recovery splits it and mean-pools the sub-vectors; in a shared
+  batch it would instead fail the whole request and be found only by bisection —
+  same end state, far more embedder round-trips and a spurious `failed_batches`.
+  `--no-subdivide-oversize` restores the old skip behaviour, and in that mode
+  the rows stay excluded from the pending count so they cannot livelock the loop.
+- **The chatlog sweeper opts in too.** A long chat turn is exactly the row this
+  dropped; leaving it on `skip` would silently regenerate the gap.
+
+### Added
+- `oversize_subdivided` counter + a `subdivided (big)` report line, so "did the
+  subdivide path actually fire?" is answerable from the run output alone.
+
 ## [2026.8.19.4] — 2026-08-09 — cognitive-loop livelock fix + cross-OS watchdog self-heal
 
 ### Fixed

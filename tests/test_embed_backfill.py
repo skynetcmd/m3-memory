@@ -113,6 +113,9 @@ def _make_args(db_path: Path, **overrides) -> argparse.Namespace:
         expected_dim=4,  # tiny dim for test vectors
         lockfile=None,
         no_augment_anchors=True,  # don't pull metadata-driven anchors in tests
+        # Mirror the CLI default. Without this the getattr() fallback silently
+        # put every test in the legacy skip mode while production subdivides.
+        subdivide_oversize=True,
         dry_run=False,
     )
     base.update(overrides)
@@ -335,6 +338,8 @@ async def test_sweep_writes_embeddings_and_queue(db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sweep_skips_oversize(db, monkeypatch):
+    """--no-subdivide-oversize (legacy) mode: drop the row, exclude it from
+    pending so it cannot livelock the loop, and report it as EXCLUDED."""
     import embed_backfill as eb
     big = "x" * 50_000  # 50KB > default 32KB
     _seed_rows(db, [
@@ -351,14 +356,14 @@ async def test_sweep_skips_oversize(db, monkeypatch):
         return [([0.1, 0.2, 0.3, 0.4], "test-model") for _ in texts]
     monkeypatch.setattr(mc, "_embed_many", fake_embed_many)
 
-    args = _make_args(db, max_row_bytes=32_768)
+    args = _make_args(db, max_row_bytes=32_768, subdivide_oversize=False)
     counters = eb.Counters()
     await eb._run_sweep(args, counters)
 
-    # Oversize rows are excluded by the candidate QUERY now, not selected and
-    # then skipped per-row, so skipped_oversize stays 0 here. (The per-row skip
-    # is still live and still needed: anchor augmentation can push a row over
-    # the cap AFTER it was selected — see test_sweep_skips_oversize_after_augment.)
+    # In skip mode the candidate QUERY excludes oversize rows, so they are never
+    # selected and skipped_oversize stays 0. (The per-row skip is still live and
+    # still needed: anchor augmentation can push a row over the cap AFTER it was
+    # selected — see test_sweep_skips_oversize_after_augment.)
     assert counters.skipped_oversize == 0
     assert counters.embedded == 1
     # The oversize row should not have been sent to the embedder
@@ -398,7 +403,8 @@ async def test_sweep_skips_oversize_after_augment(db, monkeypatch):
 
     # no_augment_anchors must be False or _run_sweep uses the identity transform
     # and the augmentation path under test never runs.
-    args = _make_args(db, max_row_bytes=32_768, no_augment_anchors=False)
+    args = _make_args(db, max_row_bytes=32_768, no_augment_anchors=False,
+                      subdivide_oversize=False)
 
     # Small on disk: the query DOES select it, and it counts as real pending work.
     assert eb._count_pending(db, args) == 1
@@ -411,6 +417,84 @@ async def test_sweep_skips_oversize_after_augment(db, monkeypatch):
     assert counters.skipped_oversize == 1
     assert counters.embedded == 0
     assert embed_calls == []
+
+
+@pytest.mark.asyncio
+async def test_sweep_subdivides_oversize_by_default(db, monkeypatch):
+    """Default mode: an oversize row is EMBEDDED, not dropped.
+
+    embed_many already recovers a lone oversized row by splitting it and
+    mean-pooling the sub-vectors (_recover_oversized_single); the only thing
+    that ever stopped these rows was embed_backfill's own pre-filter. The row
+    must therefore (a) stay in the candidate set, (b) reach embed_many ALONE so
+    the lone-row recovery fires instead of failing a shared batch, and (c) be
+    counted so "did subdivide actually happen?" is answerable from the report.
+    """
+    import embed_backfill as eb
+    big = "x" * 50_000  # 50KB > default 32KB
+    _seed_rows(db, [
+        {"id": "row-A", "content": big},
+        {"id": "row-B", "content": "small"},
+    ])
+
+    os.environ["M3_DATABASE"] = str(db)
+    import memory_core as mc
+
+    embed_calls = []
+    async def fake_embed_many(texts):
+        embed_calls.append(list(texts))
+        return [([0.1, 0.2, 0.3, 0.4], "test-model") for _ in texts]
+    monkeypatch.setattr(mc, "_embed_many", fake_embed_many)
+
+    args = _make_args(db, max_row_bytes=32_768)  # subdivide_oversize=True
+    assert eb._count_pending(db, args) == 2          # drainable, so pending
+    assert eb.count_oversize_excluded(db, args) == 0  # nothing written off
+
+    counters = eb.Counters()
+    await eb._run_sweep(args, counters)
+
+    assert counters.skipped_oversize == 0
+    assert counters.oversize_subdivided == 1
+    assert counters.embedded == 2
+
+    # The oversize row must have been sent in a batch of its own.
+    lone = [b for b in embed_calls if b == [big]]
+    assert lone, f"oversize row was not sent alone: {[len(b) for b in embed_calls]}"
+    assert all(big not in b for b in embed_calls if b != [big]), \
+        "oversize row must not ride along in a shared batch"
+
+    # And it is genuinely gone from the backlog.
+    assert eb._count_pending(db, args) == 0
+
+
+@pytest.mark.asyncio
+async def test_sweep_subdivides_oversize_after_augment(db, monkeypatch):
+    """Same for a row that only becomes oversize after anchor augmentation —
+    the case the candidate query cannot see."""
+    import embed_backfill as eb
+    _seed_rows(db, [{"id": "row-A", "content": "small enough on disk"}])
+
+    os.environ["M3_DATABASE"] = str(db)
+    import memory_core as mc
+
+    huge = "y" * 50_000
+    monkeypatch.setattr(mc, "_augment_embed_text_with_anchors",
+                        lambda text, metadata: huge)
+
+    embed_calls = []
+    async def fake_embed_many(texts):
+        embed_calls.append(list(texts))
+        return [([0.1, 0.2, 0.3, 0.4], "test-model") for _ in texts]
+    monkeypatch.setattr(mc, "_embed_many", fake_embed_many)
+
+    args = _make_args(db, max_row_bytes=32_768, no_augment_anchors=False)
+    counters = eb.Counters()
+    await eb._run_sweep(args, counters)
+
+    assert counters.skipped_oversize == 0
+    assert counters.oversize_subdivided == 1
+    assert counters.embedded == 1
+    assert embed_calls == [[huge]]
 
 
 @pytest.mark.asyncio

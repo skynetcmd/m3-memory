@@ -39,6 +39,11 @@ class Counters:
         self.embedded = 0
         self.skipped_empty = 0
         self.skipped_oversize = 0
+        # Oversize rows routed through the subdivide path instead of being
+        # dropped (oversize_mode="subdivide"). Counted separately from
+        # `embedded` so "did the subdivide path actually fire?" is answerable
+        # from the report alone.
+        self.oversize_subdivided = 0
         self.skipped_bad_dim = 0
         self.failed_batches = 0
         self.consecutive_fails = 0
@@ -94,6 +99,7 @@ async def run_embed_loop(
     deadline_s: Optional[float] = None,
     max_consecutive_fails: int = 5,
     max_row_bytes: int = 32_768,
+    oversize_mode: str = "skip",
     expected_dim: Optional[int] = 1024,
     limit: Optional[int] = None,
     log: Optional[LogFn] = None,
@@ -115,7 +121,15 @@ async def run_embed_loop(
       deadline_s:       absolute monotonic time after which the loop stops.
                         None = no deadline. Caller computes (start + budget).
       max_consecutive_fails: abort after this many back-to-back batch fails.
-      max_row_bytes:    skip rows whose post-transform text > this size.
+      max_row_bytes:    size threshold for the post-transform text. What happens
+                        at the threshold is oversize_mode's call.
+      oversize_mode:    "skip" (default, historical behaviour) drops rows over
+                        max_row_bytes. "subdivide" instead embeds each one
+                        ALONE, so embed_many's lone-row recovery splits it and
+                        mean-pools the sub-vectors rather than dropping it.
+                        Default stays "skip" so existing callers (and the
+                        chatlog sweeper) keep their current behaviour until they
+                        opt in.
       expected_dim:     skip embeddings whose dim != this. None = don't check.
       limit:            stop after AT LEAST this many successful embeds.
                         Checked at outer-cycle boundaries (NOT per-batch),
@@ -152,6 +166,7 @@ async def run_embed_loop(
 
             # Build text + content_hash for each row, applying skip rules
             items: list[dict] = []
+            oversize: list[dict] = []
             for r in batch_rows:
                 mid, content, title, metadata_json = r
                 base_text = (content or title or "").strip()
@@ -159,49 +174,69 @@ async def run_embed_loop(
                     counters.skipped_empty += 1
                     continue
                 embed_text = transform_text(base_text, metadata_json)
-                if len(embed_text.encode("utf-8")) > max_row_bytes:
-                    counters.skipped_oversize += 1
-                    continue
-                items.append({
+                entry = {
                     "mid": mid,
                     "text": embed_text,
                     "chash": content_hash_fn(embed_text),
-                })
+                }
+                if len(embed_text.encode("utf-8")) > max_row_bytes:
+                    if oversize_mode != "subdivide":
+                        counters.skipped_oversize += 1
+                        continue
+                    # Send it ALONE: embed_many recovers a lone oversized row by
+                    # subdividing it and mean-pooling the sub-vectors
+                    # (_recover_oversized_single). In a shared batch it would
+                    # instead fail the whole request and be found only by
+                    # bisection — same end state, far more embedder round-trips
+                    # and a spurious failed_batches count.
+                    oversize.append(entry)
+                    continue
+                items.append(entry)
 
-            if not items:
-                return
+            await _embed_and_write(items)
+            for entry in oversize:
+                if await _embed_and_write([entry]):
+                    counters.oversize_subdivided += 1
 
+    async def _embed_and_write(items: list[dict]) -> bool:
+        """Embed one batch and persist its vectors. Returns True if anything was
+        written. Split out of _embed_one_batch so an oversized row can be sent
+        as its own single-item batch through the identical path."""
+        if not items:
+            return False
+
+        try:
+            texts = [it["text"] for it in items]
+            results = await asyncio.wait_for(
+                embed_many(texts), timeout=timeout_s,
+            )
+        except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001
+            counters.failed_batches += 1
+            counters.consecutive_fails += 1
+            counters.record_error(e)
+            if log is not None:
+                log(f"BATCH_FAIL: {type(e).__name__}: {str(e)[:200]}")
+            return False
+
+        n_written = 0
+        for it, (vec, model_str) in zip(items, results):
+            if vec is None:
+                continue
+            if expected_dim is not None and len(vec) != expected_dim:
+                counters.skipped_bad_dim += 1
+                continue
             try:
-                texts = [it["text"] for it in items]
-                results = await asyncio.wait_for(
-                    embed_many(texts), timeout=timeout_s,
-                )
-            except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001
-                counters.failed_batches += 1
-                counters.consecutive_fails += 1
+                if write_embedding(it["mid"], vec, model_str, it["chash"]):
+                    n_written += 1
+            except Exception as e:  # noqa: BLE001
                 counters.record_error(e)
                 if log is not None:
-                    log(f"BATCH_FAIL: {type(e).__name__}: {str(e)[:200]}")
-                return
+                    log(f"WRITE_FAIL: mid={it['mid'][:8]} {type(e).__name__}: {e}")
 
-            n_written = 0
-            for it, (vec, model_str) in zip(items, results):
-                if vec is None:
-                    continue
-                if expected_dim is not None and len(vec) != expected_dim:
-                    counters.skipped_bad_dim += 1
-                    continue
-                try:
-                    if write_embedding(it["mid"], vec, model_str, it["chash"]):
-                        n_written += 1
-                except Exception as e:  # noqa: BLE001
-                    counters.record_error(e)
-                    if log is not None:
-                        log(f"WRITE_FAIL: mid={it['mid'][:8]} {type(e).__name__}: {e}")
-
-            counters.embedded += n_written
-            counters.batches_completed += 1
-            counters.consecutive_fails = 0
+        counters.embedded += n_written
+        counters.batches_completed += 1
+        counters.consecutive_fails = 0
+        return n_written > 0
 
     # Outer cycle
     while True:

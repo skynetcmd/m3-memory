@@ -479,6 +479,12 @@ async def main() -> int:
             deadline_s=deadline_s,           # soft per-run wall-clock budget (see --deadline)
             max_consecutive_fails=5,
             max_row_bytes=32_768,
+            # A long chat turn is exactly the row that used to be dropped here:
+            # over bge-m3's ctx, skipped every run, invisible to semantic search
+            # forever (2026-08-09: 3 such turns, and they also kept the cognitive
+            # loop's embed gate permanently "has work"). Subdivide + mean-pool
+            # instead, so a long turn is still searchable.
+            oversize_mode="subdivide",
             expected_dim=None,               # don't reject by dim — chatlog has heterogenous models
             limit=max_per_run,
             log=lambda msg: logger.info("%s", msg),
