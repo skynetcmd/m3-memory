@@ -16,6 +16,7 @@ test_verify_warns_on_crashed_only_keepalive pins (2).
 from __future__ import annotations
 
 import json
+import os
 import plistlib
 import sys
 from pathlib import Path
@@ -126,7 +127,14 @@ def test_watchdog_restart_backend_per_os(monkeypatch):
 
     monkeypatch.setattr(wd, "_os_name", lambda: "Darwin")
     cmds, what = wd._restart_backend()
-    assert cmds[0][:3] == ["launchctl", "kickstart", "-k"]
+    # Graceful FIRST. `kickstart -k` sends SIGKILL, and killing a writer
+    # mid-write is what tears the WAL (HALT_PROTOCOL) — the exact damage this
+    # watchdog exists to prevent. SIGTERM runs the loop's checkpoint/deregister
+    # path; the follow-up kickstart must NOT carry -k.
+    assert cmds[0] == ["launchctl", "kill", "SIGTERM",
+                       f"gui/{os.getuid()}/com.m3memory.cognitiveloop"]
+    assert "-k" not in cmds[1]
+    assert cmds[1][:2] == ["launchctl", "kickstart"]
     assert "cognitiveloop" in what
 
     monkeypatch.setattr(wd, "_os_name", lambda: "Linux")

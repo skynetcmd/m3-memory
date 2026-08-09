@@ -203,11 +203,25 @@ def _restart_backend() -> tuple[list[list[str]], str]:
     osn = _os_name()
     if osn == "Darwin":
         uid = os.getuid() if hasattr(os, "getuid") else 0
-        return ([["launchctl", "kickstart", "-k",
-                  f"gui/{uid}/{_LAUNCHD_LABEL}"]], f"launchd {_LAUNCHD_LABEL}")
+        target = f"gui/{uid}/{_LAUNCHD_LABEL}"
+        # NOT `kickstart -k`: -k sends SIGKILL, and killing a writer mid-write is
+        # exactly what tears the WAL (docs/design/HALT_PROTOCOL.md) — the damage
+        # this watchdog exists to avoid. `kill SIGTERM` runs the loop's graceful
+        # path (checkpoint, deregister, release the lock); KeepAlive=true then
+        # restarts it. The follow-up `kickstart` (no -k) is the belt-and-braces
+        # for a plist that lost KeepAlive: it starts a job that is not running
+        # and is a no-op for one that is.
+        return ([["launchctl", "kill", "SIGTERM", target],
+                 ["launchctl", "kickstart", target]],
+                f"launchd {_LAUNCHD_LABEL}")
     if osn == "Linux":
+        # systemctl restart stops with SIGTERM (KillSignal default) and waits
+        # for the unit to exit before starting it again — already graceful.
         return ([["systemctl", "--user", "restart", _SYSTEMD_UNIT]],
                 f"systemd {_SYSTEMD_UNIT}")
+    # Windows has no graceful equivalent: schtasks /End terminates the task.
+    # The loop installs a SIGTERM handler via signal.signal() there, but /End
+    # does not deliver one, so this remains the least-graceful path of the three.
     return ([["schtasks", "/End", "/TN", _WINDOWS_TASK],
              ["schtasks", "/Run", "/TN", _WINDOWS_TASK]],
             f"schtasks {_WINDOWS_TASK}")
@@ -219,22 +233,25 @@ def restart(reason: str) -> int:
         return 0
     cmds, what = _restart_backend()
     log(f"RESTARTING via {what}: {reason}")
-    ok = True
+    spawned = False
     for cmd in cmds:
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
                                **no_window_kwargs())
+            spawned = True
         except (OSError, subprocess.SubprocessError) as e:
-            log(f"  {cmd[0]} failed: {e}")
-            ok = False
-            break
-        # Windows /End returns non-zero when the task is not running; that is
-        # the expected no-op on the dead-loop path, not a failure.
-        if r.returncode != 0 and cmd[:2] != ["schtasks", "/End"]:
-            log(f"  {' '.join(cmd)} exit={r.returncode} "
-                f"stderr={(r.stderr or '').strip()}")
-            ok = False
-    if not ok:
+            log(f"  {cmd[0]} failed to spawn: {e}")
+            continue
+        if r.returncode != 0:
+            # Expected no-ops, not failures: `schtasks /End` on a task that is
+            # not running, and `launchctl kickstart` on a job KeepAlive already
+            # brought back. Log at info so a genuine problem is still visible,
+            # and let the next tick judge on the heartbeat rather than guessing
+            # from exit codes that differ per platform and per state.
+            log(f"  note: {' '.join(cmd)} exit={r.returncode} "
+                f"{(r.stderr or '').strip()}")
+    if not spawned:
+        log("  no restart command could be spawned")
         return 1
     try:
         STATE.parent.mkdir(parents=True, exist_ok=True)
