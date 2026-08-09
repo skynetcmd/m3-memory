@@ -27,7 +27,7 @@ psycopg[binary]>=3.2.0,<4
 sqlglot>=30.6.0,<31
 
 # --- Security & Auth ---
-cryptography>=48.0.1,<49
+cryptography>=50.0.0,<51
 keyring>=25.7.0,<26
 pywin32>=311; sys_platform == 'win32'
 
