@@ -157,10 +157,32 @@ class TestDiscoverModelSync:
         2026-07-26; an auth-enabled server answers a MISSING header differently
         from a WRONG one. Mirrors files_memory.config.llm_auth_headers.
         """
+        # Stub the RESOLVER, not just the env var. _default_lm_token() reads
+        # env -> keyring -> macOS keychain -> vault, so on any machine where the
+        # developer has actually configured LM Studio this test picked up a REAL
+        # token, failed, and printed the secret into the pytest report. The
+        # contract under test is "no token -> no header", so the absence of a
+        # token has to be asserted, not assumed from an ambient environment.
+        monkeypatch.delenv("LM_API_TOKEN", raising=False)
+        monkeypatch.delenv("LM_STUDIO_API_KEY", raising=False)
+        monkeypatch.setattr(L, "_default_lm_token", lambda: None)
+
         cap: dict = {}
         _fake_httpx(monkeypatch, {"data": [{"id": "m"}]}, capture=cap)
         L.discover_model_sync("http://x/v1")
         assert cap["headers"] == {}
+
+    def test_no_token_resolved_means_no_header_even_from_a_configured_host(
+            self, monkeypatch):
+        """The resolver is the seam, so pin BOTH sides of it: a resolver that
+        yields nothing must produce no header, and one that yields a token must
+        produce exactly that header. Without this the suite could only ever
+        prove the branch its own host happened to be in."""
+        cap: dict = {}
+        monkeypatch.setattr(L, "_default_lm_token", lambda: "resolved-tok")
+        _fake_httpx(monkeypatch, {"data": [{"id": "m"}]}, capture=cap)
+        L.discover_model_sync("http://x/v1")
+        assert cap["headers"] == {"Authorization": "Bearer resolved-tok"}
 
     def test_auth_header_sent_when_token_present(self, monkeypatch):
         cap: dict = {}

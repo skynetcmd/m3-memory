@@ -143,6 +143,17 @@ def _call_model(cfg: SynthConfig, user_prompt: str) -> Optional[str]:
     }
     if cfg.model:
         payload["model"] = cfg.model
+    # Turn a reasoning model's thinking OFF so the answer lands in `content`
+    # instead of the reasoning channel — otherwise it spends max_tokens thinking
+    # and returns an empty string, which this caller reads as "model gave
+    # nothing" and silently degrades. Shared seam (slm_intent, m3_entities,
+    # files_memory.extract), gated to the local runtimes that honor it.
+    try:
+        from llm_failover import suppresses_thinking_via_effort
+        if suppresses_thinking_via_effort(cfg.url):
+            payload["reasoning_effort"] = "none"
+    except Exception:  # noqa: BLE001
+        pass
 
     try:
         r = httpx.post(cfg.url, json=payload, headers=headers, timeout=cfg.timeout_s)

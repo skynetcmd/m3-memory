@@ -182,7 +182,7 @@ def render_section(report: Optional[DriftReport], links, self_path: str) -> list
 DRIFT_RECALL_FLOOR = float(os.environ.get("M3_WIKI_DRIFT_RECALL_FLOOR", "0.80"))
 DRIFT_PRECISION_FLOOR = float(os.environ.get("M3_WIKI_DRIFT_PRECISION_FLOOR", "0.70"))
 
-_JUDGE_PROMPT_VERSION = "1"  # bump to invalidate all judge caches on a prompt change
+_JUDGE_PROMPT_VERSION = "2"  # v2 (2026-08-09): wording/renaming is not drift — see _JUDGE_SYSTEM
 
 _JUDGE_SYSTEM = (
     "You audit a knowledge-base for CITATION DRIFT: a summary claim that no longer "
@@ -194,6 +194,13 @@ _JUDGE_SYSTEM = (
     "a correction/reversal the sources now carry.\n"
     "It has NOT drifted if every claim in the synthesis is supported by at least one "
     "source and none is contradicted — even if the synthesis is a lossy summary.\n"
+    "WORDING IS NOT DRIFT. Judge the SUBSTANCE of the claim, not whether it reuses "
+    "the sources' vocabulary. All of these are FAITHFUL, not drift: a paraphrase; a "
+    "shortened, renamed or informal label for something the sources name differently; "
+    "and a correct higher-level characterisation of what the sources describe in "
+    "detail. Only call it overclaiming when the synthesis asserts something BROADER "
+    "OR STRONGER THAN THE FACTS the sources establish — never merely because it "
+    "generalises, compresses, or renames them.\n"
     "Judge ONLY against the sources shown; do not use outside knowledge. When the "
     "sources are ambiguous or insufficient to tell, answer \"drifted\": false "
     "(do not manufacture a finding).\n"
@@ -210,6 +217,9 @@ class DriftConfig:
     api_key_service: str = "LM_API_TOKEN"
     timeout_s: float = 30.0
     temperature: float = 0.0   # judge wants determinism, not creativity
+    # Sized for a one-line JSON verdict. A REASONING model would blow this in
+    # its thinking channel, so the fix is to turn thinking OFF (see the
+    # reasoning_effort block in _call_model), not to inflate the budget.
     max_tokens: int = 120
     cache_dir: Optional[str] = None
 
@@ -294,11 +304,19 @@ class ModelDriftJudge:
         if cached is not None:
             self.cache_hits += 1
             return DriftVerdict(synthesis_id="?", drifted=cached[0], reason=cached[1])
-        reply = self._call_model(_build_judge_prompt(synthesis_content, source_contents))
+        reply, finish_reason = self._call_model(
+            _build_judge_prompt(synthesis_content, source_contents))
         self.calls += 1
         drifted, reason = _parse_verdict(reply or "")
         if drifted is None:
             self.abstentions += 1
+            if not (reply or "").strip() and finish_reason == "length":
+                # Distinguish "model ran out of room" from "model said nothing":
+                # a bare "empty judge reply" sent readers looking at the wrong
+                # thing entirely (see DriftConfig.max_tokens).
+                reason = ("judge hit max_tokens before answering — raise "
+                          "DriftConfig.max_tokens (reasoning models need room "
+                          "for the reasoning channel plus the reply)")
         else:
             self._write_cache(digest, drifted, reason)
         return DriftVerdict(synthesis_id="?", drifted=drifted, reason=reason)
@@ -308,11 +326,11 @@ class ModelDriftJudge:
                 f"{self.cache_hits} cached, {self.abstentions} abstained")
 
     # -- model call (mirrors wiki.synth._call_model) -------------------------
-    def _call_model(self, user_prompt: str) -> Optional[str]:
+    def _call_model(self, user_prompt: str) -> "tuple[Optional[str], str]":
         try:
             import httpx  # lazy: only when --check-drift is used
         except ImportError:
-            return None
+            return None, ""
         headers = {"Content-Type": "application/json"}
         token = self._resolve_key(self.cfg.api_key_service)
         if token:
@@ -328,13 +346,27 @@ class ModelDriftJudge:
         }
         if self.cfg.model:
             payload["model"] = self.cfg.model
+        # Turn a reasoning model's thinking OFF so the verdict lands in
+        # `content` instead of the reasoning channel. Without this, qwen3.5:9b
+        # returned finish_reason="length" with EMPTY content on every pair, the
+        # judge abstained on 100% of syntheses, and the drift section reported
+        # "0 findings" while checking nothing (measured 2026-08-09). Same shared
+        # seam slm_intent/m3_entities/files_memory.extract use — gated to the
+        # local runtimes that honor it ("none" 400s on real OpenAI cloud).
+        try:
+            from llm_failover import suppresses_thinking_via_effort
+            if suppresses_thinking_via_effort(self.cfg.url):
+                payload["reasoning_effort"] = "none"
+        except Exception:  # noqa: BLE001
+            pass
         try:
             r = httpx.post(self.cfg.url, json=payload, headers=headers,
                            timeout=self.cfg.timeout_s)
             r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            choice = r.json()["choices"][0]
+            return choice["message"].get("content"), (choice.get("finish_reason") or "")
         except Exception:
-            return None  # fail open
+            return None, ""  # fail open
 
     @staticmethod
     def _resolve_key(service: str) -> Optional[str]:

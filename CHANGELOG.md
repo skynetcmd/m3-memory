@@ -21,6 +21,52 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.7] — 2026-08-09 — reasoning models silently no-op'd the wiki LLM callers
+
+### Fixed
+- **A reasoning model made `--check-drift` report "0 findings" while checking
+  nothing.** `wiki.citation_drift`'s judge never sent `reasoning_effort="none"`,
+  so on qwen3.5:9b every call came back `finish_reason="length"` with an **empty
+  `content`** — the model spent its whole budget in the reasoning channel. The
+  judge abstained on 100% of syntheses and failed open, which is correct
+  behaviour for one pair and false confidence across all of them. With the
+  mitigation applied the same fixture scores **recall 1.00 / precision 1.00,
+  zero abstentions** (measured, 12-pair fixture).
+
+  `wiki.synth` and `wiki.prose_compiler` had the identical gap — they build the
+  same payload — and are fixed with them. All three now use the shared
+  `llm_failover.suppresses_thinking_via_effort()` seam that `slm_intent`,
+  `m3_entities` and `files_memory.extract` already used, rather than a local
+  workaround. An abstention caused by truncation now says so, instead of
+  reporting a bare "empty judge reply".
+- **Judge prompt v2: wording is not drift.** The judge flagged faithful
+  syntheses that merely *paraphrased, renamed or abbreviated* what the sources
+  said ("storage seam" for "dialect seam", "coalesce cache" for
+  "entity_coalesce's embedding cache"), and read a correct higher-level
+  characterisation as overclaiming. The prompt covered lossy summaries but never
+  said vocabulary differences are not drift. Precision on the fixture goes
+  0.67 → 0.75 on gemma-4-26b-a4b (below → above the 0.70 floor, reproducible
+  across runs) with recall unchanged at 1.00, and 1.00/1.00 on qwen3.5:9b — so
+  the change generalises rather than fitting one model.
+- **`test_auth_header_omitted_when_no_token` asserted an ambient environment.**
+  `_default_lm_token()` resolves env → keyring → macOS keychain → vault, so on
+  any machine where the developer had actually configured LM Studio the test
+  picked up a **real token**, failed, and printed the secret into the pytest
+  report. It now stubs the resolver, and a companion test pins the other side of
+  the seam so the suite can prove both branches instead of whichever one its
+  host happens to be in.
+
+### Added
+- **`tests/test_reasoning_effort_regression_guard.py`** — the mitigation is
+  opt-in per call site and therefore invisible to forget: a caller that omits it
+  works perfectly on a non-reasoning model and silently returns nothing on a
+  reasoning one. The guard (modelled on the existing no-window guard) fails when
+  a **new** local `chat/completions` caller skips the helper, pins the callers
+  that have it, and keeps `KNOWN_GAPS` honest by failing when a listed gap is
+  fixed but not delisted — a ratchet, so the remaining debt is visible and can
+  only shrink. Cloud-only bridges are excluded by design, since
+  `reasoning_effort="none"` 400s on real OpenAI.
+
 ## [2026.8.19.6] — 2026-08-09 — fix the tier-3 embeddings endpoint path
 
 ### Fixed
