@@ -21,7 +21,13 @@ the policy is forward-going only.
 
 ### None pending
 
-## [2026.8.19.9] — 2026-08-09 — the Anthropic wire, and a truncated reply is no longer "no result"
+## [2026.8.19.10] — 2026-08-09 — the Anthropic wire, and a truncated reply is no longer "no result"
+
+> Supersedes 2026.8.19.9, which shipped the same code with an inaccurate
+> verification note: it claimed the LM Studio + Anthropic-wire combination had
+> "no failure to reproduce". That test ran before thinking was re-enabled on
+> that wire. It does reproduce, and the fix resolves it — the table below is the
+> corrected result.
 
 ### Fixed
 - **The observer and reflector silently recorded nothing on a reasoning model
@@ -66,7 +72,7 @@ the policy is forward-going only.
   | server / model | wire | before | after |
   |---|---|---|---|
   | LM Studio `gemma-4-26b-a4b` | openai | `length`, empty | `stop`, JSON |
-  | LM Studio `gemma-4-26b-a4b` | anthropic | already fine (no thinking blocks) | unchanged |
+  | LM Studio `gemma-4-26b-a4b` | anthropic | `max_tokens`, empty | `end_turn`, JSON |
   | Ollama `qwen3.5:9b` | openai | `length`, empty | `stop`, JSON |
   | Ollama `qwen3.5:9b` | anthropic | `max_tokens`, empty | `end_turn`, JSON |
   | Ollama `qwen3.5-9b-lms` (MLX) | openai | `length`, empty | `stop`, JSON |
@@ -75,11 +81,16 @@ the policy is forward-going only.
   `reply_ran_out_of_room()` fired on every broken combination above and on none
   of the fixed ones.
 
-  Re-checked with thinking explicitly enabled in LM Studio: its `/v1/messages`
-  implementation still returns `['text']` / `end_turn` for `gemma-4-26b-a4b`, so
-  it does not surface thinking blocks on that wire even though its OpenAI wire
-  clearly does. That combination therefore has no failure to reproduce, and
-  suppression there is verified as a safe no-op rather than as a fix.
+  **LM Studio's two wires take their thinking setting from different places**,
+  which is worth knowing when reproducing this: the app-level toggle governs its
+  OpenAI wire, while `/v1/messages` follows the Messages-API default (thinking
+  OFF) unless the request asks for it. Probed directly, that wire honors the
+  parameter rather than ignoring it — `thinking` omitted -> `['text']`,
+  `{"type":"enabled","budget_tokens":1024}` -> `['thinking','text']`,
+  `{"type":"disabled"}` -> `['text']`. With thinking enabled on that wire and a
+  tight budget it reproduces the failure exactly (`['thinking']`, `max_tokens`,
+  empty text) and the fix resolves it, so every cell in the matrix is a real
+  reproduction rather than an assumed no-op.
 
 ## [2026.8.19.8] — 2026-08-09 — close every reasoning-model gap; guard is now per-call-site
 
