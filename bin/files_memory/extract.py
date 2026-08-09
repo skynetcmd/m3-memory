@@ -265,8 +265,8 @@ def _parse_facts_json(raw: str) -> list[ExtractedFact]:
         # Progressive repair for the common LLM/JSON-mode escapes seen in practice:
         #   1. trailing commas (common LLM tic),
         #   2. stray backslashes — a '\' not starting a valid JSON escape, i.e.
-        #      Windows paths (C:\Users -> \U) / PowerShell backticks leaking into a
-        #      string value. Double them so the string is valid.
+        #      Windows-style paths / PowerShell backticks that leak an invalid
+        #      escape into a string value. Double them so the string is valid.
         repaired = re.sub(r",(\s*[}\]])", r"\1", obj_text)
         try:
             obj = json.loads(repaired)
