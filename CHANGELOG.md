@@ -21,6 +21,66 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.9] — 2026-08-09 — the Anthropic wire, and a truncated reply is no longer "no result"
+
+### Fixed
+- **The observer and reflector silently recorded nothing on a reasoning model
+  over the Anthropic wire.** `run_observer` / `run_reflector` speak *both* wire
+  formats, and 2026.8.19.8 only covered the OpenAI branch. On `/v1/messages` a
+  reasoning model emits `thinking` blocks that consume `max_tokens` before any
+  `text` block exists, so the `type == "text"` filter yielded `""` and the run
+  banked zero observations as a clean result.
+
+  Measured live (Ollama `qwen3.5:9b`, `/v1/messages`, max_tokens=64):
+
+  | | blocks | stop_reason | text |
+  |---|---|---|---|
+  | before | `['thinking']` | `max_tokens` | `''` |
+  | after | `['text']` | `end_turn` | `'{"observations": []}'` |
+
+  New `apply_thinking_suppression_anthropic()` sends the Messages-API spelling,
+  `thinking: {"type": "disabled"}` — there is no `reasoning_effort` on that wire.
+  Same local gating as the OpenAI variant: cloud Anthropic already defaults
+  thinking OFF, and older `anthropic-version` values reject unknown params, so
+  sending it upstream buys nothing and risks a 400.
+
+- **"Found nothing" and "never got to answer" are no longer the same result.**
+  This was the deeper defect: `parse_observations("")` returns `[]`, identical to
+  a genuine empty finding set, so a truncated reply was indistinguishable from a
+  clean pass — the same conflation that let a reasoning model report "0 findings"
+  from the citation-drift judge. New `llm_failover.reply_ran_out_of_room()` is the
+  single place that separates them, across both wire formats (`finish_reason ==
+  "length"`, `stop_reason == "max_tokens"`), and both callers now raise an
+  actionable error naming the model and its `max_tokens` instead of recording an
+  empty result.
+
+  This matters beyond the suppression fix: it is the backstop for a server that
+  *ignores* the suppression hint. Partial text is still treated as output — only
+  truncated-**and**-empty is an error — and an unrecognised stop reason is never
+  treated as truncation, so an unfamiliar server cannot be made to fail.
+
+### Notes
+- **Verified across both runtimes, both wires, three models** (thinking enabled;
+  `max_tokens=64`; "before" = no suppression, "after" = suppression applied):
+
+  | server / model | wire | before | after |
+  |---|---|---|---|
+  | LM Studio `gemma-4-26b-a4b` | openai | `length`, empty | `stop`, JSON |
+  | LM Studio `gemma-4-26b-a4b` | anthropic | already fine (no thinking blocks) | unchanged |
+  | Ollama `qwen3.5:9b` | openai | `length`, empty | `stop`, JSON |
+  | Ollama `qwen3.5:9b` | anthropic | `max_tokens`, empty | `end_turn`, JSON |
+  | Ollama `qwen3.5-9b-lms` (MLX) | openai | `length`, empty | `stop`, JSON |
+  | Ollama `qwen3.5-9b-lms` (MLX) | anthropic | `max_tokens`, empty | `end_turn`, JSON |
+
+  `reply_ran_out_of_room()` fired on every broken combination above and on none
+  of the fixed ones.
+
+  Re-checked with thinking explicitly enabled in LM Studio: its `/v1/messages`
+  implementation still returns `['text']` / `end_turn` for `gemma-4-26b-a4b`, so
+  it does not surface thinking blocks on that wire even though its OpenAI wire
+  clearly does. That combination therefore has no failure to reproduce, and
+  suppression there is verified as a safe no-op rather than as a fix.
+
 ## [2026.8.19.8] — 2026-08-09 — close every reasoning-model gap; guard is now per-call-site
 
 ### Fixed

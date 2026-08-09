@@ -92,6 +92,46 @@ def apply_thinking_suppression(payload: dict, url: str) -> dict:
     return payload
 
 
+def apply_thinking_suppression_anthropic(payload: dict, url: str) -> dict:
+    """Anthropic-wire sibling of :func:`apply_thinking_suppression`.
+
+    The Messages API expresses this as ``thinking: {"type": "disabled"}`` rather
+    than ``reasoning_effort``. Gated to the same local runtimes and for the same
+    reason as the OpenAI variant: verified accepted there (LM Studio returns 200
+    with it), while real Anthropic rejects unknown/incompatible params on older
+    ``anthropic-version`` values — and cloud Anthropic already defaults to
+    thinking OFF, so sending it upstream buys nothing and risks a 400.
+    """
+    try:
+        if suppresses_thinking_via_effort(url):
+            payload["thinking"] = {"type": "disabled"}
+    except Exception:  # noqa: BLE001 — a suppression hint must never break a call
+        pass
+    return payload
+
+
+# Response fields that mean "the model stopped because it ran out of room",
+# per wire format: OpenAI chat -> finish_reason, Anthropic messages -> stop_reason.
+_TRUNCATED_MARKERS = frozenset({"length", "max_tokens"})
+
+
+def reply_ran_out_of_room(text: str, stop_reason: Optional[str]) -> bool:
+    """True when a model returned NO usable text because it hit its token cap.
+
+    The distinction this exists to preserve: "the model looked and found
+    nothing" and "the model never got to answer" are different facts, and every
+    caller that maps both to an empty result reports the second as the first.
+    That is how a reasoning model turned the citation-drift judge into a
+    permanent "0 findings" (2026-08-09) — the reply was truncated mid-thought,
+    the caller saw "", and a silent no-op looked like a clean pass.
+
+    Callers should treat True as an ERROR worth surfacing, not as an empty
+    result: it is nearly always a fixable configuration problem (raise
+    max_tokens, or suppress thinking on a reasoning model).
+    """
+    return not (text or "").strip() and (stop_reason or "") in _TRUNCATED_MARKERS
+
+
 def is_lmstudio_url(url: str) -> bool:
     """True when ``url`` points at an LM Studio server (its default port 1234).
 

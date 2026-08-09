@@ -36,7 +36,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-from llm_failover import apply_thinking_suppression
+from llm_failover import apply_thinking_suppression, apply_thinking_suppression_anthropic, reply_ran_out_of_room
 from m3_sdk import getenv_compat
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -227,6 +227,9 @@ async def call_observer(
             "messages": [{"role": "user", "content": user_text}],
             "temperature": profile.temperature,
         }
+        # A local reasoning model emits thinking blocks that consume max_tokens
+        # before any text block exists; the text filter below then yields "".
+        apply_thinking_suppression_anthropic(payload, profile.url)
         headers = {
             "Content-Type": "application/json",
             "x-api-key": token,
@@ -242,6 +245,14 @@ async def call_observer(
             b.get("text", "") for b in blocks
             if isinstance(b, dict) and b.get("type") == "text"
         ).strip()
+        # "Found nothing" and "never got to answer" are different facts. Without
+        # this, a truncated reply parses to zero observations and is recorded as
+        # a clean, empty result.
+        if reply_ran_out_of_room(text, data.get("stop_reason")):
+            raise RuntimeError(
+                f"observer: {profile.model} hit max_tokens ({max_tokens}) with no "
+                f"text block — raise the profile's max_tokens, or the model is a "
+                f"reasoning model whose thinking was not suppressed")
         # Anthropic usage shape: input_tokens / output_tokens
         u = data.get("usage") or {}
         usage_meta["tokens_in"] = int(u.get("input_tokens") or 0)
@@ -274,7 +285,13 @@ async def call_observer(
         if r.status_code != 200:
             raise RuntimeError(f"observer http {r.status_code}: {r.text[:200]}")
         data = r.json()
-        text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        choice = (data.get("choices") or [{}])[0]
+        text = (choice.get("message", {}).get("content") or "").strip()
+        if reply_ran_out_of_room(text, choice.get("finish_reason")):
+            raise RuntimeError(
+                f"observer: {profile.model} hit max_tokens ({max_tokens}) with an "
+                f"empty content — raise the profile's max_tokens, or thinking was "
+                f"not suppressed on a reasoning model")
         # OpenAI-compat usage shape: prompt_tokens / completion_tokens.
         # xAI extension: cost_in_usd_ticks (USD * 1e9).
         u = data.get("usage") or {}

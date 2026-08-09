@@ -30,7 +30,7 @@ import sys
 import time
 from pathlib import Path
 
-from llm_failover import apply_thinking_suppression
+from llm_failover import apply_thinking_suppression, apply_thinking_suppression_anthropic, reply_ran_out_of_room
 from m3_sdk import getenv_compat
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -103,6 +103,9 @@ async def call_reflector(
             "messages": [{"role": "user", "content": user_text}],
             "temperature": profile.temperature,
         }
+        # Thinking blocks consume max_tokens before any text block exists, so
+        # the filter below would yield "" on a local reasoning model.
+        apply_thinking_suppression_anthropic(payload, profile.url)
         headers = {
             "Content-Type": "application/json",
             "x-api-key": token,
@@ -118,6 +121,13 @@ async def call_reflector(
             b.get("text", "") for b in blocks
             if isinstance(b, dict) and b.get("type") == "text"
         ).strip()
+        # A truncated reply is not "no reflection" — say so rather than
+        # recording an empty result as a successful one.
+        if reply_ran_out_of_room(text, data.get("stop_reason")):
+            raise RuntimeError(
+                f"reflector: {profile.model} hit max_tokens ({max_tokens}) with "
+                f"no text block — raise the profile's max_tokens, or thinking "
+                f"was not suppressed on a reasoning model")
     else:
         payload = {
             "model": profile.model,
@@ -140,7 +150,13 @@ async def call_reflector(
         if r.status_code != 200:
             raise RuntimeError(f"reflector http {r.status_code}: {r.text[:200]}")
         data = r.json()
-        text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        choice = (data.get("choices") or [{}])[0]
+        text = (choice.get("message", {}).get("content") or "").strip()
+        if reply_ran_out_of_room(text, choice.get("finish_reason")):
+            raise RuntimeError(
+                f"reflector: {profile.model} hit max_tokens ({max_tokens}) with "
+                f"an empty content — raise the profile's max_tokens, or thinking "
+                f"was not suppressed on a reasoning model")
     return parse_reflector_output(text)
 
 
