@@ -6,6 +6,7 @@ and never touch the real host scheduler.
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
@@ -72,6 +73,64 @@ def test_sync_runs_via_both_governor_and_scheduled_task_all_oses():
     assert "AgentOS_HourlySync" in {n for n, _ in gm.KEEP_SCHEDULED_FLOOR}
 
 
+def test_chatlog_embed_sweep_is_a_kept_floor_not_eligible():
+    """Regression guard: the chatlog embed sweep must NEVER be in the removal set.
+
+    Its work IS governor-appropriate (GPU backfill + spill drain, both periodic
+    and interruptible) and the loop's 'embed' pass now runs both halves — but the
+    scheduled entry is kept as a low-frequency FLOOR, exactly like
+    AgentOS_HourlySync. Rationale: the governor HALTs background passes under
+    sustained load, and a spilled turn lives ONLY as a JSONL line on disk until
+    drained — not in any store, not searchable. Indefinite deferral of that is
+    unbounded data at risk, so a rigid entry bounds the worst case.
+
+    GOVERNOR_ELIGIBLE means "delete this scheduler entry", not "the loop runs
+    it" — a floor task must never appear there (see HourlySync, which the loop
+    also runs as a pass).
+
+    History: `governor migrate` deleted this task on the premise the loop ran its
+    work, when the loop ran only embed_backfill and nothing drained spill.
+    Observed 2026-08-09: spill from 2026-07-14/17 undrained, last_sweeper_run_at
+    frozen at 2026-07-31.
+    """
+    floor = {n for n, _ in gm.KEEP_SCHEDULED_FLOOR}
+    assert "AgentOS_ChatlogEmbedSweep" in floor
+    assert "AgentOS_ChatlogEmbedSweep" not in gm.GOVERNOR_ELIGIBLE
+
+
+def test_loop_embed_pass_drains_spill():
+    """The invariant GOVERNOR_ELIGIBLE documents: a task may only be retired into
+    the loop if the loop genuinely executes its work.
+
+    The loop's 'embed' pass must drain chatlog spill, not merely embed rows that
+    are already in a store. Spilled rows are invisible to embed_backfill's
+    _count_pending (they are not in any DB yet), so a pass that only embeds
+    leaves them on disk forever.
+
+    Asserts the MECHANISM rather than a name list, so it stays meaningful if the
+    task is ever re-classified.
+    """
+    import pathlib
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    loop_src = (repo / "bin" / "m3_cognitive_loop.py").read_text(encoding="utf-8")
+
+    assert "_drain_chatlog_spill" in loop_src, (
+        "the cognitive loop no longer defines a spill-drain step; the embed pass "
+        "would silently stop recovering spilled chatlog turns"
+    )
+    assert "drain_spill" in loop_src, (
+        "spill drainage must delegate to chatlog_embed_sweeper.drain_spill — the "
+        "single implementation that honours each row's captured _db_path"
+    )
+    # The gate must consider spill too, or a spill-only backlog never schedules
+    # the pass (the exact hole that let 2026-07-14/17 spill sit undrained).
+    assert "def has_spill_work" in loop_src
+    assert re.search(r"def has_embed_work.*?has_spill_work\(\)", loop_src, re.S), (
+        "has_embed_work must consult has_spill_work, else a spill backlog with an "
+        "empty embedding backlog leaves the embed pass unscheduled"
+    )
+
+
 def test_floor_and_not_migratable_excluded_from_eligible(monkeypatch):
     """When all canonical tasks are installed, the floor (HourlySync) and the
     not-migratable tasks (SecretRotator/CognitiveLoop) must be EXCLUDED from the
@@ -86,8 +145,10 @@ def test_floor_and_not_migratable_excluded_from_eligible(monkeypatch):
         })
     out = gm.detect_scheduled_tasks()
     assert set(out["eligible"]) == set(gm.GOVERNOR_ELIGIBLE)
-    assert out["keep_scheduled_floor"] == ["AgentOS_HourlySync"]
-    assert "AgentOS_HourlySync" not in out["eligible"]
+    assert set(out["keep_scheduled_floor"]) == {n for n, _ in gm.KEEP_SCHEDULED_FLOOR}
+    for nm in ("AgentOS_HourlySync", "AgentOS_ChatlogEmbedSweep"):
+        assert nm in out["keep_scheduled_floor"]
+        assert nm not in out["eligible"]
     for nm in ("AgentOS_SecretRotator", "AgentOS_CognitiveLoop"):
         assert nm not in out["eligible"]
         assert nm in out["not_migratable_present"]

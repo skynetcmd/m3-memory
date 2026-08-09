@@ -131,8 +131,13 @@ def test_watchdog_restart_backend_per_os(monkeypatch):
     # mid-write is what tears the WAL (HALT_PROTOCOL) — the exact damage this
     # watchdog exists to prevent. SIGTERM runs the loop's checkpoint/deregister
     # path; the follow-up kickstart must NOT carry -k.
+    # os.getuid() is Unix-only; mirror the production guard
+    # (m3_loop_watchdog.py: `os.getuid() if hasattr(os, "getuid") else 0`) so this
+    # Darwin-branch assertion is evaluable on a Windows runner too (§1: the suite
+    # must go green on all three OSes, and CI's matrix includes windows-latest).
+    _uid = os.getuid() if hasattr(os, "getuid") else 0
     assert cmds[0] == ["launchctl", "kill", "SIGTERM",
-                       f"gui/{os.getuid()}/com.m3memory.cognitiveloop"]
+                       f"gui/{_uid}/com.m3memory.cognitiveloop"]
     assert "-k" not in cmds[1]
     assert cmds[1][:2] == ["launchctl", "kickstart"]
     assert "cognitiveloop" in what
@@ -187,7 +192,13 @@ def test_verify_warns_on_crashed_only_keepalive(tmp_path, capsys,
 
     # Reproduce the check verbatim rather than importing the whole Darwin-gated
     # verify path (which shells out to launchctl and needs a loaded agent).
+    # `plutil` is macOS-only: off-Darwin the spawn raises FileNotFoundError rather
+    # than returning nonzero, so the assertion below is only meaningful there
+    # (§1 — CI's matrix includes ubuntu and windows runners).
+    import shutil
     import subprocess
+    if shutil.which("plutil") is None:
+        pytest.skip("plutil is macOS-only; the KeepAlive-value check is Darwin-gated")
     r = subprocess.run(["plutil", "-extract", "KeepAlive", "raw", "-o", "-",
                         str(dest)], capture_output=True, text=True)
     warned = r.returncode != 0 or (r.stdout or "").strip() != "true"

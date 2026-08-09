@@ -10,11 +10,18 @@ removed so the two don't double-fire.
 Not every scheduled task is a governor candidate. We split them:
 
   GOVERNOR-ELIGIBLE (periodic, interruptible, resource-using — safe to migrate):
-    AgentOS_HourlySync          PG sync (WAL + network)
-    AgentOS_ChatlogEmbedSweep   GPU embedding backfill
     AgentOS_ObservationDrain    LLM fact-extraction from chatlog
     AgentOS_Maintenance         decay / prune (DB writes)
     AgentOS_WeeklyAuditor       audit pass (low-priority)
+
+  KEEP AS A SCHEDULED FLOOR (the loop runs the work, but a rigid entry stays):
+    AgentOS_HourlySync          PG sync (WAL + network) — governor HALTs under
+                                load; the warehouse must not drift stale.
+    AgentOS_ChatlogEmbedSweep   ALSO a floor: the governor halts under sustained
+                                load, and a spilled turn lives only on disk until
+                                drained — neither in the DB nor searchable. The
+                                loop drains it (run_embed_pass), the floor bounds
+                                how long that can be deferred.
 
   NOT MIGRATABLE (left on their schedule — the governor cannot/should not own them):
     AgentOS_SecretRotator       security/compliance-anchored: rotation must happen
@@ -43,7 +50,6 @@ import sys
 # has no execution loop of its own). Keep in sync with m3_cognitive_loop's pass
 # registry and install_schedules.get_schedule_specs().
 GOVERNOR_ELIGIBLE = (
-    "AgentOS_ChatlogEmbedSweep",   # -> loop 'embed' pass
     "AgentOS_ObservationDrain",    # -> loop 'enrich' pass (Observer/Reflector)
     "AgentOS_Maintenance",         # -> loop 'maintenance' pass
     "AgentOS_WeeklyAuditor",       # -> loop 'audit' pass
@@ -58,6 +64,10 @@ KEEP_SCHEDULED_FLOOR = (
     ("AgentOS_HourlySync",
      "governor-paced in-loop AND kept as an hourly floor — the governor HALTs "
      "under load, and the warehouse must not drift stale indefinitely"),
+    ("AgentOS_ChatlogEmbedSweep",
+     "governor-paced in-loop AND kept as a low-frequency floor — the governor "
+     "HALTs under sustained load, and undrained spill is unbounded data at risk "
+     "on disk (a spilled turn is not in the DB and not searchable until drained)"),
 )
 
 # (name, reason) — surfaced to the user so they know WHY these stay scheduled.

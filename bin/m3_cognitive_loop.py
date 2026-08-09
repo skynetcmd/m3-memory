@@ -795,17 +795,47 @@ def _embed_target_dbs(core_db: Optional[str]) -> list[str]:
     return out
 
 
-def has_embed_work(core_db: Optional[str]) -> bool:
-    """SQL check: are there memory_items rows with no embedding yet?
+def has_spill_work() -> bool:
+    """Are there chatlog spill files waiting to be drained into a store?
 
-    These accumulate when memory_write deferred embedding (no fast embedder
-    available at write time — the zero-lag path). embed_backfill's own
+    Spill is written by the chatlog writer when it cannot reach the DB (lock
+    contention, a wedged store). A spilled turn exists ONLY as a JSONL line on
+    disk: it is not in any DB, not FTS-searchable, and not embeddable — so it is
+    unbounded data at risk until drained. This is a cheap filesystem check (one
+    glob), deliberately independent of any DB, so a spill backlog schedules the
+    embed pass even when every store's embedding backlog is empty.
+    """
+    try:
+        import chatlog_config
+        spill_dir = chatlog_config.SPILL_DIR
+        if not spill_dir or not os.path.isdir(spill_dir):
+            return False
+        return any(f.endswith(".jsonl") for f in os.listdir(spill_dir))
+    except Exception as e:
+        logger.debug(f"Spill work check failed (non-fatal): {e}")
+        return False  # conservative: mirrors has_embed_work's contract
+
+
+def has_embed_work(core_db: Optional[str]) -> bool:
+    """Is there embed-pass work — unembedded rows, or spill waiting to drain?
+
+    Unembedded rows accumulate when memory_write deferred embedding (no fast
+    embedder available at write time — the zero-lag path). embed_backfill's own
     _count_pending uses the same WHERE-NOT-EXISTS query, so this is an accurate,
     cheap event-gate.
 
     Checks EVERY store the pass would drain (see _embed_target_dbs) — gating on
     the main DB alone let a split-topology chatlog backlog grow forever.
+
+    SPILL is checked FIRST and independently of the DBs: draining spill is the
+    pass's other half (see run_embed_pass), and spilled rows are invisible to
+    _count_pending precisely because they are not in a DB yet. Gating solely on
+    the row count let spill sit undrained indefinitely whenever the embedding
+    backlog happened to be empty — observed 2026-08-09, spill files from
+    2026-07-14/17 still on disk.
     """
+    if has_spill_work():
+        return True
     try:
         import embed_backfill
         for db_path in _embed_target_dbs(core_db):
@@ -867,6 +897,60 @@ def _checkpoint_wal(db_path: Optional[str]) -> None:
         logger.warning("WAL checkpoint failed (non-fatal): %s", e)
 
 
+async def _drain_chatlog_spill() -> int:
+    """Drain chatlog spill files into their target stores. Returns rows drained.
+
+    Delegates to chatlog_embed_sweeper.drain_spill — the ONE implementation of
+    this (§2). It honours each spilled row's captured `_db_path`, so rows
+    enqueued against a test/benchmark DB never land in the live store, and it
+    deletes a spill file only when every row in it landed.
+
+    Never raises (§3): spill drainage is best-effort recovery work and must not
+    abort the embed pass that follows it. Returns 0 on any failure.
+
+    Backend-agnostic (§10a): drain_spill routes through active_database +
+    M3Context.get_chatlog_conn() and takes its table name and placeholders from
+    the seam, so this works on SQLite and PostgreSQL alike. Spill is not a
+    SQLite-only concern — chatlog_core._spill_batch fires on any flush exception
+    and on queue-full backpressure regardless of backend.
+    """
+    try:
+        import chatlog_config
+        spill_dir = chatlog_config.SPILL_DIR
+        if not spill_dir or not os.path.isdir(spill_dir):
+            return 0
+
+        import chatlog_embed_sweeper
+
+        # drain_spill is declared `async` but contains no await — it is blocking
+        # file+DB work. Run it on a worker thread so it cannot stall the loop's
+        # event loop, and drive its coroutine to completion there.
+        def _drain_sync() -> int:
+            coro = chatlog_embed_sweeper.drain_spill()
+            try:
+                coro.send(None)          # no awaits inside => completes now
+            except StopIteration as done:
+                return int(done.value or 0)
+            # Defensive: a future edit adding a real await would land here
+            # rather than silently half-draining.
+            coro.close()
+            raise RuntimeError(
+                "drain_spill suspended on an await; it can no longer be "
+                "driven synchronously — run it on its own event loop."
+            )
+
+        drained = await asyncio.to_thread(_drain_sync)
+        if drained:
+            logger.info("Embed pass: drained %d spilled chatlog row(s).", drained)
+        return drained
+    except Exception as e:
+        logger.warning(
+            "Spill drain failed (non-fatal, embed sweep continues): %s: %s",
+            type(e).__name__, e,
+        )
+        return 0
+
+
 async def run_embed_pass(args):
     """Drain deferred embeddings via embed_backfill.
 
@@ -878,6 +962,23 @@ async def run_embed_pass(args):
     if not has_embed_work(args.database):
         logger.debug("No pending embed-backfill work. Skipping pass.")
         return
+
+    # Drain chatlog spill FIRST — before embedding. A spilled turn lives only as
+    # a JSONL line on disk: not in any store, not searchable, not embeddable.
+    # Draining first means rows recovered this cycle are candidates for the very
+    # same embed sweep below, instead of waiting a full cycle.
+    #
+    # This is the half of AgentOS_ChatlogEmbedSweep the loop was missing. The
+    # governor migration retires that scheduled task on the premise that this
+    # pass runs its work; before this, the pass ran only embed_backfill and
+    # nothing anywhere drained spill, so `governor migrate` silently orphaned
+    # spilled turns (observed 2026-08-09: spill from 2026-07-14/17 undrained,
+    # last_sweeper_run_at frozen at 2026-07-31).
+    #
+    # Non-fatal by construction (§3): spill drainage must never abort the embed
+    # sweep. A wedged/locked spill target is exactly when the embedding backlog
+    # most needs draining.
+    await _drain_chatlog_spill()
 
     # Active embed-server recovery (§8): there IS pending embed work, which often
     # means writes deferred because the fast embedder was down. If the shared
