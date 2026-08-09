@@ -1,0 +1,19 @@
+# m3-memory cognitive-loop watchdog — systemd --user unit template.
+#
+# Installed by bin/install_schedules.py, which substitutes [M3_MEMORY_ROOT] and
+# [M3_PYTHON]. Triggered by m3-loop-watchdog.timer, not enabled directly.
+#
+# WHY: m3-cognitive-loop.service is Restart=always, which covers a loop that
+# DIED. It cannot see a loop that is alive but no longer completing cycles
+# (wedged pass, livelocked work-gate, blocked on a DB lock) — systemd considers
+# a running process healthy. This oneshot checks forward progress via the loop's
+# heartbeat and restarts the unit when it goes stale.
+[Unit]
+Description=m3 cognitive-loop watchdog (restart the loop if its heartbeat goes stale)
+Documentation=https://github.com/skynetcmd/m3-memory
+
+[Service]
+Type=oneshot
+ExecStart=[M3_PYTHON] [M3_MEMORY_ROOT]/bin/m3_loop_watchdog.py
+# The watchdog restarts m3-cognitive-loop.service; it must not be considered
+# part of that unit's cgroup or a restart would kill the watchdog mid-run.

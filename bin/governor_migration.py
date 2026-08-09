@@ -69,6 +69,9 @@ NOT_MIGRATABLE = (
     ("AgentOS_CognitiveLoop",
      "already a governor-paced keepalive service (m3_cognitive_loop.py calls "
      "get_governor_pacing), not a periodic scheduler entry"),
+    ("AgentOS_LoopWatchdog",
+     "supervises the cognitive loop — governor-pacing the watchdog would defer "
+     "it exactly when the host is loaded and the loop is most likely wedged"),
 )
 
 

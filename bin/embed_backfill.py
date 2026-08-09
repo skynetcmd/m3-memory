@@ -185,6 +185,26 @@ def _build_query(
     ]
     params: list = []
 
+    # Exclude rows the sweep would only skip as oversize. Without this the row
+    # stays in the candidate set (and in _count_pending) forever: after_id keeps
+    # ONE run monotonic, but the next run reselects it, so has_embed_work() in
+    # m3_cognitive_loop reports work that can never drain. That kept the loop on
+    # its 1s idle-backlog floor indefinitely (2026-08-09: 3 rows @ 39-44KB,
+    # 174MB of logs). Mirrors the per-row cap applied during the sweep, so the
+    # gate and the sweep now agree on what "pending" means.
+    #
+    # DIALECT: LENGTH(CAST(x AS BLOB)) is the SQLite byte-length idiom and works
+    # on every SQLite version (octet_length() needs 3.43+). This module is
+    # SQLite-only by construction — every connection here is sqlite3.connect —
+    # so that is the correct dialect to write. A PostgreSQL port must swap this
+    # for octet_length(mi.content); the backend-agnostic protection against the
+    # same livelock is _MAX_DRAIN_TICKS in m3_cognitive_loop, which bounds the
+    # idle-drain burst no matter which store reports the un-drainable work.
+    max_row_bytes = getattr(args, "max_row_bytes", None)
+    if max_row_bytes:
+        where.append("LENGTH(CAST(mi.content AS BLOB)) <= ?")
+        params.append(int(max_row_bytes))
+
     if after_id is not None:
         where.append("mi.id > ?")
         params.append(after_id)
@@ -233,6 +253,35 @@ def _count_pending(db_path: Path, args: argparse.Namespace) -> int:
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     try:
         return conn.execute(count_sql, params).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def count_oversize_excluded(db_path: Path, args: argparse.Namespace) -> int:
+    """Rows with no embedding that the size cap excludes from _count_pending.
+
+    These are a real, permanent gap in embedding coverage — they are simply not
+    a *drainable* backlog, which is why the work-gate must not count them. Kept
+    visible here so "pending: 0" never silently means "3 rows we gave up on".
+    Embedding them needs the subdivide path (_recover_oversized_single in
+    memory/embed.py), which the byte cap short-circuits today.
+    """
+    max_row_bytes = getattr(args, "max_row_bytes", None)
+    if not max_row_bytes:
+        return 0
+    sql = """
+        SELECT COUNT(*) FROM memory_items mi
+        WHERE COALESCE(mi.is_deleted, 0) = 0
+          AND LENGTH(TRIM(COALESCE(mi.content, ''))) > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM memory_embeddings me WHERE me.memory_id = mi.id)
+          AND LENGTH(CAST(mi.content AS BLOB)) > ?
+    """
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    try:
+        return conn.execute(sql, (int(max_row_bytes),)).fetchone()[0]
+    except sqlite3.Error:
+        return 0
     finally:
         conn.close()
 
@@ -344,7 +393,8 @@ def _new_uuid() -> str:
     return str(uuid.uuid4())
 
 
-def _print_report(counters: Counters, started_at: float, db_path: Path) -> None:
+def _print_report(counters: Counters, started_at: float, db_path: Path,
+                  args: argparse.Namespace | None = None) -> None:
     elapsed = time.monotonic() - started_at
     rate = counters.embedded / max(elapsed, 1e-3)
     print()
@@ -357,6 +407,11 @@ def _print_report(counters: Counters, started_at: float, db_path: Path) -> None:
     print(f"  skipped (empty):   {counters.skipped_empty}")
     print(f"  skipped (oversize):{counters.skipped_oversize}")
     print(f"  skipped (bad dim): {counters.skipped_bad_dim}")
+    _excluded = count_oversize_excluded(db_path, args) if args is not None else 0
+    if _excluded:
+        print(f"  EXCLUDED oversize: {_excluded}  <- never embedded; over "
+              f"--max-row-bytes={getattr(args, 'max_row_bytes', 0)}. Not counted "
+              f"as pending (they cannot drain); needs the subdivide path.")
     print(f"  failed batches:    {counters.failed_batches}")
     print("  cache reuses:      (handled by _embed_many internal cache)")
     print(f"  wall time:         {elapsed:.1f}s")
@@ -493,7 +548,7 @@ def main(argv: list[str] | None = None) -> int:
         print()
         _log("INTERRUPTED: caught Ctrl-C; reporting partial run.")
 
-    _print_report(counters, started_at, args.db)
+    _print_report(counters, started_at, args.db, args)
     return 0
 
 

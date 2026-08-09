@@ -436,6 +436,13 @@ def _probe_entity_work(run_sql, items_tbl: str, link_tbl: str, queue_tbl: str):
     return run_sql(_entity_work_sql(items_tbl, link_tbl, queue_tbl, exclude_queue=has_status))
 
 
+# Max consecutive short-floor cycles the idle-backlog drain may take before it
+# must sleep a full --interval. Caps the cost of a work-gate that reports rows
+# the passes can never process: 30 fast cycles per interval, not an endless 1s
+# spin. Large enough that a genuine backlog still drains in bursts.
+_MAX_DRAIN_TICKS = 30
+
+
 # ── Per-pass min-interval gate ────────────────────────────────────────────────
 # Some passes are TIME-driven, not backlog-driven: warehouse sync and the weekly
 # audit have no queryable "work queue" — "is there work?" is purely "has enough
@@ -447,6 +454,36 @@ def _probe_entity_work(run_sql, items_tbl: str, link_tbl: str, queue_tbl: str):
 # is skipped without a network round-trip; an audit that ran yesterday is a no-op.
 def _loop_pass_runs_path() -> str:
     return os.path.join(get_m3_config_root(), ".loop_pass_runs.json")
+
+
+def _loop_heartbeat_path() -> str:
+    return os.path.join(get_m3_config_root(), ".loop_heartbeat.json")
+
+
+def _write_heartbeat(cycle: int, interval: int) -> None:
+    """Stamp a liveness beat at each cycle boundary.
+
+    KeepAlive only resurrects a process that DIED. A loop that is alive but
+    wedged (stuck pass, livelocked work-gate, blocked on a DB lock) looks
+    perfectly healthy to launchd, so an external watchdog needs a signal that
+    means "still making forward progress", not just "pid exists". `interval` is
+    published so the watchdog derives its own staleness threshold instead of
+    hard-coding one that drifts when --interval changes. Best-effort: a failed
+    beat must never take the loop down."""
+    try:
+        path = _loop_heartbeat_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "pid": os.getpid(),
+                "cycle": cycle,
+                "interval_s": interval,
+            }, f)
+        os.replace(tmp, path)
+    except OSError as e:
+        logger.debug("Could not write heartbeat: %s", e)
 
 
 def _read_pass_runs() -> dict:
@@ -1277,6 +1314,13 @@ async def main_loop(args):
     # would perpetually run first and grab the local GPU before enrich/consolidate
     # ever get a turn under contention. Each pass takes the lead 1-in-N cycles.
     _cycle = 0
+    # Consecutive cycles that took the short idle-backlog-drain floor instead of
+    # the full --interval. Bounded by _MAX_DRAIN_TICKS so a work-gate that is
+    # permanently True but can never drain (oversize/bad-dim rows the sweep skips
+    # every pass) costs a burst of fast cycles per interval rather than pinning
+    # the loop at 1s forever. A real backlog still drains at full speed; it just
+    # takes a breath once per burst.
+    _drain_ticks = 0
     while not _STOP_EVENT.is_set():
         # ── Cooperative quiesce (HALT_m3) ──────────────────────────────────────
         # An exclusive op (migration/backup/repair) raised the halt: flush our WAL
@@ -1440,6 +1484,10 @@ async def main_loop(args):
         # off the event loop (may block briefly on a busy reader) and fail-safe.
         await asyncio.to_thread(_checkpoint_wal, args.database)
 
+        # Beat AFTER the passes + checkpoint: it then means "completed a full
+        # cycle", so a loop wedged mid-pass goes stale and the watchdog sees it.
+        _write_heartbeat(_cycle, args.interval)
+
         elapsed = time.monotonic() - start_time
         wait_time = max(0, args.interval - elapsed)
         # If any pass ran throttled (tiny batch), don't also wait the full
@@ -1464,9 +1512,23 @@ async def main_loop(args):
                 or (not args.skip_embed and has_embed_work(args.database))
                 or (not args.skip_classify and has_classify_work(args.database))
             )
-            if more_work:
+            if more_work and _drain_ticks < _MAX_DRAIN_TICKS:
                 floor = float(pacing_full.get("background_delay", 0.1))
                 wait_time = min(wait_time, max(floor, 1.0))
+                _drain_ticks += 1
+            elif more_work:
+                # Burst spent and work STILL pending: the backlog is not draining.
+                # Sleep the full interval and re-arm, so a livelocked gate can't
+                # hold the loop at the 1s floor (and flood the log) indefinitely.
+                logger.warning(
+                    "Idle-drain burst hit %d cycles with work still pending — "
+                    "backing off to the full %ss interval. If this repeats, a "
+                    "work-gate is reporting rows the passes cannot process "
+                    "(check embed-backfill skipped_oversize / skipped_bad_dim).",
+                    _MAX_DRAIN_TICKS, args.interval)
+                _drain_ticks = 0
+            else:
+                _drain_ticks = 0
 
         if _STOP_EVENT.is_set():
             break

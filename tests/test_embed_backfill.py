@@ -355,11 +355,62 @@ async def test_sweep_skips_oversize(db, monkeypatch):
     counters = eb.Counters()
     await eb._run_sweep(args, counters)
 
-    assert counters.skipped_oversize == 1
+    # Oversize rows are excluded by the candidate QUERY now, not selected and
+    # then skipped per-row, so skipped_oversize stays 0 here. (The per-row skip
+    # is still live and still needed: anchor augmentation can push a row over
+    # the cap AFTER it was selected — see test_sweep_skips_oversize_after_augment.)
+    assert counters.skipped_oversize == 0
     assert counters.embedded == 1
     # The oversize row should not have been sent to the embedder
     flat = [t for batch in embed_calls for t in batch]
     assert big not in flat
+
+    # The livelock guard (2026-08-09): an oversize row must NOT count as pending,
+    # or has_embed_work() reports work that can never drain and the cognitive
+    # loop pins itself to its 1s idle-backlog floor forever. It must still be
+    # VISIBLE though — excluded is not the same as forgotten.
+    assert eb._count_pending(db, args) == 0
+    assert eb.count_oversize_excluded(db, args) == 1
+
+
+@pytest.mark.asyncio
+async def test_sweep_skips_oversize_after_augment(db, monkeypatch):
+    """The per-row oversize skip must stay live even though the candidate query
+    now filters on size: anchor augmentation runs BEFORE the size check
+    (embed_sweep_lib ~L161), so a row that is under the cap on disk can exceed
+    it once anchors are prepended. Query-time filtering alone would let that row
+    reach the embedder and fail the batch."""
+    import embed_backfill as eb
+    _seed_rows(db, [{"id": "row-A", "content": "small enough on disk"}])
+
+    os.environ["M3_DATABASE"] = str(db)
+    import memory_core as mc
+
+    # Row passes the query filter, then augmentation blows it past the cap.
+    monkeypatch.setattr(mc, "_augment_embed_text_with_anchors",
+                        lambda text, metadata: "y" * 50_000)
+
+    embed_calls = []
+    async def fake_embed_many(texts):
+        embed_calls.append(list(texts))
+        return [([0.1, 0.2, 0.3, 0.4], "test-model") for _ in texts]
+    monkeypatch.setattr(mc, "_embed_many", fake_embed_many)
+
+    # no_augment_anchors must be False or _run_sweep uses the identity transform
+    # and the augmentation path under test never runs.
+    args = _make_args(db, max_row_bytes=32_768, no_augment_anchors=False)
+
+    # Small on disk: the query DOES select it, and it counts as real pending work.
+    assert eb._count_pending(db, args) == 1
+    assert eb.count_oversize_excluded(db, args) == 0
+
+    counters = eb.Counters()
+    await eb._run_sweep(args, counters)
+
+    # ...but the per-row check catches it after augmentation.
+    assert counters.skipped_oversize == 1
+    assert counters.embedded == 0
+    assert embed_calls == []
 
 
 @pytest.mark.asyncio

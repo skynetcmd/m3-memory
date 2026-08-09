@@ -1,0 +1,20 @@
+# m3-memory cognitive-loop watchdog — systemd --user timer template.
+#
+# Installed by bin/install_schedules.py. Fires m3-loop-watchdog.service every
+# 5 minutes, matching the launchd StartInterval and the Windows task repetition
+# so the recovery latency is the same on all three platforms.
+[Unit]
+Description=Run the m3 cognitive-loop watchdog every 5 minutes
+Documentation=https://github.com/skynetcmd/m3-memory
+
+[Timer]
+# Start soon after login rather than waiting a full period, so a loop that died
+# while the machine was off is recovered promptly.
+OnStartupSec=2min
+OnUnitActiveSec=5min
+# Survive a missed window (laptop suspended) instead of silently skipping it.
+Persistent=true
+Unit=m3-loop-watchdog.service
+
+[Install]
+WantedBy=timers.target

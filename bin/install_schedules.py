@@ -218,6 +218,8 @@ def install_unix_cognitive_loop(m3_memory_root):
         else:
             _safe_print(f"{FAIL} launchctl load failed: {r.stderr.strip()}")
 
+        _install_macos_loop_watchdog(m3_memory_root, python_exe)
+
     elif os_name == "Linux":
         template = os.path.join(bin_dir, "m3-cognitive-loop.service")
         if not os.path.exists(template):
@@ -237,8 +239,110 @@ def install_unix_cognitive_loop(m3_memory_root):
             _safe_print(f"{OK} Installed + started systemd --user unit: {dest}")
         else:
             _safe_print(f"{FAIL} systemctl enable --now failed: {r.stderr.strip()}")
+
+        _install_linux_loop_watchdog(m3_memory_root, python_exe)
     else:
         _safe_print(f"{WARN} install_unix_cognitive_loop: unsupported OS {os_name}")
+
+
+def _install_linux_loop_watchdog(m3_memory_root: str, python_exe: str) -> None:
+    """Install the watchdog timer beside the cognitive-loop systemd unit.
+
+    Restart=always on the loop unit covers "the process died"; systemd cannot
+    see a loop that is alive but no longer completing cycles. The timer fires
+    the oneshot every 5 min, matching the launchd/schtasks cadence so recovery
+    latency is identical on all three platforms. Never raises — a watchdog that
+    breaks the installer would be worse than no watchdog."""
+    try:
+        bin_dir = os.path.join(m3_memory_root, "bin")
+        dest_dir = os.path.expanduser("~/.config/systemd/user")
+        os.makedirs(dest_dir, exist_ok=True)
+        for unit in ("m3-loop-watchdog.service", "m3-loop-watchdog.timer"):
+            template = os.path.join(bin_dir, unit)
+            if not os.path.exists(template):
+                _safe_print(f"{WARN} Missing watchdog template: {template}")
+                return
+            with open(os.path.join(dest_dir, unit), "w", encoding="utf-8") as f:
+                f.write(_render_template(template, m3_memory_root, python_exe))
+        subprocess.run(["systemctl", "--user", "daemon-reload"],
+                       capture_output=True)
+        # Enable the TIMER, not the service: the service is oneshot and is meant
+        # to be triggered, never enabled on its own.
+        r = subprocess.run(
+            ["systemctl", "--user", "enable", "--now", "m3-loop-watchdog.timer"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            _safe_print(f"{OK} Installed + started loop watchdog timer: "
+                        f"{dest_dir}/m3-loop-watchdog.timer")
+        else:
+            _safe_print(f"{WARN} watchdog timer enable failed: "
+                        f"{(r.stderr or '').strip()}")
+    except (OSError, subprocess.SubprocessError) as e:
+        _safe_print(f"{WARN} could not install loop watchdog: {e}")
+
+
+def _remove_linux_loop_watchdog() -> None:
+    """Uninstall the watchdog timer + oneshot. Never raises."""
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "disable", "--now", "m3-loop-watchdog.timer"],
+            capture_output=True)
+        dest_dir = os.path.expanduser("~/.config/systemd/user")
+        for unit in ("m3-loop-watchdog.timer", "m3-loop-watchdog.service"):
+            path = os.path.join(dest_dir, unit)
+            if os.path.exists(path):
+                os.unlink(path)
+                _safe_print(f"{OK} Removed loop watchdog unit: {path}")
+        subprocess.run(["systemctl", "--user", "daemon-reload"],
+                       capture_output=True)
+    except (OSError, subprocess.SubprocessError) as e:
+        _safe_print(f"{WARN} could not remove loop watchdog: {e}")
+
+
+def _install_macos_loop_watchdog(m3_memory_root: str, python_exe: str) -> None:
+    """Install com.m3memory.loopwatchdog beside the cognitive-loop agent.
+
+    Second layer of self-heal. KeepAlive covers "the process died"; it is blind
+    to a loop that is alive but no longer completing cycles, and blind to the
+    window before a fixed plist is reinstalled. The watchdog polls the loop's
+    heartbeat every 5 min and kickstarts it when it stops advancing. Never
+    raises — a watchdog that breaks the installer would be worse than no
+    watchdog."""
+    try:
+        template = os.path.join(m3_memory_root, "bin",
+                                "com.m3memory.loopwatchdog.plist")
+        if not os.path.exists(template):
+            _safe_print(f"{WARN} Missing watchdog template: {template}")
+            return
+        dest_dir = os.path.expanduser("~/Library/LaunchAgents")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, "com.m3memory.loopwatchdog.plist")
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(_render_template(template, m3_memory_root, python_exe))
+        subprocess.run(["launchctl", "unload", dest], capture_output=True)
+        r = subprocess.run(["launchctl", "load", dest],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            _safe_print(f"{OK} Installed + loaded loop watchdog: {dest}")
+        else:
+            _safe_print(f"{WARN} watchdog launchctl load failed: "
+                        f"{r.stderr.strip()}")
+    except (OSError, subprocess.SubprocessError) as e:
+        _safe_print(f"{WARN} could not install loop watchdog: {e}")
+
+
+def _remove_macos_loop_watchdog() -> None:
+    """Uninstall the watchdog agent. Never raises."""
+    try:
+        dest = os.path.expanduser(
+            "~/Library/LaunchAgents/com.m3memory.loopwatchdog.plist")
+        if os.path.exists(dest):
+            subprocess.run(["launchctl", "unload", dest], capture_output=True)
+            os.unlink(dest)
+            _safe_print(f"{OK} Removed loop watchdog: {dest}")
+    except (OSError, subprocess.SubprocessError) as e:
+        _safe_print(f"{WARN} could not remove loop watchdog: {e}")
 
 
 def remove_unix_cognitive_loop():
@@ -253,6 +357,8 @@ def remove_unix_cognitive_loop():
             _safe_print(f"{OK} Removed launchd agent: {dest}")
         else:
             _safe_print(f"{WARN} launchd agent not installed (nothing to remove).")
+        # Leaving the watchdog behind would kickstart a job that no longer exists.
+        _remove_macos_loop_watchdog()
     elif os_name == "Linux":
         dest = os.path.expanduser(
             "~/.config/systemd/user/m3-cognitive-loop.service")
@@ -266,6 +372,8 @@ def remove_unix_cognitive_loop():
             _safe_print(f"{OK} Removed systemd --user unit: {dest}")
         else:
             _safe_print(f"{WARN} systemd unit not installed (nothing to remove).")
+        # Leaving the watchdog behind would restart a unit that no longer exists.
+        _remove_linux_loop_watchdog()
     else:
         _safe_print(f"{WARN} remove_unix_cognitive_loop: unsupported OS {os_name}")
 
@@ -411,6 +519,19 @@ def get_schedule_specs(m3_memory_root, dashboard_port: int = 8088):
             "modifier": "",
             "time": "00:00",
             "description": "Autonomous heartbeat: entity extraction, observations, and reflection (continuous)"
+        },
+        {
+            "name": "AgentOS_LoopWatchdog",
+            # The task Repetition above restarts a loop that DIED; nothing sees a
+            # loop that is alive but no longer completing cycles (wedged pass,
+            # livelocked work-gate, blocked on a DB lock). This polls the loop's
+            # heartbeat and bounces the task when it stops advancing. Cheap:
+            # stdlib-only, no DB, sub-second.
+            "args": [_script("m3_loop_watchdog.py")],
+            "schedule": "MINUTE",
+            "modifier": "5",
+            "time": "00:00",
+            "description": "Watchdog: restart the cognitive loop if its heartbeat goes stale"
         },
         {
             "name": "AgentOS_EmbedServer",
@@ -1061,13 +1182,30 @@ def _verify_unix_cognitive_loop() -> bool:
         loaded = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
         if "com.m3memory.cognitiveloop" in (loaded.stdout or ""):
             _safe_print(f"{OK} launchd agent installed and loaded: {dest}")
-            # KeepAlive is the self-heal knob — warn loudly if the plist lacks it.
+            # KeepAlive is the self-heal knob. Checking only that the KEY exists
+            # is what let the 2026-08-09 outage pass this check silently: a
+            # KeepAlive={Crashed:true} plist contains the string and still will
+            # not restart a loop that exited 0 (the upgrade path). Assert the
+            # VALUE, via plutil so we read what launchd reads, not the raw XML.
+            # `raw` (not `json`): plutil refuses to emit a top-level boolean as
+            # JSON, so the HEALTHY case is exactly the one `json` errors on.
+            # raw yields "true" for KeepAlive=true, the sub-key name (e.g.
+            # "Crashed") for the dict form, and rc!=0 when the key is absent.
             try:
-                with open(dest, encoding="utf-8") as f:
-                    plist = f.read()
-                if "KeepAlive" not in plist:
-                    _safe_print(f"{WARN} plist has no <key>KeepAlive</key> — loop won't self-heal on crash")
-            except OSError:
+                r = subprocess.run(["plutil", "-extract", "KeepAlive", "raw",
+                                    "-o", "-", dest],
+                                   capture_output=True, text=True, timeout=20)
+                value = (r.stdout or "").strip()
+                if r.returncode != 0:
+                    _safe_print(f"{WARN} plist has no <key>KeepAlive</key> — "
+                                f"loop won't self-heal")
+                elif value != "true":
+                    _safe_print(
+                        f"{WARN} plist has KeepAlive={value} (not true) — the "
+                        f"loop will NOT be restarted after a clean exit, which "
+                        f"is how an upgrade stops it. Re-run `m3 install` to "
+                        f"get the current template.")
+            except (OSError, subprocess.SubprocessError):
                 pass
             return True
         _safe_print(f"{WARN} launchd agent installed but not loaded (run: launchctl load {dest})")

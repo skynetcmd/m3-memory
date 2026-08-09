@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  m3-memory Cognitive Loop watchdog — macOS launchd agent template.
+
+  Installed by bin/install_schedules.py, which substitutes [M3_MEMORY_ROOT]
+  and [M3_PYTHON] and writes the result to
+  ~/Library/LaunchAgents/com.m3memory.loopwatchdog.plist.
+
+  WHY: KeepAlive only resurrects a process that DIED. It cannot see a loop that
+  is alive but wedged (livelocked work-gate, stuck pass, blocked on a DB lock),
+  and before 2026-08-09 nothing did — a loop stayed dead for 4h after an upgrade
+  because it exited 0 and KeepAlive was Crashed-only. This agent polls the
+  loop's heartbeat every 5 minutes and kickstarts it when it stops advancing.
+
+  Cheap by construction: one short stdlib-only python run per 5 min, which is
+  why StartInterval is fine here and a keepalive daemon is not needed.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.m3memory.loopwatchdog</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>[M3_PYTHON]</string>
+        <string>[M3_MEMORY_ROOT]/bin/m3_loop_watchdog.py</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>[M3_MEMORY_ROOT]/logs/m3_loop_watchdog.log</string>
+    <key>StandardErrorPath</key>
+    <string>[M3_MEMORY_ROOT]/logs/m3_loop_watchdog.log</string>
+</dict>
+</plist>
