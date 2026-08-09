@@ -240,7 +240,10 @@ def _warn_if_pypi_newer() -> None:
         from importlib.metadata import version as _pkgver
 
         installed = _pkgver("m3-memory")
-        with _url.urlopen("https://pypi.org/pypi/m3-memory/json", timeout=2.5) as r:  # noqa: S310
+        # Hardcoded https:// literal — no user input, so no file:/custom scheme
+        # can reach urlopen. Same justification (and marker) as every other
+        # urlopen in this repo; see bin/doctor/*_probe.py.
+        with _url.urlopen("https://pypi.org/pypi/m3-memory/json", timeout=2.5) as r:  # noqa: S310  # nosec B310
             latest = _json.load(r)["info"]["version"]
 
         def _key(v: str) -> list:

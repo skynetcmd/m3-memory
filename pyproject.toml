@@ -94,7 +94,7 @@ dependencies = [
     "httpx[http2]>=0.28.1,<1",
     "requests>=2.33.1,<3",
     "psycopg2-binary>=2.9.12,<3",
-    "cryptography>=48.0.1,<49",
+    "cryptography>=50.0.0,<51",
     "keyring>=25.7.0,<26",
     # Cap <2.5: numpy 2.5.0's stub uses PEP 695 `type` syntax that mypy rejects
     # under python_version 3.11 (our floor). See requirements.txt for the full note.
