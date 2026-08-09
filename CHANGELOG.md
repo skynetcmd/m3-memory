@@ -21,6 +21,58 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.4] — 2026-08-09 — cognitive-loop livelock fix + cross-OS watchdog self-heal
+
+### Fixed
+- **Cognitive-loop idle-drain livelock (the 1s spin).** `embed_backfill`'s candidate
+  query selected un-embedded rows with **no size filter**, so `_count_pending`
+  counted rows the sweep then skipped as oversize on every pass. `has_embed_work()`
+  therefore reported work that could never drain, and the loop pinned itself to its
+  1s idle-backlog floor indefinitely — zero progress, and a `cognitive_loop.log` that
+  reached 174 MB. (`after_id` keeps a *single* run monotonic; the next run reselects
+  the same rows.) The gate and the sweep now agree on what "pending" means, and
+  `count_oversize_excluded()` keeps those rows **visible** rather than silently
+  dropped — excluded is not the same as forgotten.
+- **`_MAX_DRAIN_TICKS`** caps consecutive short-floor cycles in the loop itself. This
+  is the backend- and OS-agnostic guard: it bounds the burst no matter which store or
+  which work-gate reports un-drainable work, including the case the query filter
+  cannot reach (a row under the cap on disk that anchor augmentation pushes over it).
+- **macOS: the loop was not restarted after a clean exit.** The plist shipped
+  `KeepAlive={Crashed:true}`, which by design ignores the clean exit an upgrade
+  causes (HALT_m3 → checkpoint → exit 0). The loop stayed dead for ~4h after
+  2026.8.19.3 while the embed-server (`KeepAlive=true`) came back. Now unconditional,
+  with `ThrottleInterval=60` bounding the `EXIT_ALREADY_RUNNING(4)` respawn the
+  crashed-only form was avoiding. Linux (`Restart=always`) and Windows (task
+  repetition) were never exposed to this; macOS is now at parity.
+- **The health check that hid it.** `_verify_unix_cognitive_loop()` tested
+  `if "KeepAlive" not in plist` — the **key**, never the **value** — so
+  `{Crashed:true}` passed silently. It now asserts the value via
+  `plutil -extract … raw`.
+
+### Added
+- **Cognitive-loop watchdog** (`bin/m3_loop_watchdog.py`), installed on all three
+  platforms: launchd agent (macOS), systemd timer + oneshot (Linux),
+  `AgentOS_LoopWatchdog` scheduled task (Windows), every 5 minutes.
+
+  KeepAlive / `Restart=always` / task repetition all cover *"the process died"*.
+  **None of them can see a loop that is alive and no longer completing cycles** —
+  a wedged pass, a livelocked work-gate, a blocked DB lock. The watchdog is
+  therefore **progress-based, not liveness-based**: the loop stamps
+  `.loop_heartbeat.json` at each cycle boundary (after passes and checkpoint, so a
+  mid-pass wedge goes stale) and the watchdog restarts it when that stops advancing.
+
+  Detection is OS- and backend-agnostic; only the restart **action** branches, and
+  it always goes through the platform supervisor — never by spawning the loop, since
+  two writers on one WAL DB is what the single-instance lock prevents. Restarts are
+  **graceful** (`launchctl kill SIGTERM` / `systemctl --user restart`), never
+  `kickstart -k`: SIGKILL on a writer mid-write is what tears the WAL. Honors
+  `HALT_m3` via `m3_halt.halt_is_active()` and fails **safe** if that is unreadable,
+  resolves the Homecoming roots via the SDK with an env-var fallback, backs off 600s
+  between restarts, and treats a **missing** heartbeat as *unknown* rather than
+  *dead* so an older payload cannot cause a restart loop. Declared `NOT_MIGRATABLE`:
+  governor-pacing a supervisor would defer it exactly when the host is loaded and the
+  loop is most likely wedged.
+
 ## [2026.8.19.3] — 2026-08-09 — `m3 update` upgrade-path clarity
 
 ### Changed
