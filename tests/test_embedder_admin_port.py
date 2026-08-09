@@ -68,6 +68,14 @@ def test_cmd_start_warns_then_delegates(monkeypatch, capsys, tmp_path):
     gguf.write_bytes(b"x")
     monkeypatch.setattr(ea, "_binary_and_gguf_or_fail", lambda: (tmp_path / "bin", gguf))
     monkeypatch.setattr(ea, "_port_in_use", lambda *a, **k: True)
+    # Inject the branch collaborator too: _service_reports_installed SHELLS OUT
+    # to the binary, so with a fake path it raises OSError -> False -> cmd_start
+    # takes the auto-install branch and re-resolves the REAL binary. That passes
+    # only on a machine that happens to have m3-embed-server installed; CI has
+    # none, so it failed there ("binary not found") while green locally (§3 —
+    # a test that passes only because a live local service exists is not
+    # hermetic).
+    monkeypatch.setattr(ea, "_service_reports_installed", lambda *a, **k: True)
     called = {}
 
     def _fake_service(b, g, sub, *e):
@@ -94,4 +102,7 @@ def test_cmd_start_works_regardless_of_busy(monkeypatch, tmp_path, busy):
     monkeypatch.setattr(ea, "_binary_and_gguf_or_fail", lambda: (tmp_path / "bin", gguf))
     monkeypatch.setattr(ea, "_port_in_use", lambda *a, **k: busy)
     monkeypatch.setattr(ea, "_service_cmd", lambda *a, **k: 0)
+    # See the note in test_cmd_start_warns_then_delegates: without this the
+    # fake binary makes cmd_start branch into cmd_install and hit the host.
+    monkeypatch.setattr(ea, "_service_reports_installed", lambda *a, **k: True)
     assert ea.cmd_start(_ns()) == 0

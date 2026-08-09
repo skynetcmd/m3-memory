@@ -534,6 +534,13 @@ def test_pip_success_is_not_labelled_a_pypi_install(monkeypatch, capsys):
     debugging distribution.
     """
     monkeypatch.setattr(rci, "install_prebuilt", lambda choice, **kw: 0)
+    # install_from_github_release is tried FIRST and is NOT mocked by default —
+    # it makes a real urllib call to api.github.com. Unmocked, this test reached
+    # the network: green wherever the Release resolves, red in a sandboxed CI
+    # runner, and never actually exercising the pip branch it asserts on. Force
+    # the Release path to miss so the pip-success message is what gets printed
+    # (§3 — a test that depends on a reachable external service is not hermetic).
+    monkeypatch.setattr(rci, "install_from_github_release", lambda choice, **kw: 1)
     monkeypatch.setattr(
         rci, "detect_backend",
         lambda *a, **k: rci.BackendChoice(

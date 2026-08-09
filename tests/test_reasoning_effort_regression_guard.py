@@ -122,7 +122,11 @@ def _chat_completion_callers() -> set[str]:
             continue
         if path.name in _CLOUD_ONLY or path.name in _NOT_PRODUCT:
             continue
-        out.add(str(path.relative_to(_BIN)))
+        # as_posix(), not str(): on Windows str() yields "wiki\citation_drift.py"
+        # while every assertion in this file spells the forward-slash form, so
+        # the guard silently missed nested modules on windows-latest (§1 — the
+        # suite must behave identically on all three OSes).
+        out.add(path.relative_to(_BIN).as_posix())
     return out
 
 
