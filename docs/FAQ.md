@@ -65,6 +65,19 @@ python bin/install_schedules.py --repair
 
 ## General
 
+### Q: How do I update m3 to the latest version?
+**A:** If you installed via **pipx** (the common case), upgrade the package and then reconcile the payload:
+
+```bash
+pipx upgrade m3-memory      # pull the latest release from PyPI
+m3 setup                    # re-wire agents/hooks + apply DB migrations
+m3 doctor                   # verify
+```
+
+> ⚠️ **`m3 update` is not a package upgrade.** It only re-syncs the payload/bridge to your **installed** version — it will not pull a newer release. Use `pipx upgrade m3-memory` for that. (As of **2026.8.19.3**, `m3 update` prints a nudge when PyPI has a newer version than you have installed.)
+
+Upgrading a **git checkout** instead? See the [Upgrade Guide](HOW-TO-UPGRADE.md).
+
 ### Q: Why do my writes take so long? I thought M3 was "zero-lag."
 **A:** They're two different clocks, and the slow one isn't M3.
 

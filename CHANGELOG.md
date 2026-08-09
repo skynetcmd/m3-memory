@@ -21,6 +21,20 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.3] — 2026-08-09 — `m3 update` upgrade-path clarity
+
+### Changed
+- `m3 update` now **nudges toward `pipx upgrade m3-memory`** when PyPI has a newer
+  release than the installed package. `m3 update` only re-syncs the payload/bridge
+  for the **installed** version — a frequent surprise for pipx installs — so it now
+  says so in its `--help` and prints a one-time advisory after running. Best-effort
+  and offline-safe (2.5s timeout; silent on any error).
+
+### Docs
+- `docs/HOW-TO-UPGRADE.md`: add a prominent **"Installed via pipx?"** section up
+  front (`pipx upgrade m3-memory` + `m3 setup`); the existing in-place steps are
+  labeled as the developer git-checkout path.
+
 ## [2026.8.19.2] — 2026-08-08 — cognitive-loop FD leak; phantom entity backlog; JSON-mode file extraction
 
 ### Fixed

@@ -229,6 +229,35 @@ def _cmd_reinstall(args: argparse.Namespace) -> int:
     return 0
 
 
+def _warn_if_pypi_newer() -> None:
+    """Nudge toward `pipx upgrade` when PyPI has a newer release than the installed
+    package. `m3 update` only RE-SYNCS the payload for the INSTALLED version — it
+    does NOT upgrade the package (a common surprise for pipx installs). Best-effort:
+    silent on any network/parse error, short timeout so it never stalls the command."""
+    try:
+        import json as _json
+        import urllib.request as _url
+        from importlib.metadata import version as _pkgver
+
+        installed = _pkgver("m3-memory")
+        with _url.urlopen("https://pypi.org/pypi/m3-memory/json", timeout=2.5) as r:  # noqa: S310
+            latest = _json.load(r)["info"]["version"]
+
+        def _key(v: str) -> list:
+            return [int(p) for p in v.split(".") if p.isdigit()]
+
+        if _key(latest) > _key(installed):
+            print(
+                f"\n[m3] A newer release is on PyPI: {latest} (you have {installed}).\n"
+                f"     `m3 update` only re-syncs the payload for your INSTALLED version —\n"
+                f"     it does NOT upgrade the package. To upgrade:\n"
+                f"       pipx upgrade m3-memory      # then: m3 setup",
+                file=sys.stderr,
+            )
+    except Exception:  # noqa: BLE001 — advisory only, never fail the command
+        pass
+
+
 def _cmd_update(args: argparse.Namespace) -> int:
     from m3_memory.installer import install_m3
     try:
@@ -236,6 +265,7 @@ def _cmd_update(args: argparse.Namespace) -> int:
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
+    _warn_if_pypi_newer()
     return 0
 
 
@@ -1155,7 +1185,8 @@ Examples:
 
     p_update = subparsers.add_parser(
         "update",
-        help="Re-fetch the payload, replacing any existing clone.",
+        help="Re-sync the payload for the INSTALLED version (NOT a package upgrade — "
+             "use `pipx upgrade m3-memory` for that).",
     )
     p_update.add_argument(
         "--tag", default=None,

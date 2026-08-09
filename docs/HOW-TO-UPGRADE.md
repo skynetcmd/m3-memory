@@ -4,7 +4,23 @@ This guide covers upgrading an existing checkout in place — pulling new code, 
 
 ---
 
-## TL;DR (safe default)
+## Installed via `pipx` / `m3 install-m3` (the common case)?
+
+If you installed m3 as a package (not a git clone), **the git-checkout steps below do not apply** — upgrade the package instead:
+
+```bash
+pipx upgrade m3-memory      # pull the latest release from PyPI
+m3 setup                    # re-wire agents/hooks + apply DB migrations
+m3 doctor                   # verify
+```
+
+> ⚠️ **`m3 update` is NOT a package upgrade.** It only re-syncs the payload/bridge to your **already-installed** version — it will not pull a newer release. To upgrade the package use `pipx upgrade m3-memory`, then `m3 update` (or `m3 setup`) to reconcile the payload. (`m3 update` now prints a nudge when PyPI has a newer version than you have installed.)
+
+The rest of this guide is for **developers upgrading a git checkout in place.**
+
+---
+
+## TL;DR — developer git checkout (safe default)
 
 From the repo root, in order:
 
