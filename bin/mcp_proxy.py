@@ -72,6 +72,8 @@ from m3_sdk import getenv_compat
 
 _ensure_utf8()
 
+from contextlib import asynccontextmanager
+
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -862,19 +864,30 @@ async def _sse_from_completion(completion: dict) -> AsyncIterator[str]:
 
 # ── FastAPI application ───────────────────────────────────────────────────────
 
-app = FastAPI(
-    title="MCP Tool Execution Proxy",
-    description="Injects m3-memory v2 catalog + protocol/debug tools into Aider/OpenClaw requests.",
-    version="2.0.0",
-)
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Close the shared HTTP client on shutdown.
 
-
-@app.on_event("shutdown")
-async def _on_shutdown():
+    Uses the lifespan API rather than `@app.on_event("shutdown")`: the decorator
+    form is deprecated and emits a DeprecationWarning, which this repo's
+    `filterwarnings = ["error"]` promotes to an error — every test that
+    constructs this app errored at import (12 in test_mcp_proxy_unit.py). Per
+    pyproject's own note, warnings from OUR code are fixed at the source rather
+    than added to the ignore list.
+    """
+    yield
     global _shared_client
     if _shared_client and not _shared_client.is_closed:
         await _shared_client.aclose()
         log.info("Shared HTTP client closed.")
+
+
+app = FastAPI(
+    title="MCP Tool Execution Proxy",
+    description="Injects m3-memory v2 catalog + protocol/debug tools into Aider/OpenClaw requests.",
+    version="2.0.0",
+    lifespan=_lifespan,
+)
 
 
 @app.get("/health")
