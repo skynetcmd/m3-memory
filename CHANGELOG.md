@@ -21,6 +21,35 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.6] — 2026-08-09 — fix the tier-3 embeddings endpoint path
+
+### Fixed
+- **Every primary-tier (tier-3) embed call was 404ing and silently falling back.**
+  The OpenAI-compatible sites built `f"{base}/embeddings"`, which assumes the base
+  already carries the version segment (LM Studio's `http://host:1234/v1`). But
+  `M3_EMBED_URL` / `.embed_config.json` `fallback_url` point at a **bare host** for
+  the shared m3 embedder (`http://127.0.0.1:8082`), so the request went to
+  `/embeddings` — a route no server in this tier serves.
+
+  This never surfaced as a failure: it 404'd, burned three attempts with
+  exponential backoff (~6s), then fell through to the tier-2 fallback and returned
+  correct vectors. The only symptom was latency — it is what made
+  `test_doctor_cold_cascade_slo` blow its 5s budget.
+
+  New `_embeddings_post_url()` resolves the endpoint for all four call sites:
+  a full endpoint (`/embeddings` or the m3-native `/embedding`) is honored
+  verbatim, a versioned base gets `/embeddings` appended, and a **bare host**
+  resolves to `/v1/embeddings` — which LM Studio, llama.cpp, vLLM and
+  m3-embed-server all serve. The singular `/embedding` stays tier 2's route, so
+  the two tiers keep their separate contracts (tier 2: no auth +
+  `X-M3-Embed-Priority`; tier 3: `model` field + Bearer token).
+
+  The two cloud-enclave sites had a hand-rolled suffix check with the same
+  bare-host blind spot; they now share the helper.
+
+  No configuration change is required — a bare `M3_EMBED_URL` now resolves
+  correctly on its own.
+
 ## [2026.8.19.5] — 2026-08-09 — embed oversize rows instead of dropping them
 
 ### Fixed

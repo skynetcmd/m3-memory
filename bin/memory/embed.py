@@ -20,6 +20,7 @@ import json
 import logging
 import math
 import os
+import re
 import threading
 from threading import Lock as _ThreadLock
 
@@ -892,6 +893,41 @@ _EMBED_FALLBACK_URL: str = (
 ).rstrip("/")
 
 
+# Trailing OpenAI-style version segment, e.g. ".../v1" or ".../v2".
+_VERSION_SEGMENT_RE = re.compile(r"/v\d+$")
+
+
+def _embeddings_post_url(base_url: str) -> str:
+    """Resolve the POST endpoint for an OpenAI-compatible embeddings base URL.
+
+    The tier-3 sites used to do a bare ``f"{base}/embeddings"``, which silently
+    assumes the base already carries the OpenAI version segment (LM Studio's
+    ``http://host:1234/v1``). A base pointing at a BARE HOST — which is exactly
+    what ``M3_EMBED_URL`` / ``fallback_url`` hold for the shared m3 embedder
+    (``http://127.0.0.1:8082``) — then produced ``/embeddings``, which no server
+    in this tier serves. Every primary-tier call 404'd and fell through to
+    retries + the fallback tier: correct results, three wasted round-trips and a
+    ~6s retry-backoff stall on each cold path (it is what made
+    test_doctor_cold_cascade_slo blow its 5s budget).
+
+    Rules, most-specific first:
+      * already a full endpoint (``/embeddings`` or the m3-native
+        ``/embedding``) -> use verbatim; the caller was explicit.
+      * ends in a version segment (``/v1``, ``/v2``…) -> append ``/embeddings``,
+        the OpenAI convention.
+      * bare host -> ``/v1/embeddings``. Every server this tier speaks to
+        (LM Studio, llama.cpp, vLLM, m3-embed-server) exposes it. The m3-native
+        singular ``/embedding`` is tier 2's route and stays tier 2's business,
+        so the tiers keep their separate contracts.
+    """
+    u = (base_url or "").rstrip("/")
+    if u.endswith("/embeddings") or u.endswith("/embedding"):
+        return u
+    if _VERSION_SEGMENT_RE.search(u):
+        return f"{u}/embeddings"
+    return f"{u}/v1/embeddings"
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Backend stats (thread-safe)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1080,7 +1116,7 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
             for attempt in range(3):
                 try:
                     resp = await client.post(
-                        f"{base_url}/embeddings",
+                        _embeddings_post_url(base_url),
                         json={"model": model, "input": text},
                         headers={"Authorization": f"Bearer {token}"},
                         timeout=_httpx.Timeout(config.EMBED_TIMEOUT_CONNECT, read=config.EMBED_TIMEOUT_READ),
@@ -1178,7 +1214,7 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                         headers["Authorization"] = f"Bearer {token}"
 
                     url = config.M3_CLOUD_ENCLAVE_URL.rstrip("/")
-                    post_url = url if url.endswith("/embeddings") or url.endswith("/embedding") else f"{url}/embeddings"
+                    post_url = _embeddings_post_url(url)
 
                     resp = await client.post(
                         post_url,
@@ -1321,7 +1357,7 @@ async def _embed_many_cloud_fallback(
             headers["Authorization"] = f"Bearer {token}"
 
         url = config.M3_CLOUD_ENCLAVE_URL.rstrip("/")
-        post_url = url if url.endswith("/embeddings") or url.endswith("/embedding") else f"{url}/embeddings"
+        post_url = _embeddings_post_url(url)
 
         resp = await client.post(
             post_url,
@@ -1551,7 +1587,7 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
     async def _post_once(chunk_texts: list[str]):
         try:
             resp = await client.post(
-                f"{base_url}/embeddings",
+                _embeddings_post_url(base_url),
                 json={"model": model, "input": chunk_texts},
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=_httpx.Timeout(config.EMBED_TIMEOUT_CONNECT, read=config.EMBED_TIMEOUT_READ * 4),
