@@ -21,6 +21,36 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.2] — 2026-08-08 — cognitive-loop FD leak; phantom entity backlog; JSON-mode file extraction
+
+### Fixed
+- **Cognitive-loop file-descriptor leak.** The loop's per-cycle SQLite work-gates
+  called the raw `M3Context(path)` constructor, which builds an uncached,
+  never-closed connection pool — leaking hundreds of file descriptors per second
+  until `OSError: [Errno 24] Too many open files` broke every pass (entity,
+  enrichment, classify), freezing the backlog. They now use the LRU-cached
+  `M3Context.for_db()`, so the core + chatlog pools are reused (steady-state
+  collapses to ~10 connections). PostgreSQL was unaffected — its paths were
+  already pooled. `_init_sqlite_pool` now also closes a partially-built pool
+  before re-raising a mid-init error, so a failure under FD pressure doesn't
+  leak the connections it had already opened.
+- **Phantom entity-extraction backlog.** The dashboard's `_entity_backlog_count`
+  counted chatlog types (`message`/`conversation`/`chat_log`) that the entity
+  worker deliberately excludes, inflating the "Entity extraction" backlog with
+  tens of thousands of rows it never processes — so the number never dropped. It
+  now mirrors the worker's `DEFAULT_TYPES` exactly and reports the real,
+  drainable backlog.
+- **File-extraction JSON parse failures.** Fact extraction now requests JSON mode
+  (`response_format=json_object`, with a fallback that drops it and retries on a
+  400 from servers that reject it), and the parser progressively repairs stray
+  backslashes (Windows paths / PowerShell content) — fixing the
+  `Invalid \escape` / `Expecting delimiter` failures on backslash-heavy documents.
+
+### Added
+- Cross-OS file-descriptor headroom for the cognitive-loop daemon: an in-process
+  limit raise (POSIX `setrlimit`, Windows `_setmaxstdio`), plus `NumberOfFiles`
+  in the launchd agent and `LimitNOFILE` in the systemd unit as defense-in-depth.
+
 ## [2026.8.19.1] — 2026-08-08 — cold embed cascade fails fast on a dead server
 
 ### Fixed
