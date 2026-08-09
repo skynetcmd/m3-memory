@@ -24,6 +24,8 @@ import os
 import time
 from typing import Optional
 
+from llm_failover import apply_thinking_suppression
+
 logger = logging.getLogger("files_memory.summarize")
 
 # Hard cap on input to the summarizer — bge-m3 leaf-sized chunks are fine,
@@ -152,14 +154,19 @@ def prewarm(timeout: float | None = None) -> bool:
     t0 = time.perf_counter()
     try:
         with httpx.Client(timeout=timeout or _PREWARM_TIMEOUT_S) as client:
+            warm_url = chat_completions_url(endpoint)
             resp = client.post(
-                chat_completions_url(endpoint),
+                warm_url,
                 headers=llm_auth_headers(),
-                json={
+                # Mirror the real summarize call (below), so the pre-warm loads
+                # the same shape it is warming for. At max_tokens=1 a reasoning
+                # model would otherwise spend the whole budget thinking and
+                # return an empty choice, making a healthy server look slow/bad.
+                json=apply_thinking_suppression({
                     "model": model,
                     "messages": [{"role": "user", "content": "ok"}],
                     "max_tokens": 1,
-                },
+                }, warm_url),
             )
         elapsed = time.perf_counter() - t0
         if resp.status_code != 200:
@@ -221,7 +228,10 @@ def _llm_call(prompt: str, content: str, max_tokens: int = 256) -> Optional[str]
             resp = client.post(
                 url,
                 headers=llm_auth_headers(),
-                json={
+                # A reasoning model answers in the `reasoning` channel and
+                # leaves `content` empty — the summary would silently come back
+                # blank and fall through to the truncation fallback.
+                json=apply_thinking_suppression({
                     "model": model,
                     "messages": [
                         {"role": "system", "content": prompt},
@@ -229,7 +239,7 @@ def _llm_call(prompt: str, content: str, max_tokens: int = 256) -> Optional[str]
                     ],
                     "temperature": 0.0,
                     "max_tokens": max_tokens,
-                },
+                }, url),
             )
             resp.raise_for_status()
             data = resp.json()

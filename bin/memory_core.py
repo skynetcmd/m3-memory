@@ -61,7 +61,7 @@ from functools import lru_cache as _lru_cache  # noqa: F401 — re-export
 from typing import Any, Awaitable, Callable  # noqa: F401 (used in annotations)
 
 from embedding_utils import infer_change_agent as _infer_change_agent_util  # noqa: F401 — re-export
-from llm_failover import get_best_llm
+from llm_failover import apply_thinking_suppression, get_best_llm
 from m3_sdk import M3Context, resolve_db_path
 
 # ── Dynamic Plugin Architecture (Milestone 1) ─────────────────────────────────
@@ -412,14 +412,17 @@ async def conversation_summarize_impl(conversation_id: str, threshold: int = 20)
     base_url, model = result
     prompt = f"Summarize this conversation into 3-5 key points. Preserve facts, decisions, and action items.\n\n{messages_text}"
 
+    chat_url = f"{base_url}/chat/completions"
     try:
         resp = await client.post(
-            f"{base_url}/chat/completions",
-            json={
+            chat_url,
+            # Reasoning models answer in the `reasoning` channel and leave
+            # `content` empty; without this the summary comes back "".
+            json=apply_thinking_suppression({
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3
-            },
+            }, chat_url),
             headers={"Authorization": f"Bearer {token}"},
             timeout=LLM_TIMEOUT
         )

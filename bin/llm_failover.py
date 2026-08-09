@@ -68,6 +68,30 @@ def suppresses_thinking_via_effort(url: str) -> bool:
     return is_lmstudio_url(url) or is_ollama_url(url)
 
 
+def apply_thinking_suppression(payload: dict, url: str) -> dict:
+    """Add ``reasoning_effort="none"`` to ``payload`` when ``url`` is a local
+    runtime verified to honor it. Returns the same dict, for chaining.
+
+    The one-liner every OpenAI-chat caller needs, so the guard has ONE symbol to
+    check and callers stop hand-rolling the same try/except. Without it, a
+    reasoning model spends its budget in the ``reasoning`` channel and returns
+    ``finish_reason="length"`` with an EMPTY ``content`` — the caller reads "" as
+    "the model said nothing" and the feature silently degrades to a no-op that
+    looks like a clean result (measured 2026-08-09: the citation-drift judge
+    abstained on 100% of syntheses and reported "0 findings").
+
+    Never raises and never sends the key to a cloud endpoint: ``"none"`` is
+    non-standard and 400s on real OpenAI. Pure dict manipulation — no I/O, no
+    platform or database coupling.
+    """
+    try:
+        if suppresses_thinking_via_effort(url):
+            payload["reasoning_effort"] = "none"
+    except Exception:  # noqa: BLE001 — a suppression hint must never break a call
+        pass
+    return payload
+
+
 def is_lmstudio_url(url: str) -> bool:
     """True when ``url`` points at an LM Studio server (its default port 1234).
 

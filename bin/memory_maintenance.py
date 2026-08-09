@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 DEFAULT_PROTECTED_TYPES = ("preference", "user_fact", "task", "plan")
 
 import memory_core
+from llm_failover import apply_thinking_suppression
 from memory_core import (
     DEDUP_LIMIT,
     DEDUP_THRESHOLD,
@@ -1125,13 +1126,16 @@ async def memory_consolidate_impl(
         # 4. Call LLM
         prompt = f"Consolidate these {len(rows)} memory items into a single comprehensive summary. Preserve all facts, decisions, and key details.\n\n{items_text}"
         try:
+            chat_url = f"{base_url}/chat/completions"
             resp = await client.post(
-                f"{base_url}/chat/completions",
-                json={
+                chat_url,
+                # Reasoning models leave `content` empty; without this the
+                # consolidation silently returns nothing.
+                json=apply_thinking_suppression({
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.3
-                },
+                }, chat_url),
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=memory_core.LLM_TIMEOUT
             )
@@ -1238,11 +1242,13 @@ async def _distill_call_model(prompt: str) -> "str | None":
             return None
         base_url, model = result
         try:
+            chat_url = f"{base_url}/chat/completions"
             resp = await client.post(
-                f"{base_url}/chat/completions",
-                json={"model": model,
-                      "messages": [{"role": "user", "content": prompt}],
-                      "temperature": 0.2},
+                chat_url,
+                json=apply_thinking_suppression(
+                    {"model": model,
+                     "messages": [{"role": "user", "content": prompt}],
+                     "temperature": 0.2}, chat_url),
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=memory_core.LLM_TIMEOUT,
             )

@@ -30,6 +30,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Optional
 
+from llm_failover import apply_thinking_suppression
+
 from .config import files_table
 
 logger = logging.getLogger("files_memory.carry_forward")
@@ -278,7 +280,7 @@ def judge_material_change(old_text: str, new_text: str) -> tuple[Optional[bool],
             resp = client.post(
                 url,
                 headers=llm_auth_headers(),
-                json={
+                json=apply_thinking_suppression({
                     "model": _llm_model(),
                     "messages": [
                         {"role": "system", "content": _JUDGE_PROMPT},
@@ -288,7 +290,7 @@ def judge_material_change(old_text: str, new_text: str) -> tuple[Optional[bool],
                     "max_tokens": 128,
                     # No response_format hint — some servers (LM Studio ministral)
                     # 400 on {"type":"json_object"}. Prompt drives JSON output.
-                },
+                }, url),
             )
             resp.raise_for_status()
             data = resp.json()

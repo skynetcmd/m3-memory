@@ -7,7 +7,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from llm_failover import get_best_llm, get_smallest_llm
+from llm_failover import apply_thinking_suppression, get_best_llm, get_smallest_llm
 from m3_sdk import M3Context, resolve_db_path
 
 from . import config as _config
@@ -108,13 +108,16 @@ async def _auto_classify(content: str, title: str) -> str:
     )
 
     try:
+        chat_url = f"{base_url}/chat/completions"
         resp = await client.post(
-            f"{base_url}/chat/completions",
-            json={
+            chat_url,
+            # A reasoning model would answer in the `reasoning` channel and
+            # leave `content` empty, silently yielding no enrichment.
+            json=apply_thinking_suppression({
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1
-            },
+            }, chat_url),
             headers={"Authorization": f"Bearer {token}"},
             timeout=30.0
         )
@@ -171,14 +174,17 @@ async def _maybe_auto_title(content: str, title: str, force: bool = False) -> st
             "Do not use quotes. Do not add a trailing period. No prefix.\n\n"
             f"{content[:600]}"
         )
+        chat_url = f"{base_url}/chat/completions"
         resp = await client.post(
-            f"{base_url}/chat/completions",
-            json={
+            chat_url,
+            # A reasoning model would answer in the `reasoning` channel and
+            # leave `content` empty, silently yielding no enrichment.
+            json=apply_thinking_suppression({
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.2,
                 "max_tokens": 32,
-            },
+            }, chat_url),
             headers={"Authorization": f"Bearer {token}"},
             timeout=20.0,
         )
@@ -224,14 +230,17 @@ async def _maybe_auto_entities(content: str, force: bool = False) -> list[str]:
             "Reply with a JSON array of strings, nothing else.\n\n"
             f"{content[:600]}"
         )
+        chat_url = f"{base_url}/chat/completions"
         resp = await client.post(
-            f"{base_url}/chat/completions",
-            json={
+            chat_url,
+            # A reasoning model would answer in the `reasoning` channel and
+            # leave `content` empty, silently yielding no enrichment.
+            json=apply_thinking_suppression({
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
                 "max_tokens": 128,
-            },
+            }, chat_url),
             headers={"Authorization": f"Bearer {token}"},
             timeout=20.0,
         )

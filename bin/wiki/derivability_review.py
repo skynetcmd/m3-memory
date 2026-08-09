@@ -40,6 +40,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional, Protocol
 
+from llm_failover import apply_thinking_suppression
+
 from . import authority as _authority
 
 # Provenance relations: a synthesis was compiled FROM these — the same set
@@ -358,6 +360,10 @@ class ModelDerivabilityJudge:
         }
         if self.cfg.model:
             payload["model"] = self.cfg.model
+        # Without this a reasoning model returns finish_reason="length" with an
+        # EMPTY content, and the review abstains on every item while reporting
+        # a clean result (the citation-drift failure, same shape).
+        apply_thinking_suppression(payload, self.cfg.url)
         try:
             r = httpx.post(self.cfg.url, json=payload, headers=headers,
                            timeout=self.cfg.timeout_s)

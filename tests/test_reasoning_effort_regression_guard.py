@@ -38,7 +38,10 @@ import pytest
 
 _BIN = Path(__file__).resolve().parents[1] / "bin"
 
-_HELPER = "suppresses_thinking_via_effort"
+# Either symbol satisfies the guard: the predicate is the original seam, the
+# apply_* wrapper is the one-liner that replaced hand-rolled try/except blocks.
+_HELPERS = ("apply_thinking_suppression", "suppresses_thinking_via_effort")
+_HELPER = _HELPERS[0]
 
 # Cloud-only callers: "none" is NOT valid on real OpenAI/Anthropic/xAI and would
 # 400. These must NOT adopt the mitigation, so they are excluded by design
@@ -63,19 +66,43 @@ _NOT_PRODUCT = {
 # Callers that talk to a LOCAL endpoint and still lack the mitigation. Shrink
 # this list; never add to it. Each is a place a reasoning model silently
 # degrades the feature today.
-KNOWN_GAPS = {
-    "memory_core.py",
-    "memory_maintenance.py",
-    "promote_pipeline.py",
-    "memory/enrich.py",
-    "files_memory/summarize.py",
-    "files_memory/config.py",
-    "dashboard/health.py",
-}
+KNOWN_GAPS: set[str] = set()
+
+
+def _executable_source(src: str) -> str:
+    """Source with comments and docstrings removed.
+
+    Both are legitimate places to NAME an endpoint — files_memory/config.py
+    documents the `/v1/v1/chat/completions` bug at length and never posts
+    anything. A raw substring scan called it a caller. Same technique
+    test_model_discovery_no_hardcoded_names.py uses for the same reason.
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return src
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef,
+                                 ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = getattr(node, "body", [])
+        if (body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            body.pop(0)          # drop the docstring
+    try:
+        return ast.unparse(tree)  # comments are already gone via the AST
+    except Exception:             # noqa: BLE001
+        return src
 
 
 def _chat_completion_callers() -> set[str]:
-    """Modules under bin/ that POST to a chat/completions endpoint."""
+    """Modules under bin/ that actually POST to a chat/completions endpoint.
+
+    Requires BOTH a real `.post(` call and a chat/completions reference in
+    EXECUTABLE source — a module that merely documents or builds the URL is not
+    a caller and must not be listed as debt.
+    """
     out: set[str] = set()
     for path in _BIN.rglob("*.py"):
         if "__pycache__" in path.parts or ".venv" in path.parts:
@@ -84,18 +111,83 @@ def _chat_completion_callers() -> set[str]:
             src = path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        if "chat/completions" not in src:
+        if ".post(" not in src:
             continue
-        rel = str(path.relative_to(_BIN))
+        code = _executable_source(src)
+        if ".post(" not in code:
+            continue
+        sends_messages = '"messages"' in code or "'messages'" in code
+        names_endpoint = "chat/completions" in code
+        if not (sends_messages or names_endpoint):
+            continue
         if path.name in _CLOUD_ONLY or path.name in _NOT_PRODUCT:
             continue
-        out.add(rel)
+        out.add(str(path.relative_to(_BIN)))
     return out
 
 
-def _uses_helper(rel: str) -> bool:
+def _chat_post_functions(src: str):
+    """Yield (name, node) for each OUTERMOST function containing a `.post(`
+    call that passes `json=`.
+
+    Outermost, not every nested def: m3_entities resolves the suppression
+    predicate ONCE in the enclosing function and applies it inside a closure —
+    efficient and correct, but a per-def check reads the closure as unprotected.
+    The outermost unit is the smallest scope that contains both halves of that
+    pattern while still isolating sibling call sites (memory/enrich.py's three
+    chat calls live in three separate top-level functions and stay separate).
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return
+    _FN = (ast.FunctionDef, ast.AsyncFunctionDef)
+    inner: set[int] = set()
+    for fn in ast.walk(tree):
+        if not isinstance(fn, _FN):
+            continue
+        for sub in ast.walk(fn):
+            if sub is not fn and isinstance(sub, _FN):
+                inner.add(id(sub))
+    for fn in ast.walk(tree):
+        if not isinstance(fn, _FN) or id(fn) in inner:
+            continue
+        for node in ast.walk(fn):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "post"
+                    and any(k.arg == "json" for k in node.keywords)):
+                yield fn.name, fn
+                break
+
+
+def _unprotected_functions(rel: str) -> list[str]:
+    """Functions that POST a json payload without the mitigation anywhere in
+    them.
+
+    Per-FUNCTION, not per-file: memory/enrich.py has three separate chat calls,
+    and a file-level substring check passed while two of them were unprotected
+    (caught by sabotaging one site — the guard stayed green). Function scope is
+    the smallest unit that still tolerates the two legitimate shapes: wrapping
+    the dict inline, and mutating a `payload` variable before the post.
+    """
     src = (_BIN / rel).read_text(encoding="utf-8", errors="ignore")
-    return _HELPER in src
+    bad = []
+    for name, fn in _chat_post_functions(src):
+        seg = ast.unparse(fn)
+        protected = (any(h in seg for h in _HELPERS)
+                     or "reasoning_effort" in seg)  # set directly, e.g. m3_entities
+        if not protected:
+            bad.append(name)
+    return bad
+
+
+def _uses_helper(rel: str) -> bool:
+    """True when every chat-posting function in the module is protected."""
+    src = (_BIN / rel).read_text(encoding="utf-8", errors="ignore")
+    if not any(h in src for h in _HELPERS):
+        return False
+    return not _unprotected_functions(rel)
 
 
 def test_no_new_reasoning_effort_gaps():
@@ -127,16 +219,26 @@ def test_known_gaps_list_is_accurate():
     "wiki/citation_drift.py",
     "wiki/synth.py",
     "wiki/prose_compiler.py",
+    "wiki/derivability_review.py",
     "slm_intent.py",
     "m3_entities.py",
     "files_memory/extract.py",
+    "files_memory/summarize.py",
+    "files_memory/carry_forward.py",
+    "memory_core.py",
+    "memory/enrich.py",
+    "memory_maintenance.py",
+    "run_observer.py",
+    "run_reflector.py",
 ]))
 def test_known_good_callers_keep_the_mitigation(rel):
     """Pin the callers that HAVE it, so a refactor cannot quietly drop it."""
     assert (_BIN / rel).is_file(), f"{rel} moved — update this guard"
+    unprotected = _unprotected_functions(rel)
     assert _uses_helper(rel), (
-        f"{rel} lost its {_HELPER}() call. A reasoning model will return empty "
-        f"content and this caller will silently degrade to a no-op."
+        f"{rel} has chat-posting function(s) without {_HELPER}(): "
+        f"{unprotected or '(module-level reference missing)'}. A reasoning model "
+        f"will return empty content and these will silently degrade to no-ops."
     )
 
 

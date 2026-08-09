@@ -564,14 +564,24 @@ def _smoke_llm_completion(base_url: str, model: str, token: str, timeout_s: floa
     {ok, status, model_id, detail}. status ∈ {ok, auth_failed, no_model, down,
     bad_response}. Never raises."""
     import httpx
+    from llm_failover import apply_thinking_suppression
 
     res = {"ok": False, "status": "down", "model_id": model, "detail": ""}
     try:
+        smoke_url = f"{base_url}/chat/completions"
+        # Mirror what the product now sends: every local chat caller suppresses
+        # reasoning-model thinking. This probe does not read `content` (a
+        # well-formed choice is the whole signal), but at max_tokens=1 a
+        # reasoning model can return a choice with no `content` key at all,
+        # which would be misread as bad_response and show a healthy backend as
+        # broken. Local-gated, so a cloud endpoint is untouched.
         r = httpx.post(
-            f"{base_url}/chat/completions",
-            json={"model": model,
-                  "messages": [{"role": "user", "content": _SMOKE_PROMPT}],
-                  "max_tokens": 1, "temperature": 0.0, "stream": False},
+            smoke_url,
+            json=apply_thinking_suppression(
+                {"model": model,
+                 "messages": [{"role": "user", "content": _SMOKE_PROMPT}],
+                 "max_tokens": 1, "temperature": 0.0, "stream": False},
+                smoke_url),
             headers={"Authorization": f"Bearer {token}"},
             timeout=httpx.Timeout(min(3.0, timeout_s), read=timeout_s),
         )

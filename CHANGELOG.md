@@ -21,6 +21,52 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.8] — 2026-08-09 — close every reasoning-model gap; guard is now per-call-site
+
+### Fixed
+- **Ten more local chat callers silently no-op'd on a reasoning model.**
+  2026.8.19.7 fixed the wiki trio and shipped a guard; the guard's own detection
+  was then found to be wrong in both directions, and the corrected sweep found
+  the rest. All now suppress reasoning-model thinking:
+  `memory_core` (conversation summarization), `memory/enrich` (**3** call sites —
+  type classification, title generation, entity extraction), `memory_maintenance`
+  (**2** — consolidation, summarization), `files_memory/summarize` (**2** —
+  summarizer + pre-warm), `files_memory/carry_forward` (material-change judge),
+  `run_observer`, `run_reflector`, `wiki/derivability_review`, and
+  `dashboard/health` (LLM smoke probe).
+
+  Measured live (qwen3.5:9b, the exact payload a patched caller now sends):
+  before, `finish_reason="length"` with `content=''`; after, `finish_reason="stop"`
+  with a real answer. On the ingest path (`memory/enrich`, `files_memory`) that
+  was the difference between enrichment happening and silently not happening.
+- **`run_observer` applies the gate BEFORE profile `extra_params`**, so an
+  explicit per-profile `reasoning_effort` still wins.
+
+### Added
+- **`llm_failover.apply_thinking_suppression(payload, url)`** — the one-liner
+  that replaces the hand-rolled try/except at every call site, so there is ONE
+  symbol to apply and ONE symbol to guard. Pure dict manipulation: no I/O, no
+  platform branch, no database coupling, and still local-gated (`"none"` 400s on
+  real OpenAI cloud).
+
+### Changed
+- **The regression guard is now per-call-site, and its detection is fixed.**
+  Three defects in the 2026.8.19.7 guard, each found by testing the guard itself:
+  - It scanned raw source, so a module that only *documents* an endpoint
+    (`files_memory/config.py`) counted as a caller. It now strips comments and
+    docstrings first.
+  - It required a `chat/completions` literal, so it MISSED callers that build
+    the URL elsewhere (`files_memory/summarize.py`). It now treats a `messages`
+    payload as the marker of an OpenAI chat call.
+  - It matched the helper anywhere in the FILE, so `memory/enrich.py` stayed
+    green with two of its three call sites unprotected (proven by sabotaging one
+    and watching the guard pass). It now checks each **outermost** chat-posting
+    function — the smallest scope that still accepts the legitimate closure
+    pattern `m3_entities` uses, where the predicate is resolved once in the
+    enclosing scope.
+- **`KNOWN_GAPS` is now empty.** Every local chat caller in `bin/` is protected;
+  the ratchet starts from zero and any new gap fails the build.
+
 ## [2026.8.19.7] — 2026-08-09 — reasoning models silently no-op'd the wiki LLM callers
 
 ### Fixed

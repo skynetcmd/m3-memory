@@ -30,6 +30,7 @@ import sys
 import time
 from pathlib import Path
 
+from llm_failover import apply_thinking_suppression
 from m3_sdk import getenv_compat
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -127,6 +128,9 @@ async def call_reflector(
             ],
             "max_tokens": max_tokens,
         }
+        # Local reasoning models leave `content` empty; the reflector would
+        # parse an empty reply and silently produce no reflection.
+        apply_thinking_suppression(payload, profile.url)
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",

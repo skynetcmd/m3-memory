@@ -36,6 +36,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+from llm_failover import apply_thinking_suppression
 from m3_sdk import getenv_compat
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -255,6 +256,10 @@ async def call_observer(
             ],
             "max_tokens": max_tokens,
         }
+        # Local reasoning models answer in the `reasoning` channel and leave
+        # `content` empty, so the observer extracts nothing. Applied BEFORE the
+        # profile extras below, so an explicit profile setting still wins.
+        apply_thinking_suppression(payload, profile.url)
         # Profile may pass additional OpenAI-shape params (e.g.
         # reasoning_effort: "none" for Gemini 2.5 Flash to suppress thinking).
         extras = getattr(profile, "extra_params", None) or {}
