@@ -189,16 +189,22 @@ def _llm_call(content: str, max_tokens: int = 1024) -> Optional[str]:
         ],
         "temperature": 0.0,
         "max_tokens": max_tokens,
-        # No response_format hint: some OpenAI-compat servers (e.g. LM Studio's
-        # ministral build) HARD-REJECT {"type":"json_object"} with HTTP 400 rather
-        # than ignoring it. The prompt already asks for JSON and _parse_facts_json
-        # is fence-tolerant, so we don't need the hint.
+        # JSON mode: constrain the model to emit a single valid JSON object. This
+        # fixes the "Invalid \escape / Expecting delimiter" parse failures on content
+        # heavy with backslashes/backticks (Windows/PowerShell runbooks). Some
+        # OpenAI-compat servers HARD-REJECT it with HTTP 400 (older LM Studio builds)
+        # rather than ignoring it, so the request below retries WITHOUT it on that
+        # specific rejection — the prompt still asks for JSON and the parser is lenient.
+        "response_format": {"type": "json_object"},
     }
     if _suppress:
         payload["reasoning_effort"] = "none"
     try:
         with httpx.Client(timeout=60.0) as client:
             resp = client.post(url, headers=llm_auth_headers(), json=payload)
+            if resp.status_code == 400 and "response_format" in resp.text.lower():
+                payload.pop("response_format", None)
+                resp = client.post(url, headers=llm_auth_headers(), json=payload)
             resp.raise_for_status()
             msg = resp.json()["choices"][0]["message"]
             text = (msg.get("content") or "").strip()
@@ -256,9 +262,17 @@ def _parse_facts_json(raw: str) -> list[ExtractedFact]:
     try:
         obj = json.loads(obj_text)
     except json.JSONDecodeError:
-        # One retry: drop trailing commas (common LLM tic).
-        obj_text2 = re.sub(r",(\s*[}\]])", r"\1", obj_text)
-        obj = json.loads(obj_text2)  # second failure propagates
+        # Progressive repair for the common LLM/JSON-mode escapes seen in practice:
+        #   1. trailing commas (common LLM tic),
+        #   2. stray backslashes — a '\' not starting a valid JSON escape, i.e.
+        #      Windows paths (C:\Users -> \U) / PowerShell backticks leaking into a
+        #      string value. Double them so the string is valid.
+        repaired = re.sub(r",(\s*[}\]])", r"\1", obj_text)
+        try:
+            obj = json.loads(repaired)
+        except json.JSONDecodeError:
+            repaired = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", repaired)
+            obj = json.loads(repaired)  # final failure propagates
 
     raw_facts = obj.get("facts") or []
     if not isinstance(raw_facts, list):

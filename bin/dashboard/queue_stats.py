@@ -134,12 +134,16 @@ def _entity_backlog_count(conn) -> int:
     processes, so the number sits stuck forever. Backend-agnostic (dialect
     placeholders); best-effort → 0 if tables/columns are absent.
     """
-    # Extractable types + always-skip, kept in sync with bin/m3_entities.
+    # Extractable types + always-skip, kept EXACTLY in sync with
+    # bin/m3_entities.DEFAULT_TYPES. Chatlog types (message/conversation/chat_log)
+    # are DELIBERATELY EXCLUDED there (handled by the decay/consolidation path, not
+    # entity extraction) — counting them here inflated the backlog with ~56k rows the
+    # worker never processes, so the number never dropped. It must mirror the worker's
+    # eligibility or the "Entity extraction" backlog is phantom.
     DEFAULT_TYPES = (
-        "message", "conversation", "chat_log", "note", "decision", "knowledge",
-        "reference", "fact", "plan", "document", "observation", "project",
-        "config", "infrastructure", "network_config", "local_device",
-        "home_automation", "log", "preference",
+        "note", "decision", "knowledge", "reference", "fact", "plan",
+        "document", "observation", "project", "config", "infrastructure",
+        "network_config", "local_device", "home_automation", "log", "preference",
     )
     SKIP = ("auto", "scratchpad", "summary")
     try:
