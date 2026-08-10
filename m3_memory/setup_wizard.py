@@ -690,12 +690,19 @@ def _detect_governor_eligible_tasks() -> list[str]:
 
 # ── execution phase ───────────────────────────────────────────────────────────
 
-def _run(cmd: list[str], *, check: bool = True, env: "dict | None" = None) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], *, check: bool = True, env: "dict | None" = None,
+         timeout: "float | None" = None) -> subprocess.CompletedProcess:
     """Shell out, streaming output. Returns the completed process.
 
     `env`, when given, replaces the child's environment (used to strip
-    PYTHONPATH so a stale repo payload can't shadow the installed package)."""
-    return subprocess.run(cmd, check=check, env=env)
+    PYTHONPATH so a stale repo payload can't shadow the installed package).
+
+    `timeout`, when given, bounds the wall-clock wait and raises
+    subprocess.TimeoutExpired. Callers that shell out to something which can
+    BLOCK — rather than merely fail — must pass one: a setup step that waits
+    forever is indistinguishable from a hung machine, and on CI it burns the
+    whole runner (GitHub's default job cap is 6 hours)."""
+    return subprocess.run(cmd, check=check, env=env, timeout=timeout)
 
 
 def _import_m3_halt():
@@ -2518,6 +2525,42 @@ def _step_governor_migration(plan: SetupPlan, *, non_interactive: bool = False,
     return result
 
 
+# Wall-clock cap on the post-install `m3 doctor` verification. Generous enough
+# for a cold run that migrates a fresh DB and warms an embedder, short enough
+# that a hung probe surfaces as a failed verification instead of a hung install.
+_DOCTOR_TIMEOUT_S = 300.0
+
+
+def _trace(msg: str) -> None:
+    """Unbuffered breadcrumb to BOTH stderr and a file. Debug instrumentation.
+
+    Why a file and not just a print: the failure being chased kills the setup
+    process with NO output on either stream, so anything that relies on the
+    dying process flushing its own stdio is exactly what we cannot trust. The
+    file is opened, written, flushed and closed per call — so the last line on
+    disk names the last boundary that was reached, even if the process is
+    terminated a microsecond later.
+
+    Best-effort and silent on failure: instrumentation must never be the thing
+    that breaks the run it is instrumenting.
+    """
+    try:
+        line = f"[trace] {msg}"
+        print(line, file=sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        path = os.environ.get("M3_TRACE_FILE")
+        if not path:
+            return
+        with open(path, "a", encoding="utf-8", errors="backslashreplace") as fh:
+            fh.write(f"{line}\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+    except Exception:  # noqa: BLE001 — never break the run to record it
+        pass
+
+
 def _doctor_failure_telemetry(argv: list, rc: "int | None") -> None:
     """After a FAILED verification, re-run the doctor CAPTURED and report what it
     actually emitted. Diagnostic only — never changes the verdict, never raises.
@@ -2632,10 +2675,28 @@ def _step_doctor(plan=None) -> bool:
         # a reader would connect to the exit code. Declining the embedder means
         # declining what depends on it.
         argv.append("--skip-cascade")
+    _trace(f"doctor: about to spawn argv={argv}")
+    _trace(f"doctor: sys.executable={sys.executable!r} "
+           f"utf8_mode={sys.flags.utf8_mode} "
+           f"sentinel={os.environ.get('_M3_UTF8_REEXEC')!r}")
     try:
-        _run(argv)
+        # BOUNDED (§3): verification must not be able to hang the install. The
+        # doctor probes live endpoints (embedder, LLM, warehouse) and a probe
+        # that blocks — rather than failing — would otherwise stall setup
+        # forever. Observed on windows-latest: the E2E job sat in_progress for
+        # 25+ minutes on this step while its ubuntu/macOS twins finish in well
+        # under 10, i.e. the failure mode there is a BLOCK, not a crash.
+        cp = _run(argv, timeout=_DOCTOR_TIMEOUT_S)
+        _trace(f"doctor: _run returned rc={getattr(cp, 'returncode', '?')}")
         _ok("verification passed — m3 is installed and working")
         return True
+    except subprocess.TimeoutExpired:
+        _trace("doctor: TIMED OUT")
+        _warn(f"VERIFICATION TIMED OUT after {_DOCTOR_TIMEOUT_S:.0f}s — `m3 doctor` "
+              "did not finish. The install itself completed; a probe is hanging, "
+              "not failing.")
+        _warn("Run `m3 doctor --verbose` by hand to see which probe blocks.")
+        return False
     except subprocess.CalledProcessError as e:
         _warn("VERIFICATION FAILED — the install completed but m3 is not fully "
               "healthy. The doctor output above names each issue and its fix.")
@@ -2792,11 +2853,16 @@ def run_setup(args: argparse.Namespace) -> int:
         if plan.use_shared_embedder:
             _step_shared_embedder(plan, non_interactive=args.non_interactive)
         _step_wire_agents(plan, non_interactive=args.non_interactive)
+        _trace("after wire_agents")
         _step_install_dashboard(plan)
+        _trace("after install_dashboard")
         governor_result = _step_governor_migration(
             plan, non_interactive=args.non_interactive, gui=getattr(args, "gui_child", False))
+        _trace("after governor_migration")
         verified = _step_doctor(plan)
+        _trace(f"after step_doctor -> verified={verified}")
         _summary(plan, governor_result, verified=verified)
+        _trace("after summary")
         # Exit 3 = "installed but not verified healthy". Distinct from 0
         # (clean) and from 2 (aborted, nothing installed) so a scripted
         # installer can tell "did not finish" from "finished but the result is

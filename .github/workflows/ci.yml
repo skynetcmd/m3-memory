@@ -181,6 +181,11 @@ jobs:
   # platform-specific (Windows file locks, venv launcher stubs, POSIX-only
   # asyncio signal handlers), so a single-OS lane would have missed them.
   e2e-install:
+    # A HANG must not burn a 6-hour runner. The Windows lane sat in_progress for
+    # 25+ minutes on a step whose ubuntu/macOS twins finish in well under 10 —
+    # the failure mode is a BLOCK, not a crash, and without a cap every failing
+    # run costs six hours and delays the post-mortem steps that explain it.
+    timeout-minutes: 25
     name: E2E install + upgrade on ${{ matrix.os }}
     needs: [lint, typecheck, matrix-setup]
     runs-on: ${{ matrix.os }}
@@ -213,6 +218,10 @@ jobs:
         # the point is the install path itself, not hook wiring into a client
         # that is not there.
         M3_E2E_ROOT: ${{ runner.temp }}/m3-e2e
+        # Breadcrumbs to a FILE: the Windows failure kills setup with no output
+        # on either stream, so anything relying on the dying process flushing
+        # its own stdio is precisely what cannot be trusted here.
+        M3_TRACE_FILE: ${{ runner.temp }}/m3-setup-trace.log
       run: |
         mkdir -p "$M3_E2E_ROOT/config" "$M3_E2E_ROOT/engine"
         # --no-native-wheel: runners have no GPU and a source build is slow;
@@ -234,6 +243,14 @@ jobs:
     # one: the log ends at "Step 5/5" with exit 1 and no verdict. Print the
     # doctor's own exit code and output on that runner so the next failure
     # names itself instead of needing another CI round-trip to diagnose.
+    - name: Dump the setup trace (always — this is the post-mortem)
+      if: always()
+      shell: bash
+      run: |
+        f="${{ runner.temp }}/m3-setup-trace.log"
+        echo "--- setup trace ($f) ---"
+        if [ -f "$f" ]; then cat "$f"; else echo "(no trace file written)"; fi
+
     - name: Diagnose verification (Windows only, never fails the job)
       # `always()` is REQUIRED: without it a step is skipped once an earlier one
       # fails, and the whole point of this step is to explain the setup failure
