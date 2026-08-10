@@ -21,6 +21,42 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.13] — 2026-08-10 — `m3 setup` no longer mistakes itself for a running server
+
+> The previous release fixed the Windows E2E *hang*. This one fixes what the
+> hang was protecting against: `m3 setup` could not run through the `m3` console
+> script on Windows at all, because it flagged ITSELF as a live MCP server.
+
+### Fixed
+
+- **`m3 setup` reported itself as a running MCP server, and aborted.** The
+  writer scan matched the `mcp` role on the substrings `/m3.exe`, `\m3.exe`,
+  `/m3 `, `\m3 ` — the EXECUTABLE, not the invocation. So it could not tell
+  `m3` (which starts the server) from `m3 setup` / `m3 doctor` / `m3 stop`
+  (commands that hold nothing). The signature was effectively inverted:
+  `m3 setup` matched it while the real server process (`memory_bridge.py`)
+  matched none of it.
+
+  On Windows that was fatal rather than cosmetic — preflight found its own
+  PARENT holding the DB, correctly refused to kill an ancestor, and aborted the
+  install with exit 2. Detection is now anchored at end-of-cmdline: a bare `m3`
+  or `m3 serve` (the two invocations that ARE the server) and nothing else,
+  verified across Windows and POSIX process shapes.
+
+- **Nothing verified m3's background services were running after an
+  install/upgrade.** An install STOPS the daemons — preflight must quiesce them
+  so nothing holds the DB through a migration — and owns restarting them. The
+  cognitive-loop and dashboard probes printed "installed but not running" as
+  warnings that fed no exit code, so setup could report success over a system
+  whose writers were all down. That is the state a user is left in whenever a
+  restart fails. Setup now verifies the services it enabled are live, names any
+  that are not, points at `m3 doctor --fix`, and returns exit 3 rather than 0.
+
+  The embed server is deliberately excluded from that check: it is a service,
+  not a registered writer, and never joins the PID registry — checking it there
+  reported "NOT running" while it was serving :8082. Its liveness stays with
+  doctor's HTTP health probe.
+
 ## [2026.8.19.12] — 2026-08-10 — the Windows install path, and a CI lane that had never been green
 
 > The Windows E2E lane had failed on every run in its recorded history. It was
