@@ -47,10 +47,18 @@ def killed(monkeypatch):
 
 
 def test_never_kills_self(killed, monkeypatch):
+    """Refusing must report FAILURE, not success.
+
+    Returning True here said "all writers handled" while the writer was still
+    alive, so the caller re-waited the full quiesce timeout and re-entered the
+    same branch forever — 244 iterations x 30s on windows-latest, which IS the
+    E2E lane's "hang". An ancestor is unkillable by design: terminal, never
+    retryable.
+    """
     monkeypatch.setattr(sw, "_import_m3_halt", lambda: None)
     ok = sw._kill_stuck_writers([_Proc(os.getpid())])
     assert os.getpid() not in killed, "the installer killed its own process"
-    assert ok is True
+    assert ok is False, "an unkillable ancestor must not report success"
 
 
 def test_never_kills_the_parent(killed, monkeypatch):
@@ -88,3 +96,27 @@ def test_ancestor_lookup_failure_still_protects_self(killed, monkeypatch):
 
     sw._kill_stuck_writers([_Proc(os.getpid())])
     assert os.getpid() not in killed
+
+
+def test_ancestor_refusal_is_not_retryable(killed, monkeypatch):
+    """The refusal must be TERMINAL, so the caller breaks instead of looping.
+
+    `_kill_stuck_writers` returning False routes the caller to its abort path;
+    returning True made it re-wait and re-enter forever. This pins the signal
+    the loop depends on.
+    """
+    fake = types.ModuleType("m3_halt")
+    fake._ancestor_pids = lambda pid, **kw: {424242}
+    monkeypatch.setattr(sw, "_import_m3_halt", lambda: fake)
+    assert sw._kill_stuck_writers([_Proc(424242, role="mcp")]) is False
+    assert killed == []
+
+
+def test_is_own_ancestor_agrees_with_the_guard(monkeypatch):
+    """One implementation: the caller's test and the guard must never disagree."""
+    fake = types.ModuleType("m3_halt")
+    fake._ancestor_pids = lambda pid, **kw: {555555}
+    monkeypatch.setattr(sw, "_import_m3_halt", lambda: fake)
+    assert sw._is_own_ancestor(555555) is True
+    assert sw._is_own_ancestor(os.getpid()) is True
+    assert sw._is_own_ancestor(999999) is False

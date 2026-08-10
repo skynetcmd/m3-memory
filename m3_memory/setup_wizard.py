@@ -854,10 +854,29 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
                 # privilege". A truly headless run (or a POSIX GUI child, no
                 # console for sudo) stays unelevated.
                 if not _kill_stuck_writers(result.stuck, allow_sudo=gui_can_elevate):
-                    # A kill failed — almost always an ELEVATED writer an
-                    # unprivileged installer can't stop. Do NOT report success or
-                    # migrate under it; abort with the actionable fix.
-                    _surface_elevated_kill_help(halt, result.stuck)
+                    # A kill failed. Two very different causes, and they need
+                    # different advice:
+                    #
+                    #  - an ANCESTOR writer (this install's own parent) is
+                    #    unkillable BY DESIGN. No amount of privilege changes
+                    #    that, so "re-run elevated" is actively misleading. It is
+                    #    also not retryable: re-waiting just re-enters this
+                    #    branch forever (windows-latest: 244 x 30s = the E2E
+                    #    lane's "hang").
+                    #  - anything else is almost always an ELEVATED writer an
+                    #    unprivileged installer cannot stop, where elevation IS
+                    #    the fix.
+                    ancestors = [p for p in result.stuck if _is_own_ancestor(p.pid)]
+                    if ancestors:
+                        who = ", ".join(f"{p.role}(pid {p.pid})" for p in ancestors)
+                        _err(f"  cannot quiesce {who}: it is this install's own "
+                             f"parent process.")
+                        _err("  You are running setup FROM the m3 process it must "
+                             "stop. Start it from a plain shell instead — e.g. "
+                             "`python -m m3_memory.cli setup`, or run `m3 stop` "
+                             "from a separate terminal first.")
+                    else:
+                        _surface_elevated_kill_help(halt, result.stuck)
                     halt.clear_halt()
                     return False
                 result = halt.wait_for_quiesce(timeout=5.0, on_tick=_quiesce_tick(args))
@@ -1126,6 +1145,34 @@ def _offer_elevated_schedule_repair(script: str, *, non_interactive: bool) -> bo
     return False
 
 
+def _own_ancestor_pids() -> set:
+    """This process plus its full ancestor chain — the pids we must never kill.
+
+    Shared by the kill guard and the caller's "is this retryable?" test so the
+    two can never disagree about what counts as our own branch. Degrades to
+    {self, parent} if m3_halt is unavailable; never returns an empty set.
+    """
+    protected = {os.getpid()}
+    try:
+        halt_mod = _import_m3_halt()
+        if halt_mod is not None and hasattr(halt_mod, "_ancestor_pids"):
+            protected.update(halt_mod._ancestor_pids(os.getpid()))
+        else:
+            protected.add(os.getppid())
+    except Exception:  # noqa: BLE001 — best-effort; never block the kill path
+        try:
+            protected.add(os.getppid())
+        except Exception:  # noqa: BLE001
+            pass
+    return protected
+
+
+def _is_own_ancestor(pid: int) -> bool:
+    """True when `pid` is this process or one of its ancestors — i.e. a writer
+    that is unkillable BY DESIGN, so waiting for it to exit can never succeed."""
+    return pid in _own_ancestor_pids()
+
+
 def _kill_stuck_writers(stuck, *, allow_sudo: bool = False) -> bool:
     """Kill every stuck writer; return True only if ALL were stopped (or already
     gone). A False means at least one kill was refused — cross-platform, almost
@@ -1156,18 +1203,7 @@ def _kill_stuck_writers(stuck, *, allow_sudo: bool = False) -> bool:
     #
     # Cross-platform on purpose: POSIX kills with os.kill, and killing an
     # ancestor there is just as fatal — this is not a Windows-only hazard.
-    protected = {os.getpid()}
-    try:
-        halt_mod = _import_m3_halt()
-        if halt_mod is not None and hasattr(halt_mod, "_ancestor_pids"):
-            protected.update(halt_mod._ancestor_pids(os.getpid()))
-        else:
-            protected.add(os.getppid())
-    except Exception:  # noqa: BLE001 — best-effort; never block the kill path
-        try:
-            protected.add(os.getppid())
-        except Exception:  # noqa: BLE001
-            pass
+    protected = _own_ancestor_pids()
 
     all_ok = True
     for p in stuck:
@@ -1175,8 +1211,17 @@ def _kill_stuck_writers(stuck, *, allow_sudo: bool = False) -> bool:
             # Loud, not silent (§3): the caller's quiesce is genuinely incomplete
             # and the install may still hit a lock — but sawing off our own branch
             # is strictly worse than proceeding.
+            #
+            # all_ok stays FALSE on purpose. An ancestor is unkillable BY DESIGN,
+            # so this is not a transient "try again" state: reporting success
+            # here made the caller re-wait the full quiesce timeout and re-enter
+            # this branch forever (observed on windows-latest: 244 iterations x
+            # 30s, which is the E2E lane's "hang"). The caller must treat an
+            # unkillable writer as terminal, not retryable — see the
+            # `unkillable` short-circuit in _step_preflight.
             _warn(f"    refusing to kill {p.role} (pid {p.pid}) — it is this "
                   f"install's own parent process")
+            all_ok = False
             continue
         if killer(p.pid):
             _ok(f"    stopped {p.role} (pid {p.pid})")
