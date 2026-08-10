@@ -230,6 +230,23 @@ jobs:
           --config-root "$M3_E2E_ROOT/config" \
           --engine-root "$M3_E2E_ROOT/engine"
 
+    # The Windows lane has never been green and its failure mode is a SILENT
+    # one: the log ends at "Step 5/5" with exit 1 and no verdict. Print the
+    # doctor's own exit code and output on that runner so the next failure
+    # names itself instead of needing another CI round-trip to diagnose.
+    - name: Diagnose verification (Windows only, never fails the job)
+      if: runner.os == 'Windows'
+      shell: bash
+      env:
+        M3_E2E_ROOT: ${{ runner.temp }}/m3-e2e
+      run: |
+        export M3_CONFIG_ROOT="$M3_E2E_ROOT/config"
+        export M3_ENGINE_ROOT="$M3_E2E_ROOT/engine"
+        echo "--- m3 doctor (scoped, as setup runs it) ---"
+        m3 doctor --skip-shared-embedder --skip-cascade; echo "doctor exit=$?"
+        echo "--- engine root ---"
+        ls -la "$M3_E2E_ROOT/engine" || true
+
     # Belt-and-braces: setup's own exit code already encodes this, but assert
     # the resulting install is independently usable rather than trusting the
     # installer to grade its own work.

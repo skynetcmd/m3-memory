@@ -2543,6 +2543,26 @@ def _step_doctor(plan=None) -> bool:
         _warn("Re-run `m3 doctor` after fixing, or `m3 doctor --fix` for the "
               "issues that self-repair.")
         return False
+    except BaseException as e:  # noqa: BLE001 — see below; re-raises KeyboardInterrupt
+        # ANY other failure here used to escape _step_doctor and kill the whole
+        # wizard with a bare `exit 1` and NO output — setup printed
+        # "Step 5/5: verifying the install (m3 doctor)" and then simply died,
+        # with no summary, no verdict, and an exit code the wizard never
+        # produces itself (it returns 0/2/3). Observed on windows-latest, where
+        # the E2E lane has never been green: the log ends mid-step with
+        # "##[error]Process completed with exit code 1".
+        #
+        # A verification step that can die without saying why is the exact
+        # silent-failure class the doctor exists to catch (§3). The install
+        # itself already SUCCEEDED at this point, so the correct outcome is
+        # "installed but unverified" (exit 3) with the cause NAMED — never a
+        # silent exit 1.
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        _warn(f"VERIFICATION COULD NOT RUN — {type(e).__name__}: {e}")
+        _warn("The install itself completed; only the `m3 doctor` check failed "
+              "to execute. Run `m3 doctor` manually to see the real state.")
+        return False
 
 
 # ── orchestrator ──────────────────────────────────────────────────────────────
