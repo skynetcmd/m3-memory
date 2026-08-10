@@ -87,3 +87,63 @@ def test_install_sh_does_not_claim_success_on_exit_3():
     assert 'color_ok "Done. m3-memory is installed."' not in src, (
         "install.sh still claims success unconditionally after m3 setup"
     )
+
+
+# ── verification must not grade subsystems the run declined ──────────────────
+
+class _Plan:
+    """Minimal stand-in for the setup plan (only the field under test)."""
+    def __init__(self, use_shared_embedder: bool):
+        self.use_shared_embedder = use_shared_embedder
+
+
+def _captured_argv(wizard, monkeypatch, plan):
+    seen = []
+    monkeypatch.setattr(wizard, "_run", lambda argv, **kw: seen.append(list(argv)))
+    wizard._step_doctor(plan)
+    return seen[-1]
+
+
+def test_doctor_skips_shared_embedder_when_opted_out(wizard, monkeypatch):
+    """`--no-shared-embedder` must not then fail verification for its absence.
+
+    setup prints "Optional CPU embedder (:8082) — SKIPPED (not installed). This
+    is fine", and an unfiltered doctor immediately failed the run on
+    `shared-embedder: N issue(s)` — config-missing / server-down /
+    keepalive-missing, every one of them the direct, intended consequence of the
+    opt-out. setup contradicted itself in consecutive lines and exited 3.
+
+    This is what made CI's E2E job red on all six runners: it installs with
+    --no-shared-embedder (a long-lived :8082 service would leak state on a
+    shared runner) and was then graded on that service existing. Verified
+    against a live payload doctor: exit 1 without the flag, exit 0 with it.
+    """
+    argv = _captured_argv(wizard, monkeypatch, _Plan(False))
+    assert "--skip-shared-embedder" in argv, (
+        "declining shared-embedder mode must also exclude it from verification"
+    )
+    # ...and the probes that depend on a live embedder. embedding-cascade and
+    # the file-extraction probe nested inside it both resolve a LIVE endpoint
+    # and return 1 when none answers; with no embedder installed that is the
+    # EXPECTED state, and both feed `exit_code = max(...)`.
+    assert "--skip-cascade" in argv, (
+        "declining the embedder must also exclude the probes that require one"
+    )
+
+
+def test_doctor_checks_shared_embedder_when_opted_in(wizard, monkeypatch):
+    """The skip is scoped to the opt-out — a normal install still gets graded."""
+    argv = _captured_argv(wizard, monkeypatch, _Plan(True))
+    assert "--skip-shared-embedder" not in argv, (
+        "shared-embedder mode is the shipped default; it must stay verified"
+    )
+    assert "--skip-cascade" not in argv, (
+        "a normal install must still have its embedding cascade graded"
+    )
+
+
+def test_doctor_without_a_plan_checks_everything(wizard, monkeypatch):
+    """No plan (legacy callers/tests) keeps the previous check-everything path."""
+    argv = _captured_argv(wizard, monkeypatch, None)
+    assert "--skip-shared-embedder" not in argv
+    assert "--skip-cascade" not in argv
