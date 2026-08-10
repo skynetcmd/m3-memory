@@ -225,6 +225,7 @@ jobs:
           --agents "" --capture-mode none \
           --no-native-wheel --no-shared-embedder \
           --no-dashboard --no-governor-migration \
+          --force-quiesce \
           --decouple-roots \
           --config-root "$M3_E2E_ROOT/config" \
           --engine-root "$M3_E2E_ROOT/engine"
@@ -288,6 +289,7 @@ jobs:
           --agents "" --capture-mode none \
           --no-native-wheel --no-shared-embedder \
           --no-dashboard --no-governor-migration \
+          --force-quiesce \
           --decouple-roots \
           --config-root "$M3_E2E_ROOT/config" \
           --engine-root "$M3_E2E_ROOT/engine"
