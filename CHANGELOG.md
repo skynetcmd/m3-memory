@@ -51,6 +51,27 @@ the policy is forward-going only.
   — CI, services, piped installers — still fall through to the banner and never
   block on a dialog nobody can approve.
 
+### Security
+
+- **Tenancy filters in `memory/search.py` were built with a hardcoded `?`.**
+  Three of them — the routed expansion, the two-stage observation expansion, and
+  the bypass_surface hydration. In an ordinary query that is a portability bug;
+  in a tenancy filter it is a security bug, because of how it fails: `?` is a
+  syntax error on PostgreSQL (verified against live PG 16), two of the three
+  sites sit inside `except Exception: logger.debug(...)`, so on PG the query
+  dies silently and the expansion is dropped — and a caller that catches higher
+  up and continues would proceed with the tenancy clause GONE.
+
+  `graph._session_neighbor_ids` and `search_routing` were hardened for exactly
+  this in July; these three were missed. All now build placeholders from the
+  backend seam, along with the four hand-rolled IN-lists in the same statements
+  (fixing only the tenancy clause would leave the query unrunnable on PG).
+
+  A static guard now scans every `bin/` module for this class. Static on
+  purpose: the failure is invisible on SQLite, where `?` is valid, so only
+  reading the source catches it before a PostgreSQL deployment does. The guard
+  found a third tenancy site and three IN-lists that a by-hand pass had missed.
+
 ## [2026.8.19.14] — 2026-08-10 — two failures a real upgrade surfaced
 
 > Both fixes came from one user's upgrade log on Windows 11: a health check that
