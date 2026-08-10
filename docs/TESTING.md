@@ -116,7 +116,6 @@ M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py
 | `test_bulk_parity.py` | `python bin/test_bulk_parity.py` | ~15 checks | SQLite (mocked schema) | Bulk vs single write parity: enrichment, variant isolation, contradiction detection |
 | `test_embedding_logic.py` | `python bin/test_embedding_logic.py` | 2 ops | LM Studio, `LM_API_TOKEN` | Embed path smoke: token resolution, `_embed()` round-trip |
 | `test_keychain.py` | `python bin/test_keychain.py` | 3 lookups | OS keychain or env vars | `auth_utils.get_api_key()` across env / keyring / platform-native stores |
-| `test_knowledge.py` | `python bin/test_knowledge.py` | 2 test classes | LM Studio (optional for search) | Knowledge-helpers CRUD: add / list / delete / search |
 | `test_unified_router.py` | `python bin/test_unified_router.py` | 3 payloads | LM Studio on :1234, `LM_API_TOKEN`, optional `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | OpenAI-compatible router: local dispatch + cloud fallback (Claude / Gemini) |
 | `test_mission_control.py` | `python bin/test_mission_control.py` | ~18 checks | LM Studio (skip if offline), nvidia-smi (skip if no GPU), network (skip if unreachable) | Status dashboard: platform detect, paths, KV stats, GPU / VRAM, ping, single render pass |
 

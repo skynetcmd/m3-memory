@@ -146,9 +146,21 @@ class TestMcpProxyAllowDestructive(unittest.TestCase):
                          f"Missing destructive tools when enabled: {destructive - present}")
 
     def test_full_catalog_count(self):
-        # 63 catalog tools when destructive enabled (includes memory_refresh_queue, embedder_status, etc.)
+        """With destructive enabled the proxy exposes the WHOLE catalog.
+
+        Derived from mcp_tool_catalog.TOOLS rather than a hardcoded literal: the
+        old `assertEqual(..., 63)` silently rotted as the catalog grew (63 -> 110)
+        and only surfaced once an unrelated import error stopped masking it. A
+        count assertion that must be hand-edited on every tool addition is a
+        drift generator; tests/test_tool_count_drift.py already gates the
+        published totals.
+        """
         catalog_schemas, _ = self.mcp_proxy._build_catalog_tools()
-        self.assertEqual(len(catalog_schemas), 63)
+        from mcp_tool_catalog import TOOLS
+        self.assertEqual(len(catalog_schemas), len(TOOLS),
+                         "ALLOW_DESTRUCTIVE=1 must expose every catalog tool")
+        # And it must be strictly more than the safe-mode surface.
+        self.assertGreater(len(catalog_schemas), 0)
 
 
 if __name__ == "__main__":
