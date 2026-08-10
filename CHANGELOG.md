@@ -21,6 +21,92 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.11] — 2026-08-10 — a silently-stopped chatlog drain, three CVEs, and a CI that had stopped telling the truth
+
+> Every fix here came from one thread: `m3 doctor` reported a stale
+> `last_write_at`, and pulling on it surfaced a chatlog subsystem that had
+> silently stopped recovering data, then a security scan that had never
+> actually run, then a test suite that was green for the wrong reasons.
+
+### Fixed
+
+- **`governor migrate` silently stopped chatlog spill drainage.** The migration
+  retires a scheduled task on the premise that the cognitive loop runs its work.
+  For `AgentOS_ChatlogEmbedSweep` that was only half true: the sweeper drains
+  spill **then** embeds, while the loop's `embed` pass called only
+  `embed_backfill` — which vectorises rows already in a store and never touches
+  the spill directory. Nothing anywhere drained spill. A spilled turn lives only
+  as a JSONL line on disk: not in any store, not FTS-searchable, not embeddable.
+  The loop now drains spill before embedding, `has_embed_work` consults spill
+  (a spill-only backlog previously never scheduled the pass), and the task is
+  kept as a low-frequency scheduled floor because the governor HALTs under load.
+
+- **Spill could never be recovered on PostgreSQL.** `drain_spill` hardcoded
+  `INSERT OR IGNORE INTO memory_items` with `?` placeholders and took a
+  `sqlite3.Connection` — wrong three independent ways on PG (the table is
+  `chat_log_items`, `INSERT OR IGNORE` is SQLite syntax, the placeholder is
+  `%s`). Spill is **not** a SQLite-only concern: it fires on any flush exception
+  and on queue-full backpressure regardless of backend, and a PG outage is
+  precisely when it accumulates. Reinsertion now delegates to the canonical
+  chatlog writer, which also fixes a **tenancy defect**: the hand-rolled INSERT
+  wrote 10 of 22 columns, dropping `user_id` and `scope`, so a recovered turn
+  carried no tenancy and escaped `scope_predicates` filtering. It also dropped
+  `content_hash` (dedup) and `origin_device`, whose column default mislabelled
+  every drained row on Windows and Linux.
+
+- **The scheduled sweep no-op'd entirely on PostgreSQL** — it gated spill
+  drainage behind the existence of a local `.db` file.
+
+- **A stale `_db_path` could conjure an orphan store.** A spilled row pointing at
+  a deleted tree caused the seam to create the directory and an empty database,
+  write the turns there, and delete the spill file — reporting success while
+  losing the only copy. Now refused, the file kept, the reason logged.
+
+### Security
+
+- **`cryptography` 48.0.1 → >=50.0.0** — three advisories: a PKCS#7
+  Bleichenbacher oracle (PYSEC-2026-3552), exponential path-building DoS
+  (PYSEC-2026-3553), and a wildcard-DNS escape from `permittedSubtrees`
+  (PYSEC-2026-3554). The existing `<49` cap structurally blocked all three
+  fixes. **These were live because the security job never reached `pip-audit`:**
+  a Bandit `B310` finding on a hardcoded HTTPS literal failed the step first, so
+  a green-looking gate had been hiding real CVEs behind a lint error.
+
+- **Example frontend:** `js-yaml` (high), `postcss` (medium) and
+  `brace-expansion` (high) advisories cleared; `npm audit` reports 0. Two of the
+  three already had `overrides` that predated their advisory — satisfied
+  constraints that read as "handled" while the installed version stayed
+  vulnerable.
+
+### Changed
+
+- **CI verification no longer grades subsystems the install declined.**
+  `m3 setup --no-shared-embedder` printed "SKIPPED (not installed). This is
+  fine" and then failed the run on the absence it had just requested. A
+  verification that fails on a supported configuration measures the wrong thing
+  and trains people to ignore it.
+
+- **`m3 setup` can no longer die silently during verification.** `_step_doctor`
+  caught only `CalledProcessError`; any other failure escaped and killed the
+  wizard with a bare `exit 1` — a code the wizard never returns itself (0/2/3).
+  It now reports "installed but unverified" with the cause named.
+
+- **Four tests were green for the wrong reasons** and are now hermetic: two
+  shelled out to a real binary or the network, one asserted a hardcoded tool
+  count that had rotted 63 → 110, and one compared Windows path separators
+  against forward-slash literals. `mcp_proxy` also moved off FastAPI's
+  deprecated `on_event`, which under `filterwarnings = ["error"]` had been
+  erroring out all 12 tests in its suite at import.
+
+### Known issues
+
+- **The Windows E2E lane is still red and has never been green.** `m3 setup`
+  exits 1 at the verification step with no output on either stream, while the
+  identical command exits 0 standalone and as a spawned child. Every hypothesis
+  tested so far is eliminated by measurement; the next step is capturing the
+  child's streams inside `_step_doctor`. The ubuntu and macOS E2E lanes and all
+  six test-matrix jobs are green.
+
 ## [2026.8.19.10] — 2026-08-09 — the Anthropic wire, and a truncated reply is no longer "no result"
 
 > Supersedes 2026.8.19.9, which shipped the same code with an inaccurate
