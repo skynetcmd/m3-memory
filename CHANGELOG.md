@@ -21,6 +21,42 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.14] — 2026-08-10 — two failures a real upgrade surfaced
+
+> Both fixes came from one user's upgrade log on Windows 11: a health check that
+> could not report ill, and an agent-wiring call that failed whenever roots were
+> pinned.
+
+### Fixed
+
+- **`m3 doctor` reported "cognitive loop: OK" while the loop was dead.** The
+  Windows liveness check shelled out to `wmic`, which is DEPRECATED and REMOVED
+  in Windows 11 24H2+. The subprocess returned non-zero, the check answered
+  "unknown" forever, and because the probe only nags on a POSITIVE "not
+  running", it printed OK unconditionally. A health check that cannot report ill
+  is worse than none. Now psutil-first on every platform — already a hard
+  dependency, and the same mechanism the writer scan uses, so "running" means
+  one thing across the codebase. Matching is restricted to python processes: the
+  marker string appears in any shell that merely greps for it, which would
+  otherwise report the loop as up because something asked about it.
+
+- **A successful setup could leave the cognitive loop down for 30 minutes.**
+  Preflight stops every DB-writer (required — nothing may hold the DB through a
+  migration), but the installer only restarts tasks THAT run registered. An
+  upgrade that re-registers nothing restarted nothing, leaving the keep-alive
+  cadence (PT30M) as the only thing bringing the loop back. Setup now starts
+  what it finds stopped and re-checks, so a service that returns is not reported
+  as a failure — and one that stays down still fails verification.
+
+- **`claude mcp add` failed whenever root pins were passed**, leaving m3 unwired
+  in Claude Code. The CLI's `--env` is variadic (`-e, --env <env...>`), so
+  without an option terminator it swallowed the two positionals and the parser
+  reported `missing required argument 'name'`. The bug only appeared when env
+  vars were present, so a roots-less install never hit it — and decoupled roots
+  are now the default. The failure message also printed a simplified manual
+  command that DROPPED the root pins, which would have produced the split-brain
+  the pins exist to prevent; it now echoes the exact argv that ran.
+
 ## [2026.8.19.13] — 2026-08-10 — `m3 setup` no longer mistakes itself for a running server
 
 > The previous release fixed the Windows E2E *hang*. This one fixes what the
