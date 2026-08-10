@@ -2518,6 +2518,72 @@ def _step_governor_migration(plan: SetupPlan, *, non_interactive: bool = False,
     return result
 
 
+def _doctor_failure_telemetry(argv: list, rc: "int | None") -> None:
+    """After a FAILED verification, re-run the doctor CAPTURED and report what it
+    actually emitted. Diagnostic only — never changes the verdict, never raises.
+
+    Why this exists: on windows-latest the E2E lane has never been green, and its
+    failure mode is invisible. `_run` STREAMS the child's stdout/stderr, and on
+    that runner the setup step ends with
+
+        ==> Step 5/5: verifying the install (m3 doctor)
+        ##[error]Process completed with exit code 1
+
+    — not one byte from either stream, on a step whose ubuntu twin streams the
+    entire doctor report. Meanwhile the SAME argv run standalone on that runner,
+    and re-run as a child with the parent's UTF-8 re-exec sentinel set, both exit
+    0 and print normally. Streaming is exactly what loses the evidence when a
+    child dies before its output is flushed through the inherited handles.
+
+    Capturing sidesteps that: pipes are ours, so whatever the child wrote (or the
+    traceback it died on) lands in a string we can print, even when the streamed
+    copy vanished. A second run is cheap next to an unexplained failure, and the
+    doctor is read-only in this mode.
+
+    Best-effort by construction (§3): if even the captured re-run dies, we say so
+    with the exception type rather than swallowing it — a diagnostic that can fail
+    silently would be repeating the bug it exists to explain.
+    """
+    _warn(f"  [telemetry] verification exited {rc}; re-running captured to "
+          f"recover what it emitted...")
+    try:
+        cp = subprocess.run(  # noqa: S603 — same fixed argv we just ran
+            argv, capture_output=True, text=True, errors="backslashreplace",
+            timeout=180,
+        )
+    except subprocess.TimeoutExpired:
+        _warn("  [telemetry] the captured re-run TIMED OUT after 180s — the "
+              "doctor is hanging, not exiting.")
+        return
+    except BaseException as e:  # noqa: BLE001 — diagnostic must never mask the verdict
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        _warn(f"  [telemetry] the captured re-run could not start: "
+              f"{type(e).__name__}: {e}")
+        return
+
+    out = (cp.stdout or "").strip()
+    err = (cp.stderr or "").strip()
+    _warn(f"  [telemetry] captured rc={cp.returncode} "
+          f"stdout={len(out)}B stderr={len(err)}B")
+    # Tail, not head: a traceback's useful end is the last lines, and a doctor
+    # report's verdict lines come last too.
+    for label, blob in (("stdout", out), ("stderr", err)):
+        if not blob:
+            continue
+        tail = blob.splitlines()[-25:]
+        _warn(f"  [telemetry] --- {label} (last {len(tail)} line(s)) ---")
+        for line in tail:
+            _warn(f"  [telemetry] | {line}")
+    if not out and not err:
+        # The signature we are hunting: the child produced NOTHING even when we
+        # own the pipes. That rules out "output was lost in the stream" and
+        # points at the process dying before it writes at all.
+        _warn("  [telemetry] the captured re-run ALSO produced no output on "
+              "either stream — the child is dying before it writes, not losing "
+              "its output in transit.")
+
+
 def _step_doctor(plan=None) -> bool:
     """Final verification — DOES the install actually work?
 
@@ -2570,11 +2636,12 @@ def _step_doctor(plan=None) -> bool:
         _run(argv)
         _ok("verification passed — m3 is installed and working")
         return True
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
         _warn("VERIFICATION FAILED — the install completed but m3 is not fully "
               "healthy. The doctor output above names each issue and its fix.")
         _warn("Re-run `m3 doctor` after fixing, or `m3 doctor --fix` for the "
               "issues that self-repair.")
+        _doctor_failure_telemetry(argv, e.returncode)
         return False
     except BaseException as e:  # noqa: BLE001 — see below; re-raises KeyboardInterrupt
         # ANY other failure here used to escape _step_doctor and kill the whole
@@ -2595,6 +2662,7 @@ def _step_doctor(plan=None) -> bool:
         _warn(f"VERIFICATION COULD NOT RUN — {type(e).__name__}: {e}")
         _warn("The install itself completed; only the `m3 doctor` check failed "
               "to execute. Run `m3 doctor` manually to see the real state.")
+        _doctor_failure_telemetry(argv, None)
         return False
 
 
