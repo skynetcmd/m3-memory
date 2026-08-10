@@ -394,11 +394,48 @@ def _fix_register_task() -> bool:
     rc = subprocess.run(  # noqa: S603 — fixed argv
         [sys.executable, script, "--add", "embed-server"], check=False,
     ).returncode
-    if rc != 0:
-        # install_schedules already printed the elevation hint on Windows.
-        print("  [fix] task not registered — on Windows this needs an ADMIN shell:")
-        print("            python bin/install_schedules.py --repair   # from an elevated terminal")
-    return rc == 0
+    if rc == 0:
+        return True
+
+    # Registering a scheduled task needs admin on Windows. `m3 setup` OFFERS an
+    # inline UAC prompt here; `m3 doctor --fix` only printed a command to
+    # copy-paste — so the one command whose whole job is "repair what
+    # self-repairs" could not repair the single most common breakage. The
+    # elevation machinery already exists and is used by installer.py; this wires
+    # --fix to the same helper instead of keeping a second, weaker path (§10a).
+    #
+    # Consent-gated by construction: _offer_elevated_schedule_repair shows a UAC
+    # dialog the user approves. We never silently elevate, and we never leave a
+    # long-lived privileged process behind — the elevated child registers the
+    # task and exits.
+    if _offer_elevated_repair(script):
+        return True
+
+    print("  [fix] task not registered — on Windows this needs an ADMIN shell:")
+    print("            python bin/install_schedules.py --repair   # from an elevated terminal")
+    return False
+
+
+def _offer_elevated_repair(script: str) -> bool:
+    """Offer a UAC-elevated retry of the schedule registration. False off
+    Windows, on a headless run, or if the user declines.
+
+    Imports the wizard's helper lazily: bin/ probes must not hard-depend on the
+    m3_memory package being importable (a payload-only checkout has bin/ without
+    it), so an ImportError degrades to the printed banner rather than crashing
+    the doctor (§3)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        from m3_memory.setup_wizard import _offer_elevated_schedule_repair
+    except Exception:  # noqa: BLE001 — payload-only install: fall back to the banner
+        return False
+    try:
+        return bool(_offer_elevated_schedule_repair(script, non_interactive=False))
+    except Exception as e:  # noqa: BLE001 — a repair attempt must not crash --fix
+        print(f"  [fix] elevated retry unavailable ({type(e).__name__}); "
+              f"falling back to the manual command.")
+        return False
 
 
 def _norm_model_tag(tag: str) -> str:

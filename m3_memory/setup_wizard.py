@@ -1140,13 +1140,43 @@ def _retry_elevated(action, *, what: str, max_attempts: int = 5) -> bool:
     return False
 
 
+def _stdin_is_interactive() -> bool:
+    """Is a human able to answer a prompt on this stdin?
+
+    The honest test for "can we ask a question", as distinct from a caller's
+    `non_interactive` flag, which usually means "my choices are already
+    gathered" — a very different thing. Conflating the two is what suppressed
+    the inline-UAC offer on upgrades (see _offer_elevated_schedule_repair).
+
+    False on a closed/detached stdin (services, CI, piped installers) so those
+    paths keep the copy-paste banner instead of blocking on input nobody sends.
+    """
+    try:
+        return bool(sys.stdin is not None and sys.stdin.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
 def _offer_elevated_schedule_repair(script: str, *, non_interactive: bool) -> bool:
     """On interactive Windows, OFFER to UAC-elevate the boot-task registration a
     prior unelevated attempt was denied. Applies to first install AND upgrade —
     every `m3 setup` re-runs schedule registration. Returns True if the elevated
     repair succeeded (boot tasks now registered), False otherwise (caller keeps
     the printed banner as the fallback). No-op off interactive Windows."""
-    if sys.platform != "win32" or non_interactive:
+    if sys.platform != "win32":
+        return False
+    # `non_interactive` here means "the caller already gathered its choices", NOT
+    # "there is no human". `m3 setup` runs its install step non-interactively by
+    # design — every question was answered up front — so gating the UAC offer on
+    # that flag suppressed it for the ONE path that most needs it: an upgrade,
+    # where the dashboard deps are already present and only the boot-task
+    # REGISTRATION is denied. The user then got the copy-paste banner instead of
+    # the inline prompt they explicitly prefer.
+    #
+    # What actually decides whether we can prompt is whether a console is
+    # attached. A truly headless run (CI, a service, a piped installer) has no
+    # tty and still falls through to the banner.
+    if not _stdin_is_interactive():
         return False
     if not _ask_yes_no(
         "  Register the boot-start services now? (opens a Windows admin prompt)",

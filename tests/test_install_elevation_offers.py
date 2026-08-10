@@ -18,6 +18,7 @@ These tests pin the CONTRACT, not the wiring:
 """
 from __future__ import annotations
 
+import pathlib
 import subprocess
 import sys
 from unittest.mock import MagicMock, patch
@@ -25,6 +26,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from m3_memory import installer, setup_wizard
+
+_BIN = pathlib.Path(__file__).resolve().parents[1] / "bin"
 
 DENIED = "[FAIL] Failed to create task AgentOS_Dashboard: ERROR: Access is denied."
 
@@ -173,3 +176,66 @@ def test_stuck_writer_elevation_retries():
          patch.object(setup_wizard, "_prompt", return_value="retry"):
         assert setup_wizard._kill_stuck_writers([writer], allow_sudo=True) is True
     assert attempts["n"] == 2, "a missed UAC dialog was not re-offered"
+
+
+# --- the offer must not be gated on the CALLER's non_interactive flag --------
+
+def test_offer_survives_a_non_interactive_caller_when_a_console_exists():
+    """`non_interactive` means "choices already gathered", NOT "no human".
+
+    `m3 setup` runs its install step non-interactively by design — every question
+    was answered up front. Gating the UAC offer on that flag suppressed it for
+    the ONE path that most needs it: an UPGRADE, where the dashboard deps are
+    already present and only the boot-task REGISTRATION is denied. The user then
+    got the copy-paste banner instead of the inline prompt they prefer
+    (observed 2026-08-10 on a real upgrade).
+
+    What decides "can we ask" is whether a console is attached.
+    """
+    with patch.object(setup_wizard.sys, "platform", "win32"), \
+         patch.object(setup_wizard, "_stdin_is_interactive", return_value=True), \
+         patch.object(setup_wizard, "_ask_yes_no", return_value=True) as ask, \
+         patch.object(setup_wizard, "_retry_elevated", return_value=True):
+        assert setup_wizard._offer_elevated_schedule_repair(
+            "sched.py", non_interactive=True) is True
+    assert ask.called, "a non-interactive CALLER suppressed a prompt a human could answer"
+
+
+def test_no_console_still_falls_back_to_the_banner():
+    """A truly headless run must never block on a dialog nobody can approve."""
+    with patch.object(setup_wizard.sys, "platform", "win32"), \
+         patch.object(setup_wizard, "_stdin_is_interactive", return_value=False), \
+         patch.object(setup_wizard, "_ask_yes_no") as ask:
+        assert setup_wizard._offer_elevated_schedule_repair(
+            "sched.py", non_interactive=False) is False
+    assert not ask.called
+
+
+# --- `m3 doctor --fix` must offer elevation too ------------------------------
+
+def test_doctor_fix_offers_elevation_on_a_denied_registration():
+    """`--fix` exists to repair what self-repairs; a denied task registration is
+    the most common breakage it meets, and it could only print a command to
+    copy-paste. It now reuses the SAME helper installer.py does, rather than
+    keeping a second, weaker path (§10a)."""
+    sys.path.insert(0, str(_BIN))
+    from doctor import shared_embedder_probe as probe
+
+    with patch.object(probe.sys, "platform", "win32"), \
+         patch.object(setup_wizard, "_offer_elevated_schedule_repair",
+                      return_value=True) as offer:
+        assert probe._offer_elevated_repair("sched.py") is True
+    assert offer.called, "doctor --fix did not offer elevation"
+    # It must ask as a real prompt, not inherit a caller's "already decided".
+    assert offer.call_args.kwargs.get("non_interactive") is False
+
+
+def test_doctor_fix_degrades_when_the_wizard_is_unimportable():
+    """bin/ probes must not hard-depend on the m3_memory package: a payload-only
+    checkout has bin/ without it, and the doctor must still run (§3)."""
+    sys.path.insert(0, str(_BIN))
+    from doctor import shared_embedder_probe as probe
+
+    with patch.object(probe.sys, "platform", "win32"), \
+         patch.dict(sys.modules, {"m3_memory.setup_wizard": None}):
+        assert probe._offer_elevated_repair("sched.py") is False
