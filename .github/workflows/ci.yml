@@ -251,6 +251,26 @@ jobs:
         echo "--- the same invocation setup uses, via -m ---"
         python -m m3_memory.cli doctor --skip-shared-embedder --skip-cascade
         echo "python -m doctor exit=$?"
+        # The setup step's child dies writing NOTHING — not one byte reaches the
+        # log, on a step whose ubuntu twin streams the full doctor report. The
+        # steps above run that same command standalone and both exit 0, so the
+        # difference is the CHILD-OF-SETUP context, not the command. Reproduce
+        # it: spawn exactly as _step_doctor does, with the parent's re-exec
+        # sentinel present, and CAPTURE both streams instead of streaming them.
+        echo "--- as a CHILD, with the parent's UTF-8 re-exec sentinel set ---"
+        cat > "$RUNNER_TEMP/probe_child.py" <<'PYEOF'
+        import os, subprocess, sys
+        argv = [sys.executable, "-m", "m3_memory.cli", "doctor",
+                "--skip-shared-embedder", "--skip-cascade"]
+        print("sentinel:", os.environ.get("_M3_UTF8_REEXEC"))
+        r = subprocess.run(argv, capture_output=True, text=True,
+                           errors="backslashreplace")
+        print("rc:", r.returncode)
+        print("stdout[:400]:", repr(r.stdout[:400]))
+        print("stderr[:800]:", repr(r.stderr[:800]))
+        PYEOF
+        sed -i 's/^        //' "$RUNNER_TEMP/probe_child.py"
+        _M3_UTF8_REEXEC=1 python "$RUNNER_TEMP/probe_child.py" || true
         echo "--- engine root ---"
         ls -la "$M3_E2E_ROOT/engine" || true
         echo "--- config root ---"
