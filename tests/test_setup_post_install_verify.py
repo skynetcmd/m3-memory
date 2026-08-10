@@ -122,6 +122,13 @@ def test_doctor_skips_shared_embedder_when_opted_out(wizard, monkeypatch):
     assert "--skip-shared-embedder" in argv, (
         "declining shared-embedder mode must also exclude it from verification"
     )
+    # ...and the probes that depend on a live embedder. embedding-cascade and
+    # the file-extraction probe nested inside it both resolve a LIVE endpoint
+    # and return 1 when none answers; with no embedder installed that is the
+    # EXPECTED state, and both feed `exit_code = max(...)`.
+    assert "--skip-cascade" in argv, (
+        "declining the embedder must also exclude the probes that require one"
+    )
 
 
 def test_doctor_checks_shared_embedder_when_opted_in(wizard, monkeypatch):
@@ -130,9 +137,13 @@ def test_doctor_checks_shared_embedder_when_opted_in(wizard, monkeypatch):
     assert "--skip-shared-embedder" not in argv, (
         "shared-embedder mode is the shipped default; it must stay verified"
     )
+    assert "--skip-cascade" not in argv, (
+        "a normal install must still have its embedding cascade graded"
+    )
 
 
 def test_doctor_without_a_plan_checks_everything(wizard, monkeypatch):
     """No plan (legacy callers/tests) keeps the previous check-everything path."""
     argv = _captured_argv(wizard, monkeypatch, None)
     assert "--skip-shared-embedder" not in argv
+    assert "--skip-cascade" not in argv

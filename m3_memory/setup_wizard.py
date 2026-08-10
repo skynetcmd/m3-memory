@@ -2522,6 +2522,17 @@ def _step_doctor(plan=None) -> bool:
     # passthrough (verified end to end).
     if plan is not None and not getattr(plan, "use_shared_embedder", True):
         argv.append("--skip-shared-embedder")
+        # Same principle, one layer down. The embedding-cascade probe and the
+        # file-extraction probe nested inside it both resolve a LIVE endpoint
+        # and return 1 when none answers:
+        #     ❌ embedding-cascade: broken (tier1 not-configured, tier2 online)
+        #     ❌ file-extraction LLM: NONE resolved
+        # With no shared embedder installed and no local LLM, that is the
+        # EXPECTED state of this install, not a defect in it — and both feed
+        # `exit_code = max(...)`, so they failed the run while printing nothing
+        # a reader would connect to the exit code. Declining the embedder means
+        # declining what depends on it.
+        argv.append("--skip-cascade")
     try:
         _run(argv)
         _ok("verification passed — m3 is installed and working")
