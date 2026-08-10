@@ -250,15 +250,90 @@ def _warn_if_pypi_newer() -> None:
             return [int(p) for p in v.split(".") if p.isdigit()]
 
         if _key(latest) > _key(installed):
+            # The upgrade line is OS-specific ON PURPOSE. A bare
+            # `pipx upgrade m3-memory` is unsafe on Windows in two ways, both
+            # observed on a real install (2026-08-10):
+            #
+            #  1. pip serves the index page from its HTTP cache, so pipx reports
+            #     "already at latest version" while PyPI is serving a newer one.
+            #     --no-cache-dir is the only reliable way to see a fresh release.
+            #  2. pip UNINSTALLS before it installs. Windows holds an open .exe
+            #     against deletion, so with m3 running (MCP servers, cognitive
+            #     loop, dashboard, embed server) the upgrade deletes the package
+            #     and then fails on `[WinError 32] ... Scripts\\m3.exe`, leaving
+            #     NO m3 installed: `m3` then dies with ModuleNotFoundError. pip
+            #     also leaves ~-prefixed junk dirs behind from the half-undone
+            #     uninstall.
+            #
+            # `m3 stop` quiesces the writers first, which makes the upgrade a
+            # normal one. POSIX replaces a running binary's inode happily, so
+            # the plain form stays correct there.
+            if os.name == "nt":
+                upgrade = ("       m3 stop                                     "
+                           "# release the file locks first\n"
+                           "       pipx upgrade m3-memory --pip-args=--no-cache-dir\n"
+                           "       m3 setup")
+            else:
+                upgrade = "       pipx upgrade m3-memory      # then: m3 setup"
             print(
                 f"\n[m3] A newer release is on PyPI: {latest} (you have {installed}).\n"
                 f"     `m3 update` only re-syncs the payload for your INSTALLED version —\n"
                 f"     it does NOT upgrade the package. To upgrade:\n"
-                f"       pipx upgrade m3-memory      # then: m3 setup",
+                f"{upgrade}",
                 file=sys.stderr,
             )
     except Exception:  # noqa: BLE001 — advisory only, never fail the command
         pass
+
+
+def _cmd_stop(args: argparse.Namespace) -> int:
+    """`m3 stop` — quiesce every m3 DB-writer for this engine root.
+
+    Exists because `pipx upgrade m3-memory` is unsafe while m3 is running on
+    Windows: pip uninstalls before it installs, Windows holds an open .exe
+    against deletion, and the upgrade therefore deletes the package and then
+    fails on `[WinError 32] ... Scripts\\m3.exe` — leaving NO m3 installed.
+    Stopping the writers first turns that into an ordinary upgrade.
+
+    Also the honest answer to "how do I shut m3 down", which previously had
+    none: users reached for `taskkill`/`pkill` by name, which is the
+    substring-kill footgun kill_stale_daemons exists to avoid.
+
+    Delegates to m3_halt.kill_stale_daemons: precise-PID only, never a
+    name sweep, never its own pid or parent chain.
+    """
+    script = _resolve_bin_script("m3_halt.py")
+    if script is None:
+        print("Error: m3_halt.py not found (payload not installed?). "
+              "Run `mcp-memory install-m3`.", file=sys.stderr)
+        return 1
+    bin_dir = str(script.parent)
+    if bin_dir not in sys.path:
+        sys.path.insert(0, bin_dir)
+    import m3_halt as halt  # type: ignore
+
+    results = halt.kill_stale_daemons(timeout=getattr(args, "timeout", 8.0))
+    if not results:
+        print("[m3] nothing to stop — no m3 DB-writers running.")
+        return 0
+
+    killed = [r for r in results if r.get("killed")]
+    failed = [r for r in results if not r.get("killed")]
+    for r in killed:
+        print(f"  stopped {r.get('role', '?')} (pid {r.get('pid')})")
+    for r in failed:
+        print(f"  [!] could NOT stop {r.get('role', '?')} (pid {r.get('pid')}): "
+              f"{r.get('error') or 'unknown'}", file=sys.stderr)
+
+    print(f"[m3] stopped {len(killed)}/{len(results)} writer(s).")
+    if failed:
+        # Almost always an elevated writer an unprivileged shell cannot touch.
+        # Say so and exit non-zero — a partial stop must not read as success
+        # (§3), because the caller's next step is an upgrade that will fail.
+        print("[m3] some writers survived — an upgrade may still hit a file "
+              "lock. Re-run from an elevated shell.", file=sys.stderr)
+        return 1
+    return 0
 
 
 def _cmd_update(args: argparse.Namespace) -> int:
@@ -1185,6 +1260,18 @@ Examples:
         help="Wipe and reinstall the system payload (alias for install-m3 --force).",
     )
     p_reinstall.set_defaults(func=_cmd_reinstall)
+
+    p_stop = subparsers.add_parser(
+        "stop",
+        help="Stop every running m3 DB-writer (cognitive loop, embed server, "
+             "dashboard, MCP). Run this before `pipx upgrade` on Windows.",
+    )
+    p_stop.add_argument(
+        "--timeout", type=float, default=8.0, metavar="SECONDS",
+        help="Seconds to wait for a writer to exit before reporting it stuck "
+             "(default: 8).",
+    )
+    p_stop.set_defaults(func=_cmd_stop)
 
     p_update = subparsers.add_parser(
         "update",
