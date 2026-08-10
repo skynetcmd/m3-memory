@@ -179,3 +179,53 @@ def test_step_doctor_still_propagates_keyboard_interrupt(wizard, monkeypatch):
     import pytest as _pytest
     with _pytest.raises(KeyboardInterrupt):
         wizard._step_doctor()
+
+
+# ── failure telemetry ────────────────────────────────────────────────────────
+
+def test_telemetry_surfaces_captured_output(wizard, capsys):
+    """A failing doctor's output must be recoverable even when streaming lost it.
+
+    `_run` streams the child's stdio. On windows-latest the setup step ends with
+    "Step 5/5" then `exit 1` and NOT ONE BYTE from either stream, while the same
+    argv run standalone on that runner exits 0 and prints normally. Capturing
+    owns the pipes, so whatever the child wrote lands somewhere we can print.
+    """
+    import sys as _sys
+    argv = [_sys.executable, "-c",
+            "import sys; print('verdict line'); print('why', file=sys.stderr); sys.exit(1)"]
+    wizard._doctor_failure_telemetry(argv, 1)
+    cap = capsys.readouterr()
+    blob = cap.out + cap.err
+    assert "verdict line" in blob
+    assert "why" in blob
+    assert "captured rc=1" in blob
+
+
+def test_telemetry_names_the_no_output_case(wizard, capsys):
+    """Silence under CAPTURE is itself the finding — say so, don't just print 0B.
+
+    It distinguishes "the output was lost in transit" from "the child died
+    before writing", which is the open question on the Windows E2E lane.
+    """
+    import sys as _sys
+    wizard._doctor_failure_telemetry([_sys.executable, "-c", "import sys; sys.exit(1)"], 1)
+    blob = "".join(capsys.readouterr())
+    assert "dying before it writes" in blob
+
+
+def test_telemetry_never_raises_on_a_bad_command(wizard, capsys):
+    """Diagnostics must not mask the verdict they are explaining (§3)."""
+    wizard._doctor_failure_telemetry(["definitely-not-a-real-binary-xyz"], 1)
+    assert "could not start" in "".join(capsys.readouterr())
+
+
+def test_failed_verification_still_returns_false_with_telemetry(wizard, monkeypatch):
+    """Telemetry is additive: the verdict is unchanged."""
+    import subprocess as _sp
+
+    def boom(*a, **k):
+        raise _sp.CalledProcessError(1, "doctor")
+    monkeypatch.setattr(wizard, "_run", boom)
+    monkeypatch.setattr(wizard, "_doctor_failure_telemetry", lambda *a, **k: None)
+    assert wizard._step_doctor() is False
