@@ -1135,6 +1135,9 @@ def test_offer_elevated_repair_noop_non_interactive(monkeypatch):
 def test_offer_elevated_repair_runs_on_yes(monkeypatch):
     """Interactive Windows, user says yes -> UAC repair runs; success -> True."""
     monkeypatch.setattr(setup_wizard.sys, "platform", "win32")
+    # "Interactive" now means a real console, not the caller's non_interactive
+    # flag — pytest's stdin is not a tty, so state the premise explicitly.
+    monkeypatch.setattr(setup_wizard, "_stdin_is_interactive", lambda: True)
     monkeypatch.setattr(setup_wizard, "_ask_yes_no", lambda *a, **k: True)
     ran = []
     monkeypatch.setattr(setup_wizard, "_runas_schedule_repair_windows",
