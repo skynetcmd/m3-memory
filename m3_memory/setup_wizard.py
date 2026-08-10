@@ -2525,10 +2525,18 @@ def _step_governor_migration(plan: SetupPlan, *, non_interactive: bool = False,
     return result
 
 
-# Wall-clock cap on the post-install `m3 doctor` verification. Generous enough
-# for a cold run that migrates a fresh DB and warms an embedder, short enough
-# that a hung probe surfaces as a failed verification instead of a hung install.
-_DOCTOR_TIMEOUT_S = 300.0
+# Wall-clock cap on the post-install `m3 doctor` verification.
+#
+# 60s = 10x the MEASURED cost. A real doctor run is ~6s warm and ~5s cold (fresh
+# roots, migrations applied, no embedder reachable — the E2E case), so this is an
+# order of magnitude of headroom for a slow or loaded host while still surfacing
+# a hang in a minute rather than an hour.
+#
+# Deliberately the same ORDER as --quiesce-timeout (30s): if 30s is long enough
+# to declare a DB-writer stuck and start killing it, a verification that reads
+# the same machine has no business waiting ten times longer. The first draft used
+# 300s, which was 50x the real cost and inconsistent with that existing budget.
+_DOCTOR_TIMEOUT_S = 60.0
 
 
 def _trace(msg: str) -> None:
@@ -2592,11 +2600,11 @@ def _doctor_failure_telemetry(argv: list, rc: "int | None") -> None:
     try:
         cp = subprocess.run(  # noqa: S603 — same fixed argv we just ran
             argv, capture_output=True, text=True, errors="backslashreplace",
-            timeout=180,
+            timeout=_DOCTOR_TIMEOUT_S,
         )
     except subprocess.TimeoutExpired:
-        _warn("  [telemetry] the captured re-run TIMED OUT after 180s — the "
-              "doctor is hanging, not exiting.")
+        _warn(f"  [telemetry] the captured re-run TIMED OUT after "
+              f"{_DOCTOR_TIMEOUT_S:.0f}s — the doctor is hanging, not exiting.")
         return
     except BaseException as e:  # noqa: BLE001 — diagnostic must never mask the verdict
         if isinstance(e, (KeyboardInterrupt, SystemExit)):
