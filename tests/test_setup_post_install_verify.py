@@ -267,3 +267,70 @@ def test_run_forwards_a_timeout(wizard, monkeypatch):
     monkeypatch.setattr(wizard.subprocess, "run", fake)
     wizard._run(["x"], timeout=12.5)
     assert seen.get("timeout") == 12.5
+
+
+# ── post-install daemon liveness ─────────────────────────────────────────────
+
+class _P:
+    """Minimal SetupPlan stand-in."""
+    def __init__(self, loop=False, dash=False):
+        self.cognitive_loop = loop
+        self.install_dashboard = dash
+
+
+def _fake_halt(roles):
+    import types
+    m = types.ModuleType("m3_halt")
+    m.list_live_processes = lambda *a, **k: [
+        types.SimpleNamespace(role=r, pid=i) for i, r in enumerate(roles, 1)
+    ]
+    return m
+
+
+def test_daemons_running_is_success(wizard, monkeypatch, capsys):
+    monkeypatch.setattr(wizard, "_import_m3_halt",
+                        lambda: _fake_halt(["cognitive-loop", "dashboard"]))
+    assert wizard._step_verify_daemons(_P(loop=True, dash=True)) is True
+    assert "cognitive-loop: running" in capsys.readouterr().out
+
+
+def test_a_stopped_daemon_fails_verification(wizard, monkeypatch, capsys):
+    """An upgrade STOPS the daemons and owns restarting them.
+
+    Reporting success over a system whose writers are all down is the silent
+    success this step exists to prevent — and it is exactly the state an upgrade
+    leaves if a restart fails. The cognitive-loop/dashboard probes print
+    "not running" as WARNINGS that feed no exit code, so nothing caught it.
+    """
+    monkeypatch.setattr(wizard, "_import_m3_halt",
+                        lambda: _fake_halt(["dashboard"]))
+    assert wizard._step_verify_daemons(_P(loop=True, dash=True)) is False
+    blob = "".join(capsys.readouterr())
+    assert "cognitive-loop: NOT running" in blob
+    assert "m3 doctor --fix" in blob, "must name the repair"
+
+
+def test_nothing_enabled_is_vacuously_ok(wizard, monkeypatch):
+    monkeypatch.setattr(wizard, "_import_m3_halt", lambda: _fake_halt([]))
+    assert wizard._step_verify_daemons(_P()) is True
+
+
+def test_unreadable_registry_does_not_fail_the_install(wizard, monkeypatch, capsys):
+    """Degrade to UNKNOWN, never to a false alarm (§3)."""
+    monkeypatch.setattr(wizard, "_import_m3_halt", lambda: None)
+    assert wizard._step_verify_daemons(_P(loop=True)) is True
+    assert "UNKNOWN" in "".join(capsys.readouterr())
+
+
+def test_embed_server_is_not_registry_checked(wizard, monkeypatch, capsys):
+    """The embed server is a SERVICE, not a registered writer.
+
+    It never joins the PID registry, so a registry check reports "NOT running"
+    while it serves :8082 — verified live (health 200, no registry entry). Its
+    liveness belongs to doctor's HTTP /health probe.
+    """
+    monkeypatch.setattr(wizard, "_import_m3_halt", lambda: _fake_halt([]))
+    plan = _P()
+    plan.use_shared_embedder = True
+    assert wizard._step_verify_daemons(plan) is True
+    assert "embed-server" not in "".join(capsys.readouterr())

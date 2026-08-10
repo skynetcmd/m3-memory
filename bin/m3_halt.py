@@ -35,6 +35,7 @@ import enum
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -324,8 +325,27 @@ _WRITER_CMDLINE_SIGNATURES = {
     # normal desktop — was invisible to every pre-flight scan. Match the m3
     # launcher too, anchored on a path separator so it cannot match an unrelated
     # process that merely contains "m3".
-    "mcp": ("mcp-memory", "mcp_proxy.py", "/m3.exe", "\\m3.exe", "/m3 ", "\\m3 "),
+    "mcp": ("mcp-memory", "mcp_proxy.py"),
 }
+
+# A BARE `m3` (no subcommand) starts the MCP server — see m3_memory/cli.py, which
+# falls through to _run_bridge() when no subcommand is given. It must be detected
+# as a writer. But `m3 setup`, `m3 doctor`, `m3 stop`, `m3 memory ...` are all
+# short-lived COMMANDS that hold nothing.
+#
+# The old signatures were the substrings "/m3.exe", "\\m3.exe", "/m3 ", "\\m3 ",
+# which match the EXECUTABLE and cannot tell those apart — so `m3 setup` flagged
+# ITSELF as a live MCP server. On Windows that was fatal rather than cosmetic:
+# preflight found its own parent "holding" the DB, correctly refused to kill an
+# ancestor, and aborted the install (exit 2). `m3 setup` simply could not run
+# through the console script. Meanwhile the real server (memory_bridge.py) was
+# matched by NONE of them — the signature was inverted.
+#
+# Anchoring on END-OF-CMDLINE captures exactly "m3 was invoked with no
+# subcommand", cross-platform (works for /usr/local/bin/m3 and a quoted Windows
+# path alike), with no dependency on which flags a future subcommand adds.
+_MCP_BARE_M3_RE = re.compile(
+    r"""(?:^|[\\/ "'])m3(?:\.exe)?["']?(?:\s+serve\b.*)?\s*$""", re.I)
 # Fallback process-NAME substrings, used when a process's cmdline is unreadable —
 # which happens for an ELEVATED process when the installer runs unprivileged
 # (psutil returns an empty cmdline / raises AccessDenied). The name alone can't
@@ -386,10 +406,19 @@ def scan_db_writer_processes(engine_root: Optional[str] = None) -> list[ProcInfo
                     if any(sig in cmdline for sig in sigs):
                         matched = role
                         break
+                # A BARE `m3` (no subcommand) IS the MCP server; `m3 setup` /
+                # `m3 doctor` / `m3 stop` are commands that hold nothing. See
+                # _MCP_BARE_M3_RE — an executable-substring match cannot tell
+                # them apart and made the installer flag itself.
+                if matched is None and _MCP_BARE_M3_RE.search(cmdline):
+                    matched = "mcp"
             if matched:
-                # Skip the venv launcher stub — it shares the real worker's
-                # cmdline but holds nothing and can never quiesce. See
-                # _is_venv_launcher_stub.
+                # Skip a SHIM generation — it shares the real worker's cmdline
+                # but holds nothing and can never quiesce, so counting it burns
+                # the whole quiesce timeout and then names it as stuck.
+                #
+                # The venv Scripts/ redirector shares the worker's cmdline
+                # but holds nothing (_is_venv_launcher_stub).
                 if _is_venv_launcher_stub(proc):
                     continue
                 found.append(ProcInfo(pid=pid, role=matched, started_at="",

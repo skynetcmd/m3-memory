@@ -2695,6 +2695,79 @@ def _doctor_failure_telemetry(argv: list, rc: "int | None") -> None:
               "its output in transit.")
 
 
+def _step_verify_daemons(plan=None) -> bool:
+    """Confirm the background services this install ENABLED are actually running.
+
+    An install/upgrade STOPS m3's daemons (the preflight quiesce is required so
+    nothing holds the DB through a migration) and is responsible for bringing
+    them back. Nothing verified that: the cognitive-loop and dashboard probes
+    print "installed but not running" as WARNINGS that feed no exit code, so
+    setup could report success over a system whose writers were all down —
+    exactly the state a user is left in after an upgrade that quiesced them.
+
+    Verified through the PID registry (m3_halt.list_live_processes), which is
+    the same source the quiesce reads, so "running" here means the same thing it
+    means everywhere else. Registration is cross-platform, so this is too.
+
+    Reports which expected roles are missing and returns False; the caller
+    decides severity. Best-effort: an unavailable registry yields True rather
+    than blocking an otherwise-good install on a probe failure (§3 — degrade to
+    "unknown", never to a false alarm).
+    """
+    # Field names verified against SetupPlan — a typo here would make this check
+    # silently pass (getattr(..., False) on a misspelling reads as "not enabled"),
+    # which is the same silent-success class this step exists to close.
+    #
+    # embed-server is DELIBERATELY absent: it is a SERVICE, not a registered
+    # writer. The Rust m3-embed-server never joins the PID registry, so asking
+    # the registry about it reports "NOT running" while it is serving :8082
+    # (verified live — health 200 with no registry entry). Its liveness is an
+    # HTTP /health probe, which `m3 doctor`'s shared-embedder probe already owns
+    # and repairs; duplicating that here would only add a false alarm.
+    _SERVICES = (
+        ("cognitive_loop", "cognitive-loop"),
+        ("install_dashboard", "dashboard"),
+    )
+    expected: list[str] = []
+    if plan is not None:
+        for field, role in _SERVICES:
+            if not hasattr(plan, field):  # fail loud on drift, never silently skip
+                _warn(f"  internal: SetupPlan has no {field!r}; cannot verify "
+                      f"{role}. This is a bug — please report it.")
+                continue
+            if getattr(plan, field):
+                expected.append(role)
+    if not expected:
+        return True  # nothing was enabled → nothing to verify
+
+    _say("Verifying background services are running")
+    halt = _import_m3_halt()
+    if halt is None or not hasattr(halt, "list_live_processes"):
+        _warn("  could not read the process registry — service state UNKNOWN. "
+              "Run `m3 doctor` to check.")
+        return True
+
+    try:
+        live_roles = {(p.role or "").split("(", 1)[0].strip()
+                      for p in halt.list_live_processes()}
+    except Exception as e:  # noqa: BLE001 — a probe must not fail the install
+        _warn(f"  could not read the process registry ({type(e).__name__}) — "
+              f"service state UNKNOWN. Run `m3 doctor` to check.")
+        return True
+
+    missing = [r for r in expected if r not in live_roles]
+    for role in expected:
+        if role in live_roles:
+            _ok(f"  {role}: running")
+    for role in missing:
+        _warn(f"  {role}: NOT running")
+    if missing:
+        _warn(f"  {len(missing)} of {len(expected)} background service(s) are "
+              f"not running. `m3 doctor --fix` restarts what self-repairs.")
+        return False
+    return True
+
+
 def _step_doctor(plan=None) -> bool:
     """Final verification — DOES the install actually work?
 
@@ -2929,6 +3002,15 @@ def run_setup(args: argparse.Namespace) -> int:
         _trace("after governor_migration")
         verified = _step_doctor(plan)
         _trace(f"after step_doctor -> verified={verified}")
+        # An install/upgrade STOPS the daemons (preflight must quiesce them so
+        # nothing holds the DB through a migration) and owns restarting them.
+        # Verify that actually happened: a green doctor over a system whose
+        # writers are all down is the silent success this whole step exists to
+        # prevent, and it is the state an upgrade leaves behind if a restart
+        # fails. Folded into `verified`, so the exit code says so (3, not 0).
+        daemons_up = _step_verify_daemons(plan)
+        _trace(f"after verify_daemons -> up={daemons_up}")
+        verified = verified and daemons_up
         _summary(plan, governor_result, verified=verified)
         _trace("after summary")
         # Exit 3 = "installed but not verified healthy". Distinct from 0

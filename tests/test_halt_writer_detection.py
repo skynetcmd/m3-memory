@@ -34,6 +34,13 @@ def _cmd_role(halt, cmdline):
     for role, sigs in halt._WRITER_CMDLINE_SIGNATURES.items():
         if any(s in cmdline for s in sigs):
             return role
+    # A bare `m3` / `m3 serve` IS the MCP server, but `m3 setup` / `m3 doctor`
+    # are commands that hold nothing — an executable substring cannot tell them
+    # apart (it made the installer flag itself). scan_db_writer_processes
+    # consults this regex after the substring table; mirror that here so the
+    # helper matches what the scan actually does.
+    if halt._MCP_BARE_M3_RE.search(cmdline):
+        return "mcp"
     return None
 
 
