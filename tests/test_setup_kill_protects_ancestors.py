@@ -120,3 +120,77 @@ def test_is_own_ancestor_agrees_with_the_guard(monkeypatch):
     assert sw._is_own_ancestor(555555) is True
     assert sw._is_own_ancestor(os.getpid()) is True
     assert sw._is_own_ancestor(999999) is False
+
+
+# ── the short-circuit: an ancestor must never reach a retry branch ───────────
+
+def test_ancestor_aborts_the_quiesce_instead_of_looping(monkeypatch, capsys):
+    """An unkillable ancestor must abort ONCE, not spin.
+
+    Every branch below the short-circuit is a dead end for this case:
+    --force-quiesce refuses it, the interactive "kill" refuses it, and
+    "wait"/retry waits on a process that is waiting on us. On windows-latest the
+    force path looped 244 times x 30s — the E2E lane's entire "hang".
+
+    Drives the real loop (_quiesce_db_writers) and fails if any retry branch is
+    reached at all.
+    """
+    import argparse
+
+    waits = {"n": 0}
+
+    class _Stuck:
+        def __init__(self, pid, role="mcp"):
+            self.pid, self.role = pid, role
+
+    class _Result:
+        ok = False
+        stuck = [_Stuck(777777)]
+
+    class _Halt:
+        def raise_halt(self, *a, **k):
+            return True
+
+        def clear_halt(self, *a, **k):
+            return None
+
+        def list_all_db_writers(self, *a, **k):
+            return [_Stuck(777777)]
+
+        def list_blocking_db_writers(self, *a, **k):
+            return [_Stuck(777777)]
+
+        def set_halt(self, *a, **k):
+            return True
+
+        def elevated_kill_commands(self, *a, **k):
+            return []
+
+        def kill_stale_daemons(self, *a, **k):
+            return []
+
+        def wait_for_quiesce(self, *a, **k):
+            waits["n"] += 1
+            if waits["n"] > 4:
+                raise AssertionError("looped: the short-circuit did not fire")
+            return _Result()
+
+    monkeypatch.setattr(sw, "_import_m3_halt", lambda: _Halt())
+    monkeypatch.setattr(sw, "_is_own_ancestor", lambda pid: pid == 777777)
+    monkeypatch.setattr(sw, "_quiesce_tick", lambda args: None)
+    monkeypatch.setattr(sw, "_quiesce_tick_done", lambda args: None)
+    monkeypatch.setattr(sw, "_kill_stuck_writers",
+                        lambda *a, **k: pytest.fail("reached the kill branch"))
+    monkeypatch.setattr(sw, "_surface_elevated_kill_help",
+                        lambda *a, **k: pytest.fail("blamed privilege"))
+
+    args = argparse.Namespace(non_interactive=True, force_quiesce=True,
+                              force_kill_mcp=False, gui_child=False,
+                              quiesce_timeout=1.0)
+    assert sw._quiesce_db_writers(args) is False, (
+        "an unkillable ancestor must abort the quiesce, not report success"
+    )
+    blob = "".join(capsys.readouterr())
+    assert "own parent process" in blob
+    assert "no privilege level or retry can stop it" in blob
+    assert "m3 stop" in blob, "must name the actionable fix"

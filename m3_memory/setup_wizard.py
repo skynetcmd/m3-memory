@@ -836,6 +836,28 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
         stuck = ", ".join(f"{p.role}(pid {p.pid})" for p in result.stuck)
         _warn(f"  {len(result.stuck)} writer(s) still holding the DB after "
               f"{timeout:.0f}s: {stuck}")
+
+        # An ANCESTOR writer is unkillable by design, so NO branch below can ever
+        # resolve it: --force-quiesce refuses it, the interactive "kill" refuses
+        # it, and "wait"/retry waits on a process that is waiting on us. Every
+        # route is an infinite loop or misleading advice ("re-run elevated" when
+        # privilege is not the problem). Short-circuit here, ONCE, before the
+        # branches — three call sites, one root cause.
+        #
+        # This is the E2E lane's hang: the runner invokes setup THROUGH the MCP
+        # server, so the writer is setup's own parent and the guard fired on
+        # every iteration (244 x 30s before the job cap).
+        ancestors = [p for p in result.stuck if _is_own_ancestor(p.pid)]
+        if ancestors:
+            who = ", ".join(f"{p.role}(pid {p.pid})" for p in ancestors)
+            _err(f"  cannot quiesce {who}: it is this install's own parent "
+                 f"process — no privilege level or retry can stop it.")
+            _err("  You are running setup FROM the m3 process it must stop. "
+                 "Start it from a plain shell instead — e.g. "
+                 "`python -m m3_memory.cli setup` — or run `m3 stop` from a "
+                 "separate terminal first.")
+            halt.clear_halt()  # abort: no exclusive step to protect
+            return False
         force = getattr(args, "force_quiesce", False) or getattr(args, "force_kill_mcp", False)
         gui = getattr(args, "gui_child", False)
         # GUI-triggered elevation is WINDOWS-ONLY: UAC is a GUI dialog that works
@@ -866,17 +888,10 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
                     #  - anything else is almost always an ELEVATED writer an
                     #    unprivileged installer cannot stop, where elevation IS
                     #    the fix.
-                    ancestors = [p for p in result.stuck if _is_own_ancestor(p.pid)]
-                    if ancestors:
-                        who = ", ".join(f"{p.role}(pid {p.pid})" for p in ancestors)
-                        _err(f"  cannot quiesce {who}: it is this install's own "
-                             f"parent process.")
-                        _err("  You are running setup FROM the m3 process it must "
-                             "stop. Start it from a plain shell instead — e.g. "
-                             "`python -m m3_memory.cli setup`, or run `m3 stop` "
-                             "from a separate terminal first.")
-                    else:
-                        _surface_elevated_kill_help(halt, result.stuck)
+                    # Ancestors are handled by the short-circuit at the top of
+                    # this loop, so anything reaching here is a genuinely
+                    # elevated writer — elevation IS the fix.
+                    _surface_elevated_kill_help(halt, result.stuck)
                     halt.clear_halt()
                     return False
                 result = halt.wait_for_quiesce(timeout=5.0, on_tick=_quiesce_tick(args))
