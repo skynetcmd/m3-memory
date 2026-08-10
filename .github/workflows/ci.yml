@@ -241,7 +241,14 @@ jobs:
         export M3_ENGINE_ROOT="$M3_E2E_ROOT/engine"
         set -x
         m3 --version
-        m3 status
+        # `m3 status` returns 1 on "degraded" BY DESIGN (installer.status:
+        # "Returns 0 healthy, 1 degraded/broken"). This job installs with
+        # --no-native-wheel --no-shared-embedder, so the result is degraded on
+        # purpose: pure-Python embeds, no :8082. Asserting exit 0 here demands
+        # the opposite of what the flags above requested — and under `set -e`
+        # it killed the step before `m3 doctor` even ran. Keep the output for
+        # the log, but do not gate on a verdict this job engineered.
+        m3 status || true
         # Grade only what this job installed. The setup above passes
         # --no-shared-embedder, so the shared-embedder probe and the
         # embedder-dependent probes (embedding-cascade, and the file-extraction
