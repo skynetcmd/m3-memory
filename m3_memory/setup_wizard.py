@@ -2485,11 +2485,15 @@ def _step_governor_migration(plan: SetupPlan, *, non_interactive: bool = False,
     return result
 
 
-def _step_doctor() -> bool:
+def _step_doctor(plan=None) -> bool:
     """Final verification — DOES the install actually work?
 
     Returns True only when the doctor exits clean. The caller reports that
     verdict to the user instead of unconditionally printing "Setup complete."
+
+    ``plan`` is optional so existing callers/tests that pass nothing keep the
+    previous (check-everything) behaviour; it is used only to skip probes for
+    subsystems this run deliberately did not install.
 
     History: this used to `return True` in BOTH branches, so a setup that left a
     broken install still exited 0 under a success summary. That is the same
@@ -2500,8 +2504,26 @@ def _step_doctor() -> bool:
     being handed a green summary over a red system.
     """
     _say("Step 5/5: verifying the install (m3 doctor)")
+    argv = [sys.executable, "-m", "m3_memory.cli", "doctor"]
+    # Do NOT grade a subsystem the user just declined. `--no-shared-embedder`
+    # makes setup print "SKIPPED (not installed). This is fine", and then an
+    # unfiltered doctor failed the whole run on `shared-embedder: 3 issue(s)`
+    # — config-missing / server-down / keepalive-missing, all of which are the
+    # DIRECT, INTENDED consequence of the opt-out. Setup contradicted itself in
+    # consecutive lines and exited 3.
+    #
+    # This is the E2E CI job's failure on all six runners: it installs with
+    # --no-shared-embedder precisely because a long-lived :8082 service would
+    # leak state on a shared runner, then the verification step demanded that
+    # service exist. A verification that fails on a supported configuration
+    # measures the wrong thing (§5) and trains users to ignore it (§3).
+    #
+    # The flag reaches the payload doctor through _cmd_doctor's parse_known_args
+    # passthrough (verified end to end).
+    if plan is not None and not getattr(plan, "use_shared_embedder", True):
+        argv.append("--skip-shared-embedder")
     try:
-        _run([sys.executable, "-m", "m3_memory.cli", "doctor"])
+        _run(argv)
         _ok("verification passed — m3 is installed and working")
         return True
     except subprocess.CalledProcessError:
@@ -2641,7 +2663,7 @@ def run_setup(args: argparse.Namespace) -> int:
         _step_install_dashboard(plan)
         governor_result = _step_governor_migration(
             plan, non_interactive=args.non_interactive, gui=getattr(args, "gui_child", False))
-        verified = _step_doctor()
+        verified = _step_doctor(plan)
         _summary(plan, governor_result, verified=verified)
         # Exit 3 = "installed but not verified healthy". Distinct from 0
         # (clean) and from 2 (aborted, nothing installed) so a scripted
