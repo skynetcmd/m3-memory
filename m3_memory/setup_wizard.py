@@ -1136,8 +1136,41 @@ def _kill_stuck_writers(stuck, *, allow_sudo: bool = False) -> bool:
     killer = _kill_process_windows if is_win else _kill_process_posix
     elevate = _runas_kill_windows if is_win else _sudo_kill_posix
     how = "UAC" if is_win else "sudo"
+
+    # NEVER kill our own ancestry — the branch we are sitting on. A DB-writer can
+    # legitimately register at a generation ABOVE this code: launched from the
+    # `m3` console script, setup is several generations deep
+    #     m3.exe -> python (UTF-8 re-exec) -> setup -> ...
+    # so a writer registered at the shim or re-exec generation is an ancestor,
+    # and killing it ends the run mid-install. m3_halt.kill_stale_daemons learned
+    # this on 2026-07-27 (console output stopped after agent wiring, exit 1, no
+    # traceback, ONLY under the console-script launcher) and protects the full
+    # chain; this second kill path never got the same guard.
+    #
+    # Cross-platform on purpose: POSIX kills with os.kill, and killing an
+    # ancestor there is just as fatal — this is not a Windows-only hazard.
+    protected = {os.getpid()}
+    try:
+        halt_mod = _import_m3_halt()
+        if halt_mod is not None and hasattr(halt_mod, "_ancestor_pids"):
+            protected.update(halt_mod._ancestor_pids(os.getpid()))
+        else:
+            protected.add(os.getppid())
+    except Exception:  # noqa: BLE001 — best-effort; never block the kill path
+        try:
+            protected.add(os.getppid())
+        except Exception:  # noqa: BLE001
+            pass
+
     all_ok = True
     for p in stuck:
+        if p.pid in protected:
+            # Loud, not silent (§3): the caller's quiesce is genuinely incomplete
+            # and the install may still hit a lock — but sawing off our own branch
+            # is strictly worse than proceeding.
+            _warn(f"    refusing to kill {p.role} (pid {p.pid}) — it is this "
+                  f"install's own parent process")
+            continue
         if killer(p.pid):
             _ok(f"    stopped {p.role} (pid {p.pid})")
             continue
