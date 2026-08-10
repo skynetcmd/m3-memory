@@ -235,17 +235,26 @@ jobs:
     # doctor's own exit code and output on that runner so the next failure
     # names itself instead of needing another CI round-trip to diagnose.
     - name: Diagnose verification (Windows only, never fails the job)
-      if: runner.os == 'Windows'
+      # `always()` is REQUIRED: without it a step is skipped once an earlier one
+      # fails, and the whole point of this step is to explain the setup failure
+      # that just happened. Placed after setup, it never ran on the very runs it
+      # exists to diagnose.
+      if: always() && runner.os == 'Windows'
       shell: bash
       env:
         M3_E2E_ROOT: ${{ runner.temp }}/m3-e2e
       run: |
         export M3_CONFIG_ROOT="$M3_E2E_ROOT/config"
         export M3_ENGINE_ROOT="$M3_E2E_ROOT/engine"
-        echo "--- m3 doctor (scoped, as setup runs it) ---"
+        echo "--- m3 doctor (scoped, exactly as setup runs it) ---"
         m3 doctor --skip-shared-embedder --skip-cascade; echo "doctor exit=$?"
+        echo "--- the same invocation setup uses, via -m ---"
+        python -m m3_memory.cli doctor --skip-shared-embedder --skip-cascade
+        echo "python -m doctor exit=$?"
         echo "--- engine root ---"
         ls -la "$M3_E2E_ROOT/engine" || true
+        echo "--- config root ---"
+        ls -la "$M3_E2E_ROOT/config" || true
 
     # Belt-and-braces: setup's own exit code already encodes this, but assert
     # the resulting install is independently usable rather than trusting the
