@@ -30,18 +30,35 @@ import chatlog_config
 logger = logging.getLogger("chatlog_embed_sweeper")
 
 
-async def drain_spill(conn: sqlite3.Connection) -> int:
+async def drain_spill(conn=None) -> int:
     """
-    Drain spill JSONL files back into the chat log DB(s).
+    Drain spill JSONL files back into the chat log store(s).
 
     Spilled items written after the DB-parameter refactor carry the target
     path they were enqueued against (``_db_path``). We honor that per-item
     so rows from a session that pointed at a dedicated test/benchmark DB
     don't silently land in the live store. Legacy spill items without
-    ``_db_path`` fall back to ``conn`` (the sweeper's connection).
+    ``_db_path`` fall back to the live resolver.
 
-    Returns count of rows inserted across all target DBs.
+    Reinsertion delegates to ``chatlog_core._executemany_insert`` — the SAME
+    writer the live chatlog path uses — rather than a second INSERT maintained
+    here (§10a: duplicated SQL is the defect; copies drift). That gets backend
+    portability for free (``memory_items``/``?`` on SQLite, ``chat_log_items``/
+    ``%s`` on PostgreSQL) and, critically, writes ALL 22 columns. A spill line is
+    the queued item verbatim, so ``user_id``/``scope`` (tenancy — see
+    ``Dialect.scope_predicates``), ``content_hash`` (dedup) and ``origin_device``
+    survive the round-trip.
+
+    Spill is NOT a SQLite-only concern — ``chatlog_core._spill_batch`` fires on
+    ANY flush exception and on queue-full backpressure, regardless of backend,
+    and a PG outage is precisely when spill accumulates.
+
+    ``conn`` is accepted for backwards compatibility and ignored.
+
+    Returns count of rows inserted across all target stores.
     """
+    from memory.backends import active_backend
+
     spill_dir = chatlog_config.SPILL_DIR
     if not os.path.exists(spill_dir):
         return 0
@@ -50,11 +67,7 @@ async def drain_spill(conn: sqlite3.Connection) -> int:
     if not spill_files:
         return 0
 
-    insert_sql = (
-        "INSERT OR IGNORE INTO memory_items "
-        "(id, content, title, metadata_json, type, agent_id, conversation_id, is_deleted, created_at, variant) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    )
+    _backend = active_backend()
 
     total_drained = 0
     for spill_path in spill_files:
@@ -73,68 +86,95 @@ async def drain_spill(conn: sqlite3.Connection) -> int:
                         logger.warning("Skipping malformed JSON in %s: %s", spill_path, e)
                         continue
 
-                    memory_id = doc.get("_id") or str(uuid.uuid4())
-                    content = doc.get("_content", doc.get("content", ""))
-                    title = doc.get("_title", "")
-                    conversation_id = doc.get("conversation_id", "")
+                    # Normalise a spilled doc back into the shape the canonical
+                    # writer expects. A spill line is the QUEUED item verbatim
+                    # (`{**item, "_id", "_title", "_content", "_metadata_json",
+                    # "_created_at", "_db_path"}`), so every field the live write
+                    # path uses — user_id, scope, origin_device, valid_from, … —
+                    # is already here; only the private keys need defaulting for
+                    # legacy/hand-written lines.
                     host_agent = doc.get("host_agent", "unknown")
-                    variant = doc.get("variant")
-                    timestamp = (
-                        doc.get("_created_at")
-                        or doc.get("timestamp")
-                        or datetime.now(timezone.utc).isoformat()
-                    )
-
-                    if doc.get("_metadata_json"):
-                        metadata_json = doc["_metadata_json"]
-                    else:
-                        metadata = {
+                    doc.setdefault("_id", str(uuid.uuid4()))
+                    doc.setdefault("_content", doc.get("content", ""))
+                    doc.setdefault("_title", "")
+                    doc.setdefault("_created_at",
+                                   doc.get("timestamp")
+                                   or datetime.now(timezone.utc).isoformat())
+                    doc.setdefault("conversation_id", "")
+                    doc.setdefault("model_id", doc.get("model_id", "unknown"))
+                    if not doc.get("agent_id"):
+                        doc["agent_id"] = f"{host_agent}:spill"
+                    if not doc.get("_metadata_json"):
+                        doc["_metadata_json"] = json.dumps({
                             "role": doc.get("role", "unknown"),
                             "provider": doc.get("provider", "unknown"),
                             "model_id": doc.get("model_id", "unknown"),
                             "host_agent": host_agent,
                             "spill_source": True,
-                        }
-                        metadata_json = json.dumps(metadata)
+                        })
 
-                    agent_id = doc.get("agent_id") or f"{host_agent}:spill"
-
-                    row = (
-                        memory_id, content, title, metadata_json,
-                        "chat_log", agent_id, conversation_id, 0,
-                        timestamp, variant,
-                    )
-                    per_db.setdefault(doc.get("_db_path"), []).append(row)
+                    per_db.setdefault(doc.get("_db_path"), []).append(doc)
 
             file_drained = 0
             had_error = False
             for db_path, rows in per_db.items():
                 if not rows:
                     continue
-                # Open a fresh short-lived connection for any path that
-                # differs from the sweeper's conn. This is the drain path —
-                # not hot — so the overhead is acceptable.
-                target_conn = conn
-                own_conn = False
-                if db_path and os.path.abspath(db_path) != os.path.abspath(getattr(conn, "_m3_db_path", "")):
-                    try:
-                        target_conn = sqlite3.connect(db_path, timeout=10)
-                        own_conn = True
-                    except sqlite3.Error as e:
-                        logger.error("Cannot open spill target DB %s: %s", db_path, e)
-                        had_error = True
-                        continue
-                try:
-                    target_conn.executemany(insert_sql, rows)
-                    target_conn.commit()
-                    file_drained += len(rows)
-                    logger.info("Drained %d rows from %s -> %s", len(rows), spill_path, db_path or "<sweeper-conn>")
-                except sqlite3.Error as e:
-                    logger.error("Failed to insert drained rows from %s into %s: %s", spill_path, db_path, e)
+                # A captured _db_path whose PARENT DIRECTORY is gone is a stale
+                # target — a deleted benchmark tree, an old engine root. Opening
+                # it would silently CREATE the directory and an empty database,
+                # write the turns into that orphan store, and then delete the
+                # spill file: the rows are "drained" into a DB nobody reads.
+                # Refuse, keep the spill file, and say so (§3 — fail loud, and
+                # never discard the only copy of a turn).
+                #
+                # SQLite ONLY, gated on capability, never on `!= postgres` (§10a).
+                # On a pooled backend `_db_path` is a LABEL, not a location
+                # (§10) — a filesystem check on it is meaningless and, worse,
+                # non-deterministic: os.path.abspath() resolves a bare label
+                # against the CWD, so the same spill row drains from one working
+                # directory and is refused from another. A DSN-shaped label
+                # ("postgresql://host/db") fails the check outright and would
+                # strand PG spill permanently. The orphan-store hazard is
+                # inherently SQLite's — a server backend cannot be conjured by
+                # connecting to it.
+                if (db_path and _backend.name == "sqlite"
+                        and not os.path.isdir(os.path.dirname(os.path.abspath(db_path)))):
+                    logger.error(
+                        "Spill target %s is stale (parent directory missing) — "
+                        "refusing to create an orphan store. Keeping %s; "
+                        "re-point or remove the stale rows to drain it.",
+                        db_path, spill_path)
                     had_error = True
-                finally:
-                    if own_conn:
-                        target_conn.close()
+                    continue
+
+                # Reuse the CANONICAL chatlog writer rather than a second INSERT
+                # here (§10a — duplicated SQL is the defect; copies drift). It
+                # already groups by `_db_path`, activates it, routes through
+                # M3Context.get_chatlog_conn(), and writes all 22 columns via
+                # the seam on either backend.
+                #
+                # This is not a style preference: the hand-rolled INSERT this
+                # replaces wrote only 10 columns, silently dropping user_id and
+                # scope (both NULL-defaulted) — so a drained turn carried NO
+                # tenancy and became invisible to, or leaked across,
+                # Dialect.scope_predicates filtering (§7). It also dropped
+                # content_hash (breaking dedup) and origin_device (whose column
+                # default is the literal 'macbook', mislabelling every drained
+                # row on a Windows or Linux host). The spill file carried all of
+                # it; only the reinsertion threw it away.
+                try:
+                    from chatlog_core import _executemany_insert
+                    written = await asyncio.to_thread(_executemany_insert, rows)
+                    file_drained += written
+                    logger.info("Drained %d rows from %s -> %s",
+                                written, spill_path, db_path or "<live resolver>")
+                except Exception as e:  # noqa: BLE001 — per-target isolation
+                    # Backend-agnostic: sqlite3.Error and psycopg2.Error are
+                    # unrelated types, so catch broadly and keep the spill file.
+                    logger.error("Failed to insert drained rows from %s into %s: %s: %s",
+                                 spill_path, db_path, type(e).__name__, e)
+                    had_error = True
 
             total_drained += file_drained
 
@@ -357,10 +397,28 @@ async def main() -> int:
     # elapsed" since the monotonic clock is far past 60 at runtime).
     deadline_s = None if _deadline <= 0 else time.monotonic() + _deadline
 
-    # Open DB connection
+    # Spill drainage is backend-agnostic and must run BEFORE the SQLite-only
+    # setup below (§10a/§3). chatlog_core._spill_batch fires on any flush
+    # exception and on queue-full backpressure regardless of backend, and this
+    # task is installed regardless of backend — so gating the drain behind a
+    # local .db file made it a silent no-op on PostgreSQL, stranding spilled
+    # turns on disk with only a log line. drain_spill() routes through the seam.
+    early_spill_drained = 0
+    if args.drain_spill or os.path.exists(chatlog_config.SPILL_DIR):
+        early_spill_drained = await drain_spill()
+        if early_spill_drained > 0:
+            logger.info("Drained %d rows from spill", early_spill_drained)
+
+    # Open DB connection. The embedding half below is still SQLite-bound (raw
+    # sqlite3 cursors + embed_sweep_lib); on a PG deployment the backfill runs
+    # via the cognitive loop's embed pass instead, so returning here after the
+    # drain is correct, not a silent skip.
     db_path = chatlog_config.chatlog_db_path()
     if not os.path.exists(db_path):
-        logger.info("Chat log DB does not exist yet: %s", db_path)
+        logger.info(
+            "No local chat log DB at %s (expected on a PostgreSQL-backed "
+            "deployment); spill drained: %d. Embedding backfill is handled by "
+            "the cognitive loop's embed pass.", db_path, early_spill_drained)
         return 0
 
     try:
@@ -373,7 +431,7 @@ async def main() -> int:
     start_time = asyncio.get_event_loop().time()
 
     try:
-        spill_drained = 0
+        spill_drained = early_spill_drained
         rows_embedded = 0
         batches_processed = 0
 
@@ -381,12 +439,6 @@ async def main() -> int:
         if not table_exists(conn, "memory_items"):
             logger.info("Chat log schema not initialized yet; nothing to do")
             return 0
-
-        # Drain spill if requested or if files exist
-        if args.drain_spill or os.path.exists(chatlog_config.SPILL_DIR):
-            spill_drained = await drain_spill(conn)
-            if spill_drained > 0:
-                logger.info("Drained %d rows from spill", spill_drained)
 
         # Query and embed batches via the shared embed_sweep_lib loop.
         # This delegates concurrency, batching, cursor advance, and per-
