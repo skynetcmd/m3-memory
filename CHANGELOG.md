@@ -21,6 +21,36 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.15] — 2026-08-10 — self-heal can finally reach the privileged repairs
+
+> m3 already knew how to elevate. The command whose whole job is "repair what
+> self-repairs" could not use it, and the offer was suppressed on exactly the
+> path that needed it most — an upgrade.
+
+### Fixed
+
+- **`m3 doctor --fix` could not repair anything that needs admin.** Registering
+  a scheduled task requires elevation on Windows. `m3 setup` offers an inline
+  UAC prompt for this; `--fix` only printed a command to copy-paste, so the most
+  common breakage it meets was the one thing it could not fix. It now reuses the
+  installer's existing elevation helper rather than keeping a second, weaker
+  path.
+
+  Consent-gated by construction: a UAC dialog the user approves, an elevated
+  child that registers the task and exits. There is no long-lived privileged
+  process — the daemons stay unprivileged, and the governor remains a pacing
+  library rather than a process manager.
+
+- **The elevation offer was suppressed on upgrades.** It was gated on the
+  caller's `non_interactive` flag, which does not mean "no human" — it means
+  "my choices are already gathered". `m3 setup` runs its install step
+  non-interactively by design, so on an upgrade (dashboard deps already present,
+  only the boot-task registration denied) the user got an ACTION REQUIRED banner
+  instead of the inline prompt. It is now gated on whether a console is
+  attached, which is the honest test for "can we ask a question". Headless runs
+  — CI, services, piped installers — still fall through to the banner and never
+  block on a dialog nobody can approve.
+
 ## [2026.8.19.14] — 2026-08-10 — two failures a real upgrade surfaced
 
 > Both fixes came from one user's upgrade log on Windows 11: a health check that

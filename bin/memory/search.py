@@ -817,7 +817,8 @@ async def memory_search_scored_impl(
             names = [v for v in names if v != "__none__"]
             sub: list[str] = []
             if names:
-                placeholders = ",".join(["?"] * len(names))
+                from .backends import dialect as _dl_v
+                placeholders = _dl_v().placeholder(len(names))
                 sub.append(f"mi.variant IN ({placeholders})")
                 params.extend(names)
             if include_null:
@@ -858,10 +859,12 @@ async def memory_search_scored_impl(
     # different (incomparable) vector space — and a wrong-dim blob would break the
     # cosine pack. Restrict the embeddings join to the proper identity.
     from memory.embed import _compatible_model_names
+
+    from .backends import dialect as _dl_m
     _compat = sorted(_compatible_model_names())
     if _compat:
         where_clauses.append(
-            "me.embed_model IN (%s)" % ",".join("?" for _ in _compat))
+            "me.embed_model IN (%s)" % _dl_m().placeholder(len(_compat)))
         params.extend(_compat)
     where_clauses.append("me.dim = ?")
     params.append(config.EMBED_DIM)
@@ -1360,16 +1363,27 @@ async def _apply_two_stage_expansion(ranked, k, user_id: str = "", scope: str = 
                     existing_ids.add(tid)
     if source_turn_ids:
         try:
+            # Placeholders from the SEAM, not hardcoded `?` (§10a). This is a
+            # TENANCY filter, so a dialect mismatch is a security bug, not a
+            # portability nit: on PostgreSQL `?` is a syntax error, the execute
+            # raises, and the `except Exception: logger.debug(...)` below
+            # swallows it — dropping the expansion silently. Any future caller
+            # that catches higher up and keeps going would proceed with the
+            # tenancy clause GONE. The hardened siblings (graph._session_
+            # neighbor_ids, search_routing) already use dialect().param().
+            from .backends import dialect as _dialect_t
+            _d_t = _dialect_t()
+            _p_t = _d_t.param()
             _tenancy_sql = ""
             _tenancy_params: list = []
             if user_id:
-                _tenancy_sql += " AND user_id = ?"
+                _tenancy_sql += f" AND user_id = {_p_t}"
                 _tenancy_params.append(user_id)
             if scope:
-                _tenancy_sql += " AND scope = ?"
+                _tenancy_sql += f" AND scope = {_p_t}"
                 _tenancy_params.append(scope)
             with _db() as db:
-                placeholders = ",".join("?" * len(source_turn_ids))
+                placeholders = _d_t.placeholder(len(source_turn_ids))
                 turn_rows = db.execute(
                     f"SELECT id, content, title, type, importance "
                     f"FROM memory_items "
@@ -1863,7 +1877,8 @@ async def memory_search_routed_impl(
         if hit_ids:
             try:
                 with _db() as db:
-                    placeholders = ",".join("?" * len(hit_ids))
+                    from .backends import dialect as _dl_h
+                    placeholders = _dl_h().placeholder(len(hit_ids))
                     sup_rows = db.execute(
                         f"SELECT to_id FROM memory_relationships "
                         f"WHERE relationship_type = 'supersedes' "
@@ -1903,18 +1918,25 @@ async def memory_search_routed_impl(
                 for _s, item in final_hits
                 if isinstance(item, dict) and item.get("id")
             }
+            # Seam placeholders (§10a). Same reasoning as the other tenancy
+            # filters in this module: a hardcoded `?` is a syntax error on
+            # PostgreSQL, and this clause is what keeps bypass_surface rows
+            # inside the caller's tenant.
+            from .backends import dialect as _dialect_b
+            _d_b = _dialect_b()
+            _p_b = _d_b.param()
             params: list = [conversation_id]
             scope_clause = ""
             if scope:
-                scope_clause += " AND scope = ?"
+                scope_clause += f" AND scope = {_p_b}"
                 params.append(scope)
             if user_id:
-                scope_clause += " AND user_id = ?"
+                scope_clause += f" AND user_id = {_p_b}"
                 params.append(user_id)
             with _db() as db:
                 surf_rows = db.execute(
                     f"SELECT memory_id FROM bypass_surface "
-                    f"WHERE conversation_id = ?{scope_clause}",
+                    f"WHERE conversation_id = {_p_b}{scope_clause}",
                     params,
                 ).fetchall()
                 surf_ids = [r[0] for r in surf_rows if r[0] not in already]
@@ -1928,7 +1950,7 @@ async def memory_search_routed_impl(
                     )
                     surf_ids = surf_ids[:bypass_surface_cap]
                 if surf_ids:
-                    placeholders = ",".join("?" * len(surf_ids))
+                    placeholders = _d_b.placeholder(len(surf_ids))
                     item_rows = db.execute(
                         f"SELECT id, title, type, conversation_id FROM memory_items "
                         f"WHERE id IN ({placeholders})",
@@ -1977,13 +1999,22 @@ async def _maybe_expand_routed(
     user A's memory to user B's would pull B's row into A's results. The primary
     hits are already tenant-filtered; we pass the same tenancy down and gate every
     hydrated neighbor on it (defense at the materialization choke point)."""
+    # Placeholders from the SEAM (§10a). This is the tenancy gate for every
+    # neighbor this expansion hydrates — graph, session AND entity-graph — so a
+    # dialect mismatch here is a §7 security bug, not a portability nit: `?` is
+    # a syntax error on PostgreSQL, and a caller that catches and continues
+    # would then run with NO tenancy clause. graph._session_neighbor_ids and
+    # search_routing were hardened for exactly this; these two sites in search.py
+    # were missed.
+    from .backends import dialect as _dialect_e
+    _p_e = _dialect_e().param()
     _tenancy_sql = ""
     _tenancy_params: list = []
     if user_id:
-        _tenancy_sql += " AND user_id = ?"
+        _tenancy_sql += f" AND user_id = {_p_e}"
         _tenancy_params.append(user_id)
     if scope:
-        _tenancy_sql += " AND scope = ?"
+        _tenancy_sql += f" AND scope = {_p_e}"
         _tenancy_params.append(scope)
     _resolve_mc_callbacks()  # bind memory_core callbacks on first call
 
@@ -2011,7 +2042,7 @@ async def _maybe_expand_routed(
         neighbor_ids = _resolve_graph_helper("_graph_neighbor_ids")(seed_ids, depth=int(graph_depth))
         if neighbor_ids:
             with _db() as db:
-                placeholders = ",".join(["?"] * len(neighbor_ids))
+                placeholders = _dialect_e().placeholder(len(neighbor_ids))
                 rows = db.execute(
                     f"SELECT id, type, title, content, metadata_json, conversation_id, "
                     f"valid_from, user_id FROM memory_items "
@@ -2048,7 +2079,7 @@ async def _maybe_expand_routed(
             new_ids = eg_memory_ids - primary_ids - set(extra_rows.keys())
             if new_ids:
                 with _db() as db:
-                    placeholders = ",".join(["?"] * len(new_ids))
+                    placeholders = _dialect_e().placeholder(len(new_ids))
                     eg_rows = db.execute(
                         f"SELECT id, type, title, content, metadata_json, conversation_id, "
                         f"valid_from, user_id FROM memory_items "
