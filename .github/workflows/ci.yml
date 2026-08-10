@@ -229,7 +229,15 @@ jobs:
         # --no-shared-embedder / --no-dashboard / --no-governor-migration:
         #   long-lived services and OS scheduler entries are not the subject
         #   of this test and would leak state on a shared runner.
-        m3 setup \
+        # Invoke the MODULE, not the `m3` console script. On Windows the script's
+        # UTF-8 re-exec SPAWNS a child rather than replacing the image, so the
+        # launcher generation stays alive as a registered m3 process for the whole
+        # run. Setup's preflight then finds its own PARENT holding the DB and
+        # correctly refuses to kill it — exit 2, "cannot quiesce mcp(pid N): it is
+        # this install's own parent process". `python -m m3_memory.cli` has no
+        # launcher generation. This is exactly the advice setup itself prints for
+        # this case, so CI should follow it.
+        python -m m3_memory.cli setup \
           --non-interactive --terminal \
           --agents "" --capture-mode none \
           --no-native-wheel --no-shared-embedder \
@@ -347,7 +355,15 @@ jobs:
         export M3_ENGINE_ROOT="$M3_E2E_ROOT/engine"
         echo "engine root before upgrade:"
         ls -la "$M3_E2E_ROOT/engine"
-        m3 setup \
+        # Invoke the MODULE, not the `m3` console script. On Windows the script's
+        # UTF-8 re-exec SPAWNS a child rather than replacing the image, so the
+        # launcher generation stays alive as a registered m3 process for the whole
+        # run. Setup's preflight then finds its own PARENT holding the DB and
+        # correctly refuses to kill it — exit 2, "cannot quiesce mcp(pid N): it is
+        # this install's own parent process". `python -m m3_memory.cli` has no
+        # launcher generation. This is exactly the advice setup itself prints for
+        # this case, so CI should follow it.
+        python -m m3_memory.cli setup \
           --non-interactive --terminal \
           --agents "" --capture-mode none \
           --no-native-wheel --no-shared-embedder \
