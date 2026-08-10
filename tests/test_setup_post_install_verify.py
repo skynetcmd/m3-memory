@@ -229,3 +229,41 @@ def test_failed_verification_still_returns_false_with_telemetry(wizard, monkeypa
     monkeypatch.setattr(wizard, "_run", boom)
     monkeypatch.setattr(wizard, "_doctor_failure_telemetry", lambda *a, **k: None)
     assert wizard._step_doctor() is False
+
+
+def test_verification_timeout_is_bounded_and_named(wizard, monkeypatch, capsys):
+    """A hanging doctor must fail the verification, not hang the install.
+
+    The doctor probes live endpoints (embedder, LLM, warehouse). A probe that
+    BLOCKS rather than fails would stall setup forever — and on CI that burns
+    the whole runner (GitHub's default job cap is 6 hours). Observed on
+    windows-latest: the E2E job sat in_progress for 25+ minutes on this step
+    while its ubuntu/macOS twins finish in well under 10.
+    """
+    import subprocess as _sp
+
+    monkeypatch.setattr(wizard, "_DOCTOR_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(wizard, "_doctor_failure_telemetry", lambda *a, **k: None)
+
+    def hang(cmd, **kw):
+        raise _sp.TimeoutExpired(cmd, 0.5)
+    monkeypatch.setattr(wizard, "_run", hang)
+
+    assert wizard._step_doctor() is False, "a hung doctor must fail verification"
+    blob = "".join(capsys.readouterr())
+    assert "TIMED OUT" in blob
+    assert "hanging, not failing" in blob
+
+
+def test_run_forwards_a_timeout(wizard, monkeypatch):
+    """_run must actually pass the timeout through to subprocess."""
+    seen = {}
+
+    def fake(cmd, **kw):
+        seen.update(kw)
+        class _CP:
+            returncode = 0
+        return _CP()
+    monkeypatch.setattr(wizard.subprocess, "run", fake)
+    wizard._run(["x"], timeout=12.5)
+    assert seen.get("timeout") == 12.5
