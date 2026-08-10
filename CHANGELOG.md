@@ -21,6 +21,73 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.19.12] — 2026-08-10 — the Windows install path, and a CI lane that had never been green
+
+> The Windows E2E lane had failed on every run in its recorded history. It was
+> never a crash: `m3 setup` was HANGING, and the harness killing the blocked step
+> is what produced the `exit 1` with no output that made it look like one.
+
+### Fixed
+
+- **`m3 setup` could hang forever quiescing DB-writers.** If a writer was the
+  install's own ancestor — unkillable by design — the quiesce loop refused to
+  kill it, re-waited the full timeout, and refused again. On a runner this ran
+  244 times at 30s each. Every branch was a dead end: `--force-quiesce` refused
+  it, the interactive *kill* refused it, *wait* waited on a process waiting on
+  us, and the non-force path advised `--force-quiesce`, which also refuses. The
+  check now happens ONCE, before any branch, and aborts with the fix that
+  actually works — start setup from a plain shell, or `m3 stop` from another
+  terminal — instead of "re-run elevated", which cannot help when the obstacle
+  is your own parent process.
+
+- **Verification could hang the install.** `m3 doctor` runs after install and
+  probes live endpoints; a probe that BLOCKS rather than fails stalled setup
+  indefinitely. It is now bounded (60s — 10x the measured ~5.4s cold / ~5.9s
+  warm cost, the same order as the existing 30s quiesce budget) and a timeout is
+  a named outcome, not a silent wait.
+
+- **`pipx upgrade m3-memory` broke the install on Windows.** pip uninstalls
+  before it installs and Windows holds an open `.exe` against deletion, so with
+  m3 running the upgrade deleted the package and then failed on `WinError 32` —
+  leaving NO m3 installed. Compounded by pip serving a cached index that
+  reported "already at latest" while PyPI had a newer release. **New `m3 stop`**
+  quiesces every DB-writer first (precise-PID only, never a name sweep), and the
+  upgrade nudge now prints the safe Windows sequence.
+
+- **The embed server opened a stray console window on Windows.** It launched
+  under `python.exe` with `DETACHED_PROCESS` alone, which detaches from the
+  current console but still lets the OS allocate a new one — leaving a terminal
+  window on the desktop whose obvious "close this" action killed the user's
+  embedder. Now `pythonw.exe` + `CREATE_NO_WINDOW`, matching the dashboard and
+  cognitive loop.
+
+- **`setup` could kill its own ancestry.** The `--force-quiesce` kill path had
+  no ancestor guard, so a writer registered above the wizard could be killed
+  mid-install. Cross-platform: POSIX `os.kill` on an ancestor is equally fatal.
+
+### Changed
+
+- E2E CI invokes setup as a module rather than through the `m3` console script.
+  On Windows the script's UTF-8 re-exec spawns a child, so a launcher generation
+  stays alive and the writer scan matches it as an m3 process — the same advice
+  setup itself prints for this case.
+- The e2e job is capped at 25 minutes. A hang previously burned GitHub's 6-hour
+  default AND deferred the diagnostics that would explain it.
+- Setup emits breadcrumbs (unbuffered, and fsync'd to `M3_TRACE_FILE` when set)
+  and, on a failed verification, re-runs the doctor CAPTURED to recover output a
+  streamed child may never flush. This telemetry is what found the hang.
+- `test_zero_lag_write`'s 5s wall-clock budget flaked on shared runners
+  (7.4s on py3.12 while py3.11 passed the same commit). Widened; the
+  deterministic "did it defer" assertions are unchanged.
+
+### Known issues
+
+- On Windows, a user running `m3 setup` via the `m3` console script can still
+  hit the ancestor refusal — it now aborts in seconds with actionable advice
+  instead of hanging. Whether a blocked re-exec shim should be reported as a
+  quiescable DB-writer at all belongs in `scan_db_writer_processes` and is
+  tracked separately.
+
 ## [2026.8.19.11] — 2026-08-10 — a silently-stopped chatlog drain, three CVEs, and a CI that had stopped telling the truth
 
 > Every fix here came from one thread: `m3 doctor` reported a stale
