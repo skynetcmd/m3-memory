@@ -143,3 +143,46 @@ def test_wire_claude_prints_loud_plugin_default_notice(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "mcp__m3_memory__" in out
     assert "plugin:m3:memory" in out and "disabledMcpServers" in out
+
+
+def test_add_terminates_options_before_the_positionals(monkeypatch):
+    r"""`claude mcp add` needs `--` before the name when --env is present.
+
+    Its --env is VARIADIC (`-e, --env <env...>`), so it greedily swallows
+    everything after it — including the two positionals — and the CLI fails with
+
+        error: missing required argument 'name'
+
+    leaving m3 unwired in Claude Code. Reproduced against the shipped CLI: 100%
+    failure with any --env and no `--`; with `--` the server registers and the
+    env lands intact (verified by reading back ~/.claude.json).
+
+    It survived because a roots-less install passes an empty env dict and so
+    never hits the variadic case.
+    """
+    from types import SimpleNamespace
+
+    from m3_memory import setup_wizard as sw
+
+    monkeypatch.setattr(sw.shutil, "which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr(sw, "_wire_claude_hooks", lambda mode: True)
+    import m3_memory.installer as inst
+    monkeypatch.setattr(inst, "_canonical_memory_env",
+                        lambda: {"M3_ENGINE_ROOT": "/data/e", "M3_CONFIG_ROOT": "/data/c"})
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(sw.subprocess, "run",
+                        lambda cmd, *a, **k: (calls.append(list(cmd)),
+                                              SimpleNamespace(returncode=0,
+                                                              stdout="ok", stderr=""))[1])
+    assert sw._wire_claude("both") is True
+
+    add = [c for c in calls if "add" in c][0]
+    assert "--" in add, "missing the option terminator — --env will eat the name"
+    # The separator must come AFTER every --env and immediately BEFORE the name.
+    assert add.index("--") == len(add) - 3, f"`--` is misplaced: {add}"
+    assert add[-2:] == ["m3_memory", "m3"]
+    # And every env var must still precede it.
+    for i, tok in enumerate(add):
+        if tok == "--env":
+            assert i < add.index("--"), "an --env landed after the terminator"

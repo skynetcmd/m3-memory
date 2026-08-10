@@ -2057,7 +2057,18 @@ def _wire_claude(capture_mode: str) -> bool:
     add_cmd = ["claude", "mcp", "add", "--scope", "user"]
     for k, v in env.items():
         add_cmd += ["--env", f"{k}={v}"]
-    add_cmd += ["m3_memory", "m3"]
+    # `--` TERMINATES the option list. `claude mcp add`'s --env is VARIADIC
+    # (`-e, --env <env...>`), so it greedily swallows everything after it —
+    # including the two positionals — and the CLI then fails with
+    #     error: missing required argument 'name'
+    # leaving m3 unwired in Claude Code. Reproduced against the shipped CLI:
+    # without `--` it fails 100% of the time when any --env is present; with it,
+    # the server registers and the env lands intact (verified by reading back
+    # ~/.claude.json).
+    #
+    # This only bites when env vars are passed, which is why it survived: a
+    # roots-less install has an empty env dict and registers fine.
+    add_cmd += ["--", "m3_memory", "m3"]
 
     _say("  · registering m3 memory server in Claude Code (mcp__m3_memory__, user scope)")
     # Drop the legacy roots-less `memory` entry a prior setup created (migration),
@@ -2120,8 +2131,14 @@ def _claude_mcp_add(add_cmd: list[str]) -> bool:
         return True
     if blob:
         print(blob)
+    # Echo the EXACT argv we ran, not a simplified version. The simplified form
+    # ("claude mcp add --scope user m3_memory m3") drops the --env root pins, and
+    # a user who follows it gets a server reading the DEFAULT roots while their
+    # chatlog hook writes to the pinned ones — the split-brain hazard in
+    # CLAUDE.md, arrived at by following our own advice.
+    import shlex
     _warn(f"`claude mcp add m3_memory` failed (exit {proc.returncode}); "
-          "manual: `claude mcp add --scope user m3_memory m3`")
+          f"manual: {shlex.join(add_cmd)}")
     return False
 
 
