@@ -79,18 +79,41 @@ def _process_running() -> Optional[bool]:
     None when we can't tell (no pgrep/tasklist). Complements the service-state
     check — a Windows ONSTART task in particular is "installed" long before we
     can confirm the daemon is actually up."""
+    # psutil FIRST on every platform: it is already a hard dependency, reads the
+    # cmdline directly, and is the same mechanism m3_halt's writer scan uses — so
+    # "running" means one thing across the codebase.
+    #
+    # This replaces a `wmic` call that could no longer work: wmic is DEPRECATED
+    # and REMOVED in Windows 11 24H2+, so the subprocess returned non-zero and
+    # this function answered None ("unknown") forever. The probe only NAGs on a
+    # POSITIVE "not running", so an unknown meant it printed
+    # "cognitive loop: OK" while the loop was dead — observed 2026-08-10 on a
+    # box where no m3_cognitive_loop process existed at all. A health check that
+    # cannot report ill is worse than none (§3/§5).
+    #
+    # Match on python processes only: the marker string appears in any shell that
+    # merely GREPS for it, and matching those reports the loop as up because
+    # something asked about it.
+    try:
+        import psutil
+        for p in psutil.process_iter(["name", "cmdline"]):
+            try:
+                name = (p.info.get("name") or "").lower()
+                if not any(i in name for i in ("python", "pythonw")):
+                    continue
+                if "m3_cognitive_loop" in " ".join(p.info.get("cmdline") or []):
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return False
+    except ImportError:
+        pass  # fall through to the platform CLIs below
+
     try:
         if sys.platform == "win32":
-            # tasklist can't match on the script arg; WMIC can read the command
-            # line. Best-effort — absence of WMIC just yields None (unknown).
-            proc = subprocess.run(
-                ["wmic", "process", "where",
-                 "name like '%python%'", "get", "commandline"],
-                capture_output=True, text=True,
-            )
-            if proc.returncode != 0:
-                return None
-            return "m3_cognitive_loop" in (proc.stdout or "")
+            # No psutil: tasklist cannot match on the script arg, so we cannot
+            # tell. Unknown, never a false "down".
+            return None
         proc = subprocess.run(
             ["pgrep", "-f", "m3_cognitive_loop"], capture_output=True, text=True
         )

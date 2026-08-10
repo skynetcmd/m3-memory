@@ -2695,6 +2695,45 @@ def _doctor_failure_telemetry(argv: list, rc: "int | None") -> None:
               "its output in transit.")
 
 
+_ROLE_TO_TASK = {
+    "cognitive-loop": "AgentOS_CognitiveLoop",
+    "dashboard": "AgentOS_Dashboard",
+}
+
+
+def _start_service_for_role(role: str) -> bool:
+    """Start the keep-alive task backing `role`. True if the start was issued.
+
+    Reuses install_schedules._start_longlived_tasks rather than re-implementing
+    three platform launches (schtasks /Run, launchctl, systemctl --user) — that
+    module already owns the per-OS mechanism and the _SELF_HEAL_TASKS gate, and a
+    second copy here would drift from it (§10a).
+
+    Why setup must do this at all: install_schedules only restarts the tasks THIS
+    run registered. An upgrade that re-registers nothing therefore restarts
+    nothing, while preflight has already stopped every writer — so the keep-alive
+    cadence (PT30M for the cognitive loop) is the only thing bringing it back,
+    leaving the loop down for up to half an hour after a "successful" setup.
+
+    Best-effort: a missing payload or a failed start returns False and the caller
+    reports the service as down, which is the honest outcome (§3).
+    """
+    task = _ROLE_TO_TASK.get(role)
+    if not task:
+        return False
+    try:
+        from m3_memory.installer import bin_dir
+        bd = bin_dir()
+        if bd and str(bd) not in sys.path:
+            sys.path.insert(0, str(bd))
+        import install_schedules  # type: ignore
+        install_schedules._start_longlived_tasks([{"name": task}])
+        return True
+    except Exception as e:  # noqa: BLE001 — never fail setup on a restart attempt
+        _warn(f"    could not start {task}: {type(e).__name__}: {e}")
+        return False
+
+
 def _step_verify_daemons(plan=None) -> bool:
     """Confirm the background services this install ENABLED are actually running.
 
@@ -2756,6 +2795,26 @@ def _step_verify_daemons(plan=None) -> bool:
         return True
 
     missing = [r for r in expected if r not in live_roles]
+
+    # An install STOPPED these; restarting them is this step's job, not the
+    # user's. Their keep-alive tasks self-heal on a PT30M/PT5M cadence, so
+    # without an explicit kick the cognitive loop can sit DOWN for up to half an
+    # hour after a successful setup — reported accurately, and useless to a user
+    # who just wants a working install. install_schedules only restarts tasks
+    # THIS run registered, so an upgrade that re-registers nothing restarts
+    # nothing.
+    if missing:
+        _say("  restarting stopped services...")
+        for role in list(missing):
+            if _start_service_for_role(role):
+                _ok(f"  {role}: restarted")
+        try:
+            live_roles = {(p.role or "").split("(", 1)[0].strip()
+                          for p in halt.list_live_processes()}
+            missing = [r for r in expected if r not in live_roles]
+        except Exception:  # noqa: BLE001 — keep the pre-restart verdict
+            pass
+
     for role in expected:
         if role in live_roles:
             _ok(f"  {role}: running")

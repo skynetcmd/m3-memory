@@ -334,3 +334,55 @@ def test_embed_server_is_not_registry_checked(wizard, monkeypatch, capsys):
     plan.use_shared_embedder = True
     assert wizard._step_verify_daemons(plan) is True
     assert "embed-server" not in "".join(capsys.readouterr())
+
+
+def test_a_stopped_daemon_is_restarted_not_just_reported(wizard, monkeypatch, capsys):
+    """Setup STOPPED these; restarting them is its job, not the user's.
+
+    install_schedules only restarts tasks THIS run registered, so an upgrade
+    that re-registers nothing restarts nothing — while preflight has already
+    stopped every writer. The keep-alive cadence (PT30M for the cognitive loop)
+    would then be the only thing bringing it back, leaving the loop down for up
+    to half an hour after a "successful" setup. Observed 2026-08-10.
+    """
+    started = []
+    monkeypatch.setattr(wizard, "_start_service_for_role",
+                        lambda role: (started.append(role), True)[1])
+
+    calls = {"n": 0}
+
+    def _halt_mod():
+        import types
+        m = types.ModuleType("m3_halt")
+
+        def live(*a, **k):
+            calls["n"] += 1
+            # down on the first read, up after the restart
+            roles = ["dashboard"] if calls["n"] == 1 else ["dashboard", "cognitive-loop"]
+            return [types.SimpleNamespace(role=r, pid=i) for i, r in enumerate(roles, 1)]
+
+        m.list_live_processes = live
+        return m
+
+    monkeypatch.setattr(wizard, "_import_m3_halt", _halt_mod)
+
+    assert wizard._step_verify_daemons(_P(loop=True, dash=True)) is True, (
+        "a service that comes back after the restart must not fail verification"
+    )
+    assert started == ["cognitive-loop"], f"did not restart the down service: {started}"
+    assert "restarted" in "".join(capsys.readouterr()).lower()
+
+
+def test_a_daemon_that_stays_down_still_fails(wizard, monkeypatch, capsys):
+    """The restart is best-effort — it must not turn a real failure green."""
+    monkeypatch.setattr(wizard, "_start_service_for_role", lambda role: False)
+
+    import types
+    m = types.ModuleType("m3_halt")
+    m.list_live_processes = lambda *a, **k: [
+        types.SimpleNamespace(role="dashboard", pid=1)
+    ]
+    monkeypatch.setattr(wizard, "_import_m3_halt", lambda: m)
+
+    assert wizard._step_verify_daemons(_P(loop=True, dash=True)) is False
+    assert "cognitive-loop: NOT running" in "".join(capsys.readouterr())
