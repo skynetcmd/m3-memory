@@ -84,7 +84,20 @@ async def test_write_defers_and_is_fast_without_embedder(monkeypatch, tmp_path):
         r = await mc.memory_write_impl("note", "deferred embed content", title="z1")
         dt = time.time() - t
 
-    assert dt < 5.0, f"deferred write should be fast, took {dt:.1f}s"
+    # The CONTRACT is that the write DEFERS — asserted on the next line and by
+    # the "no embedding row" check below. The wall-clock number is a proxy for
+    # it, and a flaky one on a shared runner: this budget failed at 7.4s on
+    # windows-latest py3.12 while py3.11 passed the same commit, and the test
+    # alternated pass/fail/pass/pass across four runs of IDENTICAL code. CI's own
+    # comment says timing budgets "assume a quiet, dedicated host" and belong
+    # under `-m slow`, off the PR gate (test_chatlog_perf is marked exactly so).
+    #
+    # Kept as a GENEROUS ceiling that still catches the regression it exists for
+    # — a write that synchronously embeds takes tens of seconds, not ~7 — without
+    # failing on runner jitter. The precise budget lives in the slow lane.
+    assert dt < 30.0, (
+        f"deferred write should not block on embedding, took {dt:.1f}s"
+    )
     assert "deferred" in r
     item_id = r.split("Created: ")[1].split(" ")[0]
 
