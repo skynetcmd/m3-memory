@@ -242,7 +242,13 @@ jobs:
         set -x
         m3 --version
         m3 status
-        m3 doctor
+        # Grade only what this job installed. The setup above passes
+        # --no-shared-embedder, so the shared-embedder probe and the
+        # embedder-dependent probes (embedding-cascade, and the file-extraction
+        # LLM probe nested inside it) all report the ABSENCE we asked for and
+        # return 1. Demanding them here would fail the job for honouring its own
+        # flags. Every other probe still runs and still gates this step.
+        m3 doctor --skip-shared-embedder --skip-cascade
         # The store must be writable and searchable end to end, not merely present.
         m3 memory memory_write --content "e2e canary" --type note
         m3 memory memory_search --query "e2e canary" --k 1 | grep -q "e2e canary"
@@ -293,7 +299,8 @@ jobs:
         # out from under the data.
         m3 memory memory_search --query "e2e canary" --k 1 | grep -q "e2e canary"
         # And the install must still be healthy, not merely intact.
-        m3 doctor
+        # Same scoping as the first verify step — see the note there.
+        m3 doctor --skip-shared-embedder --skip-cascade
         # A second write must work too — a store that survived but is now
         # read-only or schema-broken is still a broken upgrade.
         m3 memory memory_write --content "post-upgrade canary" --type note
