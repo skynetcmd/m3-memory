@@ -346,12 +346,28 @@ def _fix_start_server() -> bool:
     # is always safe (never a second CUDA context). Detached so it outlives doctor.
     try:
         kwargs: dict[str, Any] = {}
+        exe = sys.executable
         if sys.platform == "win32":
-            kwargs["creationflags"] = 0x00000008  # DETACHED_PROCESS
+            # pythonw.exe (GUI subsystem) = the OS never allocates a console, so
+            # there is no window and no flash. DETACHED_PROCESS alone does NOT
+            # suppress one: it detaches the child from THIS console but still
+            # lets the OS give a console-subsystem python.exe its own. That left
+            # a stray terminal window titled with the interpreter path sitting
+            # on the user's desktop for as long as the embed server ran — and
+            # closing it killed their embedder. Observed 2026-08-10.
+            #
+            # CREATE_NO_WINDOW belts-and-braces the guarantee. Same pattern as
+            # dashboard_server._daemonize, which got this right.
+            pyw = sys.executable.replace("python.exe", "pythonw.exe")
+            if os.path.exists(pyw):
+                exe = pyw
+            kwargs["creationflags"] = (
+                subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+            )
         else:
             kwargs["start_new_session"] = True
         subprocess.Popen(  # noqa: S603 — fixed argv, our own script
-            [sys.executable, script, "--port", str(_PORT)],
+            [exe, script, "--port", str(_PORT)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs,
         )
         print(f"  [fix] launched embed server on {_DEFAULT_URL} (loading may take a few seconds).")
