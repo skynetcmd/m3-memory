@@ -147,3 +147,35 @@ def test_doctor_without_a_plan_checks_everything(wizard, monkeypatch):
     argv = _captured_argv(wizard, monkeypatch, None)
     assert "--skip-shared-embedder" not in argv
     assert "--skip-cascade" not in argv
+
+
+def test_step_doctor_survives_a_non_calledprocess_failure(wizard, monkeypatch):
+    """A doctor that fails to EXECUTE must not kill the wizard silently.
+
+    Only CalledProcessError was caught, so any other failure (OSError spawning
+    the child, a crash before it wrote a byte) escaped _step_doctor and exited
+    the process 1 — a code the wizard never returns itself (0/2/3). On
+    windows-latest, where the E2E lane has never been green, the log ended
+    mid-step: "Step 5/5: verifying the install (m3 doctor)" followed straight by
+    "##[error]Process completed with exit code 1" — no summary, no verdict, no
+    cause. §3: fail loud, never silent.
+
+    The install has already succeeded by this point, so the right outcome is
+    "installed but unverified" (False -> exit 3) with the reason named.
+    """
+    def boom(*a, **k):
+        raise OSError(8, "Exec format error")
+    monkeypatch.setattr(wizard, "_run", boom)
+    assert wizard._step_doctor() is False, (
+        "a doctor that cannot run must be reported, not allowed to kill setup"
+    )
+
+
+def test_step_doctor_still_propagates_keyboard_interrupt(wizard, monkeypatch):
+    """Ctrl-C must stay interruptible — the catch-all must not swallow it."""
+    def interrupt(*a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(wizard, "_run", interrupt)
+    import pytest as _pytest
+    with _pytest.raises(KeyboardInterrupt):
+        wizard._step_doctor()
