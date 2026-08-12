@@ -78,10 +78,35 @@ def cmd_migrate(*, yes: bool) -> int:
         print("be printed.")
 
     if not yes:
+        # Only prompt when a human can actually answer. An elevated window
+        # launched via `Start-Process -Verb RunAs` has a REAL console with
+        # nobody typing into it, so a bare input() blocks forever: the admin
+        # window just sits there, doing nothing it can explain, until the user
+        # kills it. That reads as m3 having hung — or worse, as an elevated
+        # process quietly doing something — and it is the exact path our own
+        # doctor recommends ("run `m3 governor migrate` from an ELEVATED
+        # shell"). The EOFError guard below does NOT cover it: EOF fires when
+        # stdin is CLOSED, not when it is an idle console.
+        #
+        # No tty -> no question. Refuse the destructive default and say exactly
+        # which flag makes it non-interactive (§3: fail loud, never hang).
+        _interactive = False
+        try:
+            _interactive = sys.stdin is not None and sys.stdin.isatty()
+        except Exception:  # noqa: BLE001 — a stdin that cannot be probed is not a tty
+            _interactive = False
+
+        if not _interactive:
+            print("\nNo interactive console — not removing anything.")
+            print("Re-run with --yes to confirm non-interactively:")
+            print("    m3 governor migrate --yes")
+            return 0
+
         try:
             ans = input("\nRemove these and let the governor own them? [Y/n] ").strip().lower()
-        except EOFError:
-            ans = "n"
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted — no changes made.")
+            return 0
         if ans in ("n", "no"):
             print("Aborted — no changes made.")
             return 0

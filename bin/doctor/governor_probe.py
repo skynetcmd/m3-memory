@@ -63,9 +63,18 @@ def run(brief: bool = False) -> int:
             # the user runs `m3 governor migrate`, hits "Access is denied", and
             # only THEN learns they needed elevation (the runaround we want to
             # spare them). §3: fail-loud/never-silent applies to the remedy too.
-            _elev = " from an ELEVATED shell" if sys.platform == "win32" else ""
-            print(f"⚠️  governor: NAG ({len(eligible)} legacy task(s); run "
-                  f"`m3 governor migrate`{_elev})")
+            # Recommend the flag, not just the command. On Windows the fix runs
+            # in a separate elevated window; a bare `m3 governor migrate` there
+            # stops at a [Y/n] prompt the user often cannot see (or which sits
+            # in a window they did not expect), so the admin console appears to
+            # hang. `--yes` is the honest recommendation for a command we are
+            # ALREADY telling them to run elevated and unattended.
+            if sys.platform == "win32":
+                print(f"⚠️  governor: NAG ({len(eligible)} legacy task(s); run "
+                      "`m3 governor migrate --yes` from an ELEVATED shell)")
+            else:
+                print(f"⚠️  governor: NAG ({len(eligible)} legacy task(s); run "
+                      "`m3 governor migrate`)")
         else:
             print("✅ governor: OK (no legacy scheduled tasks)")
         return 0
@@ -93,7 +102,12 @@ def run(brief: bool = False) -> int:
         print("             fails with 'Access is denied':")
     else:
         print("  fix      : run the migration (may need sudo / the task owner to remove):")
-    print("               m3 governor migrate")
+    if sys.platform == "win32":
+        # --yes on purpose: the elevated shell is a separate window, and a bare
+        # migrate stops at a [Y/n] prompt there — the console appears to hang.
+        print("               m3 governor migrate --yes")
+    else:
+        print("               m3 governor migrate")
     print("             or via the setup wizard:")
     print("               m3 setup")
 

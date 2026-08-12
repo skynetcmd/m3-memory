@@ -310,11 +310,29 @@ def prompt_backup_dir(assume_yes: bool) -> str:
         logger.info(f"Non-interactive mode: using backup dir {default}")
         return default
 
+    # Same rule as _confirm: never block on a console nobody is watching. Here
+    # the safe fallback is the DEFAULT (identical to the --yes path above), not
+    # a refusal — there is nothing destructive about choosing the recommended
+    # out-of-repo backup directory.
+    try:
+        _interactive = sys.stdin is not None and sys.stdin.isatty()
+    except Exception:  # noqa: BLE001 — a stdin that cannot be probed is not a tty
+        _interactive = False
+    if not _interactive:
+        os.makedirs(default, exist_ok=True)
+        cfg["backup_dir"] = default
+        save_config(cfg)
+        logger.info(f"No interactive console: using backup dir {default}")
+        return default
+
     print("\nBefore applying migrations, the database will be backed up.")
     print("Recommended: choose a directory OUTSIDE this repo to avoid any risk")
     print("of accidentally committing backup files (even though *.db is gitignored).")
     print(f"Default: {default}")
-    choice = input("Backup directory [press Enter for default]: ").strip()
+    try:
+        choice = input("Backup directory [press Enter for default]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        choice = ""
     backup_dir = choice or default
     backup_dir = os.path.abspath(os.path.expanduser(backup_dir))
     os.makedirs(backup_dir, exist_ok=True)
@@ -623,9 +641,36 @@ def cmd_status(args):
             print()
 
 def _confirm(prompt: str, assume_yes: bool) -> bool:
+    """Ask for consent — but only where a human can actually answer.
+
+    A bare input() blocks forever when nobody is at the console. That is not a
+    hypothetical for this script: the installer runs it as a SUBPROCESS, and on
+    Windows schema work can land in an elevated window opened by
+    `Start-Process -Verb RunAs`. Such a window has a REAL console with nobody
+    typing into it, so input() does not raise EOFError — it simply waits, and
+    the user is left with an admin window that does nothing it can explain.
+    (Exactly the shape that hung `m3 governor migrate`; see
+    tests/test_governor_migrate_never_hangs.py.)
+
+    Callers pass --yes for unattended runs. When they forget, refuse rather
+    than hang: declining a destructive migration costs a re-run, hanging costs
+    trust in a privileged process (§3 fail loud, never block).
+    """
     if assume_yes:
         return True
-    ans = input(f"{prompt} [y/N]: ").strip().lower()
+    try:
+        interactive = sys.stdin is not None and sys.stdin.isatty()
+    except Exception:  # noqa: BLE001 — a stdin that cannot be probed is not a tty
+        interactive = False
+    if not interactive:
+        print(f"{prompt} [y/N]: (no interactive console — declining; pass --yes "
+              "to confirm non-interactively)")
+        return False
+    try:
+        ans = input(f"{prompt} [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
     return ans in ("y", "yes")
 
 def _print_pending_plan(pending: list[int], migs: dict, direction: str) -> None:

@@ -1,8 +1,8 @@
 ---
 tool: bin/governor_cli.py
-sha1: 4f38530511aa
-mtime_utc: 2026-07-19T06:18:23.178933+00:00
-generated_utc: 2026-07-19T19:29:22.280583+00:00
+sha1: 8e3ff45d2912
+mtime_utc: 2026-08-12T04:21:26.807046+00:00
+generated_utc: 2026-08-12T04:29:40.243587+00:00
 private: false
 ---
 
@@ -27,7 +27,7 @@ removal failed (so scripts can detect a no-op-due-to-permission).
 
 ## Entry points
 
-- `def main()` (line 108)
+- `def main()` (line 133)
 - `if __name__ == "__main__"` guard
 
 ---
