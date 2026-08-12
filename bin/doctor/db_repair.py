@@ -5,33 +5,45 @@ shipped with. Kept verbatim semantically — the goal of B19 is the
 package split, not a behavior change.
 
 Each repair is idempotent and logs what it touched. Bundled under a
-single `run()` entry point that owns the SQLite connection lifecycle.
+single `run()` entry point.
+
+Backend discipline (§10a): every statement here goes through the storage seam.
+This module used to call ``sqlite3.connect(resolve_db_path(...))`` directly,
+which had two consequences on a PostgreSQL-primary install:
+
+  * ``db_path`` is a LABEL on a pooled backend, not a location (§10). The
+    installer separately created an unused ``agent_memory.db``, so the guard
+    found a file, opened it, "repaired" an EMPTY database, and reported
+    "Memory health check and repair completed." A false green over the wrong
+    store — the worst failure shape (§3 fail loud, §5 does it actually work).
+  * The metadata pass SELECTed every row, parsed each in Python, and issued a
+    per-row UPDATE. On a pooled backend that ships the whole table and pays N
+    round-trips (§4, §8). It is now one set-based statement via
+    ``Dialect.json_is_valid``.
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
-import sqlite3
-import sys
 
 logger = logging.getLogger("memory.doctor.db_repair")
 
 
-def fix_missing_timestamps(conn: sqlite3.Connection) -> int:
+def fix_missing_timestamps(conn, dialect) -> int:
     """Backfill NULL created_at on memory_items. Returns rows touched."""
     from m3_core.runtime import iso_utc_timestamp
     logger.info("Checking for missing timestamps...")
     res = conn.execute(
-        "UPDATE memory_items SET created_at = ? WHERE created_at IS NULL",
+        f"UPDATE memory_items SET created_at = {dialect.placeholder()} "
+        "WHERE created_at IS NULL",
         (iso_utc_timestamp(),),
     )
-    if res.rowcount:
-        logger.info(f"Fixed {res.rowcount} items with missing created_at.")
-    return res.rowcount
+    touched = res.rowcount if res is not None else 0
+    if touched and touched > 0:
+        logger.info(f"Fixed {touched} items with missing created_at.")
+    return max(touched, 0)
 
 
-def validate_relationships(conn: sqlite3.Connection) -> int:
+def validate_relationships(conn, dialect) -> int:
     """Prune relationships pointing to non-existent items. Returns rows deleted."""
     logger.info("Validating relationship integrity...")
     res = conn.execute(
@@ -39,63 +51,74 @@ def validate_relationships(conn: sqlite3.Connection) -> int:
         "WHERE from_id NOT IN (SELECT id FROM memory_items) "
         "   OR to_id   NOT IN (SELECT id FROM memory_items)"
     )
-    if res.rowcount:
-        logger.info(f"Pruned {res.rowcount} orphaned relationships.")
-    return res.rowcount
+    touched = res.rowcount if res is not None else 0
+    if touched and touched > 0:
+        logger.info(f"Pruned {touched} orphaned relationships.")
+    return max(touched, 0)
 
 
-def fix_metadata_json(conn: sqlite3.Connection) -> int:
-    """Replace invalid JSON in memory_items.metadata_json with '{}'.
-    Returns rows touched."""
+def fix_metadata_json(conn, dialect) -> int:
+    """Replace unparseable metadata_json with an empty object. Rows touched.
+
+    Set-based: the dialect renders the validity test, so the server does the
+    scan. ``IS NOT NULL`` is required because SQLite's ``json_valid(NULL)``
+    yields NULL rather than 0 — a NULL here means "no metadata", not "corrupt
+    metadata", and must not be rewritten.
+
+    On PostgreSQL ``metadata_json`` is JSONB, so the column type already
+    guarantees parseability and the expression is a constant TRUE — this pass
+    correctly matches nothing instead of scanning.
+    """
     logger.info("Validating metadata JSON strings...")
-    cursor = conn.execute(
-        "SELECT id, metadata_json FROM memory_items WHERE metadata_json IS NOT NULL"
+    empty = dialect.empty_json_default() or "{}"
+    res = conn.execute(
+        f"UPDATE memory_items SET metadata_json = {dialect.placeholder()} "
+        f"WHERE metadata_json IS NOT NULL AND NOT {dialect.json_is_valid('metadata_json')}",
+        (empty,),
     )
-    fixed = 0
-    for rid, meta in cursor.fetchall():
-        if not meta:
-            continue
-        try:
-            json.loads(meta)
-        except json.JSONDecodeError:
-            logger.warning(f"Repairing invalid JSON for item {rid}")
-            conn.execute(
-                "UPDATE memory_items SET metadata_json = '{}' WHERE id = ?",
-                (rid,),
-            )
-            fixed += 1
-    if fixed:
-        logger.info(f"Repaired {fixed} items with invalid metadata JSON.")
-    return fixed
+    touched = res.rowcount if res is not None else 0
+    if touched and touched > 0:
+        logger.info(f"Repaired {touched} items with invalid metadata JSON.")
+    return max(touched, 0)
 
 
 def run(db_path: str | None = None) -> int:
-    """Run all three repairs against the resolved DB.
+    """Run the three repair passes against the ACTIVE store.
 
-    Returns 0 on success, 1 on any unhandled exception (rolls back the
-    transaction). Missing DB file is a fatal error.
+    Returns 0 on success, 1 on any unhandled exception.
+
+    ``db_path`` is accepted for call-compatibility and honored only where it is
+    meaningful (a file backend); on a pooled backend the seam resolves the one
+    store and ignores it. There is deliberately no ``os.path.exists`` guard: on
+    a pooled backend that check inspects a path that is not the database (§10),
+    and it was how this module came to repair the wrong file.
     """
-    # Late import: keep this module importable without dragging m3_sdk
-    # into the package's import surface.
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/..")
-    from m3_sdk import resolve_db_path
+    import sys
+    sys.path.insert(0, __file__.rsplit("db_repair.py", 1)[0] + "..")
 
-    resolved = resolve_db_path(db_path)
-    if not os.path.exists(resolved):
-        logger.error(f"Database not found at {resolved}")
+    try:
+        from memory.backends import active_backend
+    except Exception as e:  # noqa: BLE001 — fail loud, never silently skip
+        logger.error(f"db_repair: storage seam not loadable: {type(e).__name__}: {e}")
         return 1
 
-    conn = sqlite3.connect(resolved)
     try:
-        fix_missing_timestamps(conn)
-        validate_relationships(conn)
-        fix_metadata_json(conn)
-        conn.commit()
+        backend = active_backend()
+        dialect = backend.dialect()
+    except Exception as e:  # noqa: BLE001 — e.g. PG selected with no DSN
+        logger.error(f"db_repair: no usable backend: {e}")
+        return 1
+
+    try:
+        with backend.connection() as conn:
+            fix_missing_timestamps(conn, dialect)
+            validate_relationships(conn, dialect)
+            fix_metadata_json(conn, dialect)
+            commit = getattr(conn, "commit", None)
+            if callable(commit):
+                commit()
         logger.info("Memory health check and repair completed.")
         return 0
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — report, don't crash the doctor
         logger.error(f"db_repair failed: {e}")
-        conn.rollback()
         return 1
-    finally:
-        conn.close()

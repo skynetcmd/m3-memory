@@ -1033,12 +1033,28 @@ def _run_chatlog_init(bridge: Path, capture_mode: str) -> Optional[str]:
     return f"[+] chatlog wired ({capture_mode}): {tail}"
 
 
-def _run_main_migrations(bridge: Path) -> Optional[str]:
+def _run_main_migrations(bridge: Path, db_backend: str = "sqlite") -> Optional[str]:
     """Run `migrate_memory.py up --yes --target main` to initialize the main DB.
 
     Ensures that a fresh install has a valid agent_memory.db so `doctor`
     reports [OK] instead of [ERROR] Database not found.
+
+    SQLite ONLY. ``migrate_memory.py`` is a SQLite tool throughout — it
+    ``sqlite3.connect()``s the target and copies ``-wal``/``-shm`` sidecars —
+    and on a PostgreSQL-primary install the PG schema is built by
+    ``_run_pg_migrations`` instead. Running both left a vestigial
+    ``agent_memory.db`` that nothing reads, and which doctor probes resolving
+    ``db_path`` directly would then inspect INSTEAD of the real store (§10:
+    on a pooled backend ``db_path`` is a label, not a location).
+
+    The PG side was already gated at the call site; this is the missing half of
+    that branch, not new policy.
     """
+    if db_backend != "sqlite":
+        # Not an error, and not worth a line in the install summary: the
+        # PG path reports its own status.
+        return None
+
     migrate_script = bridge.parent / "migrate_memory.py"
     if not migrate_script.is_file():
         return f"[!] migrate_memory.py missing under {bridge.parent}; skipping main DB init"
@@ -1340,10 +1356,16 @@ def _post_install(
     # Collect all messages first so we can suppress the section entirely when
     # nothing is actionable (every helper returning None = everything already
     # fine, which is a common outcome on well-configured boxes).
+    # The primary backend decides which schema bootstrap runs: SQLite gets
+    # migrate_memory.py below, PostgreSQL gets _run_pg_migrations further down.
+    # Default "sqlite" preserves the behavior of every existing install, where
+    # db_backend_choice is None (the silent SQLite default).
+    _primary_backend = db_backend_choice[0] if db_backend_choice else "sqlite"
+
     messages = [
         m for m in (
             _run_os_install(bridge),
-            _run_main_migrations(bridge),
+            _run_main_migrations(bridge, _primary_backend),
             _register_gemini_mcp(),
             _register_antigravity_mcp(),
             _register_cursor_mcp(),

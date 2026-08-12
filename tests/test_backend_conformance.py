@@ -93,6 +93,7 @@ def _divergent_methods() -> set[str]:
         "last_insert_id": (object(),),
         "json_extract_text": ("metadata_json", "k"),
         "json_extract_int": ("metadata_json", "k"),
+        "json_is_valid": ("metadata_json",),
         "coalesce_open_timestamp": ("valid_to", "?"),
         "temporal_open_clause": ("mi.valid_from", "<="),
         "table_exists": ("memory_items",),
@@ -164,6 +165,7 @@ def test_every_dialect_overrides_every_divergent_method():
             wrapper_to_fragment = {
                 "json_extract_text": "_json_extract_text_expr",
                 "json_extract_int": "_json_extract_int_expr",
+                "json_is_valid": "_json_is_valid_expr",
                 "temporal_open_clause": "_temporal_open_clause_expr",
                 "table_exists": "_table_exists_query",
                 "columns_of": "_columns_of_query",
@@ -308,3 +310,58 @@ def test_unregistered_backend_fails_loud():
 
     with pytest.raises(ValueError):
         dialect_for("mysql")  # type: ignore[arg-type]
+
+
+# ── doctor probes must go through the seam, never a raw driver ───────────────
+
+def test_doctor_probes_do_not_bypass_the_storage_seam():
+    """No doctor probe may call sqlite3.connect() directly.
+
+    A probe that opens a driver connection itself has hardcoded the backend.
+    On a PostgreSQL-primary install ``db_path`` is a LABEL, not a location
+    (S10), so such a probe inspects whatever file happens to sit at that path
+    instead of the real store.
+
+    That is not hypothetical: bin/doctor/db_repair.py did exactly this. The
+    installer separately created an unused agent_memory.db, so the probe found
+    a file, opened it, ran three WRITE passes against an EMPTY database and
+    reported "Memory health check and repair completed." A false green over the
+    wrong store -- worse than an error, because it looks like success (S3, S5).
+
+    Probes read via ``active_backend().open_readonly(db_path)`` and write via
+    ``active_backend().connection()``; the backend decides what db_path means.
+    """
+    import pathlib
+    import re
+
+    doctor_dir = (pathlib.Path(__file__).resolve().parent.parent
+                  / "bin" / "doctor")
+    assert doctor_dir.is_dir(), f"doctor package not found at {doctor_dir}"
+
+    # Parse rather than grep: a docstring explaining this very rule mentions
+    # sqlite3.connect, and a comment-and-prose scanner flags it. Only a real
+    # Call node counts.
+    import ast
+
+    offenders = []
+    for py in sorted(doctor_dir.glob("*.py")):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError as e:  # pragma: no cover — a broken probe is its own bug
+            offenders.append(f"{py.name}: unparseable ({e})")
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if (isinstance(fn, ast.Attribute) and fn.attr == "connect"
+                    and isinstance(fn.value, ast.Name)
+                    and fn.value.id in {"sqlite3", "psycopg", "psycopg2"}):
+                offenders.append(
+                    f"{py.name}:{node.lineno}: {fn.value.id}.connect(...)")
+
+    assert not offenders, (
+        "doctor probe opens a driver connection directly instead of going "
+        "through active_backend() -- inspects the wrong store on a pooled "
+        "backend:\n  " + "\n  ".join(offenders)
+    )

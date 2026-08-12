@@ -485,6 +485,34 @@ class Dialect:
         """Backend fragment for :meth:`json_extract_text` (post-validation)."""
         raise NotImplementedError("subclass must implement _json_extract_text_expr()")
 
+    def json_is_valid(self, column: str) -> str:
+        """A boolean SQL expression: does ``column`` hold parseable JSON?
+
+        ``json_is_valid("metadata_json")`` →
+        SQLite:   ``json_valid(metadata_json)``
+        Postgres: ``pg_input_is_valid(metadata_json::text, 'jsonb')``
+
+        Completes the JSON family (``json_extract_text`` / ``json_extract_int``
+        / ``json_column_to_dict`` / ``json_bind_value`` / ``empty_json_default``),
+        which could read and write JSON but never ask whether a value IS JSON.
+
+        Exists so a repair can be SET-BASED. The doctor's metadata repair used to
+        SELECT every row, ``json.loads()`` each one in Python, and issue a
+        per-row UPDATE for the failures. On SQLite that is merely wasteful; on a
+        pooled backend it ships the whole table across the wire and pays N
+        round-trips (§4 efficiency, §8 performance). With this expression the
+        same repair is one statement the server evaluates in place.
+
+        NULL semantics are the caller's to handle: SQLite's ``json_valid(NULL)``
+        yields NULL, not 0, so guard with ``IS NOT NULL`` when NULL means "no
+        metadata" rather than "corrupt metadata".
+        """
+        return self._json_is_valid_expr(column)
+
+    def _json_is_valid_expr(self, column: str) -> str:
+        """Backend fragment for :meth:`json_is_valid`."""
+        raise NotImplementedError("subclass must implement _json_is_valid_expr()")
+
     def json_extract_int(self, column: str, json_path: str) -> str:
         """Extract a top-level JSON field AS INTEGER (a numeric-cast expression).
 

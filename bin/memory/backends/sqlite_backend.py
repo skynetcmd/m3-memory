@@ -101,6 +101,12 @@ class SqliteDialect(Dialect):
     def _json_extract_int_expr(self, column: str, json_path: str) -> str:
         return f"CAST(json_extract({column}, '$.{json_path}') AS INTEGER)"
 
+    def _json_is_valid_expr(self, column: str) -> str:
+        # json_valid() ships with SQLite's JSON1 extension, compiled in by
+        # default since 3.38 and present in every interpreter m3 supports.
+        # Returns NULL (not 0) for a NULL input — see json_is_valid's docstring.
+        return f"json_valid({column})"
+
     def _temporal_open_clause_expr(self, column: str, op: str, p: str) -> str:
         return f"({column} IS NULL OR {column} = '' OR {column} {op} {p})"
 

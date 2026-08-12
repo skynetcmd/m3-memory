@@ -444,6 +444,23 @@ class PostgresDialect(Dialect):
     def _json_extract_int_expr(self, column: str, json_path: str) -> str:
         return f"({column} ->> '{json_path}')::int"
 
+    def _json_is_valid_expr(self, column: str) -> str:
+        # metadata_json is JSONB here (pg_primary_v1.sql), so validity is
+        # enforced by the COLUMN TYPE: Postgres parses on write and rejects
+        # malformed input, and psycopg hands back a dict on read. There is no
+        # such thing as a stored-but-unparseable JSONB value, which makes the
+        # honest expression a constant TRUE.
+        #
+        # Deliberately NOT pg_input_is_valid(col::text, 'jsonb'): that is PG16+
+        # only, and on a JSONB column it round-trips the value through text to
+        # re-answer a question the type system already settled — cost with no
+        # information. If a TEXT json column ever appears on this backend, THAT
+        # is when a real check belongs here, keyed off the column's type.
+        #
+        # The repair built on this therefore no-ops on Postgres rather than
+        # scanning, which is the correct outcome: nothing to repair.
+        return "TRUE"
+
     def _temporal_open_clause_expr(self, column: str, op: str, p: str) -> str:
         return f"({column} IS NULL OR {column} {op} {p})"
 
