@@ -107,3 +107,50 @@ def test_find_python_prefers_a_working_repo_venv(name, monkeypatch, tmp_path):
 
     monkeypatch.setattr(mod, "usable_interpreter", lambda c: str(c) == str(good))
     assert mod.find_python(tmp_path) == str(good)
+
+
+# ── scheduled-task interpreter: existence is not usability ───────────────────
+
+def _sched():
+    import install_schedules
+    return install_schedules
+
+
+def test_scheduled_task_interpreter_rejects_a_dependency_less_venv(tmp_path):
+    """A registered task BAKES IN an absolute interpreter path and runs under
+    pythonw.exe, which has no console. Binding one that cannot import m3's deps
+    means every fire dies silently, forever, with nothing but a non-zero exit in
+    the task history.
+
+    A stub .venv beside the installed payload did exactly this to all seven
+    AgentOS_* jobs (2026-08-11) — the same stub that had already killed chatlog
+    capture through the hook-side resolver.
+    """
+    import venv as _venv
+
+    isch = _sched()
+    root = tmp_path / "payload"
+    (root).mkdir()
+    _venv.create(root / ".venv", with_pip=False, system_site_packages=False)
+
+    scripts = "Scripts" if os.name == "nt" else "bin"
+    exe = "python.exe" if os.name == "nt" else "python"
+    stub = root / ".venv" / scripts / exe
+    if not stub.exists():
+        pytest.skip("could not create a stub venv on this platform")
+    if isch._interpreter_has_deps(str(stub)):
+        pytest.skip("stub venv unexpectedly has httpx; cannot test the guard")
+
+    assert isch._interpreter_has_deps(str(stub)) is False
+    # ...and the resolver must NOT hand that path to a task registration.
+    resolved = isch._venv_python(str(root))
+    assert os.path.abspath(resolved) != os.path.abspath(str(stub))
+
+
+def test_scheduled_task_interpreter_accepts_the_running_one():
+    """sys.executable got here, so it necessarily has the deps."""
+    assert _sched()._interpreter_has_deps(sys.executable) is True
+
+
+def test_scheduled_task_interpreter_rejects_a_missing_path(tmp_path):
+    assert _sched()._interpreter_has_deps(str(tmp_path / "nope" / "python.exe")) is False

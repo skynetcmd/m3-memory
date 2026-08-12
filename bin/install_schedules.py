@@ -378,9 +378,48 @@ def remove_unix_cognitive_loop():
         _safe_print(f"{WARN} remove_unix_cognitive_loop: unsupported OS {os_name}")
 
 
+def _interpreter_has_deps(candidate: str) -> bool:
+    """True only if `candidate` can import m3's dependencies.
+
+    Existence is NOT usability. A bare `python -m venv` (no packages,
+    include-system-site-packages=false) satisfies os.path.exists and then dies
+    at `import httpx` on every run.
+
+    That is not hypothetical, and it is worse here than anywhere else in the
+    codebase: a scheduled task BAKES THE ABSOLUTE PATH IN at registration time
+    and runs under pythonw.exe, which has no console. So a task bound to a
+    dependency-less interpreter fails silently on every fire, forever, with no
+    window, no stderr, and nothing in the task history but a non-zero exit.
+    A stub .venv beside the installed payload did exactly this to all seven
+    AgentOS_* jobs (found 2026-08-11); the same stub had already killed chatlog
+    capture through the equivalent hook-side resolver.
+
+    Probing costs one subprocess per registration — paid once, at install.
+    """
+    if not candidate or not os.path.exists(candidate):
+        return False
+    # pythonw.exe has no console and no stdout; probe with its python.exe
+    # sibling, which shares the venv and therefore the site-packages.
+    probe = candidate
+    if candidate.lower().endswith("pythonw.exe"):
+        sibling = os.path.join(os.path.dirname(candidate), "python.exe")
+        if os.path.exists(sibling):
+            probe = sibling
+    try:
+        return subprocess.run(
+            [probe, "-c", "import httpx"],
+            capture_output=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            if os.name == "nt" else 0,
+        ).returncode == 0
+    except Exception:  # noqa: BLE001 — an unusable probe is an unusable interpreter
+        return False
+
+
 def _venv_python(m3_memory_root: str, windowless: bool = False) -> str:
     """Resolve the project venv's python interpreter, cross-platform.
-    Falls back to sys.executable if no venv is present.
+    Falls back to sys.executable if no venv is present OR the venv found cannot
+    import m3's dependencies (see _interpreter_has_deps).
 
     windowless=True (Windows only) returns pythonw.exe instead of python.exe.
     pythonw.exe is a GUI-subsystem binary — the OS never allocates a console
@@ -393,7 +432,7 @@ def _venv_python(m3_memory_root: str, windowless: bool = False) -> str:
     if _os_name() == "Windows":
         exe = "pythonw.exe" if windowless else "python.exe"
         candidate = os.path.join(m3_memory_root, ".venv", "Scripts", exe)
-        if os.path.exists(candidate):
+        if _interpreter_has_deps(candidate):
             return candidate
         # Fall back to a sibling of sys.executable (e.g. pythonw.exe next to
         # python.exe) before giving up on the windowless request entirely.
@@ -404,7 +443,7 @@ def _venv_python(m3_memory_root: str, windowless: bool = False) -> str:
         return sys.executable
     else:
         candidate = os.path.join(m3_memory_root, ".venv", "bin", "python")
-        return candidate if os.path.exists(candidate) else sys.executable
+        return candidate if _interpreter_has_deps(candidate) else sys.executable
 
 
 def get_schedule_specs(m3_memory_root, dashboard_port: int = 8088):
