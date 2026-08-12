@@ -1,8 +1,8 @@
 ---
 tool: bin/test_mcp_proxy_unit.py
-sha1: 2a4c867946d9
-mtime_utc: 2026-07-19T03:04:59.638680+00:00
-generated_utc: 2026-07-19T19:29:22.983779+00:00
+sha1: 9c41b3bac4a7
+mtime_utc: 2026-08-10T00:22:42.022477+00:00
+generated_utc: 2026-08-12T00:59:01.765554+00:00
 private: false
 ---
 
@@ -46,6 +46,7 @@ _(no argparse arguments detected)_
 
 - `mcp_proxy`
 - `mcp_tool_catalog`
+- `mcp_tool_catalog (TOOLS)`
 
 ---
 

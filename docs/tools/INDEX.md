@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-08-08T14:40:50.174324+00:00._
+_Generated 2026-08-12T00:59:01.840717+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -78,6 +78,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/m3_entities.py](m3_entities.md) | m3_entities — build entity-graph rows from your core/chatlog DBs. |  |
 | [bin/m3_entities_gliner.py](m3_entities_gliner.md) | m3_entities_gliner — fast local entity extraction via GLiNER (zero-shot NER). |  |
 | [bin/m3_lifecycle_summary.py](m3_lifecycle_summary.md) | CLI wrapper for the memory lifecycle/contradiction observability summary. |  |
+| [bin/m3_loop_watchdog.py](m3_loop_watchdog.md) | m3 cognitive-loop watchdog — progress-based self-heal for all three OSes. |  |
 | [bin/m3_sdk.py](m3_sdk.md) | m3_sdk — facade. Real implementations live in bin/m3_core/*. |  |
 | bin/macbook_status_server.py | MacBook network & LM Studio status server for Homepage dashboard. | yes |
 | [bin/mcp_proxy.py](mcp_proxy.md) | MCP Tool Execution Proxy  v2.0 |  |
@@ -120,7 +121,6 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/test_debug_agent.py](test_debug_agent.md) | End-to-end test suite for debug_agent_bridge.py. |  |
 | [bin/test_fips_integrity.py](test_fips_integrity.md) | test_fips_integrity.py — Validation suite for FIPS-ready crypto abstraction. |  |
 | [bin/test_keychain.py](test_keychain.md) | (no docstring) |  |
-| [bin/test_knowledge.py](test_knowledge.md) | (no docstring) |  |
 | [bin/test_mcp_proxy.py](test_mcp_proxy.md) | test_mcp_proxy.py — End-to-end proxy test suite |  |
 | [bin/test_mcp_proxy_unit.py](test_mcp_proxy_unit.md) | test_mcp_proxy_unit.py - In-process unit tests for mcp_proxy. |  |
 | [bin/test_memory_bridge.py](test_memory_bridge.md) | End-to-end test suite for memory_bridge.py. |  |

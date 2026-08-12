@@ -1,8 +1,8 @@
 ---
 tool: bin/gen_wiki.py
-sha1: fef2e9d1bd65
-mtime_utc: 2026-08-07T23:53:52.046526+00:00
-generated_utc: 2026-08-08T14:40:49.858688+00:00
+sha1: 02fb2f6c3591
+mtime_utc: 2026-07-26T23:40:17.996572+00:00
+generated_utc: 2026-08-12T00:59:01.398909+00:00
 private: false
 ---
 

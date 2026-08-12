@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_maintenance.py
-sha1: 5fbc5c5f838f
-mtime_utc: 2026-08-07T23:53:52.232450+00:00
-generated_utc: 2026-08-08T14:40:50.019343+00:00
+sha1: 399365ecf308
+mtime_utc: 2026-08-09T19:41:32.430027+00:00
+generated_utc: 2026-08-12T00:59:01.618710+00:00
 private: false
 ---
 
@@ -37,6 +37,7 @@ _(no argparse arguments detected)_
 - `_task_runtime (add_log_file_arg, setup_task_runtime)`
 - `agent_protocol (strip_code_fences)`
 - `audit_trail (write_audit_entry)`
+- `llm_failover (apply_thinking_suppression)`
 - `m3_sdk (_LAST_USER_INTERACTION)`
 - `memory_core`
 - `memory_core (DEDUP_LIMIT, DEDUP_THRESHOLD, EMBED_DIM, _content_hash, _cosine, _db, _embed, _get_embed_client, _pack, _unpack, ctx, get_best_llm, m3_core_rs, memory_link_impl)`
@@ -50,7 +51,7 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 1269)
+- `httpx.AsyncClient()` (line 1275)
 
 
 ---

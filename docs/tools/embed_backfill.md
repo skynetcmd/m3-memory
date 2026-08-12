@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_backfill.py
-sha1: 012363f25eba
-mtime_utc: 2026-07-19T03:04:59.559782+00:00
-generated_utc: 2026-07-19T19:29:22.187235+00:00
+sha1: 362dcc2a97b2
+mtime_utc: 2026-08-09T19:41:32.410028+00:00
+generated_utc: 2026-08-12T00:59:01.350903+00:00
 private: false
 ---
 
@@ -49,7 +49,8 @@ Hardening:
   - Hard runtime cap (--max-runtime-min)
   - Auto-abort after N consecutive batch failures (--max-consecutive-fails)
   - Dim validation (--expected-dim) — won't write malformed embeddings
-  - Per-row size cap (--max-row-bytes) — skips oversize content
+  - Per-row size cap (--max-row-bytes) — oversize content is subdivided and
+    mean-pooled by default (--no-subdivide-oversize restores skipping)
   - Optional lockfile to prevent two sweepers racing on the same DB
 
 This script is read-mostly + small bulk writes; safe to run alongside
@@ -59,7 +60,7 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 
 ## Entry points
 
-- `def main()` (line 448)
+- `def main()` (line 526)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -82,7 +83,9 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 | `--timeout-s` | f'Per-batch embed call timeout. Default: {DEFAULT_TIMEOUT_S}s.' | `DEFAULT_TIMEOUT_S` |  | float |  |
 | `--max-runtime-min` | f'Hard kill at N min wall-clock. Default: {DEFAULT_MAX_RUNTIME_MIN}.' | `DEFAULT_MAX_RUNTIME_MIN` |  | int |  |
 | `--max-consecutive-fails` | f'Abort after N back-to-back batch fails. Default: {DEFAULT_MAX_CONSEC_FAILS}.' | `DEFAULT_MAX_CONSEC_FAILS` |  | int |  |
-| `--max-row-bytes` | f'Skip rows whose content > N bytes. Default: {DEFAULT_MAX_ROW_BYTES} (bge-m3 ctx limit).' | `DEFAULT_MAX_ROW_BYTES` |  | int |  |
+| `--max-row-bytes` | f"Size threshold for a row's post-transform text. Default: {DEFAULT_MAX_ROW_BYTES} (bge-m3 ctx limit). See --subdivide-oversize for what happens above it." | `DEFAULT_MAX_ROW_BYTES` |  | int |  |
+| `--subdivide-oversize` | Embed rows over --max-row-bytes by splitting them and mean-pooling the sub-vectors, instead of skipping them. Default: on. | `True` |  | store_true |  |
+| `--no-subdivide-oversize` | Drop rows over --max-row-bytes (pre-2026.8.19.5 behaviour). They are then excluded from the pending count so they cannot livelock the cognitive loop, and reported separately as EXCLUDED oversize. | `True` |  | store_false |  |
 | `--expected-dim` | f'Skip embeddings whose dim != N. Default: {DEFAULT_EXPECTED_DIM}. Pass 0 to disable.' | `DEFAULT_EXPECTED_DIM` |  | int |  |
 | `--lockfile` | Refuse to start if this file exists; create it on start, delete on clean exit. Use for cron / scheduled sweepers. | None |  | Path |  |
 | `--no-augment-anchors` | Skip _augment_embed_text_with_anchors before embed. Default OFF — anchors match memory_write_impl behavior. | `False` |  | store_true |  |
@@ -108,9 +111,10 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 
 **sqlite**
 
-- `sqlite3.connect()  → `str(args.db)`` (line 265)
-- `sqlite3.connect()  → `str(db_path)`` (line 128)
-- `sqlite3.connect()  → `str(db_path)`` (line 233)
+- `sqlite3.connect()  → `str(args.db)`` (line 320)
+- `sqlite3.connect()  → `str(db_path)`` (line 129)
+- `sqlite3.connect()  → `str(db_path)`` (line 258)
+- `sqlite3.connect()  → `str(db_path)`` (line 286)
 
 
 ---

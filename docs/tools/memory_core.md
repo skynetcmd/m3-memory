@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 8b0f93c7cf3c
-mtime_utc: 2026-08-07T23:53:52.230327+00:00
-generated_utc: 2026-08-08T14:40:50.002448+00:00
+sha1: b069ac27aa8e
+mtime_utc: 2026-08-09T19:41:32.429028+00:00
+generated_utc: 2026-08-12T00:59:01.595223+00:00
 private: false
 ---
 
@@ -83,8 +83,8 @@ _(none detected)_
 - `embedding_utils (infer_change_agent)`
 - `embedding_utils (pack)`
 - `embedding_utils (unpack)`
+- `llm_failover (apply_thinking_suppression, get_best_llm)`
 - `llm_failover (clear_failover_caches)`
-- `llm_failover (get_best_llm)`
 - `m3_sdk (M3Context, resolve_db_path)`
 
 ---

@@ -1,8 +1,8 @@
 ---
 tool: bin/run_observer.py
-sha1: 2cf71c0ee3d4
-mtime_utc: 2026-08-07T23:53:52.249552+00:00
-generated_utc: 2026-08-08T14:40:50.085000+00:00
+sha1: 30bf7d81269f
+mtime_utc: 2026-08-09T19:41:32.433028+00:00
+generated_utc: 2026-08-12T00:59:01.703968+00:00
 private: false
 ---
 
@@ -39,7 +39,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 ## Entry points
 
-- `def main()` (line 850)
+- `def main()` (line 872)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -69,6 +69,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 - `agent_protocol (strip_code_fences)`
 - `auth_utils (get_api_key)`
+- `llm_failover (apply_thinking_suppression, apply_thinking_suppression_anthropic, reply_ran_out_of_room)`
 - `m3_sdk (getenv_compat)`
 - `memory_core`
 - `slm_intent (load_profile)`

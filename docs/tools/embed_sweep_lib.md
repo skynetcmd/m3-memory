@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_sweep_lib.py
-sha1: 22720e6d9dc1
-mtime_utc: 2026-05-04T23:42:45.306781+00:00
-generated_utc: 2026-05-05T01:49:21.670849+00:00
+sha1: e82f09a28b76
+mtime_utc: 2026-08-09T19:41:32.411027+00:00
+generated_utc: 2026-08-12T00:59:01.363394+00:00
 private: false
 ---
 

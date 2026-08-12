@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: d78e84b5f9a0
-mtime_utc: 2026-08-07T23:53:52.092318+00:00
-generated_utc: 2026-08-08T14:40:49.880988+00:00
+sha1: 3585706d9b15
+mtime_utc: 2026-08-09T19:41:32.416028+00:00
+generated_utc: 2026-08-12T00:59:01.432447+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 1129)
+- `def main()` (line 1267)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -58,25 +58,33 @@ Uses project virtual environment paths and ensures log directories exist.
 
 - `subprocess.run()  → `['crontab', '-l']`` (line 61)
 - `subprocess.run()  → `['crontab', tmp_path]`` (line 114)
-- `subprocess.run()  → `['launchctl', 'list']`` (line 1061)
+- `subprocess.run()  → `['launchctl', 'list']`` (line 1182)
 - `subprocess.run()  → `['launchctl', 'load', dest]`` (line 163)
 - `subprocess.run()  → `['launchctl', 'load', dest]`` (line 215)
+- `subprocess.run()  → `['launchctl', 'load', dest]`` (line 324)
 - `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 162)
 - `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 214)
-- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 251)
-- `subprocess.run()  → `['schtasks', '/Create', '/TN', task['name'], '/XML', xml_path, '/F']`` (line 870)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 850)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 980)
-- `subprocess.run()  → `['schtasks', '/Query', '/TN', name, '/XML', 'ONE']`` (line 995)
-- `subprocess.run()  → `['schtasks', '/Run', '/TN', name]`` (line 757)
-- `subprocess.run()  → `['schtasks', '/Run', '/TN', name]`` (line 791)
+- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 323)
+- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 341)
+- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 355)
+- `subprocess.run()  → `['plutil', '-extract', 'KeepAlive', 'raw', '-o', '-', dest]`` (line 1195)
+- `subprocess.run()  → `['schtasks', '/Create', '/TN', task['name'], '/XML', xml_path, '/F']`` (line 991)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 1101)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 971)
+- `subprocess.run()  → `['schtasks', '/Query', '/TN', name, '/XML', 'ONE']`` (line 1116)
+- `subprocess.run()  → `['schtasks', '/Run', '/TN', name]`` (line 878)
+- `subprocess.run()  → `['schtasks', '/Run', '/TN', name]`` (line 912)
 - `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 179)
-- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 231)
-- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 265)
-- `subprocess.run()  → `['systemctl', '--user', 'disable', '--now', 'm3-cognitive-loop.service']`` (line 259)
-- `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-cognitive-loop.service']`` (line 232)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 233)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 267)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 297)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 371)
+- `subprocess.run()  → `['systemctl', '--user', 'disable', '--now', 'm3-cognitive-loop.service']`` (line 365)
+- `subprocess.run()  → `['systemctl', '--user', 'disable', '--now', 'm3-loop-watchdog.timer']`` (line 288)
+- `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-cognitive-loop.service']`` (line 234)
 - `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-dashboard.service']`` (line 180)
-- `subprocess.run()  → `['systemctl', '--user', 'is-active', unit]`` (line 1081)
+- `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-loop-watchdog.timer']`` (line 271)
+- `subprocess.run()  → `['systemctl', '--user', 'is-active', unit]`` (line 1219)
 
 
 ---

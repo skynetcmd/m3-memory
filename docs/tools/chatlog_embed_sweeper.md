@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_embed_sweeper.py
-sha1: 35b62eed11b5
-mtime_utc: 2026-08-07T23:53:51.770285+00:00
-generated_utc: 2026-08-08T14:40:49.730088+00:00
+sha1: 60c2d14caa21
+mtime_utc: 2026-08-10T00:13:35.126840+00:00
+generated_utc: 2026-08-12T00:59:01.218980+00:00
 private: false
 ---
 
@@ -20,7 +20,7 @@ and drains any spill-to-disk files from the async write queue.
 
 ## Entry points
 
-- `async def main()` (line 289)
+- `async def main()` (line 329)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -48,6 +48,7 @@ and drains any spill-to-disk files from the async write queue.
 
 - `_task_runtime (add_log_file_arg, setup_task_runtime)`
 - `chatlog_config`
+- `chatlog_core (_executemany_insert)`
 - `embed_sweep_lib (Counters)`
 - `embed_sweep_lib (run_embed_loop)`
 - `embedding_utils (pack)`
@@ -63,15 +64,14 @@ and drains any spill-to-disk files from the async write queue.
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 121)
-- `sqlite3.connect()  → `db_path`` (line 367)
+- `sqlite3.connect()  → `db_path`` (line 425)
 
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `memory.backends (active_backend)`
 
 ---
 

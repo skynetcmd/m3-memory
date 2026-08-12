@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_cognitive_loop.py
-sha1: dd3c78332752
-mtime_utc: 2026-08-07T23:53:52.112853+00:00
-generated_utc: 2026-08-08T14:40:49.913767+00:00
+sha1: 026cc4aae9f4
+mtime_utc: 2026-08-10T00:13:35.128840+00:00
+generated_utc: 2026-08-12T00:59:01.477866+00:00
 private: false
 ---
 
@@ -30,7 +30,7 @@ for m3_enrich and m3_entities.
 
 ## Entry points
 
-- `def main()` (line 1359)
+- `def main()` (line 1669)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -50,6 +50,8 @@ for m3_enrich and m3_entities.
 | `--profile-enrich` | Profile for enrichment | `enrich_local_qwen` |  | str |  |
 | `--reflector-threshold` | Min observations before Reflector (default: 5) | `5` |  | int |  |
 | `--skip-entities` | Skip entity extraction | `False` |  | store_true |  |
+| `--skip-files-extract` | Skip draining queued file-extraction leaves (extract_mode='queue') | `False` |  | store_true |  |
+| `--files-db` | Files DB path override (default: M3_FILES_DB_PATH env / config) | None |  | str |  |
 | `--skip-enrich` | Skip enrichment pass | `False` |  | store_true |  |
 | `--skip-embed` | Skip embed-backfill pass (draining deferred zero-lag-write vectors) | `False` |  | store_true |  |
 | `--skip-classify` | Skip classification pass (resolving type='auto' rows deferred by zero-lag writes) | `False` |  | store_true |  |
@@ -91,6 +93,7 @@ for m3_enrich and m3_entities.
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config`
+- `chatlog_embed_sweeper`
 - `chatlog_prune`
 - `consolidate_beliefs`
 - `distill_procedures`
@@ -116,7 +119,7 @@ for m3_enrich and m3_entities.
 
 **sqlite**
 
-- `sqlite3.connect()  → `path`` (line 707)
+- `sqlite3.connect()  → `path`` (line 882)
 
 
 ---
@@ -124,6 +127,9 @@ for m3_enrich and m3_entities.
 ## Notable external imports
 
 - `atexit`
+- `ctypes`
+- `files_memory.extract (extract_for_pending_leaves)`
+- `files_memory.extract (has_pending_extraction)`
 - `m3_core.autonomy (autonomy_flag)`
 - `m3_core.autonomy (ensure_autonomy_config)`
 - `memory.backends (active_backend)`
@@ -132,12 +138,14 @@ for m3_enrich and m3_entities.
 - `memory.backends (dialect)`
 - `memory.embed (recover_if_fallback_healthy)`
 - `memory.enrich (_auto_classify)`
+- `resource`
 - `types (SimpleNamespace)`
 
 ---
 
 ## File dependencies (repo paths referenced)
 
+- `.loop_heartbeat.json`
 - `.loop_pass_runs.json`
 
 ---
