@@ -22,7 +22,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
+
+import pytest
 
 # conftest.py already puts bin/ on sys.path. Belt-and-suspenders so this
 # file is also importable in isolation:
@@ -337,3 +340,59 @@ def test_no_hardcoded_version_in_console_script_version_flags():
         "hardcoded version literal(s) -- read m3_memory.__version__ instead:\n  "
         + "\n  ".join(offenders)
     )
+
+
+# ── test-count claims ──────────────────────────────────────────────────
+#
+# Same drift shape as the tool count, previously ungated: the README advertises
+# a rounded floor ("N+ tests") that only moves when someone remembers. It had
+# rotted to "2,400+" while the suite had grown well past it.
+#
+# The floor counts `def test_` FUNCTIONS, not collected cases. Collected counts
+# vary by environment -- optional extras, plugins, and the working directory all
+# change what pytest gathers (a --collect-only here reported 3,654 while the
+# pre-push hook's run reported 3,176). Pinning a published claim to a number
+# that moves with the machine makes the gate itself flaky, and a flaky gate gets
+# disabled. The static function count is identical everywhere, and is a
+# CONSERVATIVE floor: parametrisation only ever expands it at run time, so a
+# README claim at or below it is true on every machine.
+
+_TEST_FLOOR_RE = re.compile(r"([0-9][0-9,]{2,})\s*\*{0,2}\+?\s*\*{0,2}\s*tests", re.I)
+
+
+def _readme_test_floors() -> list[int]:
+    with open(os.path.join(_ROOT, "README.md"), encoding="utf-8") as fh:
+        text = fh.read()
+    return [int(m.group(1).replace(",", "")) for m in _TEST_FLOOR_RE.finditer(text)]
+
+
+def _count_test_functions() -> int:
+    """`def test_` functions across tests/ -- environment-independent."""
+    total = 0
+    for root, _dirs, files in os.walk(os.path.join(_ROOT, "tests")):
+        for fn in files:
+            if fn.startswith("test_") and fn.endswith(".py"):
+                with open(os.path.join(root, fn), encoding="utf-8", errors="replace") as fh:
+                    total += sum(1 for ln in fh if ln.lstrip().startswith("def test_"))
+    return total
+
+
+def test_readme_test_count_floor_is_honest():
+    """The advertised test floor must be a true floor, and not badly stale.
+
+    Guards both directions: it may never OVERSTATE the suite (a false claim),
+    and may not fall more than 500 behind (stale enough to undersell it).
+    """
+    floors = _readme_test_floors()
+    assert floors, "README no longer states a test count -- expected a '<N> tests' claim"
+    actual = _count_test_functions()
+    for claimed in floors:
+        assert claimed <= actual, (
+            f"README claims {claimed:,} tests but only {actual:,} `def test_` "
+            "functions exist -- the floor OVERSTATES the suite. Lower it."
+        )
+        assert actual - claimed < 500, (
+            f"README claims {claimed:,} tests while {actual:,} `def test_` functions "
+            "exist -- the floor is stale. Round the real number down and update it "
+            "(the At-a-Glance table and the Why Trust This section)."
+        )

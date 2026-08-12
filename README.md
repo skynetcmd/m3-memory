@@ -132,7 +132,7 @@ Short version: M3 is the **local-first, MCP-native** option that stays *yours* a
 - [Memory Model](#-memory-model-at-a-glance)
 - [Installation & Onboarding](#-installation)
 - [Domain Gating (Token Optimization)](#-domain-gating-the-full-catalog-without-the-context-cost)
-- [Sovereign & Air-Gapped Deployments](#-sovereign-air-gapped-deployments)
+- [Sovereign & Air-Gapped Deployments](#-sovereign--air-gapped-deployments)
 - [Interactive Features & Capabilities](#-what-m3-does)
 - [Documentation Index](#-documentation-index)
 - [Target Audience & Fit](#-who-this-is-for)
