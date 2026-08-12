@@ -61,6 +61,31 @@ def _resolve_python_cmd(m3_repo_root: str) -> str:
     )
 
 
+def _hook_env_prefix(engine_root: str, config_root: str) -> str:
+    """Inline `VAR=val ` root pins for a hook command — POSIX only.
+
+    Returns a trailing-space prefix on macOS/Linux, and an EMPTY STRING on
+    Windows. `VAR=val cmd` is POSIX shell syntax with no cmd.exe equivalent:
+    cmd tries to run a program literally named `M3_ENGINE_ROOT=C:/...` and the
+    hook dies before it starts. Neither `set VAR=val&& cmd` nor a `cmd /c "..."`
+    wrapper is a safe substitute — the harness may re-parse the string, and a
+    value containing `&`, `^`, or `%` then splits in ways that corrupt the
+    variable name. There is no quoting that survives every layer, so on Windows
+    the correct move is to pass no env at all.
+
+    Dropping the pins is safe because they are redundant with two other
+    mechanisms: `.chatlog_config.json` pins `db_path` directly, and both the
+    hook and the MCP server default to the same `~/.m3/{engine,config}`. The
+    prefix only ever mattered for a relocated-root install, and such an install
+    on Windows should set the roots as USER environment variables (which every
+    child process inherits, including hooks) rather than rely on a per-command
+    prefix the shell cannot parse.
+    """
+    if os.name == "nt":
+        return ""
+    return f"M3_ENGINE_ROOT={engine_root} M3_CONFIG_ROOT={config_root} "
+
+
 def generate_configs():
     """Generates gemini-settings.json and claude-settings.json from templates."""
     # m3_repo_root  = the repo directory (where bin/ lives)
@@ -150,12 +175,26 @@ def generate_configs():
 
     # Inline-pin the engine + config roots on every capture hook. The hook
     # inherits Claude Code's PROCESS env (NOT the server env block above), so
-    # without these it resolves a different engine root than the server and the
-    # two chatlog halves diverge (CLAUDE.md "Split-brain hazard"). The shell
-    # `VAR=val cmd` prefix is honored because Claude Code runs hooks through a
-    # shell (Git Bash on Windows). m3 roots are space-free by convention, matching
-    # the prior working format.
-    _root_pins = f"M3_ENGINE_ROOT={engine_root} M3_CONFIG_ROOT={config_root} "
+    # without these it can resolve a different engine root than the server and
+    # diverge the two chatlog halves (CLAUDE.md "Split-brain hazard").
+    #
+    # ⚠ The `VAR=val cmd` prefix is POSIX SHELL SYNTAX AND IS FATAL ON WINDOWS.
+    # An earlier version emitted it unconditionally, on the belief that Claude
+    # Code routes hooks through Git Bash. It does not — it runs them through
+    # cmd.exe, which has no such construct and tries to execute a program named
+    # `M3_ENGINE_ROOT=C:/...`. Every hook then failed instantly with
+    # "'M3_ENGINE_ROOT' is not recognized as an internal or external command",
+    # and because a failing Stop hook is silent, chatlog capture died with no
+    # symptom other than a last_write_at that stopped advancing. Confirmed dead
+    # ~2 days on a live install before anyone noticed (2026-08-09..11).
+    #
+    # On Windows the pins are therefore omitted from the command string. That is
+    # safe, not a downgrade: the roots are ALSO pinned in the chatlog config
+    # (`db_path` in .chatlog_config.json) and default to the same ~/.m3/{engine,
+    # config} the server resolves, so the hook and server still agree. The
+    # prefix was belt-and-braces for a relocated-root install, and on Windows the
+    # belt has to come off because it strangles the wearer.
+    _root_pins = _hook_env_prefix(engine_root, config_root)
 
     # Invoke the .py hook directly with the venv interpreter — no /bin/sh, which
     # doesn't exist on native Windows (it only works today because Claude Code

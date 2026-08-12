@@ -18,12 +18,59 @@ import chatlog_init as ci  # noqa: E402
 
 
 def test_root_env_prefix_contains_both_pins(monkeypatch):
+    """POSIX: both roots inline-pinned, trailing space so it prefixes directly."""
+    monkeypatch.setattr(ci.os, "name", "posix")
     monkeypatch.setenv("M3_MEMORY_ROOT", "/data/.m3")
     monkeypatch.setenv("M3_ENGINE_ROOT", "/data/.m3/engine")
     monkeypatch.setenv("M3_CONFIG_ROOT", "/data/.m3/config")
     p = ci._root_env_prefix()
     assert "M3_ENGINE_ROOT=" in p and "M3_CONFIG_ROOT=" in p
     assert p.endswith(" ")  # prefixes the command directly
+
+
+def test_root_env_prefix_is_empty_on_windows(monkeypatch):
+    """Windows: NO inline env prefix — `VAR=val cmd` is POSIX shell syntax.
+
+    Claude Code runs hooks through cmd.exe, which has no such construct: it
+    tries to execute a program literally named `M3_ENGINE_ROOT=C:/...` and the
+    hook dies before it starts, with capture failing silently. This killed
+    chatlog capture for ~2 days on a live install (2026-08-09..11). The roots
+    stay correct via .chatlog_config.json's db_path and the shared ~/.m3
+    defaults, so omitting the prefix is safe, not a downgrade.
+    """
+    monkeypatch.setattr(ci.os, "name", "nt")
+    monkeypatch.setenv("M3_ENGINE_ROOT", "C:/data/.m3/engine")
+    monkeypatch.setenv("M3_CONFIG_ROOT", "C:/data/.m3/config")
+    assert ci._root_env_prefix() == ""
+
+
+def test_generate_configs_hook_prefix_is_os_aware(monkeypatch):
+    """The canonical Claude writer must make the same OS split.
+
+    Both writers emit hook commands; if only one is fixed the other reinstates
+    the broken form on the next `m3 setup` / `m3 doctor --fix --fix-hooks`.
+    """
+    import generate_configs as gc
+
+    monkeypatch.setattr(gc.os, "name", "posix")
+    posix = gc._hook_env_prefix("/data/.m3/engine", "/data/.m3/config")
+    assert posix.startswith("M3_ENGINE_ROOT=") and posix.endswith(" ")
+
+    monkeypatch.setattr(gc.os, "name", "nt")
+    assert gc._hook_env_prefix("C:/data/.m3/engine", "C:/data/.m3/config") == ""
+
+
+def test_windows_hook_command_starts_with_the_interpreter(monkeypatch):
+    """End-to-end shape check: on Windows the command must begin with a real
+    executable path, never a `VAR=` token that cmd.exe would try to run."""
+    import generate_configs as gc
+
+    monkeypatch.setattr(gc.os, "name", "nt")
+    prefix = gc._hook_env_prefix("C:/x/engine", "C:/x/config")
+    cmd = f"{prefix}C:/venv/Scripts/python.exe C:/m3/bin/hooks/chatlog/x.py"
+    first = cmd.split(" ", 1)[0]
+    assert "=" not in first, f"hook command starts with an env assignment: {first!r}"
+    assert first.endswith("python.exe")
 
 
 def test_apply_claude_settings_delegates_to_canonical_writer(monkeypatch):
@@ -59,6 +106,9 @@ def test_apply_gemini_settings_upgrades_stale_onexit_hook(monkeypatch, tmp_path)
     (not skip it add-only) and preserve the user's own hooks — the Gemini analog
     of the Claude onExit unification. The memory entry gets the canonical
     roots-bearing shape too."""
+    # Pin POSIX: the assertion below checks the inline root pins, which are
+    # deliberately absent on Windows (see test_root_env_prefix_is_empty_on_windows).
+    monkeypatch.setattr(ci.os, "name", "posix")
     monkeypatch.setattr(ci.Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.setenv("M3_MEMORY_ROOT", "/data/.m3")
     monkeypatch.setenv("M3_ENGINE_ROOT", "/data/.m3/engine")

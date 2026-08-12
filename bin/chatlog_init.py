@@ -279,7 +279,17 @@ def _root_env_prefix() -> str:
     server and diverge the two chatlog halves (CLAUDE.md 'Split-brain hazard').
     generate_configs pins these too; both writers must, or one reverts the other.
     Trailing space so it prefixes the command directly. m3 roots are space-free
-    by convention (matches the prior working format)."""
+    by convention (matches the prior working format).
+
+    ⚠ POSIX ONLY — returns "" on Windows. `VAR=val cmd` has no cmd.exe
+    equivalent, so emitting it there produces a hook that fails instantly with
+    "'M3_ENGINE_ROOT' is not recognized as an internal or external command".
+    That killed chatlog capture for ~2 days on a live install (2026-08-09..11)
+    with no symptom but a stalled last_write_at. Mirrors
+    generate_configs._hook_env_prefix; see its docstring for why dropping the
+    pins on Windows is safe rather than a downgrade."""
+    if os.name == "nt":
+        return ""
     try:
         from m3_sdk import get_m3_config_root, get_m3_engine_root
         eng, cfg = get_m3_engine_root(), get_m3_config_root()

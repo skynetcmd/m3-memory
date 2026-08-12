@@ -176,8 +176,19 @@ def test_decoupled_roots_pinned_in_server_env_and_hooks(monkeypatch):
 
     for event in ("PreCompact", "Stop", "SessionStart"):
         cmd = settings["hooks"][event][0]["hooks"][0]["command"]
-        assert "M3_ENGINE_ROOT=/data/.m3/engine" in cmd, cmd
-        assert "M3_CONFIG_ROOT=/data/.m3/config" in cmd, cmd
+        if os.name == "nt":
+            # Windows gets NO inline `VAR=val` prefix — that is POSIX shell
+            # syntax and cmd.exe would try to run a program named
+            # `M3_ENGINE_ROOT=...`, killing capture silently. The roots stay
+            # correct via .chatlog_config.json + the shared ~/.m3 defaults.
+            # What matters here is that the command starts with a real
+            # executable. See tests/test_chatlog_hook_pins.py.
+            assert "M3_ENGINE_ROOT=" not in cmd, cmd
+            assert "M3_CONFIG_ROOT=" not in cmd, cmd
+            assert "=" not in cmd.split(" ", 1)[0], cmd
+        else:
+            assert "M3_ENGINE_ROOT=/data/.m3/engine" in cmd, cmd
+            assert "M3_CONFIG_ROOT=/data/.m3/config" in cmd, cmd
 
 
 def test_stop_hook_omitted_when_disabled(monkeypatch):
