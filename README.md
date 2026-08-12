@@ -12,6 +12,14 @@
 
 Under the hood, M3 treats agent memory as a **distributed-systems infrastructure problem**, not a simple retrieval feature — a **shared, evolving, bitemporal, contradiction-aware knowledge base** that multiple heterogeneous agents and machines read and write, built to stay consistent over months and years.
 
+**It runs where your data has to stay.** A single `pip install` with no account, no
+API key, and no outbound calls — at home in a **homelab**, on a **corporate or
+government network**, or **fully air-gapped**. The embedder runs in-process and
+local, the store is a file you own, and installation works with no internet at all.
+On the metric that isolates the memory layer — **retrieval accuracy, no answer model
+or judge involved** — M3 reaches **99.2% session-hit-rate @ k=10 and 100% @ k=20** on
+LongMemEval-S.
+
 ---
 
 ## 🎬 Quick video overview
@@ -152,7 +160,8 @@ Short version: M3 is the **local-first, MCP-native** option that stays *yours* a
 | **M3 Is** | A persistent memory layer · An MCP server · A hybrid retrieval engine · A bitemporal knowledge base |
 | **M3 Is Not** | An LLM · A chatbot · A plain vector database · A RAG framework · An IDE |
 | **Core Promise** | Private, offline-capable, locally owned memory shared securely across all your developer tools — with FIPS 140-3-ready crypto and atomic multi-agent writes for regulated and multi-agent environments. |
-| **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10, 100% @ k=20** on LongMemEval-S (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. See [Benchmarks](#-benchmarks). |
+| **Deploys In** | Homelabs and self-hosted stacks · corporate and government networks · **air-gapped and classified environments** · regulated industries (FIPS 140-3-ready, GDPR tooling, audit logs). No account, no API key, no outbound calls. See [Sovereign & Air-Gapped Deployments](#-sovereign--air-gapped-deployments). |
+| **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10, 100% @ k=20** on LongMemEval-S (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. SHR measures the memory layer alone — no answer model, no judge — which is why it, not end-to-end QA, is the like-for-like comparison between memory systems. See [Benchmarks](#-benchmarks). |
 | **Context Efficiency** | Exposes 100+ tools but occupies just **~1.8% of a 200K context window** at startup — lazy domain-gating loads the rest on demand. |
 | **Maturity** | Stable, battle-tested core engine (2,400+ tests) that's safe to build on today; new features and integrations are added actively. **SQLite by default; PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam. (See [features.json](docs/features.json)) |
 
@@ -354,6 +363,17 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 ## 🎯 Who This Is For
 
 ### M3 is a great fit if...
+*   **You run a homelab or self-hosted stack:** M3 is a single `pip install` with no
+    account, no API key, and no outbound calls — it runs on the hardware you already
+    own, alongside your other self-hosted services. SQLite by default (zero
+    infrastructure); PostgreSQL when you want a shared store across machines.
+*   **You operate under sovereignty or data-residency requirements** — corporate,
+    government, defence, healthcare, or any regulated environment: memory and
+    embeddings never leave your boundary. The embedder is in-process and local, the
+    store is a file you control, and installation works **fully air-gapped** from
+    pre-compiled wheels. FIPS 140-3-ready crypto (`M3_FIPS_MODE=1`), GDPR
+    `gdpr_forget` / `gdpr_export`, audit logs, and relocatable storage roots so
+    databases and configuration can be secured independently.
 *   **You want the freedom to switch or add agents without losing what they know:** change tools on the fly or down the road — Claude Code, Gemini, OpenClaw, Hermes, whatever comes next — and your project's knowledge carries over instead of disappearing with the switch.
 *   **You build with LangChain/LangGraph:** An advanced replacement for standard memory models, adding bitemporal queries, contradiction management, and local embeddings.
 *   **You build with CrewAI (v1.10–1.x):** A drop-in `StorageBackend` (`Memory(storage=M3StorageBackend(user_id="crew-alpha"))`) that gives CrewAI bitemporal recall, contradiction-aware supersession, and local embeddings — plus the thing single-vector stores can't do: a CrewAI-written memory can **also be searchable by every other m3 agent** (Claude Code, Gemini, LangChain) if you want. `pip install m3-memory[crewai]`. See the [CrewAI integration guide](m3_memory/integrations/crewai/README.md).
@@ -379,7 +399,22 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 
 ## 📊 Benchmarks
 
-### Retrieval Recall (Session Hit-Rate @ k)
+> **Read retrieval accuracy first — it is the only number that measures the memory layer.**
+>
+> **Session Hit-Rate (SHR)** asks one question: *did the system surface the
+> evidence that answers the query?* No answer model is involved, so the score
+> reflects the memory layer and nothing else. It is the like-for-like metric
+> across memory systems.
+>
+> **End-to-end QA accuracy** runs that retrieved context through an LLM and has
+> a judge model grade the answer. Both choices move the score independently of
+> retrieval: a stronger answerer lifts a weaker memory layer, a lenient judge
+> lifts everyone, and neither is held constant across published comparisons. Two
+> systems quoting QA numbers are usually not measuring the same thing.
+>
+> Both are reported below. **SHR is the headline; QA is context.**
+
+### Retrieval Accuracy — Session Hit-Rate @ k *(the memory-layer metric)*
 Evaluated on the 500-question [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) dataset under default server configurations:
 
 | Retrieve Depth (k) | Session Hit-Rate (SHR) ⁂ | Success Count | vs. Prior Version |
@@ -395,8 +430,10 @@ Evaluated on the 500-question [LongMemEval-S](https://github.com/xiaowu0162/Long
 
 > ‡ **v3 improvement** — the v3 engine reaches **100% SHR at k=20**, exceeding the prior version's **97.8% measured at the deeper k=30** ([LongMemEval issue #43](https://github.com/xiaowu0162/LongMemEval/issues/43)) — higher recall at shallower depth. Both figures are retrieval-only SHR (no answerer). The "vs. Prior Version" deltas at k=5/k=10 compare v3 against the prior version's 96.2% / 96.8% at the same k.
 
-### End-to-End QA Accuracy
-**92.0% accuracy** (460/500 correct responses) with zero oracle metadata routing:
+### End-to-End QA Accuracy *(answer-model and judge dependent — not a memory-layer comparison)*
+**92.0% accuracy** (460/500 correct responses) with zero oracle metadata routing.
+Reported for completeness; see the note above on why this number is not
+comparable across systems the way SHR is:
 
 | Question Domain | Count (n) | Accuracy |
 | :--- | :---: | :---: |
