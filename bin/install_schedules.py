@@ -45,7 +45,7 @@ def install_unix_crontab(m3_memory_root):
         print(f"Error: Could not find {template_path}")
         sys.exit(1)
 
-    with open(template_path, "r") as f:
+    with open(template_path, "r", encoding="utf-8") as f:
         template_content = f.read()
 
     # Create logs directory if it doesn't exist
@@ -97,7 +97,7 @@ def install_unix_crontab(m3_memory_root):
     try:
         os.makedirs(_bak_dir, exist_ok=True)
         _bak_path = os.path.join(_bak_dir, "crontab.bak")
-        with open(_bak_path, "w") as _bf:
+        with open(_bak_path, "w", encoding="utf-8") as _bf:
             _bf.write(current_cron)
         _safe_print(f"   Backed up existing crontab to: {_bak_path}")
     except OSError as _be:

@@ -265,7 +265,7 @@ def generate_configs():
     # ── gemini-settings.json ──────────────────────────────────────────────────
     gemini_path = os.path.join(config_dir, "gemini-settings.json")
     if os.path.exists(gemini_path):
-        with open(gemini_path) as f:
+        with open(gemini_path, encoding="utf-8") as f:
             try:
                 gemini = json.load(f)
             except json.JSONDecodeError:
@@ -309,19 +309,26 @@ def generate_configs():
     # ── .aider.conf.yml ───────────────────────────────────────────────────────
     aider_path = os.path.join(m3_repo_root, ".aider.conf.yml")
     if os.path.exists(aider_path):
-        with open(aider_path) as f:
+        with open(aider_path, encoding="utf-8") as f:
             content = f.read()
         new_content = content.replace("[M3_MEMORY_ROOT]", m3_repo_root.replace("\\", "/"))
         if new_content != content:
-            with open(aider_path, "w") as f:
+            with open(aider_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
             print("Updated [M3_MEMORY_ROOT] in .aider.conf.yml")
 
 
 def _write_json(path, data):
+    # encoding="utf-8" is load-bearing on Windows, not decoration. Without it
+    # Python uses the locale codec (cp1252 on most Windows installs, and on any
+    # Python before 3.15 made UTF-8 the default). These configs embed user home
+    # paths, so a non-ASCII username decodes or encodes through the wrong codec.
+    # The CLI forces UTF-8 mode via cli._ensure_utf8(), but this module also runs
+    # as a subprocess and under `python bin/generate_configs.py`, neither of
+    # which inherits that re-exec. See tests/test_cross_platform_config.py.
     tmp = path + ".tmp"
     try:
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
         os.replace(tmp, path)

@@ -14,8 +14,10 @@ to simulate each OS and inspect the generated command strings. bin/ is on sys.pa
 via tests/conftest.py.
 """
 
+import json
 import os
 import pathlib
+import tempfile
 
 import generate_configs as g
 import pytest
@@ -413,3 +415,65 @@ def test_path_flavour_unchanged_after_both_variants(monkeypatch):
         _build_settings(monkeypatch, os_name)
         assert type(pathlib.Path(".")) is native, (
             f"path flavour changed after _build_settings({os_name!r})")
+
+
+
+
+# ── text encoding: the locale codec is not UTF-8 on Windows ──────────────────
+
+def test_reading_a_utf8_config_with_the_locale_codec_corrupts_it_silently():
+    """Demonstrates why every reader must pin encoding="utf-8".
+
+    generate_configs READS configs written by other tools (Gemini CLI, Aider),
+    which write raw UTF-8. On Windows an unencoded `open()` uses the locale
+    codec — cp1252 on most installs, and on any Python before 3.15 made UTF-8
+    the default. That does NOT raise: cp1252 maps almost every byte to some
+    character, so a UTF-8 file decodes to mojibake and is then written back
+    corrupted. A silent wrong answer is worse than a crash, which is why the
+    guard below is a static check rather than a behavioural one.
+
+    Note the writer side is safe on its own: json.dump escapes non-ASCII to
+    \\uXXXX by default, so the bytes it emits are pure ASCII regardless of codec.
+    The READ path is where the codec actually decides the result.
+    """
+    payload = {"note": "café 日本語"}
+    with tempfile.TemporaryDirectory() as d:
+        target = os.path.join(d, "gemini-settings.json")
+        with open(target, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)  # raw UTF-8, as those tools write
+
+        with open(target, encoding="cp1252") as fh:
+            mangled = json.load(fh)
+        assert mangled != payload, (
+            "expected cp1252 to corrupt this fixture — the test no longer proves anything"
+        )
+
+        with open(target, encoding="utf-8") as fh:
+            assert json.load(fh) == payload
+
+
+def test_config_writers_have_no_unencoded_text_opens():
+    """No text-mode open() in the config writers may omit encoding=.
+
+    The corruption above is silent, so the only dependable defence is that no
+    such call exists. Binary opens are exempt — no codec is involved.
+    """
+    import re
+
+    bin_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin")
+    binary_mode = re.compile(r"""['"][rwxa]\+?b\+?['"]""")
+    offenders = []
+    for name in ("generate_configs.py", "install_schedules.py"):
+        with open(os.path.join(bin_dir, name), encoding="utf-8") as fh:
+            for lineno, line in enumerate(fh, 1):
+                if "open(" not in line or "encoding=" in line:
+                    continue
+                if binary_mode.search(line) or line.lstrip().startswith("#"):
+                    continue
+                if re.search(r"\b(?:\w+\.)?open\(", line):
+                    offenders.append(f"{name}:{lineno}: {line.strip()}")
+    assert not offenders, (
+        "text-mode open() without encoding= — decodes via the locale codec on "
+        "Windows and silently corrupts UTF-8 configs:\n  " + "\n  ".join(offenders)
+    )
