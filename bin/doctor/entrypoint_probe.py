@@ -86,9 +86,16 @@ def _installed_version() -> str | None:
     import importlib.metadata as md
 
     try:
+        # Ask the PACKAGE, not importlib.metadata. m3_memory._resolve_version()
+        # is the single source of truth for "what version is this?" — it prefers
+        # a pyproject.toml beside the package (authoritative in a checkout, and
+        # immune to both a stale egg-info and an editable install's frozen
+        # dist-info) and falls back to distribution metadata for a real wheel.
+        # Querying metadata directly here would give a SECOND answer to the same
+        # question, which is the class of bug this probe exists to report.
         proc = subprocess.run(
             [sys.executable, "-c",
-             "import importlib.metadata as m;print(m.version('m3-memory'))"],
+             "import m3_memory;print(m3_memory.__version__)"],
             capture_output=True, text=True, timeout=20, cwd=_neutral_cwd(),
         )
         if proc.returncode == 0 and proc.stdout.strip():

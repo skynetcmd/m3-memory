@@ -43,6 +43,10 @@ _MANIFEST = os.path.join(_ROOT, "docs", "tools", "MCP_CATALOG.json")
 # editing the list; a new public doc that quotes the count belongs here.
 _DOC_FILES = [
     os.path.join(_ROOT, "README.md"),
+    # The package docstring is the description PyPI and every `help(m3_memory)`
+    # renders. It was ungated and had rotted to "66 MCP tools" while the catalog
+    # passed 100 — the same drift this file already guards everywhere else.
+    os.path.join(_ROOT, "m3_memory", "__init__.py"),
     os.path.join(_ROOT, "docs", "COMPARISON.md"),
     os.path.join(_ROOT, "docs", "MYTHS_AND_FACTS.md"),
     os.path.join(_ROOT, "docs", "tools", "files_memory.md"),

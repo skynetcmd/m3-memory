@@ -131,9 +131,23 @@ def _ver_key(v: str) -> tuple[tuple[int, int | str], ...]:
 
 
 def _package_version() -> str | None:
+    """The m3-memory version, from the package's OWN resolver.
+
+    Deliberately NOT ``importlib.metadata.version("m3-memory")``. That searches
+    ``sys.path``, whose first entry is the working directory, so it reads a
+    checkout's stale ``*.egg-info`` before the installed distribution — and it
+    also believes an editable install's ``dist-info``, which pip freezes at
+    install time and never rewrites on a source edit. Either one makes this
+    probe compare the plugin against a version nothing is actually running.
+
+    ``m3_memory.__version__`` resolves through ``_resolve_version()``, the one
+    place that knows the precedence (pyproject.toml in a checkout, distribution
+    metadata for a real wheel). Every m3 caller goes through it so there is a
+    single answer to "what version is this?".
+    """
     try:
-        import importlib.metadata as m
-        return m.version("m3-memory")
+        from m3_memory import __version__
+        return str(__version__) or None
     except Exception:  # noqa: BLE001
         return None
 
