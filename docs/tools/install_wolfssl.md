@@ -1,8 +1,8 @@
 ---
 tool: bin/install_wolfssl.py
-sha1: e22712d71071
-mtime_utc: 2026-06-30T22:15:04.786428+00:00
-generated_utc: 2026-06-30T22:15:40.860892+00:00
+sha1: acb3cebddcc7
+mtime_utc: 2026-08-11T23:34:34.333009+00:00
+generated_utc: 2026-08-12T00:39:51.762062+00:00
 private: false
 ---
 
@@ -49,7 +49,7 @@ Prerequisites: git, plus a C toolchain —
 
 ## Entry points
 
-- `def main()` (line 400)
+- `def main()` (line 409)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -68,6 +68,7 @@ Prerequisites: git, plus a C toolchain —
 ## Environment variables read
 
 - `M3_CONFIG_ROOT`
+- `M3_LIB_DIR`
 - `M3_MEMORY_ROOT`
 
 ---

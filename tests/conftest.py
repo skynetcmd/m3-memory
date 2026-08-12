@@ -653,6 +653,24 @@ def m3_sandbox(monkeypatch, tmp_path):
     _repo_slm = Path(__file__).resolve().parent.parent / "config" / "slm"
     if _repo_slm.is_dir():
         monkeypatch.setenv("M3_SLM_PROFILES_DIR", str(_repo_slm))
+    # Same blinding problem, second instance: crypto_provider._m3_lib_dir()
+    # derives the TRUSTED wolfSSL search path from M3_CONFIG_ROOT's parent, so
+    # pinning the root above relocates it to <tmp>/lib — which never contains
+    # the library. Harmless when FIPS is off (it falls back to the DEFAULT
+    # backend), but a developer with M3_FIPS_MODE=1 exported gets a FAIL-CLOSED
+    # RuntimeError in every CLI subprocess and the suite fails for an
+    # environmental reason with no relation to the code under test.
+    # The library is installed payload, not per-test state — pin it explicitly.
+    #
+    # Pin the DIRECTORY (M3_LIB_DIR), never the file (M3_WOLFSSL_LIB): the
+    # latter is used verbatim, so it would inject a host-specific filename
+    # (a Windows .dll) into the candidate list and break the platform-
+    # simulation tests in test_fips_integrity.py that assert .so-only under a
+    # monkeypatched posix/linux. M3_LIB_DIR keeps per-OS filename selection in
+    # crypto_provider where it belongs.
+    _real_lib = Path(_os.path.expanduser("~")) / ".m3" / "lib"
+    if _real_lib.is_dir() and not _os.environ.get("M3_LIB_DIR"):
+        monkeypatch.setenv("M3_LIB_DIR", str(_real_lib))
     _mm = sys.modules.get("migrate_memory")
     if _mm is not None:
         if hasattr(_mm, "_M3_ENGINE_ROOT"):

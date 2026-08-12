@@ -465,6 +465,33 @@ class TestSecureWolfsslDiscovery:
         for c in cands:
             assert os.path.dirname(os.path.abspath(c)) not in path_dirs
 
+    def test_lib_dir_pin_relocates_search_but_keeps_per_os_filename(
+            self, monkeypatch, tmp_path):
+        """M3_LIB_DIR pins the DIRECTORY; the filename stays platform-derived.
+
+        This is the difference from M3_WOLFSSL_LIB (used verbatim, any name).
+        Pinning the directory lets a relocated M3_CONFIG_ROOT — a test sandbox,
+        a container, a per-user install — still reach the real installed
+        library without hard-coding a host-specific filename.
+        """
+        cp = _reload_provider(monkeypatch, backend="DEFAULT")
+        monkeypatch.delenv("M3_WOLFSSL_LIB", raising=False)
+        monkeypatch.setenv("M3_LIB_DIR", str(tmp_path))
+        monkeypatch.setattr(cp.os, "name", "posix")
+        monkeypatch.setattr(cp.sys, "platform", "linux")
+
+        cands = cp._trusted_wolfssl_candidates()
+        from_pin = [c for c in cands if os.path.dirname(c) == str(tmp_path)]
+        assert from_pin, cands
+        assert all(c.endswith("libwolfssl.so") for c in from_pin), from_pin
+
+    def test_lib_dir_pin_outranks_config_root(self, monkeypatch, tmp_path):
+        """M3_LIB_DIR wins over the M3_CONFIG_ROOT-derived default."""
+        cp = _reload_provider(monkeypatch, backend="DEFAULT")
+        monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "elsewhere" / "config"))
+        monkeypatch.setenv("M3_LIB_DIR", str(tmp_path / "pinned"))
+        assert cp._m3_lib_dir() == str(tmp_path / "pinned")
+
     def test_explicit_pin_takes_precedence(self, monkeypatch, tmp_path):
         cp = _reload_provider(monkeypatch, backend="DEFAULT")
         pinned = tmp_path / "wolfssl.dll"
@@ -476,6 +503,9 @@ class TestSecureWolfsslDiscovery:
     def test_resolve_returns_none_when_no_trusted_lib(self, monkeypatch):
         cp = _reload_provider(monkeypatch, backend="DEFAULT")
         monkeypatch.delenv("M3_WOLFSSL_LIB", raising=False)
+        # M3_LIB_DIR outranks both roots (and the sandbox fixture sets it to the
+        # real ~/.m3/lib so FIPS boxes can run the suite) — clear it too.
+        monkeypatch.delenv("M3_LIB_DIR", raising=False)
         # Point M3 roots at an empty temp area so ~/.m3/lib resolves nowhere real.
         # BOTH roots must move: _m3_lib_dir() prefers M3_CONFIG_ROOT's parent over
         # M3_MEMORY_ROOT, so on a dev box that has a real ~/.m3/lib/wolfssl.dll,
@@ -513,6 +543,8 @@ class TestSecureWolfsslDiscovery:
         v = _run_fips_subprocess(
             """
             os.environ.pop("M3_WOLFSSL_LIB", None)
+            # M3_LIB_DIR outranks both roots — clear it or the real lib is found.
+            os.environ.pop("M3_LIB_DIR", None)
             # Move BOTH roots so a real ~/.m3/lib/wolfssl.dll on a dev box can't be
             # discovered (M3_CONFIG_ROOT's parent wins over M3_MEMORY_ROOT).
             empty = tempfile.mkdtemp(prefix="m3empty-")

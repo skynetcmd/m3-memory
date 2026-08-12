@@ -34,12 +34,32 @@ def find_repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def usable_interpreter(candidate: Path) -> bool:
+    """True only if `candidate` can import the chatlog_ingest dependencies.
+
+    Existence is NOT usability. A bare `python -m venv` satisfies .exists() but
+    dies with ModuleNotFoundError when chatlog_ingest imports m3_sdk -> httpx,
+    producing no parseable JSON and a generic "ingest failed or unreachable".
+    See claude_code_precompact.py for the 2026-08-09..11 regression this
+    guards against. Probe the import instead of trusting the path.
+    """
+    try:
+        return subprocess.run(
+            [str(candidate), "-c", "import httpx"],
+            capture_output=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            if os.name == "nt" else 0,
+        ).returncode == 0
+    except Exception:
+        return False
+
+
 def find_python(repo: Path) -> str:
     for candidate in [
         repo / ".venv" / "Scripts" / "python.exe",
         repo / ".venv" / "bin" / "python",
     ]:
-        if candidate.exists():
+        if candidate.exists() and usable_interpreter(candidate):
             return str(candidate)
     return sys.executable
 

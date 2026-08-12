@@ -246,7 +246,8 @@ Tiered FIPS crypto — see [`FIPS_MODULE_BOUNDARY.md`](FIPS_MODULE_BOUNDARY.md).
 | `M3_FIPS_MODE` | `1` = route all crypto through **wolfCrypt** (hardened, fail-closed if absent). Accepts the FREE open-source wolfSSL build. |
 | `M3_FIPS_STRICT` | `1` = additionally REQUIRE the **CMVP-validated** wolfCrypt FIPS module (commercial wolfSSL). Implies `M3_FIPS_MODE`. Refuses the open-source build. |
 | `M3_CRYPTO_BACKEND` | `WOLFSSL` to force the wolfCrypt backend without the FIPS lockouts; `DEFAULT` (Python crypto) otherwise. (FIPS vars override this.) |
-| `M3_WOLFSSL_LIB` | Explicit **absolute path** to the wolfSSL library (highest-precedence, trusted source). |
+| `M3_WOLFSSL_LIB` | Explicit **absolute path** to the wolfSSL library (highest-precedence, trusted source). Used **verbatim**, filename included. |
+| `M3_LIB_DIR` | **Directory** holding the wolfSSL library. Outranks the `M3_CONFIG_ROOT`-derived default (`<config-root-parent>/lib`, i.e. `~/.m3/lib`), but the per-OS filename (`wolfssl.dll` / `libwolfssl.so` / `libwolfssl.dylib`) is still chosen by M3 — so prefer this over `M3_WOLFSSL_LIB` when you only need to **relocate** the search and want it to stay portable across the three OSes. Set it when anything repoints `M3_CONFIG_ROOT` away from the real install (test sandbox, container, per-user install): under `M3_FIPS_MODE=1` a missed library is **fatal**, not a fallback. The installer (`m3 fips install-wolfssl`) honours the same precedence, so the library is written where the loader looks. |
 | `M3_WOLFSSL_SHA256` | Pin the expected SHA-256 of the wolfSSL library (**self-pin** your trusted build). A mismatch is fatal — detects tampering / in-place swap. `m3 doctor` prints the hash to pin. |
 
 ### MCP Proxy (`bin/mcp_proxy.py`)

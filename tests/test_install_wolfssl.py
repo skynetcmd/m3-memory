@@ -32,7 +32,9 @@ def test_install_dir_matches_crypto_provider(monkeypatch, tmp_path):
 
 
 def test_install_dir_default_is_dot_m3_lib(monkeypatch):
-    for v in ("M3_MEMORY_ROOT", "M3_CONFIG_ROOT"):
+    # M3_LIB_DIR outranks the roots (and the sandbox fixture sets it), so it
+    # must be cleared for this to exercise the DEFAULT resolution it names.
+    for v in ("M3_MEMORY_ROOT", "M3_CONFIG_ROOT", "M3_LIB_DIR"):
         monkeypatch.delenv(v, raising=False)
     iw = _load()
     expected = os.path.join(os.path.expanduser("~"), ".m3", "lib")
@@ -42,9 +44,29 @@ def test_install_dir_default_is_dot_m3_lib(monkeypatch):
 def test_config_root_parent_is_used(monkeypatch, tmp_path):
     """M3_CONFIG_ROOT's PARENT/lib is used (config root is <base>/config)."""
     monkeypatch.delenv("M3_MEMORY_ROOT", raising=False)
+    monkeypatch.delenv("M3_LIB_DIR", raising=False)  # outranks M3_CONFIG_ROOT
     monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "config"))
     iw = _load()
     assert os.path.abspath(iw._m3_lib_dir()) == os.path.abspath(str(tmp_path / "lib"))
+
+
+def test_lib_dir_pin_outranks_roots(monkeypatch, tmp_path):
+    """M3_LIB_DIR wins over both roots — and the installer must agree with the
+    loader, or the built library lands where nothing looks for it.
+
+    Calls the already-imported crypto_provider._m3_lib_dir directly rather than
+    reloading the module: a reload re-runs the native loader, which fail-closes
+    under M3_FIPS_MODE=1 when the pinned dir (a tmp_path here) holds no library.
+    The function is pure env-reading, so no reload is needed to see the pin.
+    """
+    monkeypatch.setenv("M3_MEMORY_ROOT", str(tmp_path / "mem"))
+    monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "cfg" / "config"))
+    monkeypatch.setenv("M3_LIB_DIR", str(tmp_path / "pinned"))
+    iw = _load()
+    import crypto_provider as cp
+    expected = os.path.abspath(str(tmp_path / "pinned"))
+    assert os.path.abspath(iw._m3_lib_dir()) == expected
+    assert os.path.abspath(cp._m3_lib_dir()) == expected
 
 
 def test_sha256_matches_hashlib(tmp_path):

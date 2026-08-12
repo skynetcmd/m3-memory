@@ -192,11 +192,25 @@ a DLL-hijack vector where an attacker drops a weaker/backdoored `wolfssl.dll`
 earlier in the path. Instead M3 resolves a **trusted absolute path** from this
 precedence and loads exactly that file:
 
-1. **`M3_WOLFSSL_LIB`** — an explicit absolute path you pin (strongest).
-2. **`~/.m3/lib/`** (M3's own lib dir; honours the decoupled roots).
-3. **Trusted system dirs only** — `/usr/local/lib`, `/usr/lib`, `/lib`,
+1. **`M3_WOLFSSL_LIB`** — an explicit absolute path you pin (strongest). Used
+   **verbatim**, filename and all.
+2. **`M3_LIB_DIR`/** — a directory you pin. M3 still appends the **per-OS
+   filename** (`wolfssl.dll` / `libwolfssl.so` / `libwolfssl.dylib`), so unlike
+   the pin above it stays correct across the three OSes. Use it when you only
+   need to *relocate* the search.
+3. **`~/.m3/lib/`** (M3's own lib dir; honours the decoupled roots — it is
+   derived from `M3_CONFIG_ROOT`'s parent).
+4. **Trusted system dirs only** — `/usr/local/lib`, `/usr/lib`, `/lib`,
    `/opt/homebrew/lib` (Unix) or `%SystemRoot%\System32` (Windows). The **CWD
    and `%PATH%`/`LD_LIBRARY_PATH` are deliberately excluded.**
+
+> ⚠ **Relocating `M3_CONFIG_ROOT` moves the crypto search with it.** Step 3 is
+> derived from that root, so a test sandbox, container, or per-user install that
+> repoints it will look for wolfSSL somewhere the library was never installed.
+> With `M3_FIPS_MODE=1` that is **fail-closed**: the process aborts rather than
+> falling back. Pin `M3_LIB_DIR` at the real install directory in those setups.
+> `m3 fips install-wolfssl` follows the same precedence, so the installer and
+> the loader always agree on the location.
 
 **Integrity pin (optional, strongest) — you pin *your own* build.** Because M3
 does **not** bundle wolfSSL, you build it yourself (§5). So the pin is a

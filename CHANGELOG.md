@@ -19,7 +19,54 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-### None pending
+> Two ways to hold a path that exists and still be wrong about it: an
+> interpreter that cannot import what it needs, and a crypto library looked for
+> somewhere it was never installed. Both failed quietly.
+
+### Fixed
+
+- **Chatlog hooks picked an interpreter that could not run the ingest.** Every
+  hook chose the first candidate whose path existed — which is not the same as
+  one that can import `httpx`. A bare `python -m venv` satisfies the check and
+  then dies at import, before `chatlog_ingest` prints any JSON, so the caller
+  reported a generic "ingest failed or unreachable" and capture stopped. The
+  hook configuration still looked correct; the only visible symptom was a
+  `last_write_at` that quietly stopped advancing.
+
+  All eleven entry points now probe the candidate (`python -c "import httpx"`)
+  and take the first that actually imports: the three Python hooks, four `.sh`
+  wrappers, and four `.ps1` wrappers. The shell wrappers already *documented*
+  this intent — "Pick a python that has the chatlog_ingest deps (httpx, etc)" —
+  while implementing an existence test; the code now matches the comment.
+
+  A working repo-local `.venv` is still preferred for dev checkouts, and
+  `sys.executable` remains the fallback: it is by definition an interpreter that
+  imported everything needed to reach that line.
+
+- **The PowerShell hooks never looked in the pipx venv.** A pipx install fell
+  through to whatever `python` was first on `PATH`. They now check the standard
+  Windows pipx locations and `$env:PIPX_HOME`, and every wrapper warns on stderr
+  when no probed candidate is found instead of silently handing off.
+
+### Added
+
+- **`M3_LIB_DIR`** — pins the directory M3 searches for the wolfSSL library.
+
+  The trusted search path was derived from `M3_CONFIG_ROOT`'s parent, which
+  couples the crypto library's location to a root that is designed to be
+  relocatable. Anything repointing that root — a test sandbox, a container, a
+  per-user install — silently moved the search away from the real installation.
+  Harmless with FIPS off, since it falls back to the default backend; under
+  `M3_FIPS_MODE=1` it is fail-closed, so every affected process aborted while
+  the library sat in `~/.m3/lib`. Concretely, the test sandbox pins all three
+  roots, so any developer with `M3_FIPS_MODE=1` exported could not run the
+  suite.
+
+  It pins the **directory**, deliberately not the file: `M3_WOLFSSL_LIB` is used
+  verbatim, so pinning a full path injects a host-specific filename and defeats
+  per-OS resolution of `wolfssl.dll` / `libwolfssl.so` / `libwolfssl.dylib`.
+  `install_wolfssl.py` honours the same precedence, so the installer keeps
+  writing where the loader looks.
 
 ## [2026.8.19.15] — 2026-08-10 — self-heal can finally reach the privileged repairs
 

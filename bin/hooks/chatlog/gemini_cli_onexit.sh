@@ -18,26 +18,30 @@ if [ ! -f "$BASE/bin/chatlog_ingest.py" ]; then
     exit 1
 fi
 
-# See claude_code_precompact.sh for the rationale behind this fallback order.
-if [ -x "$BASE/.venv/bin/python" ]; then
-    PY="$BASE/.venv/bin/python"
-elif [ -x "$BASE/.venv/Scripts/python.exe" ]; then
-    # Support Windows Git Bash / Cygwin paths
-    PY="$BASE/.venv/Scripts/python.exe"
-elif [ -x "$HOME/.local/share/pipx/venvs/m3-memory/bin/python" ]; then
-    PY="$HOME/.local/share/pipx/venvs/m3-memory/bin/python"
-elif [ -x "$HOME/.local/share/pipx/venvs/m3-memory/Scripts/python.exe" ]; then
-    PY="$HOME/.local/share/pipx/venvs/m3-memory/Scripts/python.exe"
-elif [ -x "$HOME/.local/pipx/venvs/m3-memory/bin/python" ]; then
-    PY="$HOME/.local/pipx/venvs/m3-memory/bin/python"
-elif [ -x "$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe" ]; then
-    PY="$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe"
-elif [ -n "$PIPX_HOME" ] && [ -x "$PIPX_HOME/venvs/m3-memory/bin/python" ]; then
-    PY="$PIPX_HOME/venvs/m3-memory/bin/python"
-elif [ -n "$M3_PYTHON" ] && [ -x "$M3_PYTHON" ]; then
-    PY="$M3_PYTHON"
-else
+# See claude_code_precompact.sh for the rationale behind this fallback order,
+# and for why each candidate is PROBED rather than merely tested with -x.
+m3_usable() {
+    [ -n "$1" ] && [ -x "$1" ] && "$1" -c "import httpx" >/dev/null 2>&1
+}
+
+PY=""
+for _cand in \
+    "$BASE/.venv/bin/python" \
+    "$BASE/.venv/Scripts/python.exe" \
+    "$HOME/.local/share/pipx/venvs/m3-memory/bin/python" \
+    "$HOME/.local/share/pipx/venvs/m3-memory/Scripts/python.exe" \
+    "$HOME/.local/pipx/venvs/m3-memory/bin/python" \
+    "$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe" \
+    "${PIPX_HOME:+$PIPX_HOME/venvs/m3-memory/bin/python}" \
+    "${PIPX_HOME:+$PIPX_HOME/venvs/m3-memory/Scripts/python.exe}" \
+    "$M3_PYTHON"
+do
+    if m3_usable "$_cand"; then PY="$_cand"; break; fi
+done
+
+if [ -z "$PY" ]; then
     PY="python3"
+    m3_usable "$PY" || echo "gemini_cli_onexit: no python with httpx found; trying '$PY' anyway" >&2
 fi
 
 # Read stdin once, then parse all fields in a single python call.

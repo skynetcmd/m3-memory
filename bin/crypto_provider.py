@@ -141,9 +141,21 @@ def _m3_lib_dir() -> str:
     """M3's own trusted lib directory (~/.m3/lib by default).
 
     Mirrors the decoupled-roots resolution without importing m3_sdk (the crypto
-    layer stays dependency-light): M3_CONFIG_ROOT's parent, else
-    M3_MEMORY_ROOT/.. , else ~/.m3 — then /lib.
+    layer stays dependency-light): M3_LIB_DIR, else M3_CONFIG_ROOT's parent,
+    else M3_MEMORY_ROOT/.. , else ~/.m3 — then /lib.
+
+    M3_LIB_DIR pins the DIRECTORY only; the per-OS filename is still chosen by
+    _trusted_wolfssl_candidates(). That distinction matters: M3_WOLFSSL_LIB
+    pins a full path verbatim, so using it to relocate the search would inject
+    a host-specific filename (e.g. a Windows .dll) and defeat platform
+    resolution. Needed because the decoupled roots are relocatable — anything
+    that repoints M3_CONFIG_ROOT (a test sandbox, a container, a per-user
+    install) silently moves the trusted crypto search away from the real
+    installed library, which is FAIL-CLOSED under M3_FIPS_MODE=1.
     """
+    pinned_dir = os.environ.get("M3_LIB_DIR", "").strip()
+    if pinned_dir:
+        return os.path.abspath(os.path.expanduser(pinned_dir))
     cfg = os.environ.get("M3_CONFIG_ROOT")
     if cfg:
         base = os.path.dirname(os.path.abspath(os.path.expanduser(cfg)))

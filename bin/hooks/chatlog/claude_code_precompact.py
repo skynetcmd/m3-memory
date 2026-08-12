@@ -31,13 +31,41 @@ def find_repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def usable_interpreter(candidate: Path) -> bool:
+    """True only if `candidate` can import the chatlog_ingest dependencies.
+
+    Existence is NOT usability. A bare `python -m venv` (no packages,
+    include-system-site-packages=false) satisfies .exists() but dies with
+    ModuleNotFoundError the moment chatlog_ingest imports m3_sdk -> httpx.
+    That produces no parseable JSON on stdout, so run_ingest() reports the
+    generic "m3 ingest failed or unreachable" and every capture is silently
+    lost while the hook config still looks correct.
+
+    Regression 2026-08-09..11: a stub `.venv` appeared beside the installed
+    payload; find_python() preferred it over the working pipx interpreter and
+    killed chatlog capture for ~2 days. The only visible symptom was a stale
+    last_write_at. Probe the import instead of trusting the path.
+    """
+    try:
+        return subprocess.run(
+            [str(candidate), "-c", "import httpx"],
+            capture_output=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            if os.name == "nt" else 0,
+        ).returncode == 0
+    except Exception:
+        return False
+
+
 def find_python(repo: Path) -> str:
     for candidate in [
         repo / ".venv" / "Scripts" / "python.exe",
         repo / ".venv" / "bin" / "python",
     ]:
-        if candidate.exists():
+        if candidate.exists() and usable_interpreter(candidate):
             return str(candidate)
+    # sys.executable is the interpreter already running this hook, which by
+    # definition imported everything it needed to get here.
     return sys.executable
 
 

@@ -240,7 +240,16 @@ def _which(name: str) -> str | None:
 
 
 def _m3_lib_dir() -> str:
-    """Mirror crypto_provider._m3_lib_dir so we install where the loader looks."""
+    """Mirror crypto_provider._m3_lib_dir so we install where the loader looks.
+
+    Kept in sync by tests/test_install_wolfssl.py::
+    test_install_dir_matches_crypto_provider — if you change the precedence
+    here, change it there too (M3_LIB_DIR wins, then M3_CONFIG_ROOT's parent,
+    then M3_MEMORY_ROOT, then ~/.m3).
+    """
+    pinned_dir = os.environ.get("M3_LIB_DIR", "").strip()
+    if pinned_dir:
+        return os.path.abspath(os.path.expanduser(pinned_dir))
     cfg = os.environ.get("M3_CONFIG_ROOT")
     if cfg:
         base = os.path.dirname(os.path.abspath(os.path.expanduser(cfg)))

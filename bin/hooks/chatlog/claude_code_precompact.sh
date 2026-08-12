@@ -18,6 +18,14 @@ if [ ! -f "$BASE/bin/chatlog_ingest.py" ]; then
 fi
 
 # Pick a python that has the chatlog_ingest deps (httpx, etc).
+#
+# EXECUTABLE IS NOT USABLE. A bare `python -m venv` (no packages) passes -x but
+# dies at `import httpx` before chatlog_ingest prints any JSON, so the caller
+# sees a generic "ingest failed or unreachable" and capture is silently lost.
+# That is the 2026-08-09..11 regression: a stub .venv at candidate 1 shadowed
+# all eight working fallbacks below it for ~2 days. Probe each candidate and
+# take the first that actually imports the dependency.
+#
 # Priority:
 #   1. Repo-local venv at $BASE/.venv (dev checkouts)
 #   2. pipx venv for m3-memory:
@@ -26,25 +34,30 @@ fi
 #   3. $PIPX_HOME/venvs/m3-memory if user set a custom pipx home
 #   4. Env override $M3_PYTHON (last resort for odd layouts)
 #   5. system python3 (works only if the host happens to have httpx installed)
-if [ -x "$BASE/.venv/bin/python" ]; then
-    PY="$BASE/.venv/bin/python"
-elif [ -x "$BASE/.venv/Scripts/python.exe" ]; then
-    # Support Windows Git Bash / Cygwin paths
-    PY="$BASE/.venv/Scripts/python.exe"
-elif [ -x "$HOME/.local/share/pipx/venvs/m3-memory/bin/python" ]; then
-    PY="$HOME/.local/share/pipx/venvs/m3-memory/bin/python"
-elif [ -x "$HOME/.local/share/pipx/venvs/m3-memory/Scripts/python.exe" ]; then
-    PY="$HOME/.local/share/pipx/venvs/m3-memory/Scripts/python.exe"
-elif [ -x "$HOME/.local/pipx/venvs/m3-memory/bin/python" ]; then
-    PY="$HOME/.local/pipx/venvs/m3-memory/bin/python"
-elif [ -x "$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe" ]; then
-    PY="$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe"
-elif [ -n "$PIPX_HOME" ] && [ -x "$PIPX_HOME/venvs/m3-memory/bin/python" ]; then
-    PY="$PIPX_HOME/venvs/m3-memory/bin/python"
-elif [ -n "$M3_PYTHON" ] && [ -x "$M3_PYTHON" ]; then
-    PY="$M3_PYTHON"
-else
+m3_usable() {
+    [ -n "$1" ] && [ -x "$1" ] && "$1" -c "import httpx" >/dev/null 2>&1
+}
+
+PY=""
+for _cand in \
+    "$BASE/.venv/bin/python" \
+    "$BASE/.venv/Scripts/python.exe" \
+    "$HOME/.local/share/pipx/venvs/m3-memory/bin/python" \
+    "$HOME/.local/share/pipx/venvs/m3-memory/Scripts/python.exe" \
+    "$HOME/.local/pipx/venvs/m3-memory/bin/python" \
+    "$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe" \
+    "${PIPX_HOME:+$PIPX_HOME/venvs/m3-memory/bin/python}" \
+    "${PIPX_HOME:+$PIPX_HOME/venvs/m3-memory/Scripts/python.exe}" \
+    "$M3_PYTHON"
+do
+    if m3_usable "$_cand"; then PY="$_cand"; break; fi
+done
+
+# Last resort: system python3. Probe it too, but fall back to it regardless —
+# a broken python3 yields a loud ingest error, which beats exiting silently.
+if [ -z "$PY" ]; then
     PY="python3"
+    m3_usable "$PY" || echo "claude_code_precompact: no python with httpx found; trying '$PY' anyway" >&2
 fi
 
 # Read stdin once, then parse all fields in a single python call.
