@@ -19,9 +19,125 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-> Two ways to hold a path that exists and still be wrong about it: an
-> interpreter that cannot import what it needs, and a crypto library looked for
-> somewhere it was never installed. Both failed quietly.
+### None pending
+
+## [2026.8.19.16] — 2026-08-12 — the failures that looked like successes
+
+> A release about silence. Every fix here is a path that was already broken and
+> said nothing: a hook that died before it started, seven scheduled jobs firing
+> into a void, a repair reporting success over an empty database, and a doctor
+> confidently diagnosing the wrong machine. None of them raised an error; you
+> found out by noticing a timestamp had stopped moving.
+
+### Fixed — capture and background jobs on Windows
+
+- **Chatlog capture was dead on Windows, silently.** Both config writers emitted
+  hook commands as `M3_ENGINE_ROOT=… M3_CONFIG_ROOT=… <python> <hook.py>`. That
+  `VAR=val cmd` form is POSIX shell syntax; Claude Code runs hooks through
+  cmd.exe, which tried to execute a program named `M3_ENGINE_ROOT=C:/…` and
+  failed instantly on every fire. A failing Stop hook prints nothing, so the only
+  symptom was a `last_write_at` that stopped advancing. Confirmed dead ~2 days on
+  a live install before anyone noticed.
+
+  The pins are now POSIX-only. Dropping them on Windows is safe rather than a
+  downgrade: `.chatlog_config.json` pins `db_path` directly, and hook and server
+  both default to the same `~/.m3/{engine,config}`.
+
+- **All seven `AgentOS_*` scheduled jobs were bound to an interpreter that
+  cannot run them.** The resolver took the first path that existed, which is not
+  the same as one that can import `httpx`. Worse here than anywhere else: a task
+  bakes the absolute path in at registration and runs under `pythonw.exe`, which
+  has no console — so every fire died with no window, no stderr, and nothing but
+  a non-zero exit in the task history. HourlySync, SecretRotator,
+  ChatlogEmbedSweep, CognitiveLoop, LoopWatchdog, EmbedServer and Dashboard were
+  all affected.
+
+- **The same defect in eleven entry points.** Three Python hooks, four `.sh`
+  wrappers, four `.ps1` wrappers, and the schedule installer each chose an
+  interpreter by existence alone. All now probe it. The `.sh` files had already
+  *documented* the intent — "Pick a python that has the chatlog_ingest deps" —
+  while implementing an existence test.
+
+- **The PowerShell hooks never looked in the pipx venv**, so a pipx install fell
+  through to whatever `python` was first on `PATH`.
+
+- **Config readers used the locale codec.** Six text-mode `open()` calls omitted
+  `encoding=`. `generate_configs` reads configs written by other tools as raw
+  UTF-8, and cp1252 does not raise on those bytes — it decodes to mojibake and
+  writes the corruption back.
+
+### Fixed — the doctor was diagnosing the wrong things
+
+- **`db_repair` reported "Memory health check and repair completed" over an
+  empty database.** It opened SQLite directly and guarded on
+  `os.path.exists(db_path)`. On a PostgreSQL-primary install `db_path` is a
+  label, not a location, and the installer separately created an unused
+  `agent_memory.db` — so three write passes ran against a decoy file. A false
+  green is worse than an error, because it looks like success.
+
+- **The hook check was inverted on Windows.** The doctor required the POSIX pins
+  unconditionally and reported a correctly-configured Windows install as
+  "CAPTURE MAY BE DEAD", advising `--fix-hooks` — which would have reinstated
+  the exact prefix that breaks capture. Windows now gets the rule it needs: a
+  hook command whose first token contains `=` is one cmd.exe cannot execute.
+
+- **The entrypoint probe's verdict depended on the working directory.** Same
+  probe, same interpreter: 0 findings from a temp dir, 3 "stale launcher" FAILs
+  from a source checkout — with advice to `pip uninstall` a working entrypoint.
+  Python puts the CWD at `sys.path[0]`, so both sides of the comparison were
+  reading a checkout's stale metadata.
+
+- **The doctor never said which database it was talking about.** m3 ships two
+  primary backends and every line of the report is a claim about one of them. It
+  now leads with the store, and flags an `agent_memory.db` left beside a pooled
+  backend as *not* the live store.
+
+### Fixed — one version, one answer
+
+- **A single machine had four answers to "what version is m3?"** — the source of
+  truth, a correct wheel install, a stale `egg-info` in the checkout, and an
+  editable install's `dist-info` frozen 22 releases earlier. `importlib.metadata`
+  searches `sys.path` (CWD first) and believes editable metadata that pip never
+  rewrites on a source edit.
+
+  `m3_memory.__version__` now resolves through one function that prefers
+  `pyproject.toml` in a checkout and distribution metadata for a real wheel.
+  Every caller routes through it; a test fails the build if any module resolves
+  m3's version independently.
+
+### Added
+
+- **`Dialect.json_is_valid(column)`** — completes the JSON family, which could
+  read and write JSON but never ask whether a value *is* JSON. Lets the doctor's
+  metadata repair be one set-based statement instead of select-all,
+  parse-in-Python, per-row update. Renders as `json_valid(col)` on SQLite and a
+  constant `TRUE` on PostgreSQL, where the JSONB column type already guarantees
+  parseability.
+
+- **`M3_LIB_DIR`** — pins the directory M3 searches for the wolfSSL library.
+  The trusted path was derived from `M3_CONFIG_ROOT`'s parent, so anything
+  repointing that root moved the crypto search away from the real install. Under
+  `M3_FIPS_MODE=1` that is fail-closed, which meant any developer with FIPS mode
+  exported could not run the test suite.
+
+### Documentation
+
+- The README now leads with retrieval accuracy as the metric that isolates the
+  memory layer — session hit-rate involves no answer model and no judge, so it is
+  the like-for-like comparison between memory systems, while end-to-end QA moves
+  with both. Deployment audiences (homelabs, sovereign, air-gapped, regulated)
+  are named above the fold rather than at line 288.
+
+- Regenerated 17 stale tool pages, removed two orphans whose sources were
+  deleted months ago, and gated both failure modes. One orphan was carrying a
+  bench-database reference on the public remote.
+
+### Guards added
+
+Every fix above ships with a test that fails when the fix is reverted —
+verified by mutation, not assumed: the interpreter probes, the OS-aware hook
+shape, the seam-bypass check, the version single-source rule, generated-doc
+freshness, orphaned tool pages, and the README's test-count claim.
 
 ### Fixed
 
