@@ -125,3 +125,93 @@ def test_undeterminable_version_reports_skipped_not_ok(probe, monkeypatch, capsy
 
     assert probe.run(brief=True) == 0
     assert "SKIPPED" in capsys.readouterr().out
+
+
+# ── cwd must not change the verdict ──────────────────────────────────────────
+
+def test_version_probes_run_from_a_neutral_cwd():
+    """The probe's answer must not depend on where the doctor was launched.
+
+    Python puts the working directory at sys.path[0], so a process started
+    inside a source checkout imports that tree's packages and reads its
+    *.dist-info before the installed ones. For a probe whose whole job is
+    comparing installed-vs-running versions, cwd is then a hidden input: the
+    same probe, same interpreter, reported 0 findings from a temp dir and 3
+    "stale launcher" FAILs from a checkout (measured 2026-08-11) — sending the
+    user to uninstall a launcher that was never broken.
+
+    Both sides of the comparison must stand in the same neutral place:
+    _installed_version() resolves in a child pinned to _neutral_cwd(), and
+    _probe_version() passes the same cwd to the launcher it runs.
+    """
+    import subprocess as _sp
+
+    from doctor import entrypoint_probe as ep
+
+    neutral = ep._neutral_cwd()
+    assert neutral and os.path.isdir(neutral)
+    # A checkout is exactly what must NOT be used: it carries its own dist-info.
+    assert not os.path.exists(os.path.join(neutral, "pyproject.toml")), (
+        f"_neutral_cwd() returned a source checkout: {neutral}"
+    )
+
+    seen = {}
+    real_run = _sp.run
+
+    def capture(cmd, **kw):
+        seen["cwd"] = kw.get("cwd")
+        return real_run(cmd, **kw)
+
+    ep.subprocess.run = capture
+    try:
+        ep._probe_version(sys.executable)
+    finally:
+        ep.subprocess.run = real_run
+
+    assert seen.get("cwd") == neutral, (
+        f"_probe_version ran the launcher from {seen.get('cwd')!r}, not the "
+        "neutral cwd — a checkout would shadow the launcher's own package"
+    )
+
+
+def test_installed_version_ignores_a_shadowing_cwd(tmp_path, monkeypatch):
+    """A dist-info sitting in the working directory must not be believed.
+
+    Reproduces the exact shape that caused the false FAIL: a checkout with its
+    own m3_memory-<other version>.dist-info beside it.
+    """
+    from doctor import entrypoint_probe as ep
+
+    fake = tmp_path / "m3_memory-1.2.3.dist-info"
+    fake.mkdir()
+    (fake / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: m3-memory\nVersion: 1.2.3\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    # Assert the MECHANISM, not just the answer. Checking `got != "1.2.3"` alone
+    # passes for the wrong reason on a machine whose in-process lookup happens
+    # to return something else — verified: deleting the subprocess entirely left
+    # that weaker assertion green. What must hold is that the resolution is
+    # delegated to a child pinned OUTSIDE the shadowing directory.
+    seen = {}
+    real_run = ep.subprocess.run
+
+    def capture(cmd, **kw):
+        seen.setdefault("cwd", kw.get("cwd"))
+        return real_run(cmd, **kw)
+
+    ep.subprocess.run = capture
+    try:
+        got = ep._installed_version()
+    finally:
+        ep.subprocess.run = real_run
+
+    assert seen.get("cwd") == ep._neutral_cwd(), (
+        "_installed_version() resolved the version in-process (or from "
+        f"{seen.get('cwd')!r}) instead of a child pinned to a neutral cwd — "
+        "a dist-info in the working directory would be believed"
+    )
+    assert got != "1.2.3", (
+        "read the version from a dist-info in the CWD — the probe is still "
+        "shadowable and will invent stale-launcher findings in any checkout"
+    )

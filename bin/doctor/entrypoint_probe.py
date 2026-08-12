@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 
 # Console scripts m3 declares. `m3` is the primary CLI; `mcp-memory` is the
 # backwards-compat MCP entrypoint some client configs still launch directly, so
@@ -43,8 +44,28 @@ import subprocess
 ENTRYPOINTS = ("m3", "mcp-memory", "m3-team")
 
 
+def _neutral_cwd() -> str:
+    """A directory that shadows nothing — for running version probes from.
+
+    Python puts the working directory at ``sys.path[0]``, so ANY process
+    started inside a source checkout imports that checkout's packages and reads
+    its ``*.dist-info`` before the installed ones. For a probe whose entire job
+    is comparing installed-vs-running versions, that turns the cwd into a hidden
+    input: the same probe, same interpreter, reports 0 findings from ``/tmp``
+    and 3 "stale launcher" FAILs from a checkout (measured 2026-08-11).
+
+    Falls back to the current directory only if tempdir is unavailable — worse
+    than nothing is a crash in a diagnostic.
+    """
+    try:
+        import tempfile
+        return tempfile.gettempdir()
+    except Exception:  # noqa: BLE001 — a probe must never die on its own setup
+        return os.getcwd()
+
+
 def _installed_version() -> str | None:
-    """Version of the m3-memory package THIS process is running from.
+    """Version of the m3-memory package the ENTRYPOINTS resolve to.
 
     Tries several sources: the doctor can run from a bin/ script whose sys.path
     does not include the installed package, and a lookup that quietly returns
@@ -52,8 +73,33 @@ def _installed_version() -> str | None:
     report "OK" precisely when it is least able to tell. Falling back through
     both distribution names and the package attribute keeps it working from a
     repo checkout as well as an installed wheel.
+
+    ⚠ The metadata lookup is deliberately NOT done in-process.
+    ``importlib.metadata`` searches ``sys.path``, whose first entry is the
+    working directory, so running the doctor from a source checkout reads THAT
+    tree's dist-info — a different version from the one the launchers use. The
+    probe then compares the checkout against itself and reports every launcher
+    as stale. Resolve it in a child pinned to a neutral cwd instead, which is
+    the same vantage point ``_probe_version`` now uses for the other side of
+    the comparison; both sides must agree on where they are standing.
     """
     import importlib.metadata as md
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             "import importlib.metadata as m;print(m.version('m3-memory'))"],
+            capture_output=True, text=True, timeout=20, cwd=_neutral_cwd(),
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        # Only a genuine spawn failure falls through. A broad `except` here
+        # would swallow a NameError/AttributeError in this very block and
+        # silently restore the shadowed in-process answer — the bug looks
+        # fixed while the probe keeps lying. (It did exactly that during
+        # development: a missing `import sys` was caught and hidden.)
+        pass
 
     for dist in ("m3-memory", "m3_memory"):
         try:
@@ -116,10 +162,18 @@ def _probe_version(path: str, timeout: float = 20.0) -> tuple[str | None, str | 
     existing on disk — which is exactly the state we need to distinguish from
     "missing". Never raises: a hung or unrunnable launcher is itself a finding.
     """
+    # cwd=<neutral>: a child inherits the doctor's working directory, and
+    # sys.path[0] is that directory. Run this from a source checkout and the
+    # launcher imports THAT tree's m3_memory instead of the one it was
+    # installed with, so `--version` reports the checkout — not the launcher.
+    # The probe then compares a shadowed number against a shadowed number and
+    # invents a "stale launcher" that does not exist (§5). Neutralise the cwd
+    # so the launcher resolves the package it actually ships with.
     try:
         proc = subprocess.run(
             [path, "--version"],
             capture_output=True, text=True, timeout=timeout,
+            cwd=_neutral_cwd(),
         )
     except Exception as e:  # noqa: BLE001 — an unrunnable launcher is a finding
         return None, f"{type(e).__name__}: {e}"
@@ -194,7 +248,24 @@ def run(brief: bool = False) -> int:
         print(f"✅ entrypoints: OK — `m3` on PATH runs this install ({expected})")
         return 0
 
+    # A source checkout is the common benign cause, and the generic advice
+    # ("remove the stale launcher") is actively wrong there — the launchers are
+    # fine; the doctor is simply running under a DIFFERENT install than the one
+    # on PATH. Naming that case first stops a developer uninstalling a working
+    # entrypoint to satisfy a warning about their own venv.
+    _running_from_checkout = os.path.exists(
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "pyproject.toml",
+        )
+    )
     print("⚠️  entrypoints: [FAIL] the m3 commands on PATH do not match this install")
+    if _running_from_checkout:
+        print("    note: this doctor is running from a SOURCE CHECKOUT, whose venv")
+        print("          is a different install from the one on PATH. That alone")
+        print("          explains a version difference and is not a broken setup —")
+        print("          compare against `m3 doctor` run from the installed copy")
+        print("          before changing anything.")
     for f in findings:
         print(f"    - {f['entrypoint']} ({f['kind']}): {f['path']}")
         print(f"      {f['detail']}")
