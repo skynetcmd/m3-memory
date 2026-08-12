@@ -203,7 +203,17 @@ def check() -> dict:
                               "payload's install — it executes different m3 code",
                 })
 
-        if event in CAPTURE_EVENTS:
+        # The inline `VAR=val cmd` pins are POSIX shell syntax. Claude Code runs
+        # hooks through cmd.exe on Windows, where that form is not just useless
+        # but FATAL: cmd tries to execute a program named `M3_ENGINE_ROOT=C:/…`
+        # and the hook dies before it starts. The writers therefore emit no
+        # prefix there (generate_configs._hook_env_prefix), and a Windows hook
+        # WITHOUT pins is correct. Flagging it as "CAPTURE MAY BE DEAD" sends the
+        # user to `--fix-hooks` to reinstate the thing that breaks capture — the
+        # precise inversion of this probe's job (§5: does it actually work).
+        # The roots still agree on Windows via .chatlog_config.json's db_path and
+        # the shared ~/.m3 defaults.
+        if event in CAPTURE_EVENTS and os.name != "nt":
             missing = [v for v in REQUIRED_ROOT_PINS if v not in command]
             if missing:
                 findings.append({
@@ -212,6 +222,21 @@ def check() -> dict:
                               " — hooks reload live but server env re-resolves "
                               "only on restart, so turns can be written to a "
                               "different engine root than the server reads",
+                })
+        elif event in CAPTURE_EVENTS and os.name == "nt":
+            # Windows: the FATAL shape is the opposite — a POSIX prefix present.
+            # A command whose first token carries an `=` is one cmd.exe cannot
+            # run, so capture really is dead. This is the check that would have
+            # caught the 2026-08-09..11 outage on the day it started.
+            first = command.split(" ", 1)[0] if command else ""
+            if "=" in first:
+                findings.append({
+                    "kind": "posix_prefix_on_windows", "event": event,
+                    "detail": f"command starts with {first!r} — a POSIX "
+                              "`VAR=val cmd` prefix that cmd.exe cannot parse. "
+                              "The hook fails instantly on every fire "
+                              "('is not recognized as an internal or external "
+                              "command'), so capture is DEAD",
                 })
 
     # Corroborate the config's own claim against the file. `wired` in

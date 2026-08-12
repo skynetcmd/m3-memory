@@ -222,6 +222,33 @@ def main() -> int:
     exit_code = 0
     brief = not args.verbose  # brief is the DEFAULT; --verbose opts into detail
 
+    # Name the store being inspected, FIRST. m3 ships two primary backends, and
+    # every line below is a claim about one of them — a health report that never
+    # says which is ambiguous at best. It also surfaces the PG-install artefact
+    # the installer deliberately leaves behind: an orphaned agent_memory.db from
+    # a pre-fix install is harmless but looks like the live store, and a user
+    # comparing file timestamps against doctor's output has no way to tell.
+    try:
+        from memory.backends import active_backend
+        _b = active_backend()
+        if _b.name == "sqlite":
+            from m3_sdk import resolve_db_path
+            print(f"store: SQLite — {resolve_db_path(args.database)}")
+        else:
+            print(f"store: {_b.name} (pooled; db_path is a label, not a location)")
+            # An agent_memory.db beside a pooled backend is NOT the live store.
+            try:
+                from m3_core.paths import resolve_engine_file
+                _stray = resolve_engine_file("agent_memory.db")
+                if os.path.exists(_stray):
+                    print(f"       note: {_stray} exists but is NOT in use — a "
+                          "leftover from a pre-2026-08 install. Safe to archive "
+                          "once you have confirmed the PG store is authoritative.")
+            except Exception:  # noqa: BLE001 — a note is never worth failing on
+                pass
+    except Exception as e:  # noqa: BLE001 — never let the header break the doctor
+        print(f"store: unknown (storage seam not loadable: {type(e).__name__})")
+
     # In brief mode the DB-repair phase's [INFO] chatter is noise — the overall
     # health line (from installer.doctor) already reflects DB health. Skip it
     # unless the operator explicitly asked to repair.

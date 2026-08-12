@@ -91,8 +91,13 @@ def test_foreign_interpreter_is_caught(probe, wire, tmp_path):
     assert any(f["kind"] == "foreign_interpreter" for f in res["findings"]), res["findings"]
 
 
-def test_missing_root_pins_are_caught(probe, wire, tmp_path):
-    """CLAUDE.md split-brain: hooks reload live, server env only on restart."""
+def test_missing_root_pins_are_caught(probe, wire, tmp_path, monkeypatch):
+    """CLAUDE.md split-brain: hooks reload live, server env only on restart.
+
+    POSIX only — the inline `VAR=val` prefix is POSIX shell syntax. See
+    test_posix_prefix_on_windows_is_the_finding for the inverted Windows rule.
+    """
+    monkeypatch.setattr(probe.os, "name", "posix")
     py = _make(tmp_path, "venv/Scripts/python.exe")
     sc = _make(tmp_path, "venv/Lib/site-packages/m3_memory/bin/hooks/chatlog/cc.py")
     wire({"PreCompact": f"{py} {sc}"})  # no set M3_ENGINE_ROOT/M3_CONFIG_ROOT
@@ -101,6 +106,42 @@ def test_missing_root_pins_are_caught(probe, wire, tmp_path):
     hits = [f for f in res["findings"] if f["kind"] == "unpinned_roots"]
     assert hits, res["findings"]
     assert "M3_ENGINE_ROOT" in hits[0]["detail"]
+
+
+def test_unpinned_roots_is_not_a_finding_on_windows(probe, wire, tmp_path, monkeypatch):
+    """A Windows hook WITHOUT the pins is correct, and must not be flagged.
+
+    cmd.exe cannot parse `VAR=val cmd`, so the config writers deliberately emit
+    no prefix there. Reporting "CAPTURE MAY BE DEAD" would send the user to
+    `--fix-hooks` to reinstate the very thing that breaks capture — the probe
+    causing the outage it exists to detect (§5).
+    """
+    monkeypatch.setattr(probe.os, "name", "nt")
+    py = _make(tmp_path, "venv/Scripts/python.exe")
+    sc = _make(tmp_path, "venv/Lib/site-packages/m3_memory/bin/hooks/chatlog/cc.py")
+    wire({"PreCompact": f"{py} {sc}"})
+
+    res = probe.check()
+    assert not [f for f in res["findings"] if f["kind"] == "unpinned_roots"], res["findings"]
+
+
+def test_posix_prefix_on_windows_is_the_finding(probe, wire, tmp_path, monkeypatch):
+    """On Windows the FATAL shape is a POSIX prefix PRESENT, not absent.
+
+    Reproduces the 2026-08-09..11 outage: cmd.exe tries to execute a program
+    named `M3_ENGINE_ROOT=...`, the hook dies before it starts, and capture is
+    silently dead with only a stalled last_write_at as evidence. This is the
+    check that would have caught it on day one.
+    """
+    monkeypatch.setattr(probe.os, "name", "nt")
+    py = _make(tmp_path, "venv/Scripts/python.exe")
+    sc = _make(tmp_path, "venv/Lib/site-packages/m3_memory/bin/hooks/chatlog/cc.py")
+    wire({"PreCompact": f"M3_ENGINE_ROOT=C:/x/engine M3_CONFIG_ROOT=C:/x/config {py} {sc}"})
+
+    res = probe.check()
+    hits = [f for f in res["findings"] if f["kind"] == "posix_prefix_on_windows"]
+    assert hits, res["findings"]
+    assert "cmd.exe cannot parse" in hits[0]["detail"]
 
 
 def test_absent_settings_reports_unknown_not_ok(probe, monkeypatch, capsys):

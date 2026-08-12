@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: c097bbdd9675
-mtime_utc: 2026-08-08T03:47:37.161554+00:00
-generated_utc: 2026-08-08T14:40:50.005200+00:00
+sha1: 8b24c075736e
+mtime_utc: 2026-08-12T02:47:23.723081+00:00
+generated_utc: 2026-08-12T02:54:57.028489+00:00
 private: false
 ---
 
@@ -74,6 +74,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (add_database_arg)`
+- `m3_sdk (resolve_db_path)`
 
 ---
 
@@ -102,13 +103,15 @@ _(no subprocess / http / sqlite calls detected)_
 - `doctor (plugin_version_probe)`
 - `doctor (schedule_probe)`
 - `doctor (shared_embedder_probe)`
+- `m3_core.paths (resolve_engine_file)`
+- `memory.backends (active_backend)`
 - `memory.doctor (memory_doctor_fix_impl)`
 
 ---
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- `agent_memory.db`
 
 ---
 
