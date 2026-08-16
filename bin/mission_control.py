@@ -36,6 +36,28 @@ BASE = pathlib.Path(__file__).parent.parent.resolve()
 import sys as _sys
 
 _sys.path.insert(0, str(BASE / "bin"))
+
+# Console-window suppression for every child process this module spawns.
+#
+# Imported AFTER the sys.path insert above -- `_task_runtime` lives in bin/ and
+# is not importable until that line has run.
+#
+# Why it matters: mission_control probes hardware by shelling out to nvidia-smi,
+# powershell.exe, sysctl, ioreg and system_profiler. On Windows each of those is
+# a console program, so without CREATE_NO_WINDOW each spawn allocates its own
+# conhost and can flash a window that steals focus.
+#
+# The fallback keeps this module runnable standalone (it is also a CLI), where a
+# missing sibling must not be fatal -- returning {} is correct on POSIX anyway.
+try:
+    from _task_runtime import no_window_kwargs
+except ImportError:  # pragma: no cover - standalone/partial checkout
+    def no_window_kwargs() -> dict:
+        """Fallback mirroring `_task_runtime.no_window_kwargs`."""
+        import subprocess as _sp
+        flags = getattr(_sp, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+        return {"creationflags": flags} if flags else {}
+
 try:
     from m3_sdk import resolve_db_path as _resolve_db
     DB_PATH = pathlib.Path(_resolve_db(None))
@@ -135,7 +157,7 @@ def get_gpu_usage() -> float:
         try:
             out = subprocess.check_output(
                 ["ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"],
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, **no_window_kwargs(),
             ).decode()
             m = re.search(r'"Device Utilization %"=(\d+)', out)
             return float(m.group(1)) if m else 0.0
@@ -159,7 +181,7 @@ def get_gpu_usage() -> float:
             out = subprocess.check_output(
                 ["nvidia-smi", "--query-gpu=utilization.gpu",
                  "--format=csv,noheader,nounits"],
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, **no_window_kwargs(),
             ).decode().strip()
             return float(out.splitlines()[0])
         except Exception:
@@ -173,7 +195,7 @@ def get_gpu_usage() -> float:
             out = subprocess.check_output(
                 ["nvidia-smi", "--query-gpu=utilization.gpu",
                  "--format=csv,noheader,nounits"],
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, **no_window_kwargs(),
             ).decode().strip()
             return float(out.splitlines()[0])
         except Exception:
@@ -201,7 +223,7 @@ def get_vram_usage() -> tuple[float, float, float] | None:
         out = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=memory.used,memory.total",
              "--format=csv,noheader,nounits"],
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, **no_window_kwargs(),
         ).decode().strip().splitlines()[0]
         used_mib, total_mib = (int(x.strip()) for x in out.split(","))
         used_gb  = used_mib  / 1024
@@ -219,7 +241,7 @@ def gpu_label() -> str:
     if IS_WIN or IS_LINUX:
         try:
             subprocess.check_output(
-                ["nvidia-smi"], stderr=subprocess.DEVNULL
+                ["nvidia-smi"], stderr=subprocess.DEVNULL, **no_window_kwargs()
             )
             return "GPU (NVIDIA)"
         except Exception:
@@ -242,7 +264,8 @@ def ping_ms(host: str) -> str | None:
         else:
             cmd = ["ping", "-c", "1", "-W", "1", host]
             pat = r"time[=<]([\d.]+) ms|min/avg/max/(?:mdev|stddev)\s*=\s*[\d.]+/([\d.]+)/"
-        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=3).decode()
+        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=3,
+                                      **no_window_kwargs()).decode()
         m = re.search(pat, out)
         if m:
             val = next(g for g in m.groups() if g is not None)
@@ -276,7 +299,7 @@ def get_hw_info() -> tuple[str, str]:
             chip = subprocess.check_output(
                 ["powershell.exe", "-NoProfile", "-Command",
                  "(Get-WmiObject Win32_Processor).Name"],
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, **no_window_kwargs(),
             ).decode().strip().splitlines()[0].strip()
         except Exception:
             pass
@@ -284,13 +307,13 @@ def get_hw_info() -> tuple[str, str]:
         try:
             chip = subprocess.check_output(
                 ["sysctl", "-n", "machdep.cpu.brand_string"],
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, **no_window_kwargs(),
             ).decode().strip()
             # Prefer Apple Silicon marketing name if available
             try:
                 model = subprocess.check_output(
                     ["system_profiler", "SPHardwareDataType"],
-                    stderr=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, **no_window_kwargs(),
                 ).decode()
                 m = re.search(r"Chip:\s+(.+)", model)
                 if m:
@@ -326,7 +349,7 @@ def get_hw_info() -> tuple[str, str]:
         out = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=name,memory.total",
              "--format=csv,noheader,nounits"],
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, **no_window_kwargs(),
         ).decode().strip().splitlines()[0]
         name, vram_mib = out.split(",", 1)
         vram_gb = round(int(vram_mib.strip()) / 1024)
@@ -336,7 +359,7 @@ def get_hw_info() -> tuple[str, str]:
             try:
                 out = subprocess.check_output(
                     ["system_profiler", "SPDisplaysDataType"],
-                    stderr=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, **no_window_kwargs(),
                 ).decode()
                 m = re.search(r"Chipset Model:\s+(.+)", out)
                 vram_m = re.search(r"VRAM.*?:\s+(.+)", out)
