@@ -90,8 +90,45 @@ def _resolve_log_file(log_file) -> pathlib.Path:
     return resolved
 
 
+def _rotate_if_oversized(log_path: pathlib.Path) -> None:
+    """Roll the log aside at startup if it has grown past the cap.
+
+    Rotation happens HERE, at startup, and not via RotatingFileHandler: the
+    daemon logs by pointing sys.stdout/sys.stderr straight at this file
+    (_redirect_output), and a live OS handle cannot be rotated out from under
+    itself on Windows — the rename fails with EACCES and the handler silently
+    keeps appending to the old inode. A startup check is the honest seam: it
+    always runs before the handle is opened.
+
+    Sized-based, single generation: keep <name>.1 and drop anything older, so a
+    runaway cannot fill the disk. A cognitive-loop bug once produced a 720 MB
+    log this way (2026-08-29) with nothing to bound it.
+
+    Never raises — failing to rotate must not stop the daemon from starting.
+    """
+    try:
+        cap = int(os.environ.get("M3_LOG_MAX_BYTES", str(64 * 1024 * 1024)))
+    except (TypeError, ValueError):
+        cap = 64 * 1024 * 1024
+    if cap <= 0:
+        return  # explicitly disabled
+    try:
+        if not log_path.exists() or log_path.stat().st_size < cap:
+            return
+        prev = log_path.with_suffix(log_path.suffix + ".1")
+        if prev.exists():
+            prev.unlink()
+        log_path.replace(prev)
+    except OSError:
+        # A locked/again-open log just means we append; better a large log than
+        # a daemon that will not start.
+        pass
+
+
 def _redirect_output(log_path: pathlib.Path, logger_name: str | None) -> None:
     """Point stdout/stderr at the logfile and configure logging onto it."""
+    # Bound the log BEFORE opening the handle (see _rotate_if_oversized).
+    _rotate_if_oversized(log_path)
     # Line-buffered, utf-8 so non-ASCII log output doesn't crash on cp1252.
     fh = open(log_path, "a", encoding="utf-8", buffering=1)
     sys.stdout = fh

@@ -185,6 +185,7 @@ async def drain_spill(conn=None) -> int:
 
     Returns count of rows inserted across all target stores.
     """
+    from m3_core.paths import _db_is_populated
     from memory.backends import active_backend
 
     spill_dir = chatlog_config.SPILL_DIR
@@ -284,6 +285,24 @@ async def drain_spill(conn=None) -> int:
                         db_path, spill_path)
                     had_error = True
                     last_error = "stale target %s (parent directory missing)" % db_path
+                    continue
+
+                # The directory check above is necessary but NOT sufficient: a
+                # target can exist as a 0-table SQLite stub (test scaffolding
+                # left in %TEMP%, or a not-yet-migrated engine root). That passes
+                # the directory check, then dies inside the writer with
+                # "no such table: memory_items" — a confusing error for what is
+                # really the SAME orphan-store hazard. Reuse the existing
+                # `_db_is_populated` seam rather than hand-rolling the probe
+                # (§10a): it already answers "does this file carry the schema".
+                if db_path and _backend.name == "sqlite" and not _db_is_populated(db_path):
+                    logger.error(
+                        "Spill target %s exists but carries no chatlog schema "
+                        "(empty/foreign SQLite file) — refusing to write into it. "
+                        "Keeping %s; re-point or remove the stale rows to drain it.",
+                        db_path, spill_path)
+                    had_error = True
+                    last_error = "target %s has no chatlog schema" % db_path
                     continue
 
                 # Reuse the CANONICAL chatlog writer rather than a second INSERT
