@@ -21,6 +21,48 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.29.1] — 2026-08-29 — the filter that only worked when it did nothing
+
+> A one-line fix for a bug that hid behind its own default. Selecting a type in
+> the dashboard's KB Browser raised `no such column: mi.type`; leaving it on
+> "all types" worked perfectly — because "all types" emits no predicate at all,
+> so the broken SQL was never generated.
+
+### Fixed — KB Browser type filter
+
+- **`Error scanning DB: no such column: mi.type`** when selecting any type in the
+  dashboard's KB Browser (reported against 2026.8.19.16 on Ubuntu / Python 3.12).
+
+  `dialect().scope_predicates()` qualifies its predicates with its `table_alias`,
+  which defaults to `mi`, so a type filter emits `AND mi.type LIKE ?`. The browse
+  query selected `FROM memory_items` with no alias, leaving that column unbound.
+  An empty `type_filter` emits no predicate, which is exactly why browse-all
+  looked healthy and kept the bug out of sight.
+
+  Fixed by aliasing the table (`FROM memory_items AS mi`) and qualifying the
+  projection to match, rather than passing `table_alias=""` — the seam is shared
+  with the search paths that do use the alias, and the dashboard should sit on
+  the same contract as `memory_search` instead of special-casing itself.
+
+  Verified against a live store: all 29 types plus browse-all return rows.
+  `tests/test_dashboard_kb_type_filter.py` pins the contract at the seam rather
+  than asserting on rendered HTML, and was confirmed to catch the regression.
+
+### Documentation
+
+- **`SYNC.md` now covers the MCP-only agent machine.** Its multi-machine guidance
+  assumed m3 was installed on both ends. A common setup isn't: one machine runs
+  m3, another runs the coding agent and reaches it over MCP — the memory tools
+  work, nothing lands in the chat log, and it reads as a bug rather than the
+  architecture. Chat capture is a hook the agent fires in its own process, so it
+  runs on the agent's machine; MCP carries the tools, not turn capture.
+
+  The section also covers not loading a second embedder on a small agent box.
+  `M3_EMBED_URL` alone is not sufficient: tier-1 auto-detects a bge-m3 GGUF when
+  `M3_EMBED_GGUF` is unset (`M3_EMBED_GGUF_AUTODETECT` defaults to `1`), so a
+  machine with LM Studio models installed still loads one in-process.
+  `M3_EMBED_INPROC=0` is the actual gate.
+
 ## [2026.8.29.0] — 2026-08-29 — the background work that would not stay quiet
 
 > A release about processes that never learned to stop. A telemetry probe that
