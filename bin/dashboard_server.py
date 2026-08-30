@@ -1896,12 +1896,13 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
 
     try:
         query = """
-            SELECT id, type, title, content, metadata_json, importance,
-                   origin_device, change_agent, created_at, updated_at,
-                   confidence, pinned, source, valid_from, valid_to,
-                   corroboration_count, contradiction_count
-            FROM memory_items
-            WHERE is_deleted = 0
+            SELECT mi.id, mi.type, mi.title, mi.content, mi.metadata_json,
+                   mi.importance, mi.origin_device, mi.change_agent,
+                   mi.created_at, mi.updated_at, mi.confidence, mi.pinned,
+                   mi.source, mi.valid_from, mi.valid_to,
+                   mi.corroboration_count, mi.contradiction_count
+            FROM memory_items AS mi
+            WHERE mi.is_deleted = 0
         """
         params = []
         _backend = _active_backend()
@@ -1912,6 +1913,11 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
         # hand-maintained copies in memory/search.py did (2026-07-26: a
         # type_filter fix reached one of them and filtered searches silently
         # returned unfiltered rows).
+        # scope_predicates() emits predicates qualified with its `table_alias`
+        # (default "mi"), so the SELECT above MUST alias memory_items AS mi.
+        # Without it a type filter produced `AND mi.type LIKE ?` against an
+        # unaliased table -> "no such column: mi.type", and only when a type was
+        # selected (no filter emits no predicate, so browse-all looked fine).
         _tenancy_sql, _tenancy_params = _backend.dialect().scope_predicates(
             type_filter=type or "",
         )
