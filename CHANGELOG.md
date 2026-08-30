@@ -21,6 +21,79 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.29.0] — 2026-08-29 — the background work that would not stay quiet
+
+> A release about processes that never learned to stop. A telemetry probe that
+> could not succeed on this hardware, retried forever. A GPU probe whose console
+> cannot be hidden at all, polled every two seconds. A spill file whose target
+> had been deleted in July, re-attempted 312,684 times. None of them was broken
+> in a way that raised an error — they were each doing exactly what they were
+> told, far more often than anyone intended. The symptom was a desktop that kept
+> flashing console windows and stalling into a spinning cursor mid-game.
+
+### Fixed — background probes flashing console windows on Windows
+
+- **The thermal probe retried a call that can never succeed.** A scheduled task
+  runs under `pythonw.exe` (no console), but every console-subsystem child it
+  spawns gets its own `conhost` window, and that window steals focus from
+  fullscreen apps. `get_thermal_status()` shells out to PowerShell for
+  `MSAcpi_ThermalZoneTemperature` — a largely laptop-only WMI class that desktop
+  boards do not expose — and falls back to `wmic`, removed in Windows 11 24H2.
+  Both fail on every call, and there was no cache, so the governor's per-cycle
+  telemetry spawned PowerShell every 2–14 seconds indefinitely.
+
+  `CREATE_NO_WINDOW` was already set correctly and was never the problem; the
+  problem was spawning at all, forever, for a value this hardware cannot report.
+  Adds a 60s TTL cache and a `_PROBE_UNSUPPORTED` latch so a platform that cannot
+  answer is asked once per process rather than once per cycle.
+
+- **`nvidia-smi` creates its own console, which no parent flag can suppress.**
+  Measured: `CREATE_NO_WINDOW` alone, and `CREATE_NO_WINDOW` plus
+  `STARTUPINFO`/`SW_HIDE`, both leave the window count higher than before the
+  call. (The same flag *does* work for PowerShell, which is why the guard looked
+  sufficient.) Since the window cannot be hidden, the fix is to spawn it far less
+  often: the GPU probe TTL default moves from 2s to 60s. `M3_GPU_PROBE_TTL` still
+  overrides and `M3_GPU_PROBE_DISABLE=1` turns the probe off.
+
+- **An unguarded spawn on the hourly sync path.** `reembed_space` launched
+  `embed_backfill.py` with no window guard, reached unattended through
+  `sync_all` → `pg_sync`, where `sys.executable` can be a console `python.exe`.
+
+### Fixed — a spill file that could never drain, retried without backoff
+
+- **312,684 retries, ~1.2 GB/s of I/O, and a 720 MB log.** Two 3 KB spill files
+  held ten rows whose target stores were test artifacts: deleted pytest tmpdirs
+  and empty `%TEMP%` scratch databases. Refusing them is correct — discarding a
+  captured turn is worse than keeping it — but with no escape hatch the cognitive
+  loop re-attempted the drain roughly every 1.7 seconds, forever. The memory
+  bandwidth that burned is what stalled the desktop into a spinning cursor.
+
+  Spill files now carry a consecutive-failure count. Past the budget the file is
+  **moved** to `<spill_dir>/quarantine/` and logged at ERROR — never deleted, and
+  it drains again if moved back once the target exists. A file past its budget
+  costs one `os.stat` rather than a full reparse, and a successful drain clears
+  the counter so a transient outage never accumulates toward quarantine. The
+  budget resolves config file → env var → default, because the scheduled task,
+  launchd agent and systemd unit that run the sweeper all inherit a bare
+  environment, where an env-only knob would be invisible.
+
+- **A target can exist and still be unusable.** The guard checked that the parent
+  directory existed, which a 0-table SQLite stub passes before dying inside the
+  writer with `no such table: memory_items`. It now reuses the existing
+  `_db_is_populated` seam to refuse a target that carries no schema, with a
+  message that names the real cause.
+
+### Fixed — unbounded daemon logs
+
+- **No log in `bin/` had any size bound.** `cognitive_loop.log` reached 720 MB
+  during the runaway with nothing to stop it. `setup_task_runtime` now rolls a
+  log aside at startup once it passes `M3_LOG_MAX_BYTES` (64 MB default, one
+  generation, `0` disables). Rotation happens at startup rather than through
+  `RotatingFileHandler` because the daemons point `sys.stdout`/`sys.stderr`
+  straight at the file, and on Windows a live handle cannot be rotated out from
+  under itself — the rename fails and the handler silently keeps appending to the
+  old inode.
+
 ## [2026.8.19.16] — 2026-08-12 — the failures that looked like successes
 
 > A release about silence. Every fix here is a path that was already broken and
