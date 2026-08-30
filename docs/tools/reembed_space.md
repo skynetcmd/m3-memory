@@ -1,8 +1,8 @@
 ---
 tool: bin/reembed_space.py
-sha1: 49f4dbea9451
-mtime_utc: 2026-08-07T23:53:52.248216+00:00
-generated_utc: 2026-08-08T14:40:50.074624+00:00
+sha1: 20cc84f875d6
+mtime_utc: 2026-08-30T00:09:08.520688+00:00
+generated_utc: 2026-08-30T01:24:29.409422+00:00
 private: false
 ---
 
@@ -66,6 +66,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `_task_runtime (no_window_kwargs)`
 - `sqlite_pragmas (apply_pragmas, profile_for_db)`
 - `sqlite_pragmas (checkpoint_truncate)`
 
@@ -75,7 +76,7 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.call()  → `cmd`` (line 389)
+- `subprocess.call()  → `cmd`` (line 400)
 
 **sqlite**
 
