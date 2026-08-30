@@ -5,6 +5,18 @@ import sys
 
 logger = logging.getLogger("thermal_utils")
 
+# --- TTL cache + unsupported-probe latch (added 2026-08-29) -------------------
+# get_thermal_status() is called on the governor's per-cycle path. Each Windows
+# probe spawns a CONSOLE process (powershell/wmic); on a host where the WMI class
+# is unsupported that spawn happens forever and never succeeds, flashing a
+# conhost window and STEALING FOCUS from fullscreen apps (games).
+# Cache the answer, and remember when the probe is simply not available here.
+import time as _time
+
+_TTL = 60.0                 # seconds; governor cycles are far faster than this
+_THERMAL_CACHE = {"value": None, "at": 0.0}
+_PROBE_UNSUPPORTED = False  # set once a platform proves it cannot answer
+
 # get_thermal_status() runs on a WARM path — the cognitive loop polls telemetry
 # every cycle (and the governor on every load check). On Windows the powershell
 # and wmic probes are console-subsystem processes that FLASH a window and steal
@@ -22,10 +34,48 @@ except Exception:  # pragma: no cover - fallback if _task_runtime unavailable
         return {"creationflags": flags} if flags else {}
 
 def get_thermal_status() -> str:
+    """Thermal/pressure status: Nominal, Fair, Serious, or Critical.
+
+    Cached for _TTL seconds. If the platform's probe proves unsupported, it is
+    latched off and never spawned again for the life of the process -- otherwise
+    a host that cannot report temperature spawns a console window every cycle.
+    """
+    global _PROBE_UNSUPPORTED
+    now = _time.monotonic()
+    if _THERMAL_CACHE["value"] is not None and (now - _THERMAL_CACHE["at"]) < _TTL:
+        return _THERMAL_CACHE["value"]
+    if _PROBE_UNSUPPORTED:
+        # Refresh the timestamp so we do not re-enter the probe path every call.
+        _THERMAL_CACHE["at"] = now
+        return _THERMAL_CACHE["value"] or "Nominal"
+
+    result = _probe_thermal_status()
+
+    # "Nominal" from a platform whose probes all failed means "unknown", not
+    # "measured cool". Latch it so the spawn happens once, not every cycle.
+    if result == "Nominal" and sys.platform == "win32" and not _probe_succeeded():
+        _PROBE_UNSUPPORTED = True
+        logger.debug("thermal probe unsupported on this host; disabling further probes")
+
+    _THERMAL_CACHE["value"] = result
+    _THERMAL_CACHE["at"] = now
+    return result
+
+
+_PROBE_OK = {"ok": False}
+
+
+def _probe_succeeded() -> bool:
+    """True if the most recent probe actually read a temperature."""
+    return _PROBE_OK["ok"]
+
+
+def _probe_thermal_status() -> str:
     """
     Returns the thermal/pressure status of the current system.
     Returns: Nominal, Fair, Serious, or Critical.
     """
+    _PROBE_OK["ok"] = False
     # sys.platform, not platform.system(): the latter can hang on a WMI query
     # on Python 3.14 / Windows, and thermal checks run on a warm path.
     system = {"darwin": "Darwin", "win32": "Windows"}.get(sys.platform, "Linux")
@@ -55,6 +105,7 @@ def get_thermal_status() -> str:
             )
             if res.returncode == 0 and res.stdout.strip():
                 raw_temp = int(res.stdout.strip().splitlines()[0])
+                _PROBE_OK["ok"] = True
                 temp_c = (raw_temp / 10.0) - 273.15
                 if temp_c > 90: return "Critical"
                 if temp_c > 80: return "Serious"
@@ -74,6 +125,7 @@ def get_thermal_status() -> str:
                 lines = res.stdout.strip().split("\n")
                 if len(lines) > 1:
                     raw_temp = int(lines[1].strip())
+                    _PROBE_OK["ok"] = True
                     # WMI returns deci-Kelvin (K * 10)
                     temp_c = (raw_temp / 10.0) - 273.15
                     if temp_c > 90: return "Critical"

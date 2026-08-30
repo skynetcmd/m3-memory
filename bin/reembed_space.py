@@ -386,7 +386,18 @@ def _process_one_db(db_path: str, args) -> int:
     # tool had already committed the deletes, leaving the store with vectors
     # removed and nothing regenerating them. (Hit live 2026-07-23.)
     cmd = [sys.executable, os.path.join(_BIN, "embed_backfill.py"), "--db", db_path]
-    rc = subprocess.call(cmd)
+    # CREATE_NO_WINDOW: this runs unattended under the hourly AgentOS_HourlySync
+    # task (sync_all -> pg_sync -> here). sys.executable there can be a CONSOLE
+    # python.exe, whose spawn flashes a conhost window and steals focus from
+    # fullscreen apps. Guard it like every other unattended spawn.
+    try:
+        sys.path.insert(0, _BIN)
+        from _task_runtime import no_window_kwargs as _nwk
+        _nw = _nwk()
+    except Exception:
+        _f = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+        _nw = {"creationflags": _f} if _f else {}
+    rc = subprocess.call(cmd, **_nw)
     if rc != 0:
         print()
         print(f"WARNING: embed_backfill.py exited {rc} — the stale vectors are "
