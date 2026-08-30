@@ -155,6 +155,90 @@ hub; peers don't talk to each other directly.
 
 ---
 
+## Agent machine with no local m3 (MCP-only) — and why the chat log goes missing
+
+A common setup: **machine A** runs m3, **machine B** runs the coding agent
+(Claude Code, OpenCode) and reaches A's MCP server over the network. The memory
+tools work, but nothing is captured to the chat log.
+
+That is expected. **Chat capture is not part of the MCP server** — it is a hook
+that the agent fires in its own process:
+
+```
+agent on machine B
+   ├─▶ hooks/chatlog/opencode_session_end.py
+   │        └─▶ chatlog_ingest.py        ← runs on machine B
+   └─▶ MCP ─────────────────────────────▶ memory_search / memory_write on machine A
+```
+
+MCP carries the *tools* across the wire; it does not carry turn capture. m3 ships
+hooks for Claude Code, OpenCode, Gemini CLI and Aider, and each one runs locally.
+
+**So m3 has to be installed on machine B too.** Install it thin, then sync via
+the warehouse as described above.
+
+### Don't load a second embedder on the agent machine
+
+The usual reason a small agent box falls over after installing m3 is the local
+GGUF embedder: `m3-embed-server` loads `bge-m3-Q4_K_M.gguf` into RAM at startup.
+On a 4-core / 16 GB machine, alongside the agent, that is enough to exhaust
+memory.
+
+Point machine B at machine A's embed server, and keep B from starting one of its
+own:
+
+```bash
+# machine B
+M3_EMBED_URL=http://machine-a:8082   # where to send embed requests
+M3_EMBED_INPROC=0                    # do not load a local GGUF in-process
+```
+
+`M3_EMBED_URL` alone is not sufficient. Tier-1 **auto-detects** a bge-m3 GGUF in
+the canonical model directories when `M3_EMBED_GGUF` is unset
+(`M3_EMBED_GGUF_AUTODETECT` defaults to `1`), so a machine that happens to have
+one — via LM Studio, say — will still load it in-process. In-process embedding is
+gated by `M3_EMBED_INPROC` / `.embed_config.json`: the design is
+*safe-by-default — route to the shared server unless inproc is clearly intended*,
+so being explicit here keeps B on that path.
+
+Then don't register the heavyweight services on B — skip `AgentOS_EmbedServer`
+(it is the sole embedder for the fleet, and belongs on A), and skip the cognitive
+loop if B doesn't need it. B needs the chatlog hooks, the MCP client, and its
+local SQLite store; the warehouse sync handles the rest.
+
+> ⚠️ The embed server binds `127.0.0.1` by default and has **no authentication**.
+> To serve another machine, A must bind a reachable interface — keep that on a
+> trusted LAN or a tunnel (Tailscale, WireGuard), never the open internet.
+
+### Never share a SQLite file over a network mount
+
+Do not put `agent_memory.db` on an SMB/NFS share and point both machines at it.
+SQLite's locking relies on filesystem semantics network mounts don't reliably
+provide. It appears to work, which is what makes it dangerous — the failure
+surfaces later as a corrupt store or silently lost turns. Each machine keeps its
+own local SQLite; the warehouse is the meeting point.
+
+### Pin both roots, or the chat log splits
+
+The **MCP server** reads its roots from its own registration's `env` block; the
+**chatlog hook** inherits the agent's *process* environment. Pin only one and the
+server reads the new root while hooks keep writing to the old one.
+
+On machine B, set `M3_ENGINE_ROOT` and `M3_CONFIG_ROOT` in **both** the
+`claude mcp add --env …` registration **and** inline on each hook `command`.
+
+### Verifying capture on the agent machine
+
+```bash
+m3 chatlog doctor          # exits nonzero on capture warnings
+m3 chatlog status --json   # last_write_at must advance after a session
+```
+
+If `last_write_at` doesn't move after a session on B, the hooks aren't firing —
+chase that independently of whether the MCP tools work.
+
+---
+
 ## Advanced: M3_SYNC_DBS
 
 If you want to override the default DB list (e.g., to sync a custom
