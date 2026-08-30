@@ -29,6 +29,134 @@ import chatlog_config
 
 logger = logging.getLogger("chatlog_embed_sweeper")
 
+# --- undrainable-spill quarantine (added 2026-08-29) -------------------------
+# A spill file whose target can never exist (a deleted pytest tmpdir, a %TEMP%
+# scratch DB) is refused on every pass — correctly, since discarding a turn is
+# worse than keeping it (§3). But with no escape hatch the sweeper retries it
+# forever: measured at 312,684 passes / ~1,230 MB/s / a 720 MB log, which
+# stalled the desktop UI. Count consecutive failures per file and, past the
+# budget, move it aside. MOVE, never delete — the turns must survive (§3).
+_QUARANTINE_DIRNAME = "quarantine"
+_SPILL_CFG_TTL = 5.0
+_spill_cfg_cache: dict = {"ts": 0.0, "mtime": None, "max_attempts": None}
+
+
+def _spill_config_path() -> str:
+    from m3_core.paths import get_m3_config_root
+    return os.path.join(get_m3_config_root(), ".spill_config.json")
+
+
+def _spill_max_attempts(now: float | None = None) -> int:
+    """Consecutive-failure budget before a spill file is quarantined.
+
+    Precedence: config file > env var > default (§3). A config FILE, not an env
+    var alone: the Windows scheduled task / launchd agent / systemd --user unit
+    that runs the sweeper inherits a bare environment, so an env-only knob is
+    absent in exactly the process that needs it. Re-read only when the file's
+    mtime changes, stat throttled to _SPILL_CFG_TTL (§4). Never raises.
+    """
+    now = now if now is not None else time.time()
+    if now - _spill_cfg_cache["ts"] >= _SPILL_CFG_TTL:
+        _spill_cfg_cache["ts"] = now
+        try:
+            mtime = os.stat(_spill_config_path()).st_mtime
+        except OSError:
+            mtime = None  # absent/unreadable -> env + default
+        if mtime != _spill_cfg_cache["mtime"]:
+            _spill_cfg_cache["mtime"] = mtime
+            cfg: dict = {}
+            if mtime is not None:
+                try:
+                    with open(_spill_config_path(), encoding="utf-8") as fh:
+                        cfg = json.load(fh) or {}
+                except Exception as e:  # noqa: BLE001 — any parse failure
+                    # §3 never silent: a malformed file would otherwise revert to
+                    # defaults invisibly, so the operator's tuning is not live.
+                    logger.warning(
+                        "Spill config %s is unreadable/malformed (%s) — falling "
+                        "back to env var + default until fixed.",
+                        _spill_config_path(), e)
+                    cfg = {}
+            _spill_cfg_cache["max_attempts"] = cfg.get("max_drain_attempts")
+
+    val = _spill_cfg_cache["max_attempts"]
+    if val is not None:
+        try:
+            return max(1, int(val))
+        except (TypeError, ValueError):
+            pass
+    try:
+        # os.environ.get, NOT getenv_compat: that helper maps a DEPRECATED
+        # legacy name to a new one, and this knob is new — it has no legacy
+        # spelling to be compatible with (test_env_rename_map_drift enforces
+        # that every getenv_compat call site is a real rename).
+        return max(1, int(os.environ.get("M3_SPILL_MAX_ATTEMPTS", "5") or 5))
+    except (TypeError, ValueError):
+        return 5
+
+
+def _attempts_path(spill_path: str) -> str:
+    return spill_path + ".attempts"
+
+
+def _read_attempts(spill_path: str) -> int:
+    """Consecutive failures recorded for this spill file (0 if none/unreadable)."""
+    try:
+        with open(_attempts_path(spill_path), encoding="utf-8") as fh:
+            return int(json.load(fh).get("consecutive_failures", 0))
+    except Exception:  # noqa: BLE001 — absent or corrupt both mean "start over"
+        return 0
+
+
+def _record_attempt(spill_path: str, ok: bool, reason: str = "") -> int:
+    """Bump (or clear) the consecutive-failure count. Returns the new count."""
+    if ok:
+        try:
+            os.remove(_attempts_path(spill_path))
+        except OSError:
+            pass
+        return 0
+    n = _read_attempts(spill_path) + 1
+    try:
+        with open(_attempts_path(spill_path), "w", encoding="utf-8") as fh:
+            json.dump({
+                "consecutive_failures": n,
+                "last_error": reason[:500],
+                "last_attempt": datetime.now(timezone.utc).isoformat(),
+            }, fh)
+    except OSError as e:
+        # Best-effort: a counter we cannot persist just means we retry longer.
+        logger.warning("Could not record drain attempt for %s: %s", spill_path, e)
+    return n
+
+
+def _quarantine_spill(spill_path: str, reason: str, attempts: int) -> bool:
+    """Move an undrainable spill file out of the hot path. True if moved.
+
+    The turns are NOT lost (§3): they sit in <spill_dir>/quarantine/ and drain
+    again if moved back once the target store exists.
+    """
+    try:
+        qdir = os.path.join(os.path.dirname(spill_path), _QUARANTINE_DIRNAME)
+        os.makedirs(qdir, exist_ok=True)
+        dest = os.path.join(qdir, os.path.basename(spill_path))
+        if os.path.exists(dest):  # keep both rather than clobber
+            dest = "%s.%s" % (dest, datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S"))
+        os.replace(spill_path, dest)
+        try:
+            os.remove(_attempts_path(spill_path))
+        except OSError:
+            pass
+        logger.error(
+            "QUARANTINED undrainable spill %s -> %s after %d consecutive failures "
+            "(%s). Turns are PRESERVED, not deleted — move the file back once the "
+            "target store exists. Raise max_drain_attempts in %s to retry longer.",
+            spill_path, dest, attempts, reason, _spill_config_path())
+        return True
+    except OSError as e:
+        logger.warning("Could not quarantine %s: %s", spill_path, e)
+        return False
+
 
 async def drain_spill(conn=None) -> int:
     """
@@ -70,7 +198,15 @@ async def drain_spill(conn=None) -> int:
     _backend = active_backend()
 
     total_drained = 0
+    _max_attempts = _spill_max_attempts()
     for spill_path in spill_files:
+        # §4: a file that has already spent its retry budget is quarantined
+        # WITHOUT reopening/reparsing it — one os.stat, not a full drain pass.
+        # This is what stops a permanently-undrainable spill costing anything.
+        _prior = _read_attempts(spill_path)
+        if _prior >= _max_attempts:
+            _quarantine_spill(spill_path, "exceeded retry budget", _prior)
+            continue
         try:
             # Group rows by their captured target DB. Legacy spills (no
             # _db_path) land on the sweeper's connection under the None key.
@@ -117,6 +253,7 @@ async def drain_spill(conn=None) -> int:
 
             file_drained = 0
             had_error = False
+            last_error = ""
             for db_path, rows in per_db.items():
                 if not rows:
                     continue
@@ -146,6 +283,7 @@ async def drain_spill(conn=None) -> int:
                         "re-point or remove the stale rows to drain it.",
                         db_path, spill_path)
                     had_error = True
+                    last_error = "stale target %s (parent directory missing)" % db_path
                     continue
 
                 # Reuse the CANONICAL chatlog writer rather than a second INSERT
@@ -175,16 +313,28 @@ async def drain_spill(conn=None) -> int:
                     logger.error("Failed to insert drained rows from %s into %s: %s: %s",
                                  spill_path, db_path, type(e).__name__, e)
                     had_error = True
+                    last_error = "%s: %s" % (type(e).__name__, e)
 
             total_drained += file_drained
 
             # Delete the spill file only if every group landed successfully.
             if not had_error:
+                _record_attempt(spill_path, ok=True)
                 try:
                     os.remove(spill_path)
                     logger.info("Deleted spill file: %s", spill_path)
                 except OSError as e:
                     logger.warning("Failed to delete spill file %s: %s", spill_path, e)
+            else:
+                # Something in this file refused to drain. Count it; once the
+                # budget is spent, move it aside so the loop stops spinning.
+                n = _record_attempt(spill_path, ok=False, reason=last_error)
+                if n >= _max_attempts:
+                    _quarantine_spill(spill_path, last_error or "repeated drain failure", n)
+                else:
+                    logger.warning(
+                        "Spill %s did not fully drain (attempt %d/%d): %s",
+                        spill_path, n, _max_attempts, last_error or "unknown")
 
         except Exception as e:
             logger.error("Error processing spill file %s: %s", spill_path, e)

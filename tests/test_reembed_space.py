@@ -152,7 +152,10 @@ def test_backfill_handoff_always_passes_the_resolved_db(tmp_path, monkeypatch):
     db = _store(tmp_path, MIXED)
     seen = {}
 
-    def _fake_call(cmd):
+    def _fake_call(cmd, **kwargs):
+        # **kwargs: the real call passes CREATE_NO_WINDOW on Windows so the
+        # unattended embed_backfill spawn does not flash a console and steal
+        # focus. The stub must tolerate it; the assertion is about `cmd`.
         seen["cmd"] = cmd
         return 0
 
@@ -170,7 +173,7 @@ def test_backfill_handoff_always_passes_the_resolved_db(tmp_path, monkeypatch):
 def test_backfill_failure_is_reported_not_swallowed(tmp_path, capsys, monkeypatch):
     """If regeneration fails the operator must be told the store is mid-way."""
     db = _store(tmp_path, MIXED)
-    monkeypatch.setattr("subprocess.call", lambda cmd: 2)
+    monkeypatch.setattr("subprocess.call", lambda cmd, **kwargs: 2)
     rc = reembed_space.main(["--db", db, "--apply"])
     out = capsys.readouterr().out
     assert rc == 2
