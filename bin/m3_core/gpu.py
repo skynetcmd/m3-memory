@@ -16,7 +16,16 @@ logger = logging.getLogger("M3_SDK")
 # Cached with a short TTL: spawning nvidia-smi costs ~30-80ms, and the loop reads
 # telemetry often. Disable with M3_GPU_PROBE_DISABLE=1 (e.g. CPU-only hosts).
 _GPU_PROBE_DISABLE = os.environ.get("M3_GPU_PROBE_DISABLE", "").lower() in ("1", "true", "yes")
-_GPU_PROBE_TTL = float(os.environ.get("M3_GPU_PROBE_TTL", "2.0"))
+# TTL default: 60s, NOT 2s. On Windows, `nvidia-smi` CREATES ITS OWN CONSOLE —
+# neither CREATE_NO_WINDOW nor STARTUPINFO/SW_HIDE suppresses it (both measured
+# 2026-08-29: conhost count rose with the guard correctly applied). So the only
+# way to stop the focus-stealing flash is to SPAWN IT LESS. A 2s TTL on the
+# per-cycle governor path meant a console window every ~2 seconds, which pulls
+# focus out of fullscreen apps (reported live while gaming).
+# 60s still tracks GPU load for a governor that reacts over minutes; set
+# M3_GPU_PROBE_TTL lower only on a host where no one is looking at the screen,
+# or M3_GPU_PROBE_DISABLE=1 to turn the probe off entirely.
+_GPU_PROBE_TTL = float(os.environ.get("M3_GPU_PROBE_TTL", "60.0"))
 # `backend` pins the first probe that returned a reading so we don't re-try dead
 # ones every cycle; `misses` trips the whole probe off after every backend has
 # failed enough times (circuit breaker — §6: don't keep paying for a dead call).
