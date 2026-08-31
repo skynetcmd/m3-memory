@@ -4,6 +4,8 @@ import sys
 import time
 from typing import Any
 
+from m3_core.paths import get_m3_config_root
+
 logger = logging.getLogger("M3_SDK")
 
 # ── GPU utilization probe ─────────────────────────────────────────────────────
@@ -25,7 +27,68 @@ _GPU_PROBE_DISABLE = os.environ.get("M3_GPU_PROBE_DISABLE", "").lower() in ("1",
 # 60s still tracks GPU load for a governor that reacts over minutes; set
 # M3_GPU_PROBE_TTL lower only on a host where no one is looking at the screen,
 # or M3_GPU_PROBE_DISABLE=1 to turn the probe off entirely.
-_GPU_PROBE_TTL = float(os.environ.get("M3_GPU_PROBE_TTL", "60.0"))
+_GPU_PROBE_TTL_DEFAULT = 60.0
+_GPU_PROBE_TTL = float(os.environ.get("M3_GPU_PROBE_TTL", str(_GPU_PROBE_TTL_DEFAULT)))
+_GPU_TTL_CFG_TTL = 5.0
+_gpu_ttl_cfg_cache: dict[str, Any] = {"ts": 0.0, "mtime": None, "ttl": None}
+
+
+def _gpu_probe_ttl(now: float | None = None) -> float:
+    """Seconds between GPU probes. Precedence: config file > env var > default.
+
+    A config FILE and not the env var alone (§3): the processes that spawn this
+    probe are HEADLESS scheduled tasks (AgentOS_LoopWatchdog / _Dashboard /
+    _EmbedServer, every 5 min), and none of them inherit a shell environment —
+    so `M3_GPU_PROBE_TTL` exported in a terminal is absent in exactly the
+    processes doing the spawning.
+
+    That matters here more than for most knobs: nvidia-smi draws its own console
+    window that NO parent flag can suppress (measured 2026-08-29), so the TTL is
+    the only lever on how often a window flashes. A TTL at or below the task
+    interval means every fire finds the cache expired and re-probes — measured
+    at 15 console windows/hour with TTL=300 against a 5-minute task period.
+
+    Lives in the existing `.governor_config.json` rather than a new file: this
+    probe is governor machinery (it feeds `load = max(cpu, ram, gpu)`), and a
+    fourth config file for one number is the sprawl §2 warns about. Read here
+    rather than via governor._governor_thresholds to avoid a new import edge
+    between these modules (§10a).
+
+    mtime-cached, stat throttled to _GPU_TTL_CFG_TTL (§4). Never raises.
+    """
+    now = now if now is not None else time.time()
+    if now - _gpu_ttl_cfg_cache["ts"] >= _GPU_TTL_CFG_TTL:
+        _gpu_ttl_cfg_cache["ts"] = now
+        path = os.path.join(get_m3_config_root(), ".governor_config.json")
+        try:
+            mtime = os.stat(path).st_mtime
+        except OSError:
+            mtime = None  # absent/unreadable -> env + default
+        if mtime != _gpu_ttl_cfg_cache["mtime"]:
+            _gpu_ttl_cfg_cache["mtime"] = mtime
+            val = None
+            if mtime is not None:
+                try:
+                    import json as _json
+
+                    with open(path, encoding="utf-8") as f:
+                        val = (_json.load(f) or {}).get("gpu_probe_ttl_seconds")
+                except Exception as e:  # noqa: BLE001 — any parse failure
+                    # §3 never silent: a malformed file would otherwise revert to
+                    # the default invisibly, and the operator's tuning would be
+                    # dead while appearing live.
+                    logger.warning(
+                        "Governor config %s is unreadable/malformed (%s) — GPU "
+                        "probe TTL falling back to env var + default.", path, e)
+            _gpu_ttl_cfg_cache["ttl"] = val
+
+    val = _gpu_ttl_cfg_cache["ttl"]
+    if val is not None:
+        try:
+            return max(0.0, float(val))
+        except (TypeError, ValueError):
+            pass  # malformed value -> fall through to env/default
+    return _GPU_PROBE_TTL
 # `backend` pins the first probe that returned a reading so we don't re-try dead
 # ones every cycle; `misses` trips the whole probe off after every backend has
 # failed enough times (circuit breaker — §6: don't keep paying for a dead call).
@@ -178,7 +241,9 @@ def probe_gpu_util(now: float | None = None) -> float:
     if _GPU_PROBE_DISABLE or _gpu_probe_cache["misses"] >= _GPU_PROBE_MAX_MISSES:
         return 0.0
     now = now if now is not None else time.time()
-    if now - _gpu_probe_cache["ts"] < _GPU_PROBE_TTL:
+    # Resolved live (config file > env > default) so an operator can widen the
+    # probe interval WITHOUT restarting the headless tasks that spawn it.
+    if now - _gpu_probe_cache["ts"] < _gpu_probe_ttl(now):
         return _gpu_probe_cache["util"]
     _gpu_probe_cache["ts"] = now
 
