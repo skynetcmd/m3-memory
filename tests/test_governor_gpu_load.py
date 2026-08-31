@@ -79,7 +79,11 @@ def test_probe_gpu_util_picks_first_working_backend(monkeypatch):
         ("windows", lambda: 73.0),
         ("macos", lambda: 5.0),
     ))
-    assert m3_sdk.probe_gpu_util(now=100.0) == 73.0
+    # Advance past the TTL rather than hardcoding a clock: _GPU_PROBE_TTL is
+    # env-tunable (M3_GPU_PROBE_TTL), so a fixed `now` silently returns the
+    # cached 0.0 -- and the test fails -- for anyone who raised it. Same
+    # derive-from-TTL pattern as the CPU-only test above.
+    assert m3_sdk.probe_gpu_util(now=m3_sdk._GPU_PROBE_TTL + 1) == 73.0
     assert m3_sdk._gpu_probe_cache["backend"] == "windows"
 
 
@@ -232,8 +236,10 @@ def test_probe_gpu_util_nvidia_parses_busiest_and_caches(monkeypatch):
         return _R()
     monkeypatch.setattr(subprocess, "run", _fake_run)
 
-    assert m3_sdk.probe_gpu_util(now=1000.0) == 91.0
+    # Derive from the TTL (env-tunable) rather than a hardcoded clock.
+    _t0 = m3_sdk._GPU_PROBE_TTL + 1
+    assert m3_sdk.probe_gpu_util(now=_t0) == 91.0
     assert m3_sdk._gpu_probe_cache["backend"] == "nvidia"
     # Within TTL -> cached, no second spawn.
-    assert m3_sdk.probe_gpu_util(now=1000.5) == 91.0
+    assert m3_sdk.probe_gpu_util(now=_t0 + m3_sdk._GPU_PROBE_TTL / 2) == 91.0
     assert len(calls) == 1
