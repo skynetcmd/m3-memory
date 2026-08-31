@@ -30,7 +30,8 @@ _GPU_PROBE_DISABLE = os.environ.get("M3_GPU_PROBE_DISABLE", "").lower() in ("1",
 _GPU_PROBE_TTL_DEFAULT = 60.0
 _GPU_PROBE_TTL = float(os.environ.get("M3_GPU_PROBE_TTL", str(_GPU_PROBE_TTL_DEFAULT)))
 _GPU_TTL_CFG_TTL = 5.0
-_gpu_ttl_cfg_cache: dict[str, Any] = {"ts": 0.0, "mtime": None, "ttl": None}
+_gpu_ttl_cfg_cache: dict[str, Any] = {"ts": 0.0, "mtime": None, "ttl": None,
+                                      "disabled": None}
 
 
 def _gpu_probe_ttl(now: float | None = None) -> float:
@@ -67,12 +68,15 @@ def _gpu_probe_ttl(now: float | None = None) -> float:
         if mtime != _gpu_ttl_cfg_cache["mtime"]:
             _gpu_ttl_cfg_cache["mtime"] = mtime
             val = None
+            _gpu_ttl_cfg_cache["disabled"] = None
             if mtime is not None:
                 try:
                     import json as _json
 
                     with open(path, encoding="utf-8") as f:
-                        val = (_json.load(f) or {}).get("gpu_probe_ttl_seconds")
+                        _cfg = _json.load(f) or {}
+                    val = _cfg.get("gpu_probe_ttl_seconds")
+                    _gpu_ttl_cfg_cache["disabled"] = _cfg.get("gpu_probe_disabled")
                 except Exception as e:  # noqa: BLE001 — any parse failure
                     # §3 never silent: a malformed file would otherwise revert to
                     # the default invisibly, and the operator's tuning would be
@@ -89,6 +93,30 @@ def _gpu_probe_ttl(now: float | None = None) -> float:
         except (TypeError, ValueError):
             pass  # malformed value -> fall through to env/default
     return _GPU_PROBE_TTL
+
+
+def _gpu_probe_disabled(now: float | None = None) -> bool:
+    """Whether the GPU probe is off. Precedence: config file > env var > default.
+
+    Same §3 reasoning as _gpu_probe_ttl: `M3_GPU_PROBE_DISABLE` is read from the
+    environment at import, so it is invisible to the headless scheduled tasks
+    that spawn the probe — and it cannot be changed without restarting every
+    daemon. `gpu_probe_disabled` in .governor_config.json reaches them and takes
+    effect within one stat interval.
+
+    Turning the probe off is a supported configuration, not a workaround: on a
+    host where nvidia-smi's unsuppressable console steals focus from fullscreen
+    apps, the governor still has cpu% and ram% to work with, and `load` simply
+    drops the gpu term. Never raises.
+    """
+    now = now if now is not None else time.time()
+    _gpu_probe_ttl(now)  # refreshes the shared cache (one stat, §4)
+    val = _gpu_ttl_cfg_cache.get("disabled")
+    if val is not None:
+        return bool(val)
+    return _GPU_PROBE_DISABLE
+
+
 # `backend` pins the first probe that returned a reading so we don't re-try dead
 # ones every cycle; `misses` trips the whole probe off after every backend has
 # failed enough times (circuit breaker — §6: don't keep paying for a dead call).
@@ -238,7 +266,9 @@ def probe_gpu_util(now: float | None = None) -> float:
     AMD+Intel Vulkan / CPU-only, on all three OSes. Returns 0.0 when no GPU
     backend is available (CPU-only) or the probe is disabled. TTL-cached; pins
     the working backend; trips off after repeated total misses. Never raises."""
-    if _GPU_PROBE_DISABLE or _gpu_probe_cache["misses"] >= _GPU_PROBE_MAX_MISSES:
+    # Live-resolved (config file > env > default) so the probe can be turned
+    # off without restarting the headless daemons that call it.
+    if _gpu_probe_disabled() or _gpu_probe_cache["misses"] >= _GPU_PROBE_MAX_MISSES:
         return 0.0
     now = now if now is not None else time.time()
     # Resolved live (config file > env > default) so an operator can widen the
