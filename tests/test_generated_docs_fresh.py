@@ -106,7 +106,11 @@ def test_tool_pages_are_fresh():
     for md, src, declared in _tool_pages():
         if not src.exists():
             continue  # covered by the orphan test below
-        actual = hashlib.sha1(src.read_bytes()).hexdigest()[: len(declared)]
+        # Normalise CRLF exactly as gen_tool_inventory.file_sha1 does: the hash
+        # must describe CONTENT, not the checkout's line endings, or a page
+        # generated on Windows can never match on a Linux CI runner.
+        _content = src.read_bytes().replace(b"\r\n", b"\n")
+        actual = hashlib.sha1(_content).hexdigest()[: len(declared)]
         if actual != declared:
             stale.append(f"{md.name} (declares {declared}, source is {actual})")
     assert not stale, (

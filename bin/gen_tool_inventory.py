@@ -165,8 +165,18 @@ def _tracked_files() -> set[Path]:
 
 
 def file_sha1(path: Path) -> str:
+    """Content hash of a source file, independent of checkout line endings.
+
+    CRLF is normalised to LF before hashing. Without this the hash records the
+    WORKING-TREE line endings rather than the content: a page generated on a
+    Windows checkout (CRLF) can never match the same file on a Linux runner
+    (LF), so test_generated_docs_fresh fails in CI while passing locally, and
+    regenerating on either platform just moves the failure to the other.
+    (.gitattributes already pins *.py to eol=lf, but files committed before
+    that rule keep CRLF in an existing working tree until renormalised.)
+    """
     h = hashlib.sha1(usedforsecurity=False)
-    h.update(path.read_bytes())
+    h.update(path.read_bytes().replace(b"\r\n", b"\n"))
     return h.hexdigest()[:12]
 
 
