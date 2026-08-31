@@ -36,6 +36,34 @@ _BIN = REPO_ROOT / "bin"
 if str(_BIN) not in sys.path:
     sys.path.insert(0, str(_BIN))
 
+
+def _rotate_task_log(log_file: str) -> None:
+    """Roll --log-file aside at startup if it has grown past M3_LOG_MAX_BYTES.
+
+    Delegates to _task_runtime._rotate_if_oversized so the cap, the single-
+    generation policy and the disable switch stay defined in ONE place. This
+    entrypoint cannot use setup_task_runtime() wholesale — it manages its own
+    daemonize/re-exec and its own handlers — but it must not therefore go
+    unbounded, which is what shipped: the loop runs for weeks, so without a
+    startup bound its log grows forever (720 MB measured, 2026-08-29).
+
+    Never raises: a log we cannot rotate must not stop the daemon starting.
+    """
+    try:
+        from _task_runtime import _rotate_if_oversized
+
+        _rotate_if_oversized(Path(os.path.abspath(log_file)))
+    except Exception as e:  # noqa: BLE001 — must never block daemon startup
+        # Fail safe, not silent (§3). Logging is not configured yet here, so go
+        # to the real stderr; swallowing this would hide the fact that the only
+        # bound on this daemon's log has stopped working.
+        print(
+            f"[m3] WARNING: log rotation failed for {log_file} "
+            f"({type(e).__name__}: {e}); the log is now unbounded.",
+            file=sys.__stderr__ or sys.stderr,
+        )
+
+
 import chatlog_config
 import m3_enrich
 import m3_entities
@@ -88,6 +116,13 @@ def daemonize_windows(args):
     if args.log_file:
         try:
             os.makedirs(os.path.dirname(os.path.abspath(args.log_file)), exist_ok=True)
+            # Bound the log BEFORE opening the handle the child inherits. This
+            # is the seam that was missing: the loop is long-lived, so nothing
+            # else ever rotates it and it grows without limit (a 720 MB log was
+            # measured in the wild). Truncating it out-of-band does NOT help —
+            # the inherited handle keeps its offset and the next write
+            # zero-fills the gap back to full size on Windows.
+            _rotate_task_log(args.log_file)
             child_out = open(args.log_file, "a", encoding="utf-8")
         except OSError:
             child_out = open(os.devnull, "a")
@@ -1783,6 +1818,11 @@ def main():
     # and this still runs in the managed process.
     if args.log_file:
         os.makedirs(os.path.dirname(os.path.abspath(args.log_file)), exist_ok=True)
+        # Same startup bound as the parent redirect above. Under launchd/systemd
+        # there is no re-exec, so this is the ONLY rotation point on those
+        # platforms; on Windows the parent has usually rotated already and this
+        # is a cheap no-op (one stat).
+        _rotate_task_log(args.log_file)
         _fh = logging.FileHandler(args.log_file, encoding="utf-8")
         _fh.setFormatter(logging.Formatter(
             "%(asctime)s [%(levelname)s] %(name)s: %(message)s"))

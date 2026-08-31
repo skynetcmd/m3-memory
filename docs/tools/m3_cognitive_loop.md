@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_cognitive_loop.py
-sha1: 026cc4aae9f4
-mtime_utc: 2026-08-10T00:13:35.128840+00:00
-generated_utc: 2026-08-12T00:59:01.477866+00:00
+sha1: 570b12440c49
+mtime_utc: 2026-08-31T00:34:45.433052+00:00
+generated_utc: 2026-08-31T01:25:33.422293+00:00
 private: false
 ---
 
@@ -30,7 +30,7 @@ for m3_enrich and m3_entities.
 
 ## Entry points
 
-- `def main()` (line 1669)
+- `def main()` (line 1704)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -92,6 +92,7 @@ for m3_enrich and m3_entities.
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `_task_runtime (_rotate_if_oversized)`
 - `chatlog_config`
 - `chatlog_embed_sweeper`
 - `chatlog_prune`
@@ -115,11 +116,11 @@ for m3_enrich and m3_entities.
 
 **subprocess**
 
-- `subprocess.Popen()  → `argv`` (line 119)
+- `subprocess.Popen()  → `argv`` (line 154)
 
 **sqlite**
 
-- `sqlite3.connect()  → `path`` (line 882)
+- `sqlite3.connect()  → `path`` (line 917)
 
 
 ---

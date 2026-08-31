@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_server_inproc.py
-sha1: 88c6e5fd026f
-mtime_utc: 2026-08-07T23:53:51.900549+00:00
-generated_utc: 2026-08-08T14:40:49.829803+00:00
+sha1: 078f0bd35451
+mtime_utc: 2026-08-31T00:34:49.975542+00:00
+generated_utc: 2026-08-31T01:25:33.301568+00:00
 private: false
 ---
 
@@ -80,6 +80,7 @@ Model: M3_EMBED_GGUF env, else auto-detected (discover_bge_m3_gguf).
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `_task_runtime (_rotate_if_oversized)`
 - `m3_sdk (acquire_or_exit)`
 
 ---

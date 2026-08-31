@@ -429,6 +429,25 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.log_file:
+        # Bound the log at startup before opening the handle. This server runs
+        # under uvicorn for as long as the machine is up, so nothing else ever
+        # rotates this file; unbounded, it grows until the disk complains (the
+        # cognitive loop hit 720 MB the same way). Best-effort by contract —
+        # never let a rotation failure stop the embedder from starting.
+        try:
+            from pathlib import Path as _Path
+
+            from _task_runtime import _rotate_if_oversized
+
+            _rotate_if_oversized(_Path(os.path.abspath(args.log_file)))
+        except Exception as e:  # noqa: BLE001 — must not block server startup
+            # Fail safe, not silent (§3): an unbounded embedder log is a slow
+            # disk-fill the operator should hear about now, not later.
+            print(
+                f"[m3] WARNING: log rotation failed for {args.log_file} "
+                f"({type(e).__name__}: {e}); the log is now unbounded.",
+                file=sys.__stderr__ or sys.stderr,
+            )
         logging.getLogger().addHandler(logging.FileHandler(args.log_file, encoding="utf-8"))
 
     # Pre-flight liveness guard (do NOT stack a second embedder). The self-heal
