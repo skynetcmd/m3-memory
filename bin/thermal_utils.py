@@ -14,7 +14,12 @@ logger = logging.getLogger("thermal_utils")
 import time as _time
 
 _TTL = 60.0                 # seconds; governor cycles are far faster than this
-_THERMAL_CACHE = {"value": None, "at": 0.0}
+# Two scalars rather than one dict: the value is a str and the timestamp a
+# float, and a heterogeneous dict literal makes mypy infer a single value type
+# (dict[str, float | None]) — so storing the status and returning it both fail
+# type-check. Separate names keep each type honest without a cast.
+_THERMAL_VALUE: str | None = None
+_THERMAL_AT = 0.0
 _PROBE_UNSUPPORTED = False  # set once a platform proves it cannot answer
 
 # get_thermal_status() runs on a WARM path — the cognitive loop polls telemetry
@@ -40,14 +45,14 @@ def get_thermal_status() -> str:
     latched off and never spawned again for the life of the process -- otherwise
     a host that cannot report temperature spawns a console window every cycle.
     """
-    global _PROBE_UNSUPPORTED
+    global _PROBE_UNSUPPORTED, _THERMAL_VALUE, _THERMAL_AT
     now = _time.monotonic()
-    if _THERMAL_CACHE["value"] is not None and (now - _THERMAL_CACHE["at"]) < _TTL:
-        return _THERMAL_CACHE["value"]
+    if _THERMAL_VALUE is not None and (now - _THERMAL_AT) < _TTL:
+        return _THERMAL_VALUE
     if _PROBE_UNSUPPORTED:
         # Refresh the timestamp so we do not re-enter the probe path every call.
-        _THERMAL_CACHE["at"] = now
-        return _THERMAL_CACHE["value"] or "Nominal"
+        _THERMAL_AT = now
+        return _THERMAL_VALUE or "Nominal"
 
     result = _probe_thermal_status()
 
@@ -57,8 +62,8 @@ def get_thermal_status() -> str:
         _PROBE_UNSUPPORTED = True
         logger.debug("thermal probe unsupported on this host; disabling further probes")
 
-    _THERMAL_CACHE["value"] = result
-    _THERMAL_CACHE["at"] = now
+    _THERMAL_VALUE = result
+    _THERMAL_AT = now
     return result
 
 
