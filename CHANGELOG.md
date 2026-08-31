@@ -21,6 +21,61 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.30.0] — 2026-08-30 — the log nothing was watching
+
+> Two daemons opened a log file and never bounded it. On a machine that had been
+> up for weeks the cognitive loop's log reached 720 MB, and the disk I/O behind
+> it showed up as stalls on the desktop. The rotation helper to prevent exactly
+> this already existed — its docstring even cites the incident — but neither
+> daemon was wired into it.
+
+### Fixed — unbounded daemon logs
+
+- **`bin/m3_cognitive_loop.py` and `bin/embed_server_inproc.py` never rotated
+  their `--log-file`.** Both manage their own daemonize and logging handlers, so
+  both bypass `setup_task_runtime()` — and the size bound that comes with it.
+  Long-lived by design, they appended forever.
+
+  Rotation now happens at startup, **before** the handle is opened, at all three
+  sites: the cognitive loop's parent redirect (the handle the child inherits) and
+  its own `FileHandler`, plus the embed server's handler. Order is load-bearing —
+  rotating after the open leaves the child writing to the old oversized inode, so
+  the bug persists while appearing fixed.
+
+  Truncating such a log out-of-band does not help either: the running process
+  holds its offset, so the next write zero-fills the gap back to full size on
+  Windows. The bound has to be applied before the handle exists.
+
+- **The rotation cap was unreachable from the processes that needed it.**
+  `M3_LOG_MAX_BYTES` was env-only, and none of the headless launchers — Windows
+  Task Scheduler, launchd, `systemd --user` — inherit a shell environment. The
+  cap now resolves **config file > env var > default** via
+  `<config_root>/.log_config.json`, seeded idempotently by `ensure_log_config()`
+  and mirroring the existing `.governor_config.json` pattern.
+
+- **A failed rotation is no longer silent.** A rotation failure or a malformed
+  config warns on stderr instead of being swallowed. Both still fail *safe* —
+  never blocking daemon startup — but a dead disk-space bound must not look
+  healthy.
+
+  Cross-platform: the launchd plist and systemd unit deliberately omit
+  `--background`, so there is no re-exec and the `FileHandler` site is the only
+  rotation point on macOS and Linux. Both are covered and now guarded by tests,
+  so neither can regress while Windows still looks fine. Rotation touches no
+  database, so SQLite and PostgreSQL behave identically.
+
+  `tests/test_log_rotation_guard.py` adds the repo's first rotation coverage —
+  19 tests, verified by fault injection.
+
+### Fixed — test suite
+
+- **`test_probe_gpu_util_picks_first_working_backend` failed on any machine that
+  raised `M3_GPU_PROBE_TTL`.** The test hardcoded `probe_gpu_util(now=100.0)`;
+  with a TTL above 100 the cache had not expired, so the probe loop was never
+  reached and the cached `0.0` came back. Invisible in CI, which sets no such
+  variable. The clock is now derived from `_GPU_PROBE_TTL`, matching the pattern
+  the neighbouring CPU-only test already used.
+
 ## [2026.8.29.1] — 2026-08-29 — the filter that only worked when it did nothing
 
 > A one-line fix for a bug that hid behind its own default. Selecting a type in
