@@ -21,6 +21,44 @@ the policy is forward-going only.
 
 ### None pending
 
+## [2026.8.30.1] — 2026-08-30 — the console nothing could suppress
+
+> On Windows `nvidia-smi` draws its own console window, and no parent flag
+> suppresses it — not `CREATE_NO_WINDOW`, not `STARTUPINFO`/`SW_HIDE`. So the
+> only lever on the flashing is how often it is spawned, and both knobs that
+> control that were unreachable from the processes doing the spawning.
+
+### Fixed — GPU probe knobs now reach the headless daemons
+
+- **`M3_GPU_PROBE_TTL` and `M3_GPU_PROBE_DISABLE` were environment-only.** The
+  processes that spawn this probe are headless scheduled tasks / launchd agents
+  / `systemd --user` units, none of which inherit a shell environment — so a
+  value exported in a terminal is absent in exactly the process whose console
+  keeps flashing (§3). Both now resolve **config file > env var > default**, via
+  `gpu_probe_ttl_seconds` and `gpu_probe_disabled` in the existing
+  `.governor_config.json`.
+
+  Measured on a Windows host from its own process-creation audit: with the TTL
+  at 300s against a 5-minute task interval, every fire found the cache expired
+  and re-probed — **58 spawns over 3.88 h, a console window every 5 minutes**.
+  With the probe disabled, zero subprocess calls across 50 consecutive probes.
+
+  No new config file: the probe is governor machinery (it feeds
+  `load = max(cpu, ram, gpu)`), so its knobs live beside the governor's own (§2),
+  read inline rather than through the governor's resolver to avoid a new import
+  edge (§10a). Both are read live — no daemon restart needed. With the probe off
+  the governor simply drops the gpu term and runs on cpu% and ram%.
+
+### Fixed — CI type-check
+
+- **The Mypy job had been failing, silently skipping the test matrix.** A TTL
+  cache added on 2026-08-29 stored a `str` status and a `float` timestamp in one
+  dict literal; mypy infers a single value type from such a literal, so three
+  errors in `bin/thermal_utils.py` failed the job — and because that job gates
+  the matrix, the test and E2E-install legs were **skipped, not run**, on every
+  push since. Split into two typed scalars, no cast and no `type: ignore`.
+  Behaviour unchanged.
+
 ## [2026.8.30.0] — 2026-08-30 — the log nothing was watching
 
 > Two daemons opened a log file and never bounded it. On a machine that had been
