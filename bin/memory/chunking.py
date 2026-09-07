@@ -26,6 +26,14 @@ MAX_CHARS_PER_CHUNK = int(os.environ.get("M3_EMBED_CHUNK_MAX_CHARS", 28000))
 MIN_OVERLAP_CHARS = int(os.environ.get("M3_EMBED_CHUNK_OVERLAP_CHARS", 8000))
 STRIDE_CHARS = MAX_CHARS_PER_CHUNK - MIN_OVERLAP_CHARS
 
+# Floor for the token-aware split: below this a window is handed back whole even
+# if it still estimates over budget. Guards the degenerate case (a few astral
+# characters whose byte length dominates) from recursing to single characters.
+_MIN_SPLIT_CHARS = 256
+# Depth cap: with halving, 20 levels covers ~1M characters. A belt-and-braces
+# bound so a pathological input can never spin (§3 fail safe).
+_MAX_SPLIT_DEPTH = 20
+
 DENSE_TARGET_TOKENS = 7000
 DENSE_TOKEN_OVERLAP = 500
 DENSE_MIN_SUB_CHARS = 2000
@@ -33,21 +41,67 @@ _DENSE_ERR_RE = re.compile(r"(\d+)\s*tokens\s*>\s*n_ctx")
 
 
 def _chunk_for_sliding_window(text: str) -> list[tuple[str, int]]:
-    """Split text into overlapping windows for embedding."""
+    """Split text into overlapping windows that each fit the model's n_ctx.
+
+    The character window (``MAX_CHARS_PER_CHUNK``) is retained as the coarse
+    outer bound, but it is NOT sufficient on its own: characters are not tokens.
+    A row of dense content -- code, JSON, CJK, base64 -- can exceed n_ctx while
+    sitting well under 28000 characters, and this function used to hand such a
+    row back as ONE window. Measured: a realistic mixed CJK+UUID row of 11,379
+    chars is ~11,381 tokens against a ceiling of 8,192, and returning a single
+    window meant the caller's oversize recovery had nothing to split (it bails
+    on ``len(sub_texts) <= 1``), so the row was dropped.
+
+    So every window is additionally bounded in TOKENS: any window still over
+    budget is split in half, recursively, until it fits or hits a floor. The
+    recursion terminates because each split strictly halves the character count
+    and the floor stops degenerate cases (a single astral-plane character that
+    somehow exceeds the budget cannot be split further).
+
+    Returns ``[(window_text, index), ...]``. Short text still returns exactly
+    one window with index 0, so the single-vector back-compat path is unchanged.
+    """
     n = len(text or "")
+    if n == 0:
+        return [("", 0)]
+
+    # Coarse pass: the existing character sliding window.
     if n <= MAX_CHARS_PER_CHUNK:
-        return [(text or "", 0)]
+        coarse = [text]
+    else:
+        coarse = []
+        start = 0
+        while True:
+            end = start + MAX_CHARS_PER_CHUNK
+            if end >= n:
+                coarse.append(text[start:n])
+                break
+            coarse.append(text[start:end])
+            start += STRIDE_CHARS
+
+    # Fine pass: bound each window in TOKENS. Imported lazily to keep this
+    # module import-cycle-free (tokens.py is pure, but the lazy import also
+    # keeps `chunking` usable in contexts where config has not been set up).
+    from .tokens import TOKEN_BUDGET, estimate_tokens
+
+    def _split_to_budget(part: str, depth: int = 0) -> list[str]:
+        # estimate_tokens (never count_tokens) on purpose: this is a hot,
+        # per-window decision and the estimator is conservative -- it may
+        # over-split, never under-split. Exactness here would cost a tokenizer
+        # call per candidate boundary for no correctness gain.
+        if estimate_tokens(part) <= TOKEN_BUDGET or len(part) <= _MIN_SPLIT_CHARS:
+            return [part]
+        if depth >= _MAX_SPLIT_DEPTH:
+            return [part]  # pathological input: hand it back rather than loop
+        mid = len(part) // 2
+        return _split_to_budget(part[:mid], depth + 1) + \
+            _split_to_budget(part[mid:], depth + 1)
+
     out: list[tuple[str, int]] = []
-    idx = 0
-    start = 0
-    while True:
-        end = start + MAX_CHARS_PER_CHUNK
-        if end >= n:
-            out.append((text[start:n], idx))
-            return out
-        out.append((text[start:end], idx))
-        idx += 1
-        start += STRIDE_CHARS
+    for part in coarse:
+        for piece in _split_to_budget(part):
+            out.append((piece, len(out)))
+    return out
 
 
 def _order_embeddings(data: list[dict], n_inputs: int) -> list[list[float]] | None:
