@@ -262,6 +262,48 @@ class Dialect:
 
         return sql, params
 
+    def byte_length(self, column: str) -> str:
+        """SQL expression for the UTF-8 BYTE length of a text ``column``.
+
+        NOT the character count: a size cap expressed in bytes must measure
+        bytes, or the same predicate means different things per encoding (a
+        CJK row is ~3 bytes/char, so a char-based cap admits ~3x the payload).
+
+        SQLite has no portable ``octet_length`` before 3.43, so the byte length
+        of TEXT is obtained by casting to BLOB and taking its length. Postgres
+        has ``octet_length`` natively. A third backend (MariaDB) overrides with
+        its own ``OCTET_LENGTH``.
+
+            sql = f"... WHERE {_d.byte_length('mi.content')} <= {_d.param()}"
+
+        ``column`` is a trusted identifier, never end-user input.
+
+        ⚠ A byte cap is NOT a token cap. bge-m3 token density spans 4x across
+        content types (English ~4.18 chars/token, base64 1.00), so a byte
+        threshold tuned for English silently admits rows that overflow n_ctx on
+        CJK/code/JSON/base64. Use this for a coarse size bound only; the token
+        budget is the real guard. See docs/EMBED_INPUT_RECIPE.md.
+        """
+        raise NotImplementedError("subclass must implement byte_length()")
+
+    def has_content(self, column: str) -> str:
+        """Boolean predicate: ``column`` holds non-whitespace text.
+
+        Replaces five hand-written copies of
+        ``LENGTH(TRIM(COALESCE(col, ''))) > 0``. Character-``LENGTH`` happens to
+        be portable across SQLite/PG/MariaDB, so this is de-duplication rather
+        than a portability fix today (DESIGN_PHILOSOPHIES §10a: duplicated
+        predicate logic is the defect INDEPENDENT of correctness -- copies
+        drift, and a future backend gets ONE override instead of five call
+        sites to find).
+
+        NULL-safe: COALESCE folds NULL to '' so the predicate is false, never
+        NULL (which would silently drop rows from an AND chain).
+
+            sql = f"... WHERE {_d.has_content('mi.content')} ..."
+        """
+        raise NotImplementedError("subclass must implement has_content()")
+
     def group_concat(self, expr: str, separator: str = ",") -> str:
         """Aggregate ``expr`` across a GROUP BY into a single separator-joined
         string. ``expr`` is a trusted column/identifier; ``separator`` is a trusted

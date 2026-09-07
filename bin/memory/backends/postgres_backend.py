@@ -438,6 +438,15 @@ class PostgresDialect(Dialect):
         # Etc/UTC -- agreement by configuration, not by contract.
         return f"to_char({column} AT TIME ZONE 'UTC', 'YYYY-MM-DD')"
 
+    def byte_length(self, column: str) -> str:
+        # Native on PG. NOTE: length() on PG counts CHARACTERS, not bytes, so
+        # the SQLite idiom would be silently wrong here (a CJK row would report
+        # ~1/3 its true byte size).
+        return f"octet_length({column})"
+
+    def has_content(self, column: str) -> str:
+        return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
+
     def empty_json_default(self) -> "str | None":
         return "{}"  # metadata_json is JSONB; '' is rejected, '{}' is the empty obj
 

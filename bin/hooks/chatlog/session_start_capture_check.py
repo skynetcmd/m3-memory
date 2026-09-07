@@ -64,16 +64,34 @@ def _resolve_db() -> str:
     return str(repo / "engine" / "agent_memory.db")
 
 
+def _recent_window_sql() -> "tuple[str, tuple]":
+    """(sql, params) counting chat_log rows written in the last WINDOW_MIN.
+
+    The "now minus N minutes" expression comes from the backend seam
+    (DESIGN_PHILOSOPHIES §10a) rather than the SQLite-only
+    ``datetime('now', ?)`` idiom, which raises on PostgreSQL. The minutes value
+    is BOUND, not interpolated into the SQL text.
+
+    This hook must never break session start, so a seam import failure falls
+    back to the SQLite form -- the hook only ever opens a SQLite file by path.
+    """
+    base = "SELECT COUNT(*) FROM memory_items WHERE type = 'chat_log' AND "
+    try:  # pragma: no cover - import shim for standalone hook execution
+        from memory.backends.sqlite_backend import SqliteDialect
+
+        d = SqliteDialect(backend="sqlite", param_style="qmark")
+        return base + f"created_at > {d.now_minus_minutes(d.param())}", (int(WINDOW_MIN),)
+    except Exception:  # noqa: BLE001
+        return base + "created_at > datetime('now', ?)", (f"-{int(WINDOW_MIN)} minutes",)
+
+
 def main() -> None:
     db = _resolve_db()
     try:
         conn = sqlite3.connect(db, timeout=5)
         try:
-            (count,) = conn.execute(
-                "SELECT COUNT(*) FROM memory_items "
-                "WHERE type = 'chat_log' "
-                f"AND created_at > datetime('now', '-{WINDOW_MIN} minutes')"
-            ).fetchone()
+            _sql, _params = _recent_window_sql()
+            (count,) = conn.execute(_sql, _params).fetchone()
         finally:
             conn.close()
     except Exception as exc:  # noqa: BLE001 — never break session start

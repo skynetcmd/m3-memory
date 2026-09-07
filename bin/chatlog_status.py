@@ -21,6 +21,18 @@ from typing import Any
 
 import chatlog_config
 
+# The non-empty-content predicate comes from the backend seam so it has exactly
+# one definition (DESIGN_PHILOSOPHIES §10a: duplicated predicate logic is the
+# defect independent of correctness). This module still opens SQLite by path
+# (Finding L), so the SQLite dialect is resolved here.
+try:  # pragma: no cover - import shim for standalone execution
+    from memory.backends.sqlite_backend import SqliteDialect as _SqliteDialect
+    _has_content = _SqliteDialect(backend="sqlite", param_style="qmark").has_content
+except Exception:  # pragma: no cover
+    def _has_content(column: str) -> str:
+        return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
+
+
 logger = logging.getLogger("chatlog_status")
 
 
@@ -138,7 +150,7 @@ def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, Any]:
                         "SELECT COUNT(*) as cnt FROM memory_items mi "
                         "WHERE mi.type='chat_log' "
                         "AND COALESCE(mi.is_deleted, 0) = 0 "
-                        "AND LENGTH(TRIM(COALESCE(mi.content, ''))) > 0 "
+                        f"AND {_has_content('mi.content')} "
                         "AND NOT EXISTS ("
                         "SELECT 1 FROM memory_embeddings me WHERE me.memory_id = mi.id)"
                     ).fetchone()
