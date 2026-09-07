@@ -30,6 +30,54 @@ import time
 from typing import Awaitable, Callable, Optional
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Failure classification: infrastructure vs content
+# ──────────────────────────────────────────────────────────────────────────────
+# The sweep aborts after `max_consecutive_fails` back-to-back failures, on the
+# theory that the embedder is down. That theory is only sound for failures that
+# actually indicate an unreachable/broken embedder. A row the embedder REFUSED
+# (too long, malformed) says nothing about its availability -- and counting one
+# toward the abort is what made issue #139 catastrophic: five dense CJK batches
+# aborted the whole sweep with "Check embedder availability", the loop re-fetched
+# the same rows next pass, failed again, and never drained.
+#
+# Conservative by design: anything NOT recognised as content-shaped counts as
+# infrastructure. A genuinely dead embedder must still trip the breaker; the
+# cost of a mis-classified content failure is one extra retry, while the cost of
+# a mis-classified infra failure is an infinite spin (§3 fail safe).
+_CONTENT_FAILURE_HINTS = (
+    "context_length_exceeded",
+    "input too long",
+    "context length exceeded",
+    "maximum context length",
+    "token length exceeds",
+    "too many tokens",
+    "exceeds context window",
+    "n_ctx",
+)
+
+
+def _is_infrastructure_failure(exc: BaseException) -> bool:
+    """True if `exc` suggests the EMBEDDER is unavailable (breaker-worthy).
+
+    False for content-shaped failures -- an oversized or unembeddable row --
+    which must not count toward the abort threshold.
+    """
+    # A typed context-overflow is unambiguous content. Imported lazily: this
+    # module is injected `embed_many` by its caller and must stay usable when
+    # memory.embed is not importable (tests pass a stub).
+    try:
+        from memory.embed import ContextLengthExceeded
+        if isinstance(exc, ContextLengthExceeded):
+            return False
+    except Exception:  # noqa: BLE001
+        pass
+    text = str(exc).lower()
+    if any(h in text for h in _CONTENT_FAILURE_HINTS):
+        return False
+    return True
+
+
 # ── Counters used by both callers ─────────────────────────────────────────
 class Counters:
     """Shared counters. Both tools instantiate one and read totals at the end."""
@@ -46,6 +94,11 @@ class Counters:
         self.oversize_subdivided = 0
         self.skipped_bad_dim = 0
         self.failed_batches = 0
+        # Batches that failed for CONTENT reasons (a row the embedder could
+        # not process) rather than INFRASTRUCTURE reasons. Tracked separately
+        # because only infrastructure failures may trip the abort breaker --
+        # see _is_infrastructure_failure.
+        self.content_failures = 0
         self.consecutive_fails = 0
         self.batches_completed = 0
         self.errors_by_class: dict[str, int] = {}
@@ -77,6 +130,22 @@ TransformFn = Callable[[str, Optional[str]], str]
 # this so the chatlog tool (logger.info) and the general tool (custom
 # stdout writer) keep their own conventions.
 LogFn = Callable[[str], None]
+
+
+# Token budgeting comes from the shared seam so the sweep, the chunker and the
+# embed boundary all agree on "how long is this". Import shim: this module is
+# deliberately dependency-light (its caller injects `embed_many`), so a missing
+# memory.tokens degrades to the same conservative arithmetic rather than failing
+# to import.
+try:  # pragma: no cover - import shim for standalone execution
+    from memory.tokens import TOKEN_BUDGET as _TOKEN_BUDGET, token_budget as _token_budget
+except Exception:  # pragma: no cover
+    _TOKEN_BUDGET = 7000
+
+    def _token_budget(text: str) -> int:
+        if not text:
+            return 2
+        return max(len(text.encode("utf-8")) // 3, len(text)) + 2
 
 
 def _identity_transform(text: str, _metadata: Optional[str]) -> str:
@@ -179,7 +248,16 @@ async def run_embed_loop(
                     "text": embed_text,
                     "chash": content_hash_fn(embed_text),
                 }
-                if len(embed_text.encode("utf-8")) > max_row_bytes:
+                # TOKENS, not bytes. `max_row_bytes` (32768) is 8192 * 4 --
+                # the ENGLISH bytes-per-token ratio written down as a constant.
+                # Chinese runs ~4.88 bytes/token, so 32768 bytes of CJK is
+                # ~9,900 tokens: such a row PASSED this guard, was never routed
+                # to the subdivide path, and then blew n_ctx inside a shared
+                # batch. Code/JSON/base64 fail it in the other direction
+                # (1.6-3.2 bytes/token). The byte cap is kept as a coarse outer
+                # bound; the token budget is the real guard.
+                if (_token_budget(embed_text) > _TOKEN_BUDGET
+                        or len(embed_text.encode("utf-8")) > max_row_bytes):
                     if oversize_mode != "subdivide":
                         counters.skipped_oversize += 1
                         continue
@@ -210,12 +288,33 @@ async def run_embed_loop(
             results = await asyncio.wait_for(
                 embed_many(texts), timeout=timeout_s,
             )
-        except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — classified below
+            # `except (asyncio.TimeoutError, Exception)` was redundant: Exception
+            # already subsumes TimeoutError, and the tuple form implied an
+            # intent that was not there.
             counters.failed_batches += 1
-            counters.consecutive_fails += 1
             counters.record_error(e)
-            if log is not None:
-                log(f"BATCH_FAIL: {type(e).__name__}: {str(e)[:200]}")
+            # ⭐ CONTENT failures must NOT trip the INFRASTRUCTURE breaker.
+            # An oversized row is not evidence the embedder is down, but it used
+            # to increment the same counter as a connection refusal -- so five
+            # dense rows aborted the entire sweep with "Check embedder
+            # availability", which is why issue #139 looked like a deployment
+            # problem and sent its reporter to inspect a healthy server.
+            # DESIGN_PHILOSOPHIES §3: crash on contract violation, not on edge
+            # cases. A long row is an edge case; the old code treated it as an
+            # infrastructure contract violation.
+            if _is_infrastructure_failure(e):
+                counters.consecutive_fails += 1
+                if log is not None:
+                    log(f"BATCH_FAIL[infra]: {type(e).__name__}: {str(e)[:400]}")
+            else:
+                counters.content_failures += 1
+                if log is not None:
+                    log(
+                        f"BATCH_FAIL[content]: {type(e).__name__}: {str(e)[:400]} "
+                        f"| not counted toward the abort threshold (the embedder "
+                        f"is reachable; this batch's CONTENT could not be embedded)"
+                    )
             return False
 
         n_written = 0
@@ -235,7 +334,25 @@ async def run_embed_loop(
 
         counters.embedded += n_written
         counters.batches_completed += 1
-        counters.consecutive_fails = 0
+        # ⭐ Reset the breaker only on ACTUAL PROGRESS. Previously this ran
+        # unconditionally, so a batch where EVERY row came back vec=None --
+        # an embedder returning None instead of raising -- cleared the failure
+        # counter and the breaker NEVER tripped. That is the opposite failure
+        # mode from the one above: instead of aborting too eagerly on content,
+        # the sweep would spin forever against a genuinely dead embedder.
+        # Both bugs come from conflating "did the call raise" with "did work
+        # happen"; `n_written` is the only honest measure of the latter.
+        if n_written > 0:
+            counters.consecutive_fails = 0
+        elif items:
+            counters.consecutive_fails += 1
+            if log is not None:
+                log(
+                    f"BATCH_EMPTY: {len(items)} row(s) returned no usable vector "
+                    f"(no exception raised). possible: embedder returning None, "
+                    f"or every row failed the dim/identity gate. "
+                    f"inspect: M3_EMBED_FALLBACK_URL; try: m3 embedder status"
+                )
         return n_written > 0
 
     # Outer cycle
@@ -247,8 +364,17 @@ async def run_embed_loop(
 
         if counters.consecutive_fails >= max_consecutive_fails:
             if log is not None:
-                log(f"ABORT: {counters.consecutive_fails} consecutive batch failures. "
-                    f"Check embedder availability.")
+                log(
+                    f"ABORT: {counters.consecutive_fails} consecutive "
+                    f"INFRASTRUCTURE failures (content failures are excluded and "
+                    f"do not abort the sweep). "
+                    f"observed: {counters.failed_batches} failed batch(es), "
+                    f"{counters.content_failures} of them content-shaped; "
+                    f"{counters.embedded} row(s) embedded this run. "
+                    f"possible: embed server unreachable, overloaded, or a "
+                    f"network path issue. "
+                    f"inspect: M3_EMBED_FALLBACK_URL. try: m3 embedder status"
+                )
             break
 
         if limit is not None and counters.embedded >= limit:
