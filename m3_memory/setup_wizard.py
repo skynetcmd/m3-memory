@@ -1329,6 +1329,47 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
     else:
         _ok(f"  package resolution: {installed_path}")
 
+    # ── Probe 1b: stale LAUNCHER shadowing (different from probe 1) ──────
+    # Probe 1 catches a stale `m3_memory/` PACKAGE on sys.path. This catches a
+    # stale console SCRIPT on PATH -- a different failure with the same shape.
+    #
+    # How it happens: the README/QUICKSTART headline is `pip install m3-memory`,
+    # while the shell installer and most upgrade paths use pipx. Run both (or
+    # `pip install` once, then switch to pipx) and two launchers exist. Whichever
+    # wins PATH serves the MCP server, because ~/.claude.json invokes a bare
+    # `m3`. Today that resolution is incidental -- a shell-profile edit, a later
+    # `pip install --user`, or a different terminal can silently promote the
+    # OLDER copy. A version rollback with no error message is exactly the kind of
+    # silent failure m3 is supposed to make loud.
+    #
+    # `m3 doctor` already detects this (bin/doctor/entrypoint_probe.py) and its
+    # check() is pure detection, so reuse it rather than writing a second
+    # implementation that can drift. Surfaced at SETUP time because that is when
+    # a second install is most likely to have just been created, and when the
+    # user is already in a position to act on it.
+    try:
+        from doctor import entrypoint_probe as _ep  # type: ignore
+    except Exception:  # noqa: BLE001 — probe unavailable (payload not staged yet)
+        _ep = None  # type: ignore[assignment]
+    if _ep is not None:
+        try:
+            _bad = [f for f in _ep.check() if f.get("kind") in ("shadowed", "stale")]
+        except Exception as e:  # noqa: BLE001 — never block setup on a probe
+            _warn(f"  could not verify launchers on PATH: {type(e).__name__}: {e}")
+            _bad = []
+        if _bad:
+            ok = False
+            _warn("launcher shadowing: more than one m3 install is on PATH.")
+            for f in _bad:
+                _warn(f"    {f['entrypoint']} ({f['kind']}): {f['path']} — {f['detail']}")
+            _warn("    Which copy answers `m3` depends on PATH ORDER, so an "
+                  "unrelated change can silently swap versions.")
+            _warn("    fix: keep ONE install. `pip uninstall m3-memory` removes a "
+                  "pip --user copy; `pipx ensurepath` puts the pipx bin dir first. "
+                  "Then re-run `m3 doctor` to confirm.")
+        else:
+            _ok("  launchers on PATH: one install")
+
     # ── Probe 2: running mcp-memory.exe will lock the venv binary ──────
     # On Windows, pip install -e cannot overwrite mcp-memory.exe if a
     # process is using it. Detect + offer to kill (interactive) or warn

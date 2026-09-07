@@ -100,7 +100,17 @@ m3 setup
 `m3 setup` is the recommended path — interactive wizard, sensible
 defaults. Power users can still run individual steps with `m3 install-m3`,
 `m3 embedder install`, `m3 chatlog init`, etc. — see `m3 --help`.
-Upgrade path: `pip install -U m3-memory && m3 update`.
+Upgrade path: `pip install -U m3-memory && m3 update` — **use the same
+installer you started with**.
+
+> ⚠️ **Do not mix `pip` and `pipx`.** Both create an `m3` launcher, and which
+> one answers depends on PATH ORDER. Your MCP config invokes a bare `m3`, so an
+> unrelated change (a shell-profile edit, a later `pip install --user`, a
+> different terminal) can silently promote the OLDER copy — a version rollback
+> with no error message. `m3 doctor` reports this as
+> `entrypoints: [FAIL] ... (shadowed)`; the fix is to keep exactly one install
+> (`pip uninstall m3-memory` for a pip copy, or `pipx ensurepath` to put pipx
+> first).
 
 You can also reach **any** memory tool from the shell — every catalog tool is
 exposed as `m3 <domain> <tool>` (e.g. `m3 files files_stats`,
