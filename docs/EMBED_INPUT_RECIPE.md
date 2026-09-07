@@ -16,10 +16,11 @@
 1. [The cascade — what text actually gets embedded](#the-cascade)
 2. [Anchor augmentation (passage-side only, on purpose)](#anchor-augmentation)
 3. [Variants and dual_embed](#variants-and-dual_embed)
-4. [Cache key — content_hash semantics](#cache-key)
-5. [Model-tag namespacing](#model-tag-namespacing)
-6. [The pooling/BOS/attention triplet (per-model)](#the-poolingbosattention-triplet)
-7. [Cross-references](#cross-references)
+4. [Token budgeting — why characters are not tokens](#token-budgeting--why-characters-are-not-tokens)
+5. [Cache key — content_hash semantics](#cache-key)
+6. [Model-tag namespacing](#model-tag-namespacing)
+7. [The pooling/BOS/attention triplet (per-model)](#the-poolingbosattention-triplet)
+8. [Cross-references](#cross-references)
 
 ---
 
@@ -110,6 +111,85 @@ Retrieval-side fusion is controlled by `vector_kind_strategy` kwarg on
 The mid-tier search path (`memory_core.py:5289`) runs `"max"` automatically
 on the second pass when overshoot is enabled. Schema dependency:
 `vector_kind` column was added in v022; older databases need migration.
+
+---
+
+## Token budgeting — why characters are not tokens
+
+Every length guard in m3 used to measure **characters** or **bytes** and compare
+the result against a **token** ceiling (bge-m3's `n_ctx`, 8192). Those units are
+not interchangeable. Measured against the real bge-m3 tokenizer:
+
+| Content type | chars/token | bytes/token | tokens @28000 chars | tokens @32768 bytes |
+|---|---|---|---|---|
+| English prose | 4.18 | 4.18 | 6,699 ✅ | 7,839 ✅ |
+| Python code | 2.96 | 3.15 | **9,459** ❌ | **10,403** ❌ |
+| Logs / stack traces | 2.26 | 2.26 | **12,389** ❌ | **14,499** ❌ |
+| Chinese | 1.66 | 4.88 | **16,867** ❌ | 6,715 ✅ |
+| JSON | 1.63 | 1.63 | **17,178** ❌ | **20,103** ❌ |
+| UUID lists | 1.61 | 1.61 | **17,391** ❌ | **20,353** ❌ |
+| Base64 | 1.00 | 1.00 | **28,000** ❌ | **32,768** ❌ |
+
+**Only English prose was safe at the legacy defaults**, and that is not a
+coincidence: `32768 == 8192 × 4` is the English bytes-per-token ratio written
+down as a constant.
+
+Two things operators get wrong about this:
+
+- **It is not a CJK problem.** JSON and UUID lists are *denser per character*
+  than Chinese (1.63 and 1.61 vs 1.66). A corpus of code and structured logs
+  hits it with no CJK content at all.
+- **Chinese is the only type where the two legacy guards disagreed.** At 4.88
+  bytes/token the byte guard happened to catch it while the character guard
+  missed badly. For code, JSON, logs and base64 *both* failed together.
+
+### The estimator
+
+`memory/tokens.py` is the single authority. `estimate_tokens` returns:
+
+```
+max(bytes/3, chars) + SPECIAL_TOKENS      # SPECIAL_TOKENS = 2
+```
+
+The `chars` term is load-bearing: bge-m3 uses SentencePiece, which cannot emit
+more *content* tokens than there are characters, so `chars` is a hard upper
+bound for **any** input rather than for sampled ones. `SPECIAL_TOKENS` is the
+BOS/EOS frame (`AddBos::Always`), which occupies `n_ctx` like any other token —
+even the empty string encodes to 2. Omitting it under-counts base64 by exactly
+2, which is enough to overflow a row sitting on the boundary.
+
+Formulas measured against the real tokenizer and **rejected**:
+
+| Formula | Worst ratio (est/actual) | |
+|---|---|---|
+| `max(bytes/4, chars/1.1)` | 0.91 | under-counts |
+| `max(bytes/3, chars/1.05)` | 0.95 | under-counts |
+| `max(bytes/3, chars)` | 0.999 | under-counts by 2 |
+| `max(bytes/3, chars) + 2` | ≥ 1.00 | **safe** |
+
+⚠ The `chars` ceiling is a property of **SentencePiece**, not of tokenizers in
+general — a byte-level BPE model can exceed 1 token/char. A model swap must
+revisit this bound; `tests/test_token_budget.py` asserts the assumption so the
+swap fails loudly.
+
+### Exact counting
+
+When the Rust core exposes `count_tokens` (3.7.32+), `memory/tokens.py` uses it
+automatically — the cascade is Rust → caller-supplied `exact_fn` (e.g. an HTTP
+`/tokenize/count`) → estimator. **Every tier is optional**: correctness never
+depends on the wheel, a server or the network. Exactness only tightens the
+budget, buying back the over-chunking the conservative estimator costs:
+
+| Content | Estimate vs exact |
+|---|---|
+| English prose | 3.45× |
+| Python code | 3.34× |
+| Chinese | 1.77× |
+| Base64 | 1.44× |
+
+Exact counts use the same `str_to_token(text, AddBos::Always)` call the embed
+path makes, so a caller that chunks below `n_ctx` cannot then be surprised by an
+overflow — a guarantee no estimate can offer.
 
 ---
 
