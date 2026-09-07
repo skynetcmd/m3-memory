@@ -403,7 +403,10 @@ def _compute_warnings(
         else:
             warnings.append(
                 f"NO chatlog writes in last {recent_window_min}min "
-                "(capture may be down — verify before trusting memory)"
+                "(capture may be down — verify before trusting memory) "
+                "-> try: m3 chatlog doctor. NOTE: an MCP disconnect does NOT "
+                "cause this; capture writes to the DB directly, independent of "
+                "the MCP connection."
             )
     elif recent_writes < 0:
         warnings.append("could not query recent chatlog writes (capture status unknown)")

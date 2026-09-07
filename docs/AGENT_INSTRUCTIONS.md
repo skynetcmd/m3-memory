@@ -27,14 +27,45 @@ All persistent state goes through the `memory` MCP server: `memory_search` befor
 
 **At session start, ALL agents MUST:**
 
-1. **Verify MCP tools are reachable.** If `memory_search`, `chatlog_search`, or equivalent tools return errors or are absent — **tell the user immediately and loudly.** Do not proceed silently.
+> ⚠️ **These are TWO INDEPENDENT conditions. Do not conflate them.** Chatlog
+> capture writes to the database through the ingest hook, **not** through the
+> MCP connection — so a dropped MCP session does **not** mean turns are being
+> lost. Reporting "chatlog is NOT being captured" on an MCP disconnect is a
+> FALSE ALARM, and a warning that cries wolf is worse than no warning: it trains
+> users to ignore the one that matters.
+>
+> Measured 2026-09-07: a session with 17 MCP disconnects captured **610 turns
+> with zero loss**, including 4 written *during* a disconnect window. The
+> process never restarted; only the client's view of it lapsed.
 
-2. **Verify chatlog is writing** (for long-running projects — check within first few exchanges):
-   - Call `chatlog_status` or equivalent
-   - If `hook.enabled = false` OR `last_write` is null/stale → **warn the user immediately:**
-     > "⚠️ m3 chatlog hooks are not writing. Design decisions made this session will NOT be preserved across sessions. Please check your hook configuration (`m3 status`) before continuing substantive work."
+1. **Verify MCP tools are reachable.** If `memory_search`, `chatlog_search`, or
+   equivalent tools return errors or are absent, **say so** — you cannot
+   search or write memory until it returns. But say only that:
+   > "m3's MCP tools are unreachable, so I can't search or write memory right
+   > now. Chatlog capture is unaffected (it writes to the DB directly).
+   > Reconnect with `/mcp`."
+   A **transient** drop that reconnects immediately is worth one line, not an
+   alarm. If it recurs, the usual cause is a long-running tool call starving
+   the transport, not m3 — check whether a build or test run was in flight.
 
-3. **Never silently degrade.** The correct behavior when m3 is unreachable or not writing is a **loud, visible warning** — not silent fallback to flat files, not continuing as if everything is fine.
+2. **Verify chatlog is writing** (for long-running projects — check within the
+   first few exchanges). This is the check that actually protects context:
+   - Call `chatlog_status`.
+   - Trust **`capture.healthy`** and **`last_write_at`** — the DATA. Do **not**
+     trust `hooks[*].enabled`: that flag records only whether a per-turn shell
+     hook was wired at init time and reads `false` on healthy installs where the
+     Stop-hook/MCP write path is capturing fine (confirmed 2026-06-13).
+     Alarming on it produces a permanent false positive.
+   - Warn **only** when the data says capture has actually stopped:
+     > "⚠️ m3 chatlog capture has stopped — `last_write_at` is <TIME> (<N> min
+     > stale) and `capture.healthy` is false. Turns from this session are NOT
+     > being preserved. Run `m3 chatlog doctor` before continuing substantive
+     > work."
+
+3. **Never silently degrade — and never falsely alarm.** Both erode trust. When
+   m3 genuinely is not capturing, warn loudly and specifically, naming the
+   observed value that proves it. When it is only the MCP connection that
+   lapsed, say that and nothing more.
 
 **Memory trust hierarchy (all agents must follow):**
 1. **m3 memory** — persistent, cross-session, curated. **Highest trust.**
