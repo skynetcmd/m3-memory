@@ -26,10 +26,15 @@ Public API:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterator, Protocol
 
 logger = logging.getLogger("files_memory.chunkers")
+
+# Floor for the token-forced leaf split: below this a piece is kept whole even
+# if it still estimates over cap, so a degenerate input cannot recurse down to
+# single characters.
+_MIN_LEAF_SPLIT_CHARS = 256
 
 
 @dataclass
@@ -97,7 +102,97 @@ def chunker_version(filetype: str) -> str:
     return getattr(mod, "CHUNKER_VERSION", "unknown")
 
 
+def _enforce_leaf_token_cap(leaf: Leaf) -> "Iterator[Leaf]":
+    """Split a leaf that exceeds FILES_MAX_LEAF_TOKENS, or yield it unchanged.
+
+    `FILES_MAX_LEAF_TOKENS` (7000) was DECLARED in files_memory/config.py with a
+    comment promising that oversize leaves "are truncated with a warning and
+    `truncated=true` flag" -- and had ZERO references outside its own
+    definition. Nothing truncated, nothing warned, and `Leaf.truncated` (a real
+    column, written at ingest.py:420) was never set True by any code path, so
+    `WHERE truncated=1` gave every operator a false clean bill of health.
+
+    That mattered because the per-chunker caps are CHARACTER counts, and
+    characters are not tokens. `markdown.py`'s MAX_SECTION_CHARS=16000 yields
+    ~9,639 tokens of Chinese, ~9,816 of JSON and 16,000 of base64 -- all over
+    bge-m3's 8,192 ceiling -- and Markdown is the format most likely to carry
+    exactly that content (fenced code blocks, JSON examples, CJK docs).
+    `text.py`'s MAX_CHARS=2400 is safe only by accident: 2400 characters cannot
+    exceed 2400 tokens.
+
+    Enforced HERE, at the single dispatch point, so every chunker (including
+    ones added later) inherits it rather than each re-implementing the check --
+    the same reasoning as the embed-path boundary guard.
+
+    Splitting is preferred over truncation: truncation silently DISCARDS
+    content, which is a worse failure than a slightly diluted vector.
+    `truncated` is set only when a piece genuinely cannot be split further, so
+    the column finally means what it says.
+    """
+    from files_memory.config import FILES_MAX_LEAF_TOKENS
+    from memory.tokens import estimate_tokens
+
+    if estimate_tokens(leaf.text) <= FILES_MAX_LEAF_TOKENS:
+        yield leaf
+        return
+
+    # Halve until each piece fits. estimate_tokens (not count_tokens) on
+    # purpose: this is a per-leaf hot path and the estimator is conservative --
+    # it may over-split, never under-split.
+    pieces: "list[str]" = []
+    stack = [leaf.text]
+    while stack:
+        part = stack.pop()
+        if estimate_tokens(part) <= FILES_MAX_LEAF_TOKENS or len(part) <= _MIN_LEAF_SPLIT_CHARS:
+            pieces.append(part)
+            continue
+        mid = len(part) // 2
+        stack.append(part[mid:])
+        stack.append(part[:mid])
+    pieces = [p for p in pieces if p]
+
+    if len(pieces) <= 1:
+        # Could not split (a single indivisible run). Flag it honestly rather
+        # than pretending it was fine -- this is the ONLY case where
+        # `truncated` is true, and it now carries real information.
+        logger.warning(
+            "files: leaf %r is %d est. tokens (cap %d) and could not be split; "
+            "flagged truncated=True. review: M3_FILES_MAX_LEAF_TOKENS",
+            leaf.division_id, estimate_tokens(leaf.text), FILES_MAX_LEAF_TOKENS,
+        )
+        leaf.truncated = True
+        yield leaf
+        return
+
+    logger.info(
+        "files: leaf %r exceeded the token cap (%d > %d); split into %d pieces "
+        "so no content is lost.",
+        leaf.division_id, estimate_tokens(leaf.text), FILES_MAX_LEAF_TOKENS, len(pieces),
+    )
+    offset = leaf.char_range_start
+    for i, piece in enumerate(pieces):
+        sub = replace(
+            leaf,
+            text=piece,
+            # Keep division_id stable-but-distinct: the ingester treats it as
+            # unique within (file_node, division_type).
+            division_id=f"{leaf.division_id}#t{i}" if i else leaf.division_id,
+            char_range_start=offset,
+            char_range_end=offset + len(piece),
+            # A token-forced split is not a structural boundary, so downstream
+            # rankers should not treat it as one.
+            boundary_confidence=min(leaf.boundary_confidence, 0.5),
+        )
+        offset += len(piece)
+        yield sub
+
+
 def chunk_file(path: str, filetype: str, text: str | None = None) -> Iterator[Leaf]:
-    """Convenience: dispatch + chunk in one call."""
+    """Convenience: dispatch + chunk in one call.
+
+    Every leaf passes through the token cap, so a chunker's CHARACTER budget
+    can no longer emit a leaf that overflows the embedder's context window.
+    """
     mod = get_chunker(filetype)
-    yield from mod.chunk(path, text=text)
+    for leaf in mod.chunk(path, text=text):
+        yield from _enforce_leaf_token_cap(leaf)
