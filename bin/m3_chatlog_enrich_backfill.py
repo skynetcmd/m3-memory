@@ -21,6 +21,31 @@ import sqlite3
 import sys
 from pathlib import Path
 
+# Date bounds go through the shared seam normalizer: a bare YYYY-MM-DD compared
+# against an ISO-TEXT timestamp column is lexicographically wrong (an `until`
+# excluded the entire requested day). See memory/backends/dialect.py.
+try:  # pragma: no cover - import shim for standalone execution
+    from memory.backends.dialect import Dialect as _Dialect
+    _normalize_date_bound = _Dialect.normalize_date_bound
+    _date_bound_op = _Dialect.date_bound_op
+except Exception:  # pragma: no cover
+    import re as _re_db
+    from datetime import date as _d_db, timedelta as _td_db
+    _BARE = _re_db.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+    def _normalize_date_bound(value: str, side: str) -> str:
+        v = (value or "").strip()
+        if not _BARE.match(v):
+            return v
+        if side == "since":
+            return v + "T00:00:00Z"
+        y, m, d = (int(x) for x in v.split("-"))
+        return (_d_db(y, m, d) + _td_db(days=1)).strftime("%Y-%m-%dT00:00:00Z")
+
+    def _date_bound_op(side: str) -> str:
+        return ">=" if side == "since" else "<"
+
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MAIN_DB = REPO_ROOT / "memory" / "agent_memory.db"
 DEFAULT_CHATLOG_DB = REPO_ROOT / "memory" / "agent_chatlog.db"
@@ -55,8 +80,8 @@ def _conversations_reverse_chrono(
             "AND conversation_id IS NOT NULL AND conversation_id != ''"
         )
         if since:
-            where += " AND created_at >= ?"
-            params.append(since)
+            where += f" AND created_at {_date_bound_op('since')} ?"
+            params.append(_normalize_date_bound(since, "since"))
         cur = con.execute(
             f"""
             SELECT conversation_id,

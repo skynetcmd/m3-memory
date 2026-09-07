@@ -427,7 +427,16 @@ class PostgresDialect(Dialect):
     def day_bucket(self, column: str) -> str:
         # to_char keeps the TEXT 'YYYY-MM-DD' shape identical to SQLite's substr;
         # ::date would return a PG date type and change the bucket value shape.
-        return f"to_char({column}, 'YYYY-MM-DD')"
+        #
+        # `AT TIME ZONE 'UTC'` pins the bucket to UTC. Without it, to_char()
+        # renders a TIMESTAMPTZ in the SESSION timezone, so the same row buckets
+        # into a different DAY depending on a server/connection setting, while
+        # SQLite's substr() of ISO-UTC text is always UTC. Verified on PG 15.18:
+        # '2026-09-07T02:30:00Z' -> '2026-09-07' under UTC but '2026-09-06'
+        # under America/New_York; with the pin it is '2026-09-07' in both.
+        # The two backends agreed only because this deployment happens to run
+        # Etc/UTC -- agreement by configuration, not by contract.
+        return f"to_char({column} AT TIME ZONE 'UTC', 'YYYY-MM-DD')"
 
     def empty_json_default(self) -> "str | None":
         return "{}"  # metadata_json is JSONB; '' is rejected, '{}' is the empty obj

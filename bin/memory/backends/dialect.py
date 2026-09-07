@@ -19,10 +19,14 @@ names are trusted, caller-supplied identifiers, never end-user input.
 from __future__ import annotations
 
 import json as _json
+import re as _re
+from datetime import date as _date, timedelta as _timedelta
 from dataclasses import dataclass
 from typing import Literal
 
 from .base import BackendName
+
+_BARE_DATE_RE = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 ParamStyle = Literal["qmark", "format"]  # sqlite '?'  vs  psycopg '%s'
 
@@ -619,6 +623,80 @@ class Dialect:
         raise NotImplementedError(
             "subclass must implement _temporal_open_clause_expr()"
         )
+
+    @staticmethod
+    def normalize_date_bound(value: str, side: str) -> str:
+        """Expand a bare ``YYYY-MM-DD`` filter bound into a half-open instant.
+
+        Callers accept user-supplied date filters (``since`` / ``until``) that may
+        be a bare calendar date OR a full ISO timestamp. Comparing a bare date
+        against a timestamp column is WRONG on every backend, in two different
+        ways, so the expansion happens here once rather than at each call site:
+
+        - **SQLite** stores ``created_at`` as ISO TEXT, so the comparison is
+          lexicographic: ``'2026-09-06T02:01:29Z' <= '2026-09-06'`` is FALSE
+          (``'T'`` sorts after ``''``). An ``until`` of a bare date therefore
+          excluded the ENTIRE requested day — 0 rows where 3 were expected.
+        - **PostgreSQL** casts the bare date to midnight, so the same filter kept
+          only rows at exactly ``00:00:00`` — 1 row where 3 were expected.
+
+        Same wrong query, two different wrong answers, neither obviously broken
+        in isolation. Verified 2026-09-07 against SQLite and PostgreSQL 15.18.
+
+        The expansion is **half-open** (``>= day`` / ``< day+1``) rather than an
+        inclusive ``23:59:59.999`` end bound. An inclusive millisecond bound is
+        correct on SQLite but silently DROPS rows on PostgreSQL, whose TIMESTAMPTZ
+        carries microsecond precision — a row at ``23:59:59.9995`` fails
+        ``<= '...23:59:59.999Z'``. Half-open is precision-independent and is the
+        only form that agrees on both backends.
+
+        A value that already carries a time component is returned UNCHANGED, so
+        callers passing a precise instant keep exact semantics.
+
+        ``side`` is ``"since"`` (lower, inclusive) or ``"until"`` (upper,
+        exclusive after expansion — pair it with :meth:`date_bound_op`).
+        """
+        if side not in ("since", "until"):
+            raise ValueError(f"unexpected date-bound side {side!r}")
+        v = (value or "").strip()
+        if not _BARE_DATE_RE.match(v):
+            return v  # full timestamp (or empty) — caller's precision wins
+        if side == "since":
+            return v + "T00:00:00Z"
+        y, m, d = (int(x) for x in v.split("-"))
+        nxt = _date(y, m, d) + _timedelta(days=1)
+        return nxt.strftime("%Y-%m-%dT00:00:00Z")
+
+    @staticmethod
+    def date_bound_op(side: str) -> str:
+        """The comparison operator that pairs with :meth:`normalize_date_bound`.
+
+        ``since`` -> ``>=`` (inclusive lower bound).
+        ``until`` -> ``<``  (EXCLUSIVE upper bound: the normalized value is the
+        start of the following day, so ``<`` includes all of the requested day).
+
+        Using ``<=`` with a normalized ``until`` would wrongly include midnight of
+        the NEXT day, so the operator and the normalization must move together —
+        which is why both live here rather than at the call sites.
+        """
+        if side not in ("since", "until"):
+            raise ValueError(f"unexpected date-bound side {side!r}")
+        return ">=" if side == "since" else "<"
+
+    def date_bound(self, column: str, side: str) -> str:
+        """A complete ``<column> <op> <placeholder>`` fragment for a date filter.
+
+        Bind the value returned by :meth:`normalize_date_bound` for the same
+        ``side``. Portable across backends: the operator/normalization pairing is
+        identical everywhere, and the emitted placeholder follows ``param_style``.
+
+            frag = _d.date_bound("mi.created_at", "until")
+            params.append(_d.normalize_date_bound(until, "until"))
+
+        Index-safe: verified to keep ``SEARCH ... USING COVERING INDEX
+        idx_mi_created`` on SQLite (a range scan, not a full table scan).
+        """
+        return f"{column} {self.date_bound_op(side)} {self.param()}"
 
     def coalesce_open_timestamp(self, column: str, fill_placeholder: str) -> str:
         """COALESCE an "open" timestamp bound to a fill value, backend-correct.

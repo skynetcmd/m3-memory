@@ -48,6 +48,31 @@ import chatlog_config
 import chatlog_redaction
 from chatlog_core import _content_hash, _utcnow_iso
 
+# Date bounds go through the shared seam normalizer: a bare YYYY-MM-DD compared
+# against an ISO-TEXT timestamp column is lexicographically wrong (an `until`
+# excluded the entire requested day). See memory/backends/dialect.py.
+try:  # pragma: no cover - import shim for standalone execution
+    from memory.backends.dialect import Dialect as _Dialect
+    _normalize_date_bound = _Dialect.normalize_date_bound
+    _date_bound_op = _Dialect.date_bound_op
+except Exception:  # pragma: no cover
+    import re as _re_db
+    from datetime import date as _d_db, timedelta as _td_db
+    _BARE = _re_db.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+    def _normalize_date_bound(value: str, side: str) -> str:
+        v = (value or "").strip()
+        if not _BARE.match(v):
+            return v
+        if side == "since":
+            return v + "T00:00:00Z"
+        y, m, d = (int(x) for x in v.split("-"))
+        return (_d_db(y, m, d) + _td_db(days=1)).strftime("%Y-%m-%dT00:00:00Z")
+
+    def _date_bound_op(side: str) -> str:
+        return ">=" if side == "since" else "<"
+
+
 
 def _build_where(conversation_id: str, since: str, until: str) -> tuple[str, list[Any]]:
     """Assemble the WHERE clause + params, mirroring chatlog_rescrub_impl so the
@@ -58,11 +83,11 @@ def _build_where(conversation_id: str, since: str, until: str) -> tuple[str, lis
         clauses.append("conversation_id=?")
         params.append(conversation_id)
     if since:
-        clauses.append("created_at>=?")
-        params.append(since)
+        clauses.append(f"created_at{_date_bound_op('since')}?")
+        params.append(_normalize_date_bound(since, "since"))
     if until:
-        clauses.append("created_at<=?")
-        params.append(until)
+        clauses.append(f"created_at{_date_bound_op('until')}?")
+        params.append(_normalize_date_bound(until, "until"))
     return " AND ".join(clauses), params
 
 

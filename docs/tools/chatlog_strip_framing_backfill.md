@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_strip_framing_backfill.py
-sha1: 1ac4efd9404f
-mtime_utc: 2026-07-13T03:57:28.562666+00:00
-generated_utc: 2026-07-17T02:18:40.477683+00:00
+sha1: 1a198e7cb3bd
+mtime_utc: 2026-09-07T21:22:15.075119+00:00
+generated_utc: 2026-09-07T21:37:21.457027+00:00
 private: false
 ---
 
@@ -51,7 +51,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 155)
+- `def main()` (line 180)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -93,7 +93,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-_(only stdlib)_
+- `memory.backends.dialect (Dialect)`
 
 ---
 
