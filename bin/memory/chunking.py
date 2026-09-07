@@ -122,9 +122,23 @@ def _order_embeddings(data: list[dict], n_inputs: int) -> list[list[float]] | No
 
 
 def _subdivide_dense_chunk(text: str, observed_tokens: int) -> list[str]:
-    """Re-split a chunk that overflowed the bge-m3 token ceiling."""
-    if observed_tokens <= 0 or not text:
+    """Re-split a chunk that overflowed the bge-m3 token ceiling.
+
+    ``observed_tokens`` may be 0 when the server reported the CLASS of error
+    without a count (a differently-worded llama.cpp build, or a proxy that
+    rewrote the body). Falling back to `[text]` there would return the chunk
+    UNSPLIT and the row would be dropped -- recovery must depend on knowing the
+    input is too long, not on the server having been chatty about it. So an
+    absent count is replaced by the conservative estimate, which is exactly what
+    the estimator exists for.
+    """
+    if not text:
         return [text]
+    if observed_tokens <= 0:
+        from .tokens import estimate_tokens
+        observed_tokens = estimate_tokens(text)
+        if observed_tokens <= 0:  # unreachable for non-empty text; belt-and-braces
+            return [text]
     chars_per_token = len(text) / observed_tokens
     sub_chars = int(DENSE_TARGET_TOKENS * chars_per_token * 0.90)
     sub_chars = max(sub_chars, DENSE_MIN_SUB_CHARS)

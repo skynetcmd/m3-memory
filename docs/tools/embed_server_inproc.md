@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_server_inproc.py
-sha1: 078f0bd35451
-mtime_utc: 2026-08-31T00:34:49.975542+00:00
-generated_utc: 2026-08-31T01:25:33.301568+00:00
+sha1: 491e77e26e2f
+mtime_utc: 2026-09-07T22:17:53.815840+00:00
+generated_utc: 2026-09-07T22:20:57.353994+00:00
 private: false
 ---
 
@@ -51,7 +51,7 @@ Model: M3_EMBED_GGUF env, else auto-detected (discover_bge_m3_gguf).
 
 ## Entry points
 
-- `def main()` (line 420)
+- `def main()` (line 508)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -68,6 +68,7 @@ Model: M3_EMBED_GGUF env, else auto-detected (discover_bge_m3_gguf).
 
 ## Environment variables read
 
+- `M3_EMBED_CTX`
 - `M3_EMBED_GGUF`
 - `M3_EMBED_INTERACTIVE_MAX_TEXTS`
 - `M3_EMBED_SERVER_CONCURRENCY`

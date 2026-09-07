@@ -720,6 +720,82 @@ _EMBED_TRANSIENT = object()   # retryable: timeout / 5xx / 413 / 429
 _EMBED_PERMANENT = object()   # non-retryable 4xx: don't retry or bisect
 
 
+class ContextLengthExceeded(EmbedError):
+    """The server rejected an input for exceeding its context window.
+
+    A TYPED signal so the recovery path does not have to parse prose. Before
+    this, the only way to recognise an n_ctx overflow was matching the error
+    STRING -- which failed completely on standalone deployments, where FastAPI's
+    default handler replaced the message with "Internal Server Error" (issue
+    #139). `observed_tokens` / `max_tokens` are best-effort: a server that
+    reports the class of error without the counts still gets recovered, it just
+    cannot inform the split ratio.
+    """
+
+    def __init__(self, message: str, observed_tokens: "int | None" = None,
+                 max_tokens: "int | None" = None):
+        super().__init__(message)
+        self.observed_tokens = observed_tokens
+        self.max_tokens = max_tokens
+
+
+# Recognises the CLASS of "too long" across llama.cpp builds and wrappers. The
+# canonical form carries the counts; the hint list catches rewordings so a
+# differently-phrased server still triggers subdivision instead of dropping the
+# row. Kept deliberately broader than _DENSE_ERR_RE, which stays as-is because
+# other call sites depend on its exact capture-group shape.
+_CTX_OVERFLOW_HINTS = (
+    "input too long",
+    "context length exceeded",
+    "maximum context length",
+    "token length exceeds",
+    "too many tokens",
+    "exceeds context window",
+    "context_length_exceeded",
+)
+
+
+def _parse_context_overflow(status_code: int, body: str) -> "ContextLengthExceeded | None":
+    """Build a typed overflow error from an HTTP response, or None.
+
+    Structured JSON first (`error.code == "context_length_exceeded"`), free text
+    second. That ordering is what makes the contract robust across the version
+    skew this issue is fundamentally about -- client and server are deployed
+    INDEPENDENTLY here, so both directions must degrade gracefully:
+
+      - new client + new server -> structured, no parsing at all;
+      - new client + old server -> falls through to the regex/hint path;
+      - old client + new server -> the 413 body still contains the original
+        "N tokens > n_ctx M", which the old client's regex already matches, so
+        upgrading the SERVER alone repairs clients in the field.
+    """
+    if not body:
+        return None
+    observed = max_tok = None
+    try:
+        payload = json.loads(body)
+        err = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(err, dict):
+            if err.get("code") == "context_length_exceeded":
+                ot, mt = err.get("observed_tokens"), err.get("max_tokens")
+                return ContextLengthExceeded(
+                    str(err.get("message") or body)[:2000],
+                    int(ot) if isinstance(ot, int) else None,
+                    int(mt) if isinstance(mt, int) else None,
+                )
+            body = str(err.get("message") or err) or body
+        elif isinstance(err, str):
+            body = err
+    except Exception:  # noqa: BLE001 — not JSON: fall through to text matching
+        pass
+    m = _DENSE_ERR_RE.search(body)
+    if m is None and not any(h in body.lower() for h in _CTX_OVERFLOW_HINTS):
+        return None
+    if m is not None:
+        observed = int(m.group(1))
+    return ContextLengthExceeded(body[:2000], observed, max_tok)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Length contract — enforced HERE, at the boundary, not at call sites
 # ──────────────────────────────────────────────────────────────────────────────
@@ -902,11 +978,16 @@ async def _http_bulk_with_subdivide(
             results.append(vecs[0] if vecs else None)
             continue
         except Exception as e:
-            m = _DENSE_ERR_RE.search(str(e))
-            if not m:
-                results.append(None)
-                continue
-            observed = int(m.group(1))
+            observed = getattr(e, "observed_tokens", None)
+            if observed is None:
+                m = _DENSE_ERR_RE.search(str(e))
+                # A typed ContextLengthExceeded without counts is still an
+                # overflow: recover on the class of error, not on whether the
+                # server happened to report numbers.
+                if not m and not isinstance(e, ContextLengthExceeded):
+                    results.append(None)
+                    continue
+                observed = int(m.group(1)) if m else 0
         # Overflow: split into sub-chunks, embed each over HTTP, mean-pool.
         try:
             subs = _subdivide_dense_chunk(text, observed)
@@ -1625,7 +1706,10 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
             # handles them), and only the rows tier 1 genuinely can't do fall
             # through. This keeps a single oversized row from cascading to the
             # HTTP tiers (and, when those are down, fanning out into a 4xx storm).
-            if _DENSE_ERR_RE.search(str(e)):
+            # Typed signal first, string second: a structured 413 from a
+            # current server needs no parsing, and the regex remains for
+            # older servers that only carry the message.
+            if isinstance(e, ContextLengthExceeded) or _DENSE_ERR_RE.search(str(e)):
                 resolved = await _embedded_bulk_with_subdivide(embedded, miss_texts)
                 still_missing_local = []
                 for j, (idx, vec) in enumerate(zip(miss_indices, resolved)):
@@ -1667,8 +1751,15 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
                 body = resp_.text
             except Exception:
                 pass
+            over = _parse_context_overflow(resp_.status_code, body)
+            if over is not None:
+                raise over
+            # Body limit raised 200 -> 2000. 200 chars is enough to truncate a
+            # diagnostic away entirely once a proxy (nginx/FastAPI) wraps the
+            # upstream message in its own envelope -- the very information the
+            # oversize recovery needs.
             raise RuntimeError(
-                f"CPU embedder HTTP {resp_.status_code}: {body[:200]}"
+                f"CPU embedder HTTP {resp_.status_code}: {body[:2000]}"
             )
         data_ = resp_.json()["data"]
         v_ = _order_embeddings(data_, len(chunk_texts))
@@ -1696,7 +1787,7 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
         # is too long. Mirror tier 1: subdivide the oversized row(s) over HTTP
         # and mean-pool, so a single huge row doesn't sink the batch. Only rows
         # the HTTP tier still can't embed fall through to the primary path.
-        if _DENSE_ERR_RE.search(str(e)):
+        if isinstance(e, ContextLengthExceeded) or _DENSE_ERR_RE.search(str(e)):
             resolved = await _http_bulk_with_subdivide(_fallback_post, miss_texts)
             # _accept_bulk assigns proper vectors into `out` and returns the
             # LOCAL indices still missing (None or failed identity). Feed the
