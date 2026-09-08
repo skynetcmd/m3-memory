@@ -145,6 +145,8 @@ jobs:
         run: python bin/gen_download_badges.py --repo "${{ github.repository }}" --package m3-memory
 
       - name: Commit if changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Stage every asset either generator may have touched; commit only if
           # something actually changed (idempotent — no empty commits).
@@ -156,4 +158,12 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(badges): refresh star history + download counts [skip ci]"
-          git push
+          # checkout ran with persist-credentials: false (so no token is written
+          # into .git/config, where it could leak via an uploaded artifact), which
+          # means a bare `git push` has NOTHING to authenticate with and dies on
+          # "could not read Username for 'https://github.com'". Push with an
+          # explicit one-shot credential instead: the built-in GITHUB_TOKEN is
+          # enough here (contents: write) and is scoped to this run only. This is
+          # a DIFFERENT token from M3_STARGAZER — that one exists solely because
+          # the stargazers API refuses installation tokens; pushing does not.
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
