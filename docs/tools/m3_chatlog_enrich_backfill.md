@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_chatlog_enrich_backfill.py
-sha1: 62750cf769f1
-mtime_utc: 2026-09-08T05:35:02.575753+00:00
-generated_utc: 2026-09-08T05:35:46.077628+00:00
+sha1: 31c30512d71d
+mtime_utc: 2026-09-08T05:55:24.578504+00:00
+generated_utc: 2026-09-08T05:55:38.809871+00:00
 private: false
 ---
 
@@ -62,10 +62,7 @@ _(none detected)_
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `str(main_db)`` (line 182)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ---
 

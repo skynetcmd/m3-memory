@@ -179,24 +179,30 @@ def main() -> int:
             print("aborted.")
             return 0
 
-    con = sqlite3.connect(str(main_db), timeout=60)
-    try:
+    d = seam_dialect()
+    with seam_backend().connection() as con:
         _ensure_observation_queue(con)
         cur = con.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        # Lock now, not at the first write: the SELECT above chose these
+        # candidates and another pass must not enqueue them in between.
+        d.begin_immediate(cur)
         rowcount = 0
+        # "INSERT OR IGNORE" is a SQLite verb form; PostgreSQL puts the arbiter
+        # in a trailing ON CONFLICT clause. The dialect pair renders both --
+        # verified against a live PG 16.14: the generated
+        # "INSERT INTO ... VALUES (%s, %s) ON CONFLICT DO NOTHING" left exactly
+        # one row after a duplicate insert.
+        _p = d.param()
+        sql = (
+            f"{d.insert_or_ignore()} observation_queue (conversation_id, user_id) "
+            f"VALUES ({_p}, {_p}) {d.on_conflict_ignore()}"
+        )
         for cid, uid, _ts in candidates:
-            cur.execute(
-                "INSERT OR IGNORE INTO observation_queue (conversation_id, user_id) "
-                "VALUES (?, ?)",
-                (cid, uid),
-            )
+            cur.execute(sql, (cid, uid))
             rowcount += cur.rowcount
         cur.execute("COMMIT")
         print(f"\nenqueued {rowcount} new rows "
               f"({len(candidates) - rowcount} were already in the queue).")
-    finally:
-        con.close()
 
     print("\nnext step: the AgentOS_ObservationDrain scheduled task will "
           "process them on its next fire (every 15 min).")

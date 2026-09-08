@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_entity_vocab.py
-sha1: 9cca3baf43ca
-mtime_utc: 2026-05-04T22:04:47.599369+00:00
-generated_utc: 2026-05-04T22:24:29.488364+00:00
+sha1: ff1ae67b3852
+mtime_utc: 2026-09-08T05:42:32.249597+00:00
+generated_utc: 2026-09-08T05:49:33.426579+00:00
 private: false
 ---
 
@@ -58,7 +58,7 @@ agent_memory.db) follows the same convention as other m3-memory scripts.
 
 ## Entry points
 
-- `def main()` (line 189)
+- `def main()` (line 191)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -88,14 +88,14 @@ agent_memory.db) follows the same convention as other m3-memory scripts.
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 75)
+- `sqlite3.connect()  → `db_path`` (line 77)
 
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core.paths (seam_dialect)`
 
 ---
 

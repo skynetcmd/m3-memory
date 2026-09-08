@@ -149,6 +149,12 @@ class SqliteDialect(Dialect):
         # privileged as "the default". `schema` is intentionally unused here.
         return name
 
+    def begin_immediate(self, conn: object) -> None:
+        # Take the RESERVED lock now. A deferred BEGIN takes it at the first
+        # write, so two read-modify-write passes can both read and then one
+        # fails "database is locked" after doing its work.
+        conn.execute("BEGIN IMMEDIATE")
+
     def compact_storage(self, *, sqlite_path: "str | None" = None,
                         max_bytes: int = 500 * 1024 * 1024) -> str:
         # VACUUM rewrites the file to reclaim free pages. It needs a fresh

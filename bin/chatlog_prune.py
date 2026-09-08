@@ -353,8 +353,11 @@ def _run_sweep(conn, db_path, args, now_ts, S, _d, _p, _tbl, _is_sqlite) -> dict
         S["prune_content_mb"] = round(S["prune_content_mb"], 1)
         if args.apply:
             ts = datetime.now(timezone.utc).isoformat()
-            if _is_sqlite:
-                conn.execute("BEGIN IMMEDIATE")
+            # The dialect decides: BEGIN IMMEDIATE on SQLite, plain BEGIN on
+            # PG. The old `if _is_sqlite` here is the call-site branch §10a
+            # warns about -- a third backend would have fallen into the "do
+            # nothing" side and silently run without the lock it needs.
+            _d.begin_immediate(conn)
             if has_valid_to:
                 conn.executemany(
                     f"UPDATE {_tbl} SET importance={_p}, valid_to={_p}, updated_at={_p} "

@@ -51,6 +51,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from m3_core.paths import seam_dialect
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 try:
@@ -162,7 +164,7 @@ def migrate(db_path: str, dry_run: bool = False) -> int:
             print(f"DRY-RUN: would migrate {total_to_migrate:,} rows total.")
             return 0
 
-        con.execute("BEGIN IMMEDIATE")
+        seam_dialect().begin_immediate(con)
         for old, new in ENTITY_TYPE_RENAMES.items():
             con.execute(
                 "UPDATE entities SET entity_type = ?, updated_at = "

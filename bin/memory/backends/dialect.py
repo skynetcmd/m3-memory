@@ -916,6 +916,38 @@ class Dialect:
         """
         return "Compaction skipped: not applicable on this backend"
 
+    # -- transactions --------------------------------------------------------
+    def begin_immediate(self, conn: object) -> None:
+        """Start a transaction that takes its WRITE lock NOW, not on first write.
+
+        The read-modify-write passes in this repo (enrich backfill, chatlog
+        prune, entity-vocab migration) all need the same thing: no other writer
+        may slip between the SELECT that chooses rows and the UPDATE that claims
+        them. Three call sites each spelled it ``conn.execute("BEGIN
+        IMMEDIATE")`` — SQLite-only syntax that PostgreSQL rejects outright, so
+        every one of them was a portability bug, and three copies of the same
+        idiom is the §10a defect independent of that.
+
+        Contract, per backend:
+          - **SQLite** — ``BEGIN IMMEDIATE`` acquires the RESERVED lock at once.
+            The default deferred ``BEGIN`` takes it only at the first write, so
+            two passes can both read, then one fails with "database is locked"
+            *after* doing its work.
+          - **Postgres** — a plain ``BEGIN``. MVCC means the read snapshot is
+            already stable, and row locks are taken by the write itself; there
+            is no "upgrade the whole transaction to a writer now" statement, and
+            ``LOCK TABLE`` would be strictly heavier than the SQLite behaviour
+            it is standing in for.
+          - **A future backend** — spells whatever gives the same guarantee.
+
+        Concrete on the base as the portable default so a new backend works
+        without implementing anything; SQLite overrides it. Deliberately NOT
+        abstract: a backend that forgets this still gets CORRECT (if slightly
+        weaker-locking) behaviour rather than a NotImplementedError in the
+        middle of a maintenance pass.
+        """
+        conn.execute("BEGIN")
+
 
 # ── Concrete per-backend dialects live in their backend modules ──────────────
 # `SqliteDialect`/`SQLITE` are in `sqlite_backend.py`; `PostgresDialect`/`POSTGRES`

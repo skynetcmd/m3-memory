@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_prune.py
-sha1: 1430144f65d9
-mtime_utc: 2026-08-09T19:41:32.406117+00:00
-generated_utc: 2026-08-12T00:59:01.239908+00:00
+sha1: 463e6521b37a
+mtime_utc: 2026-09-08T05:42:32.249597+00:00
+generated_utc: 2026-09-08T05:49:33.047177+00:00
 private: false
 ---
 
@@ -46,7 +46,7 @@ USAGE
 ## Entry points
 
 - `def run()` (line 196)
-- `def main()` (line 383)
+- `def main()` (line 386)
 - `if __name__ == "__main__"` guard
 
 ---
