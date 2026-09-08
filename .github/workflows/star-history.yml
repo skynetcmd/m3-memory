@@ -2,13 +2,24 @@
 # back to main. GitHub now gates star data behind an authenticated token, so the
 # anonymous star-history.com embed no longer renders in the README.
 #
-# IMPORTANT — token: as of 2026-06-30 GitHub limits the stargazers endpoint to a
-# repo's own admins/collaborators. The built-in GITHUB_TOKEN is an installation
-# token that is NOT treated as an admin/collaborator, so it returns 403 on the
-# stargazers `starred_at` data. This workflow therefore uses a repo secret,
-# M3_STARGAZER — a fine-grained PAT owned by an admin, with only
-# "Metadata: read-only" permission on this repo. Create it at
-# https://github.com/settings/tokens?type=beta and add it under
+# IMPORTANT — token TYPE, not scope. The stargazers `starred_at` media type is
+# not reachable by a FINE-GRAINED PAT at all, whatever its permissions. Measured
+# 2026-09-08 against this repo, identical headers:
+#
+#   fine-grained PAT (Metadata:read, scoped to this repo) -> 403
+#       {"message":"Resource not accessible by personal access token",
+#        "documentation_url":".../rest/activity/starring#list-stargazers"}
+#   classic PAT                                           -> 200
+#
+# "Resource not accessible by personal access token" is GitHub refusing the
+# token CLASS. So M3_STARGAZER must be a CLASSIC PAT (public_repo is enough for
+# a public repo; repo for a private one). The built-in GITHUB_TOKEN is likewise
+# rejected, which is why a secret is needed at all.
+#
+# This cost seven weeks of stale badges and one wrong diagnosis: the fine-grained
+# token was healthy — unexpired, correctly scoped, last used within the week —
+# so "rotate it" was never the fix. Create the classic PAT at
+# https://github.com/settings/tokens and add it under
 # Settings -> Secrets and variables -> Actions -> New repository secret.
 # Until that secret exists the job no-ops (it will not fail the Actions tab).
 #
@@ -75,14 +86,12 @@ jobs:
           # the README quietly served seven-week-old numbers. Nobody watches a
           # green cron; nobody watches a red one either, unless it says why.
           #
-          # The cause is NOT expiry and NOT scope. Checked directly on
-          # 2026-09-08: the M3_STARGAZER PAT has NO expiration date, was "last
-          # used within the last week", is scoped to exactly this repository,
-          # and carries "Read access to metadata" — precisely what the header
-          # above prescribes. The secret's timestamp matches the token's
-          # creation date, so the secret does hold that token. Why GitHub still
-          # answers 403 for it in Actions is UNRESOLVED; do not "fix" this by
-          # rotating a healthy token.
+          # RESOLVED 2026-09-08: the cause was the token CLASS. A fine-grained
+          # PAT cannot read this endpoint no matter how it is scoped — GitHub
+          # answers "Resource not accessible by personal access token". A
+          # classic PAT returns 200 for the identical request. The old secret
+          # held a perfectly healthy fine-grained token, which is why "rotate
+          # it" was the wrong instinct and cost weeks.
           #
           # Probe the endpoint the generator ACTUALLY calls (/stargazers with
           # the starred_at media type), not /repos/{repo}. They have different
@@ -106,7 +115,7 @@ jobs:
           if [ "$code" = "200" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::error title=M3_STARGAZER cannot read the stargazers endpoint::HTTP $code. GitHub said: $reason -- Badge refresh is DISABLED and README badges will go stale. Check that token BEFORE rotating it: a correctly-scoped, unexpired one was already ruled out on 2026-09-08."
+            echo "::error title=M3_STARGAZER cannot read the stargazers endpoint::HTTP $code. GitHub said: $reason -- Badge refresh is DISABLED and README badges will go stale. If the message is \"Resource not accessible by personal access token\", the secret holds a FINE-GRAINED PAT: this endpoint requires a CLASSIC one (public_repo)."
             echo "present=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
