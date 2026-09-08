@@ -108,7 +108,7 @@ def _audit(
             FROM memory_items
             WHERE COALESCE(is_deleted,0)=0
               AND (title IS NULL OR title IN ({placeholders}))
-              AND length(COALESCE(content,'')) >= ?
+              AND {seam_dialect().byte_length("COALESCE(content,'')")} >= {seam_dialect().param()}
             GROUP BY type
             ORDER BY n DESC
         """
@@ -133,7 +133,7 @@ def _backfill(
             FROM memory_items
             WHERE COALESCE(is_deleted,0)=0
               AND (title IS NULL OR title IN ({placeholders}))
-              AND length(COALESCE(content,'')) >= ?
+              AND {seam_dialect().byte_length("COALESCE(content,'')")} >= {seam_dialect().param()}
             ORDER BY created_at ASC
         """
         if limit:
@@ -210,8 +210,8 @@ def _sample_derivations(
             FROM memory_items
             WHERE COALESCE(is_deleted,0)=0
               AND (title IS NULL OR title IN ({placeholders}))
-              AND length(COALESCE(content,'')) >= ?
-            ORDER BY length(content) DESC LIMIT ?
+              AND {seam_dialect().byte_length("COALESCE(content,'')")} >= {seam_dialect().param()}
+            ORDER BY {seam_dialect().byte_length('content')} DESC LIMIT {seam_dialect().param()}
         """
         rows = conn.execute(sql, list(useless_titles) + [min_chars, n]).fetchall()
         return [(r[0] or "<NULL>", _derive_title(r[1] or "", max_title_chars)) for r in rows]

@@ -194,12 +194,17 @@ def _select_rows(
             extraction_clause = (
                 "AND mi.id NOT IN (SELECT DISTINCT memory_id FROM memory_item_entities)"
             )
+        # Size predicate via the dialect: a bare length() counts CHARACTERS on
+        # PostgreSQL, so a CJK row would be measured at ~1/3 its byte size and
+        # the min_content_len floor would mean something different per encoding.
+        from memory.backends import dialect as _dialect_fn
+        _d = _dialect_fn()
         sql = f"""
             SELECT mi.id, mi.content, mi.metadata_json, mi.conversation_id
             FROM memory_items mi
             WHERE mi.type != 'fact_enriched'
               AND COALESCE(mi.is_deleted, 0) = 0
-              AND length(mi.content) > {int(min_content_len)}
+              AND {_d.byte_length('mi.content')} > {int(min_content_len)}
               {variant_clause}
               {extraction_clause}
             ORDER BY mi.created_at ASC

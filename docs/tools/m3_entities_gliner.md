@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_entities_gliner.py
-sha1: 918e437bcbcc
-mtime_utc: 2026-08-07T23:53:52.149180+00:00
-generated_utc: 2026-08-08T14:40:49.961949+00:00
+sha1: edba0e98fe53
+mtime_utc: 2026-09-08T21:34:25.098923+00:00
+generated_utc: 2026-09-08T21:39:23.649540+00:00
 private: false
 ---
 
@@ -48,7 +48,7 @@ Env vars (all optional):
 
 ## Entry points
 
-- `def main()` (line 484)
+- `def main()` (line 489)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -100,6 +100,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 - `gliner (GLiNER)`
 - `m3_core.gpu (torch_device)`
+- `memory.backends (dialect)`
 
 ---
 

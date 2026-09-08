@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_entities.py
-sha1: b61fba5902b3
-mtime_utc: 2026-08-08T13:12:19.050858+00:00
-generated_utc: 2026-08-08T14:40:49.957013+00:00
+sha1: 8f7c8f01b509
+mtime_utc: 2026-09-08T21:33:54.985772+00:00
+generated_utc: 2026-09-08T21:39:23.643509+00:00
 private: false
 ---
 

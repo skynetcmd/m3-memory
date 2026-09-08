@@ -498,7 +498,23 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
         first_vec: list[float] | None = None
         any_inserted = False
         for chunk_text, chunk_idx in chunks:
-            base_kind = "default" if len(chunks) == 1 else f"window_{chunk_idx}"
+            # The FIRST window is always 'default', even when a row is split
+            # into several. memory_search's back-compat strategy scores ONLY
+            # vector_kind='default' rows (search.py: `me.vector_kind =
+            # 'default'`), so naming every window `window_N` made a large
+            # memory embedded-but-UNFINDABLE: memory_get returns it, embed
+            # backfill reports 0 pending (an embedding row DOES exist), and
+            # semantic search never returns it. Every health check says fine.
+            #
+            # Observed 2026-09-08: a 28,527-char procedure produced window_0 +
+            # window_1 and could not be retrieved by its own distinctive
+            # strings. It was the only such row in 3,864 memories -- the defect
+            # needs a row big enough to window, so it hid until one appeared.
+            #
+            # Later windows keep window_N: they are additional views of the
+            # same row, reachable via vector_kind_strategy="max", and the
+            # dedupe there keeps the best-scoring one per memory_id.
+            base_kind = "default" if chunk_idx == 0 else f"window_{chunk_idx}"
             sub_results = await _embed_chunk_with_dense_recovery(chunk_text, base_kind)
             if not sub_results:
                 logger.warning(

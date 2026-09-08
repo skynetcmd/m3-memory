@@ -90,7 +90,7 @@ def _audit_unembedded(
             LEFT JOIN memory_embeddings me ON me.memory_id = mi.id
             WHERE COALESCE(mi.is_deleted,0)=0
               AND me.id IS NULL
-              AND length(COALESCE(mi.content,'')) >= {seam_dialect().param()}
+              AND {seam_dialect().byte_length("COALESCE(mi.content,'')")} >= {seam_dialect().param()}
               {type_clause}
             GROUP BY mi.type
             ORDER BY n DESC
@@ -197,7 +197,7 @@ async def _backfill_db(
         LEFT JOIN memory_embeddings me ON me.memory_id = mi.id
         WHERE COALESCE(mi.is_deleted,0)=0
           AND me.id IS NULL
-          AND length(COALESCE(mi.content,'')) >= ?
+          AND {seam_dialect().byte_length("COALESCE(mi.content,'')")} >= {seam_dialect().param()}
           {type_clause}
         ORDER BY mi.created_at ASC
     """

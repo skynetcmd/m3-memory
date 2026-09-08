@@ -612,7 +612,7 @@ def _query_eligible_rows(
               AND type NOT IN ({excl_placeholders})
               {variant_clause}
               {extracted_clause}
-            ORDER BY LENGTH(content) DESC
+            ORDER BY {_d.byte_length('content')} DESC
         """
         params = list(type_allowlist) + list(ALWAYS_SKIP_TYPES) + variant_params
         rows = conn.execute(sql, params).fetchall()

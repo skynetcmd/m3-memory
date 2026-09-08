@@ -65,6 +65,74 @@ def _family(tag: str) -> str:
     return t
 
 
+def _report_unfindable() -> None:
+    """Report rows that HAVE embeddings but cannot be reached by search.
+
+    Worse than a missing embedding, because every check says healthy:
+    memory_get returns the row, `m3 embedder backfill` reports 0 pending (its
+    predicate only asks whether an embedding EXISTS), and memory_search returns
+    it at no score for any query -- including verbatim strings from its body.
+
+    Cause is vector_kind: search.py's back-compat strategy scores ONLY
+    `vector_kind = 'default'` rows. Found 2026-09-08 -- memory/write.py named
+    EVERY window of a split row `window_N`, so one 28,527-char memory (the only
+    row of 3,864 large enough to window) had window_0 + window_1 and no
+    default. Fixed at the source; a store written by an older build still
+    carries the bad rows and nothing else reports them.
+
+    Runs on the OK path too. This defect's whole signature is a store that
+    looks perfectly consistent -- returning early on "all spaces agree" is
+    exactly how it stayed invisible.
+    """
+    try:
+        # Imported HERE, not at module scope: run() resolves these lazily so a
+        # missing seam degrades to a status line instead of an import error at
+        # doctor load. This helper is called from run(), but must not depend on
+        # run()'s locals to stay independently testable.
+        from m3_core.paths import resolve_engine_file
+        from memory.backends import active_backend
+
+        from memory.backends import dialect
+
+        # Size via the dialect, NOT a bare LENGTH(): on PostgreSQL length()
+        # counts CHARACTERS, so a CJK-heavy memory would be reported at roughly
+        # a third of its real size — and size is the whole reason these rows got
+        # windowed. byte_length() renders octet_length() there (§10a).
+        _size = dialect().byte_length("COALESCE(mi.content,'')")
+        db_path = resolve_engine_file("agent_memory.db")
+        with active_backend().open_readonly(db_path) as conn:
+            orphans = conn.execute(
+                f"""
+                SELECT mi.id, {_size}
+                FROM memory_items mi
+                WHERE COALESCE(mi.is_deleted,0)=0
+                  AND EXISTS (SELECT 1 FROM memory_embeddings e
+                              WHERE e.memory_id = mi.id)
+                  AND NOT EXISTS (SELECT 1 FROM memory_embeddings e2
+                                  WHERE e2.memory_id = mi.id
+                                    AND e2.vector_kind = 'default')
+                LIMIT 10
+                """
+            ).fetchall()
+    except Exception:  # noqa: BLE001 — fresh store / missing table is fine
+        return
+
+    if not orphans:
+        return
+    print(f"  EMBEDDED BUT UNFINDABLE: {len(orphans)} memory row(s) have "
+          f"embeddings but no vector_kind='default' vector.")
+    print("    observed: rows exist, have embedding rows, and are returned by "
+          "memory_get; semantic search cannot reach them at any score.")
+    print("    cause: memory_search's default strategy scores only "
+          "vector_kind='default' rows.")
+    print("    effect: `m3 embedder backfill` reports these as DONE — its "
+          "check is 'has an embedding', not 'has a findable one'.")
+    for mid, n in orphans[:5]:
+        print(f"      {mid}  ({n} chars)")
+    print("    fix: re-embed those rows "
+          "(`m3 embedder backfill --force`, or rewrite the memory).")
+
+
 def run(brief: bool = False) -> int:
     """Report whether the store mixes incompatible embedding spaces.
 
@@ -153,6 +221,7 @@ def run(brief: bool = False) -> int:
             alias = f" (tags: {', '.join(tags)})" if len(tags) > 1 else ""
             print(f"  {kind:10} : {fam} — {n:,} vectors{alias}")
         print("  status   : OK — all vectors are cosine-comparable.")
+        _report_unfindable()
         return 0
 
     for kind, fams in sorted(mixed.items()):
@@ -176,5 +245,6 @@ def run(brief: bool = False) -> int:
         print(f"  MIXED DIMENSIONS in vector_kind '{kind}': "
               f"{', '.join(str(d) for d in sorted(dims))} — vectors of different "
               f"lengths cannot be compared at all.")
+
 
     return 0
