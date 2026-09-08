@@ -85,15 +85,67 @@ def _recent_window_sql() -> "tuple[str, tuple]":
         return base + "created_at > datetime('now', ?)", (f"-{int(WINDOW_MIN)} minutes",)
 
 
-def main() -> None:
-    db = _resolve_db()
+def _candidate_dbs() -> "list[str]":
+    """Every store chat turns could be landing in — main AND chatlog.
+
+    On a SPLIT topology (the default) turns live in `agent_chatlog.db`, a
+    different file from `agent_memory.db`. Checking only the main DB finds ZERO
+    chat_log rows on a perfectly healthy install and reports "capture NOT
+    writing" — a false alarm on every session start, which is exactly the
+    cry-wolf failure this check exists to prevent. Measured 2026-09-07: the main
+    store had 0 chat_log rows in the window while the chatlog store had 654.
+
+    The chatlog path comes from `chatlog_config.chatlog_db_path()`, the SAME
+    resolver the writers use (chatlog_core, m3_core.context). Do NOT hand-derive
+    it as a sibling of the main DB: that guess ignores `CHATLOG_DB_PATH`, the
+    active-database ContextVar, and a `db_path` pinned in .chatlog_config.json,
+    so a user who relocated their chatlog would get the false alarm back — the
+    check would be reading a file nobody writes to.
+
+    On a UNIFIED deployment both resolve to the same file, so the list collapses
+    to one entry and behaviour is unchanged.
+    """
     try:
-        conn = sqlite3.connect(db, timeout=5)
-        try:
-            _sql, _params = _recent_window_sql()
-            (count,) = conn.execute(_sql, _params).fetchone()
-        finally:
-            conn.close()
+        import chatlog_config  # type: ignore
+        paths = chatlog_config.chat_store_paths()
+        if paths:
+            return paths
+    except Exception:  # noqa: BLE001
+        pass
+    # Payload unavailable — a fresh install, a mid-upgrade window, or this hook
+    # copied somewhere without its siblings. A SessionStart hook must still
+    # answer, so fall back to the conventional layout. Main-ONLY would be the
+    # false alarm again: on a split topology the main store legitimately holds
+    # 0 chat_log rows, so we would report "capture NOT writing" precisely when
+    # we are least able to know.
+    main = _resolve_db()
+    out = [main]
+    sibling = os.path.join(os.path.dirname(main), "agent_chatlog.db")
+    if os.path.abspath(sibling) != os.path.abspath(main) and os.path.exists(sibling):
+        out.append(os.path.abspath(sibling))
+    return out
+
+
+def main() -> None:
+    dbs = _candidate_dbs()
+    try:
+        _sql, _params = _recent_window_sql()
+        count = 0
+        errors = []
+        for db in dbs:
+            try:
+                conn = sqlite3.connect(db, timeout=5)
+                try:
+                    (n,) = conn.execute(_sql, _params).fetchone()
+                    count += n
+                finally:
+                    conn.close()
+            except Exception as e:  # noqa: BLE001 — a missing store is not fatal
+                errors.append(f"{os.path.basename(db)}: {e}")
+        # Only a TOTAL failure is "status unknown": if any store answered, the
+        # count is authoritative (writes land in one store, not spread).
+        if errors and len(errors) == len(dbs):
+            raise RuntimeError("; ".join(errors))
     except Exception as exc:  # noqa: BLE001 — never break session start
         msg = (
             f"\U0001f6a8 m3 chatlog check FAILED to query DB: {exc} "
@@ -107,8 +159,10 @@ def main() -> None:
     else:
         msg = (
             f"\U0001f6a8 WARNING: m3 chatlog capture NOT writing "
-            f"(0 rows in last {WINDOW_MIN}min). Design decisions are NOT being "
-            "preserved. Restart the m3 MCP server before continuing."
+            f"(0 rows in last {WINDOW_MIN}min). Turns from this session are NOT "
+            "being preserved. Run `m3 chatlog doctor` before continuing "
+            "substantive work. (Note: an MCP disconnect does NOT cause this — "
+            "capture writes to the DB directly, independent of that connection.)"
         )
     print(json.dumps({"systemMessage": msg, "suppressOutput": True}))
 

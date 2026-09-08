@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: 8b24c075736e
-mtime_utc: 2026-08-12T02:47:23.723081+00:00
-generated_utc: 2026-08-12T02:54:57.028489+00:00
+sha1: c2d4bc1d863e
+mtime_utc: 2026-09-08T00:01:56.248943+00:00
+generated_utc: 2026-09-08T00:04:40.860012+00:00
 private: false
 ---
 
@@ -86,6 +86,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
+- `doctor (agent_guidance_probe)`
 - `doctor (agent_paths_probe)`
 - `doctor (cascade_probe)`
 - `doctor (claude_mcp_probe)`

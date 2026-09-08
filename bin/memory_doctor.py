@@ -337,6 +337,13 @@ def main() -> int:
         # whether typing `m3` runs THIS code.
         exit_code = max(exit_code, entrypoint_probe.run(brief=brief))
 
+    # Stale m3 guidance copied into the user's own CLAUDE.md / GEMINI.md.
+    # EXIT-CODE NEUTRAL on purpose: m3 never writes those files, so this is a
+    # correctness issue in the user's own notes, not a broken install, and
+    # failing anyone's CI over it would be wrong. Detection only, never writes.
+    from doctor import agent_guidance_probe
+    agent_guidance_probe.run(brief=brief)
+
     if not args.skip_environment:
         from doctor import environment_probe
         # DOES bump the exit code: a hook pointing at a path a reinstall moved

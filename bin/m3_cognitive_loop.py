@@ -798,35 +798,48 @@ def _embed_target_dbs(core_db: Optional[str]) -> list[str]:
     whose loop was running normally; those rows stayed FTS-searchable but were
     invisible to semantic/vector search.
 
-    Returns de-duplicated existing paths, so a UNIFIED deployment (chatlog path
+    Returns de-duplicated EXISTING paths, so a UNIFIED deployment (chatlog path
     == main path) yields exactly one entry and behaves as before.
+
+    Store enumeration itself lives in `chatlog_config.chat_store_paths()` — the
+    shared answer to "where can chat turns be?". This function had its own copy
+    until 2026-09-07, and so did `m3 embedder backfill` and the SessionStart
+    capture check; each copy got the split-topology question wrong at least
+    once. What stays HERE is what is genuinely loop-specific: an explicit
+    `core_db` override, and filtering to paths that EXIST (the loop must not
+    try to sweep a store that was never created).
     """
     paths: list[str] = []
-    main = core_db or os.environ.get("M3_DATABASE")
-    if main:
-        paths.append(os.path.abspath(str(main)))
     try:
         import chatlog_config
-        # Do NOT use resolve_config().db_path here. With no explicit
-        # CHATLOG_DB_PATH it deliberately falls back to M3_DATABASE (the
-        # "one env var = unified DB" convenience), which this loop always
-        # sets — so it would hand back the MAIN db and the real chatlog
-        # store would silently never be swept. Prefer the explicit override,
-        # else the configured/default chatlog path from the config file.
-        chat = chatlog_config._path_from_env()
-        if not chat:
-            chat = chatlog_config._build_from_dict(chatlog_config._load_file()).db_path
-        if chat:
-            paths.append(os.path.abspath(str(chat)))
+        paths = list(chatlog_config.chat_store_paths())
     except Exception as e:  # noqa: BLE001 — chatlog is optional; never break the loop
         logger.debug(f"Chatlog DB resolution failed (non-fatal): {e}")
+
+    # An explicit core_db argument REPLACES the shared resolver's main store
+    # (callers pass args.database). Everything the resolver found that is not
+    # the default main store — i.e. the chatlog half — is kept.
+    #
+    # The existence filter below then applies to the substituted path too, so a
+    # core_db that does not exist drops out entirely and the sweep proceeds on
+    # the chatlog store alone. That is deliberate and matches the pre-refactor
+    # behaviour: a caller naming a database that is not there should not cause
+    # the loop to silently sweep a DIFFERENT one instead.
+    main = core_db or os.environ.get("M3_DATABASE")
+    if main:
+        default_main = paths[0] if paths else None
+        rest = [p for p in paths[1:]] if default_main else list(paths)
+        paths = [os.path.abspath(str(main))] + [
+            p for p in rest if os.path.abspath(p) != os.path.abspath(str(main))
+        ]
 
     seen: set[str] = set()
     out: list[str] = []
     for p in paths:
-        if p not in seen and os.path.exists(p):
-            seen.add(p)
-            out.append(p)
+        ap = os.path.abspath(p)
+        if ap not in seen and os.path.exists(ap):
+            seen.add(ap)
+            out.append(ap)
     return out
 
 

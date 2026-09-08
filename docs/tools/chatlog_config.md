@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_config.py
-sha1: ca96353ea6be
-mtime_utc: 2026-07-19T03:04:59.543388+00:00
-generated_utc: 2026-07-19T19:29:21.974449+00:00
+sha1: c8948631db84
+mtime_utc: 2026-09-08T00:18:01.167577+00:00
+generated_utc: 2026-09-08T00:18:53.479095+00:00
 private: false
 ---
 
@@ -70,6 +70,7 @@ _(no argparse arguments detected)_
 
 - `m3_sdk (_active_db)`
 - `m3_sdk (get_m3_config_root, get_m3_engine_root, get_m3_root, getenv_compat)`
+- `m3_sdk (resolve_db_path)`
 - `sqlite_pragmas (apply_pragmas)`
 
 ---
@@ -78,7 +79,7 @@ _(no argparse arguments detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 351)
+- `sqlite3.connect()  → `db_path`` (line 410)
 
 
 ---
