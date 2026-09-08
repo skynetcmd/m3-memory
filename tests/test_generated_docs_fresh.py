@@ -14,6 +14,7 @@ and commit the regenerated files.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -116,6 +117,77 @@ def test_tool_pages_are_fresh():
     assert not stale, (
         "Stale tool pages — run `python bin/gen_tool_inventory.py` and commit:\n  "
         + "\n  ".join(stale)
+    )
+
+
+def test_every_cli_tool_has_a_page():
+    """A tool source with NO page at all must fail — the inverse of staleness.
+
+    The two tests above both start from a PAGE and look at its source, so they
+    can only see a page that has gone stale or orphaned. A brand-new tool that
+    was never generated has no page to start from and is therefore invisible to
+    both — the gate reports green while the inventory silently omits the tool.
+
+    Found on 2026-09-08 reviewing PR #101: `bin/watch_pr_checks.py` was added
+    with no `docs/tools/watch_pr_checks.md`, and the full suite passed. The
+    freshness gate was never a completeness gate.
+
+    Selection deliberately reuses the GENERATOR's own predicates (SOURCE_DIRS,
+    ROOT_FILES, SKIP, is_cli_tool, and the tracked-files filter) instead of
+    restating the rule here. A second copy of "which sources deserve a page"
+    would drift from the first, which is the very failure mode this file exists
+    to catch.
+    """
+    import gen_tool_inventory as gen
+
+    # Untracked sources are skipped by the generator on purpose (gitignored WIP,
+    # machine-local experiments), so they must not fail the build either. An
+    # empty set means git was unavailable — the generator disables filtering
+    # there, and we mirror that rather than inventing a stricter rule.
+    tracked = gen._tracked_files()
+
+    candidates: list[pathlib.Path] = []
+    for d in gen.SOURCE_DIRS:
+        if d.is_dir():
+            candidates.extend(sorted(list(d.glob("*.py")) + list(d.glob("*.sh"))))
+    for p in gen.ROOT_FILES:
+        if p.is_file():
+            candidates.append(p)
+
+    missing = []
+    for src in candidates:
+        if src.name in gen.SKIP:
+            continue
+        if tracked and src.resolve() not in tracked:
+            continue
+        try:
+            source = src.read_text(encoding="utf-8")
+            tree = None if src.name.endswith(".sh") else ast.parse(source)
+        except (OSError, SyntaxError):
+            continue  # the generator skips these too, loudly
+        if not gen.is_cli_tool(source, name=src.name, tree=tree):
+            continue
+        # PRIVATE tools deliberately get NO page: the generator deletes any that
+        # exists and lists them in INDEX.md only, so bench harnesses and
+        # machine-specific servers never publish a page. Requiring one here
+        # would fight the generator and pressure someone into publishing a
+        # bench doc to get a green build.
+        rel = src.relative_to(_ROOT).as_posix()
+        if src.name in gen.PRIVATE or any(
+            rel.startswith(p) for p in gen.PRIVATE_PATH_PREFIXES
+        ):
+            continue
+        # Page naming mirrors the generator: .py keeps <stem>.md, any other
+        # extension gets <stem>_<ext>.md so a .py and a .sh sharing a stem
+        # cannot clobber each other.
+        page = (f"{src.stem}.md" if src.suffix == ".py"
+                else f"{src.stem}_{src.suffix.lstrip('.')}.md")
+        if not (_TOOLS_DIR / page).exists():
+            missing.append(rel)
+
+    assert not missing, (
+        "CLI tools with no generated page — run `python bin/gen_tool_inventory.py` "
+        "and commit the new page(s) plus INDEX.md:\n  " + "\n  ".join(sorted(missing))
     )
 
 
