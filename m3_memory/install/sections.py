@@ -129,8 +129,9 @@ def _chatlog_db_stats(db_path: Path) -> dict:
         out["error"] = "file not found"
         return out
     try:
-        uri = f"file:{db_path.as_posix()}?mode=ro"
-        conn = sqlite3.connect(uri, uri=True, timeout=1.0)
+        from m3_core.paths import seam_backend
+        _cm = seam_backend().open_readonly(str(db_path))
+        conn = _cm.__enter__()
         try:
             # Count rows the chatlog subsystem writes — types 'chat_log'
             # and 'message'. Matches chatlog_status's totals so the two
@@ -143,7 +144,7 @@ def _chatlog_db_stats(db_path: Path) -> dict:
             out["last_at"] = row[1] or ""
             out["ok"] = True
         finally:
-            conn.close()
+            _cm.__exit__(None, None, None)
     except sqlite3.OperationalError as e:
         # Table may not exist yet (fresh install before first write).
         out["error"] = str(e)
@@ -494,7 +495,9 @@ def _sqlite_store_stats(db_path: str) -> "dict | None":
     if not db_path or not os.path.exists(db_path):
         return None
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
+        from m3_core.paths import seam_backend
+        _cm = seam_backend().open_readonly(str(db_path))
+        conn = _cm.__enter__()
     except sqlite3.Error:
         return None
     try:
@@ -518,7 +521,7 @@ def _sqlite_store_stats(db_path: str) -> "dict | None":
     except sqlite3.Error:
         return None
     finally:
-        conn.close()
+        _cm.__exit__(None, None, None)
 
 
 def _cdw_sync_section() -> None:
@@ -557,7 +560,9 @@ def _cdw_sync_section() -> None:
         print("  [!] no local store to read sync watermarks from.")
         return
     try:
-        conn = sqlite3.connect(f"file:{core_db}?mode=ro", uri=True, timeout=5.0)
+        from m3_core.paths import seam_backend
+        _cm = seam_backend().open_readonly(str(core_db))
+        conn = _cm.__enter__()
     except sqlite3.Error:
         print("  [!] could not open the local store to read watermarks.")
         return
@@ -579,7 +584,7 @@ def _cdw_sync_section() -> None:
     except sqlite3.Error as e:
         print(f"  [!] could not read watermarks: {e}")
     finally:
-        conn.close()
+        _cm.__exit__(None, None, None)
 
 
 def _backend_section(cfg: dict) -> None:

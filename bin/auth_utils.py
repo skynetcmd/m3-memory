@@ -100,6 +100,34 @@ def _vault_db_path() -> str:
         return DB_PATH
 
 
+def _seam_is_being_built() -> bool:
+    """True while this thread is INSIDE backend construction.
+
+    auth_utils is called BY the backend as it is built: PostgresBackend.__init__
+    -> _resolve_dsn -> _reject_same_as_warehouse -> context.get_secret ->
+    get_api_key. If the vault helpers below then ask the seam for a backend or a
+    dialect, that re-enters ``active_backend()`` and blocks on its
+    non-reentrant ``_lock`` -- a hard deadlock, hung forever rather than raising.
+    (Observed 2026-09-08: the whole suite stalled at 80% with the traceback
+    selector.active_backend -> postgres_backend.__init__ -> get_secret ->
+    get_api_key -> dialect -> active_backend.)
+
+    ``active_backend()`` reads its cache BEFORE taking the lock, so the hazard
+    exists only on FIRST construction. Detect that window by walking the stack
+    once; it is cheap next to opening a DB, and it is honest -- the alternative
+    (a module-global "in construction" flag) has to be set and cleared by the
+    seam, which would push this module's problem into the seam's API.
+    """
+    import sys as _sys
+
+    f = _sys._getframe(1)
+    while f is not None:
+        g = f.f_globals.get("__name__", "")
+        if g.startswith("memory.backends"):
+            return True
+        f = f.f_back
+    return False
+
 def _backend():
     """The active storage backend, or a minimal SQLite-only shim.
 
@@ -111,26 +139,51 @@ def _backend():
     a PostgreSQL install always has the seam on sys.path by the time secrets
     are read.
     """
+    # Same re-entrancy hazard as _dialect_param: the backend calls get_secret()
+    # while being constructed, so asking for the backend here would deadlock on
+    # active_backend()'s lock. Use the SQLite shim for that window -- the vault
+    # read that triggers it is resolving a DSN, i.e. the store is not yet usable.
+    if not _seam_is_being_built():
+        try:
+            from memory.backends import active_backend  # type: ignore
+            return active_backend()
+        except Exception:  # noqa: BLE001 — bootstrap: seam not importable yet
+            pass
+
+    import sqlite3 as _sq
+    from contextlib import contextmanager
+
+    class _SqliteOnlyShim:
+        @staticmethod
+        @contextmanager
+        def open_readonly(db_path: str):
+            if not os.path.exists(db_path):
+                raise FileNotFoundError(db_path)
+            c = _sq.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2)
+            try:
+                yield c
+            finally:
+                c.close()
+
+    return _SqliteOnlyShim()
+
+
+
+
+def _dialect_param() -> str:
+    """The active backend's bind placeholder ('?' on SQLite, '%s' on PG).
+
+    A literal '?' in feature code is a portability bug (§10a). Falls back to the
+    SQLite form when the seam is unavailable (installer bootstrap) or when
+    asking would re-enter backend construction -- see _seam_is_being_built.
+    """
+    if _seam_is_being_built():
+        return "?"
     try:
-        from memory.backends import active_backend  # type: ignore
-        return active_backend()
+        from memory.backends import dialect  # type: ignore
+        return dialect().param()
     except Exception:  # noqa: BLE001 — bootstrap: seam not importable yet
-        import sqlite3 as _sq
-        from contextlib import contextmanager
-
-        class _SqliteOnlyShim:
-            @staticmethod
-            @contextmanager
-            def open_readonly(db_path: str):
-                if not os.path.exists(db_path):
-                    raise FileNotFoundError(db_path)
-                c = _sq.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2)
-                try:
-                    yield c
-                finally:
-                    c.close()
-
-        return _SqliteOnlyShim()
+        return "?"
 
 
 def get_master_key() -> str | None:
@@ -430,12 +483,21 @@ def get_api_key(service: str) -> str | None:
 
     # Fallback to the synchronized encrypted vault
     vault_path = _vault_db_path()
-    if os.path.exists(vault_path):
+    # No os.path.exists gate: on PostgreSQL there is no vault FILE, and skipping
+    # the lookup here means every secret silently resolves to None -- the vault
+    # tier would be dead on PG while appearing merely "empty".
+    if True:
         conn = None
         try:
-            conn = sqlite3.connect(vault_path)
+            _p = _dialect_param()
+            _cm = _backend().open_readonly(vault_path)
+            conn = _cm.__enter__()
             cur = conn.cursor()
-            cur.execute("SELECT encrypted_value FROM synchronized_secrets WHERE service_name = ?", (service,))
+            cur.execute(
+                f"SELECT encrypted_value FROM synchronized_secrets "
+                f"WHERE service_name = {_p}",
+                (service,),
+            )
             row = cur.fetchone()
 
             if row and row[0]:
@@ -479,8 +541,11 @@ def get_api_key(service: str) -> str | None:
         except Exception as exc:
             logger.debug(f"Failed to read from encrypted vault: {type(exc).__name__}")
         finally:
-            if conn:
-                conn.close()
+            if conn is not None:
+                try:
+                    _cm.__exit__(None, None, None)
+                except Exception:  # noqa: BLE001 — already closing
+                    pass
 
     return None
 
@@ -500,17 +565,27 @@ def set_api_key(service: str, value: str):
 
     conn = None
     try:
-        conn = sqlite3.connect(_vault_db_path())
+        # WRITE path: the pooled seam connection, with the same commit/rollback
+        # discipline as every other writer. No os.path.exists gate above it --
+        # on PG the vault has no file and secrets would silently never persist.
+        _p = _dialect_param()
+        _wcm = _backend().connection()
+        conn = _wcm.__enter__()
         cur = conn.cursor()
 
         # Get current version, increment by 1
-        cur.execute("SELECT version FROM synchronized_secrets WHERE service_name = ?", (service,))
+        cur.execute(
+            f"SELECT version FROM synchronized_secrets WHERE service_name = {_p}",
+            (service,),
+        )
         row = cur.fetchone()
         version = (row[0] + 1) if row else 1
 
-        cur.execute("""
+        # ON CONFLICT ... DO UPDATE with excluded.* is spelled identically on
+        # SQLite and PostgreSQL, so only the placeholders need the dialect.
+        cur.execute(f"""
             INSERT INTO synchronized_secrets (service_name, encrypted_value, version, origin_device, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES ({_p}, {_p}, {_p}, {_p}, {_p})
             ON CONFLICT(service_name) DO UPDATE SET
                 encrypted_value = excluded.encrypted_value,
                 version = excluded.version,
@@ -521,5 +596,8 @@ def set_api_key(service: str, value: str):
         conn.commit()
         logger.info(f"Successfully saved encrypted {service} to the synchronized vault (version {version}).")
     finally:
-        if conn:
-            conn.close()
+        if conn is not None:
+            try:
+                _wcm.__exit__(None, None, None)
+            except Exception:  # noqa: BLE001 — already closing
+                pass

@@ -224,10 +224,24 @@ def test_build_query_filter_id_prefix(db):
 # ── Schema sanity tests ──────────────────────────────────────────────────
 
 def test_verify_schema_missing_db_errors(tmp_path):
+    """A bad --db must fail LOUD. The exception TYPE changed deliberately.
+
+    _verify_schema used to gate on `db_path.exists()` and raise
+    FileNotFoundError. That gate is a SQLite assumption: on PostgreSQL there is
+    no DB file, so it would abort a backfill against a perfectly healthy store
+    before a single row was read.
+
+    With the gate gone, a nonexistent SQLite path opens as an EMPTY database and
+    the very next check -- "does memory_items exist?" -- fires instead. Same
+    contract (loud, non-silent, names the path), and the message is strictly
+    more useful: it also tells the operator to run migrate_memory. So this
+    asserts the CONTRACT, not the historical exception class.
+    """
     import embed_backfill as eb
     bad = tmp_path / "nope.db"
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises((FileNotFoundError, RuntimeError)) as exc:
         eb._verify_schema(bad)
+    assert "nope.db" in str(exc.value), "the error must name the offending path"
 
 
 def test_verify_schema_missing_table_errors(tmp_path):

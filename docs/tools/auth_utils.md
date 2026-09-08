@@ -1,8 +1,8 @@
 ---
 tool: bin/auth_utils.py
-sha1: abb1762f6b62
-mtime_utc: 2026-09-08T04:58:30.665100+00:00
-generated_utc: 2026-09-08T05:08:53.548117+00:00
+sha1: 813b725635c7
+mtime_utc: 2026-09-08T12:19:03.866323+00:00
+generated_utc: 2026-09-08T12:25:32.488952+00:00
 private: false
 ---
 
@@ -50,15 +50,10 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 404)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 151)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 390)
-- `subprocess.run()` (line 419)
-
-**sqlite**
-
-- `sqlite3.connect()  → `_vault_db_path()`` (line 503)
-- `sqlite3.connect()  → `vault_path`` (line 436)
+- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 457)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 204)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 443)
+- `subprocess.run()` (line 472)
 
 
 ---
@@ -69,6 +64,7 @@ _(no argparse arguments detected)_
 - `cryptography.fernet (Fernet)`
 - `keyring`
 - `memory.backends (active_backend)`
+- `memory.backends (dialect)`
 - `platform`
 - `unicodedata`
 

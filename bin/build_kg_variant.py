@@ -191,8 +191,13 @@ def main():
     args = p.parse_args()
 
     db_path = resolve_db_path(args.database) if args.database else DB_PATH
-    db = sqlite3.connect(db_path)
-    db.row_factory = sqlite3.Row
+    from m3_core.paths import seam_backend
+    _cm = seam_backend().open_readonly(str(db_path))
+    db = _cm.__enter__()
+    try:
+        db.row_factory = sqlite3.Row
+    except Exception:  # noqa: BLE001 — non-SQLite connection
+        pass
     # Centralised pragma stack — applies wal_autocheckpoint + journal_size_limit
     # to bound WAL growth on bulk-insert workloads.  profile_for_db() selects
     # "production" for the main memory DB, "bench" for bench-named DBs.

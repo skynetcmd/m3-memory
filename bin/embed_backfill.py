@@ -185,9 +185,10 @@ def _lockfile_guard(path: Path | None):
 def _verify_schema(db_path: Path) -> None:
     """Confirm the target DB has memory_items + memory_embeddings tables
     in the shape we expect. Raise with a clear actionable message if not."""
-    if not db_path.exists():
-        raise FileNotFoundError(f"DB not found: {db_path}")
-    conn = sqlite3.connect(str(db_path), timeout=10.0)
+    # No .exists() gate: on PostgreSQL there is no DB file, and raising
+    # FileNotFoundError there would abort a backfill against a healthy store.
+    _cm = _bound_db(db_path)
+    conn = _cm.__enter__()
     try:
         for tbl in ("memory_items", "memory_embeddings"):
             row = conn.execute(
@@ -215,7 +216,7 @@ def _verify_schema(db_path: Path) -> None:
                     f"DB schema is too old; run migrate_memory.py up."
                 )
     finally:
-        conn.close()
+        _cm.__exit__(None, None, None)
 
 
 # ── Build the candidate-row query ─────────────────────────────────────────

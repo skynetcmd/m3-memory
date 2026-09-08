@@ -13,8 +13,13 @@ from memory_core import _embed, _pack
 
 async def re_embed_all(db_path: str):
     print(f"Connecting to {db_path}...")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    from m3_core.paths import seam_backend
+    _cm = seam_backend().open_readonly(str(db_path))
+    conn = _cm.__enter__()
+    try:
+        conn.row_factory = sqlite3.Row
+    except Exception:  # noqa: BLE001 — non-SQLite connection
+        pass
 
     items = conn.execute("SELECT id, content, title FROM memory_items WHERE is_deleted = 0").fetchall()
     print(f"Found {len(items)} active items to re-embed.")
@@ -52,7 +57,7 @@ async def re_embed_all(db_path: str):
             print(f"FAILED to embed {rid}")
 
     conn.commit()
-    conn.close()
+    _cm.__exit__(None, None, None)
     print(f"Successfully re-embedded {updated} items.")
 
 

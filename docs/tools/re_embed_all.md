@@ -1,8 +1,8 @@
 ---
 tool: bin/re_embed_all.py
-sha1: 642efa7df146
-mtime_utc: 2026-07-02T01:21:24.715175+00:00
-generated_utc: 2026-07-03T20:00:03.828085+00:00
+sha1: 9a29d86275e7
+mtime_utc: 2026-09-08T10:56:30.059924+00:00
+generated_utc: 2026-09-08T10:59:36.329848+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 59)
+- `def main()` (line 64)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -44,16 +44,13 @@ _(no module docstring — update the source file.)_
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `db_path`` (line 16)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core.paths (seam_backend)`
 
 ---
 

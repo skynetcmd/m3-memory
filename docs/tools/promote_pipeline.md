@@ -1,8 +1,8 @@
 ---
 tool: bin/promote_pipeline.py
-sha1: d729811b79ce
-mtime_utc: 2026-08-08T03:47:37.162304+00:00
-generated_utc: 2026-08-08T14:40:50.070202+00:00
+sha1: 468ba54c9ad9
+mtime_utc: 2026-09-08T10:56:21.285243+00:00
+generated_utc: 2026-09-08T10:59:36.327798+00:00
 private: false
 ---
 
@@ -20,7 +20,7 @@ Stage 2 (--smoke N / --run): batched judge via LM Studio; distill PROMOTE
 
 ## Entry points
 
-- `def main()` (line 133)
+- `def main()` (line 136)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -53,16 +53,14 @@ _(none detected)_
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `db`` (line 54)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ---
 
 ## Notable external imports
 
 - `importlib.util`
+- `m3_core.paths (seam_backend)`
 
 ---
 

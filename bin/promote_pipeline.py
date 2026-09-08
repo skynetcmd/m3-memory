@@ -51,11 +51,14 @@ LM_TOKEN = get_secret("LM_API_TOKEN") or ""
 
 def select(db: str, min_age=14.0, lo=120, hi=4000):
     now = time.time()
-    c = sqlite3.connect(db); c.row_factory = sqlite3.Row
-    try:
+    from m3_core.paths import seam_backend
+    with seam_backend().open_readonly(str(db)) as c:
+        try:
+            c.row_factory = sqlite3.Row
+        except Exception:  # noqa: BLE001 — non-SQLite connection
+            pass
+        # The context manager closes even if classify()/float() raises mid-loop.
         return _select(c, now, min_age, lo, hi)
-    finally:
-        c.close()  # close even if classify()/float() raises mid-loop
 
 
 def _select(c, now, min_age, lo, hi):
