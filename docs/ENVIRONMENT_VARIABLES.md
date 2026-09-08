@@ -144,7 +144,7 @@ for a non-standard layout or to debug connection issues.
 | `M3_SQLITE_MMAP_SIZE` | — | Value for the SQLite `mmap_size` pragma (bytes). Larger values memory-map more of the DB for read-heavy workloads. |
 | `M3_SKIP_MIGRATIONS` | _(unset)_ | Set to skip running schema migrations on startup (e.g. a read-only or already-migrated DB). |
 | `M3_DISABLE_AUTO_ACTIVATION` | _(unset)_ | Set to skip the auto-activation step that runs when a DB connection is opened. |
-| `M3_DEBUG` | _(unset)_ | Set to enable verbose DB/debug logging. |
+| `M3_DEBUG` | _(unset)_ | Verbose DB/debug logging. Honoured by the Python layer **and**, since 3.7.32, by the Rust core (which previously read only `RUST_LOG`, so debug output went dark at the FFI boundary). `RUST_LOG` still takes precedence when set. |
 
 ### Chatlog subsystem
 
@@ -460,8 +460,11 @@ a new vector space.
 | `M3_EMBED_SEARCH_DEADLINE_S` | — | Per-search wall budget for producing the query embedding before falling back. |
 | `M3_EMBED_BULK_CHUNK` | `1024` | Batch size for bulk embedding. |
 | `M3_EMBED_BULK_CONCURRENCY` | `4` | Concurrent batches during bulk embedding. |
-| `M3_EMBED_CHUNK_MAX_CHARS` | — | Maximum characters per text chunk before embedding. |
-| `M3_EMBED_CHUNK_OVERLAP_CHARS` | — | Character overlap between consecutive chunks. |
+| `M3_EMBED_CHUNK_MAX_CHARS` | `28000` | Coarse character bound per chunk. **Characters are not tokens** — see `M3_EMBED_TOKEN_BUDGET`, which is the real guard. |
+| `M3_EMBED_CHUNK_OVERLAP_CHARS` | `8000` | Character overlap between consecutive character windows (~28% of the window). |
+| `M3_EMBED_TOKEN_BUDGET` | `7000` | **Target tokens per chunk.** The bound that actually prevents an n_ctx overflow. Leaves headroom under `M3_EMBED_CTX` for anchor augmentation and estimator slack. |
+| `M3_EMBED_TOKEN_OVERLAP` | `2000` | Token overlap between consecutive windows. |
+| `M3_EMBED_CTX` | `8192` | Model context window. ⚠ **Do not raise this.** bge-m3 is TRAINED to 8192 positions, so beyond it you extrapolate past the model rather than gaining capacity, and KV cost is ~96 KB/token (16384 takes a 4-stream pool from ~3.0 GB to ~6.0 GB) for embeddings that get *worse*. |
 | `M3_EMBED_HTTP_MAX_CONNS` | — | httpx maximum total connections to the embed server. |
 | `M3_EMBED_HTTP_MAX_KEEPALIVE` | — | httpx maximum keep-alive connections. |
 | `M3_EMBED_HTTP_KEEPALIVE_EXPIRY` | — | httpx keep-alive expiry (seconds). |

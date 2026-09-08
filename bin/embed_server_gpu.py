@@ -11,6 +11,7 @@ import argparse
 import logging
 import os
 import signal
+import re
 import subprocess
 import sys
 import time
@@ -19,6 +20,7 @@ import httpx
 import numpy as np
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from m3_sdk import getenv_compat
 from pydantic import BaseModel, Field
 
@@ -66,8 +68,46 @@ async def create_embeddings(req: EmbeddingRequest):
         )
 
     if response.status_code != 200:
-        logger.error(f"llama-server error: {response.text}")
-        return {"error": "llama-server failed", "details": response.text}
+        # Two bugs were here. (1) This returned HTTP 200 with an error BODY, so
+        # a client saw success and then failed on a missing "data" key -- a
+        # failure that looks like a client parsing bug rather than an upstream
+        # error. (2) An n_ctx overflow was flattened into a generic failure,
+        # discarding the token counts the client's subdivide-and-mean-pool
+        # recovery needs (the same information loss as issue #139 on the
+        # in-process server).
+        #
+        # Now: propagate the upstream status, and translate a context overflow
+        # into the same structured 413 the in-process server emits so ONE client
+        # contract covers every backend. The upstream body is preserved verbatim
+        # so an older client's regex still matches it.
+        body = response.text
+        logger.error(f"llama-server error {response.status_code}: {body[:2000]}")
+        low = body.lower()
+        if re.search(r"(\d+)\s*tokens\s*>\s*n_ctx", body, re.I) or any(
+            h in low for h in (
+                "input too long", "context length exceeded",
+                "maximum context length", "token length exceeds",
+                "too many tokens", "exceeds context window",
+            )
+        ):
+            m = re.search(r"(\d+)\s*tokens\s*>\s*n_ctx\s*(\d+)", body, re.I)
+            err: "dict[str, object]" = {
+                "code": "context_length_exceeded",
+                "message": body[:2000],
+            }
+            if m:
+                err["observed_tokens"] = int(m.group(1))
+                err["max_tokens"] = int(m.group(2))
+            logger.warning(
+                "context_length_exceeded from llama-server. "
+                "action: returning 413 so the client can subdivide and mean-pool. "
+                "review: the CLIENT's chunk budget (M3_EMBED_TOKEN_BUDGET)."
+            )
+            return JSONResponse(status_code=413, content={"error": err})
+        return JSONResponse(
+            status_code=response.status_code,
+            content={"error": "llama-server failed", "details": body[:2000]},
+        )
 
     data = response.json()
 

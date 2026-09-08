@@ -219,6 +219,41 @@ Full benchmark table and analysis:
 
 ---
 
+## Token counting (3.7.32+)
+
+`EmbeddedEmbedder.count_tokens(texts)` returns **exact** bge-m3 token counts,
+one per input. It uses the same `str_to_token(text, AddBos::Always)` call the
+embed path already makes, so a count returned here is exactly what the embedder
+will measure against `n_ctx` — a caller that chunks below the ceiling cannot
+then be surprised by an overflow. Counts include the BOS/EOS frame, because
+those occupy `n_ctx` like any other token.
+
+Tokenization needs only the model — no `LlamaContext`, no KV cache, no decode —
+so counting runs **off the embed job queue** and never waits behind an in-flight
+batch. That matters because callers count *in order to decide how to batch*.
+
+`estimate_tokens` was also corrected. It was `bytes/4` — the English ratio —
+which under-counted denser content by up to 4× and mis-placed jobs in the
+dispatcher's length-bucket queue (a JSON or base64 batch was scheduled as though
+it were a quarter of its true size). It is now `max(bytes/3, chars) + 2`, which
+provably never under-counts; see
+[`EMBED_INPUT_RECIPE.md`](EMBED_INPUT_RECIPE.md#token-budgeting--why-characters-are-not-tokens)
+for the measurements and the rejected formulas.
+
+**Optional, like every other native path.** `memory/tokens.py` cascades
+Rust → caller-supplied `exact_fn` → conservative estimator, and adopts
+`count_tokens` automatically once a wheel exposes it. Nothing requires a wheel
+upgrade to embed a long row correctly; exactness only removes the over-chunking
+the estimator costs (~3.45× on English prose, ~3.34× on code).
+
+`M3_DEBUG` is now honoured by the Rust core as well. It previously read only
+`RUST_LOG`, so debug output went dark the moment execution crossed the FFI
+boundary — someone tracing a chunking or token-count discrepancy saw one half of
+the seam with no indication the other half existed. `RUST_LOG` still takes
+precedence when set.
+
+---
+
 ## Fallback & kill-switch
 
 Every native path above keeps its pure-Python implementation as the fallback,

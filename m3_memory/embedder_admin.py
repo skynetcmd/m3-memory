@@ -934,6 +934,68 @@ def cmd_unshared(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backfill(args: argparse.Namespace) -> int:
+    """Drain unembedded rows (delegates to bin/embed_backfill.py).
+
+    Exists because `embed_backfill.py` was previously unreachable except by
+    `cd`-ing into site-packages and running `python -m embed_backfill` from
+    inside `bin/` -- it is exposed by no `m3` subcommand, and the cognitive
+    loop invokes it with only `--db` and `--limit`. So an operator who needed
+    to pass a sweep flag had no supported way to do it.
+
+    Sweeps EVERY store by default, not just the main DB. On a split topology
+    (the default) the chatlog lives in its own file, and a `--db`-only sweep
+    leaves it permanently unembedded -- the trap `_embed_target_dbs` documents
+    from a 2026-07-25 incident where 6,653 chat turns stayed FTS-only while the
+    loop reported no work. Pass --db to target one store deliberately.
+    """
+    from m3_memory.cli import _resolve_bin_script, _run_bin_script
+
+    script = _resolve_bin_script("embed_backfill.py")
+    if script is None:
+        print("error: bin/embed_backfill.py not found — is the payload installed? "
+              "Try `m3 update`.", file=sys.stderr)
+        return 1
+
+    targets: "list[str]" = []
+    if getattr(args, "db", None):
+        targets = [args.db]
+    else:
+        # Reuse the loop's own resolver so the CLI and the automatic pass agree
+        # on what "every store" means; duplicating that logic here is how the
+        # two would drift.
+        bin_dir = str(script.parent)
+        if bin_dir not in sys.path:
+            sys.path.insert(0, bin_dir)
+        try:
+            import m3_cognitive_loop as _loop  # type: ignore
+            targets = _loop._embed_target_dbs(os.environ.get("M3_DATABASE"))
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: could not resolve the store list ({e}); "
+                  f"falling back to the default database.", file=sys.stderr)
+            targets = [""]
+
+    common: "list[str]" = []
+    for name, flag in (("limit", "--limit"), ("max_row_bytes", "--max-row-bytes"),
+                       ("batch_size", "--batch-size")):
+        val = getattr(args, name, None)
+        if val:
+            common += [flag, str(val)]
+    if getattr(args, "no_subdivide_oversize", False):
+        common.append("--no-subdivide-oversize")
+
+    rc = 0
+    for db in targets:
+        argv = (["--db", db] if db else []) + common
+        if len(targets) > 1:
+            print(f"\n[m3] sweeping {os.path.basename(db) or 'default store'} ...")
+        # Each store is swept independently so a failure on one (a locked
+        # chatlog, say) still lets the others drain -- same contract as the
+        # cognitive loop's pass.
+        rc = _run_bin_script("embed_backfill.py", argv) or rc
+    return rc
+
+
 def cmd_reembed(args: argparse.Namespace) -> int:
     """Retire vectors from a non-current embedding model (delegates to bin/).
 
@@ -1034,6 +1096,36 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Revert to per-process in-process embedders (remove .embed_config.json).",
     )
     p_unshared.set_defaults(func=cmd_unshared)
+
+    p_backfill = sub.add_parser(
+        "backfill",
+        help="Embed rows that have no vector yet. Sweeps EVERY store (main and "
+             "chatlog) unless --db targets one.",
+    )
+    p_backfill.add_argument(
+        "--db", default=None,
+        help="Sweep only this database. Default: every store the cognitive "
+             "loop drains, so a split-topology chatlog is not left behind.",
+    )
+    p_backfill.add_argument(
+        "--limit", type=int, default=None,
+        help="Stop after embedding this many rows (per store).",
+    )
+    p_backfill.add_argument(
+        "--batch-size", type=int, default=None,
+        help="Rows per embed call.",
+    )
+    p_backfill.add_argument(
+        "--max-row-bytes", type=int, default=None,
+        help="Coarse per-row size bound. The real guard is the TOKEN budget "
+             "(M3_EMBED_TOKEN_BUDGET); this is a byte backstop.",
+    )
+    p_backfill.add_argument(
+        "--no-subdivide-oversize", action="store_true",
+        help="Drop oversized rows instead of splitting and mean-pooling them. "
+             "Leaves them permanently unembedded — prefer the default.",
+    )
+    p_backfill.set_defaults(func=cmd_backfill)
 
     p_reembed = sub.add_parser(
         "reembed",

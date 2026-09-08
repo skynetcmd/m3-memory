@@ -86,6 +86,15 @@ class SqliteDialect(Dialect):
     def day_bucket(self, column: str) -> str:
         return f"substr({column},1,10)"
 
+    def byte_length(self, column: str) -> str:
+        # LENGTH(CAST(x AS BLOB)) is the SQLite byte-length idiom and works on
+        # every SQLite version; octet_length() needs 3.43+, which is newer than
+        # the interpreters m3 supports.
+        return f"LENGTH(CAST({column} AS BLOB))"
+
+    def has_content(self, column: str) -> str:
+        return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
+
     def empty_json_default(self) -> "str | None":
         return ""  # metadata_json is TEXT on SQLite; '' is fine (historical value)
 

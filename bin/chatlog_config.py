@@ -336,6 +336,65 @@ def chatlog_db_path() -> str:
     return resolve_config().db_path
 
 
+def chat_store_paths() -> "list[str]":
+    """Every store chat turns can land in, main first, de-duplicated.
+
+    THE TRAP THIS EXISTS TO CLOSE. On a SPLIT topology (the default) turns live
+    in `agent_chatlog.db` while `agent_memory.db` is a different file, so any
+    caller that checks only the main DB sees ZERO chat_log rows on a perfectly
+    healthy install. That has now produced the same bug three times:
+
+      - the cognitive loop's embed gate (2026-07-25: 6,653 unembedded turns
+        while the loop reported no work),
+      - `m3 embedder backfill` before it reused `_embed_target_dbs`,
+      - the SessionStart capture check (2026-09-07: it cried "capture NOT
+        writing" while the chatlog store held 654 rows in the window).
+
+    Each caller had hand-rolled its own answer. This is the shared one: the
+    chatlog half comes from :func:`chatlog_db_path`, so it honours
+    ``CHATLOG_DB_PATH``, the active-database ContextVar and a pinned
+    ``db_path`` — none of which a sibling-of-the-main-DB guess would see.
+
+    On a UNIFIED deployment both resolve to the same file and this returns one
+    entry, so callers need no special case.
+    """
+    out: "list[str]" = []
+    seen: "set[str]" = set()
+
+    def _add(p: "Optional[str]") -> None:
+        if not p:
+            return
+        key = os.path.abspath(p)
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+
+    # Main store first: callers that stop at the first hit stay correct on a
+    # unified deployment.
+    try:
+        from m3_sdk import resolve_db_path  # lazy: avoid an import cycle
+        _add(resolve_db_path(None))
+    except Exception:  # noqa: BLE001 — fall through to the chatlog half
+        _add(_main_path_from_env())
+    # Deliberately NOT chatlog_db_path() here. With no explicit
+    # CHATLOG_DB_PATH it falls back to M3_DATABASE (the "one env var = unified
+    # DB" convenience). The cognitive loop ALWAYS sets M3_DATABASE, so on a
+    # SPLIT install this would hand back the MAIN db, the list would collapse
+    # to one entry, and the real chatlog store would never be visited — the
+    # precise bug `_embed_target_dbs` was written to avoid (2026-07-25: 6,653
+    # unembedded turns). Prefer the explicit override, else the configured or
+    # default chatlog path from the config file.
+    try:
+        chat = _path_from_env()
+        if not chat:
+            chat = _build_from_dict(_load_file()).db_path
+        _add(chat)
+    except Exception:  # noqa: BLE001 — a broken chatlog config must not hide
+        # the main store from a caller that only needs one path.
+        pass
+    return out
+
+
 # ── Connection pool ───────────────────────────────────────────────────────────
 _POOL: Optional["queue.Queue[sqlite3.Connection]"] = None
 _POOL_LOCK = threading.Lock()

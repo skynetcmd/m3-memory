@@ -21,6 +21,23 @@ from typing import Any
 
 import chatlog_config
 
+# The non-empty-content predicate comes from the backend seam so it has exactly
+# one definition (DESIGN_PHILOSOPHIES §10a: duplicated predicate logic is the
+# defect independent of correctness). This module still opens SQLite by path
+# (Finding L), so the SQLite dialect is resolved here.
+try:  # pragma: no cover - import shim for standalone execution
+    from memory.backends.sqlite_backend import SqliteDialect as _SqliteDialect
+    _SQL = _SqliteDialect(backend="sqlite", param_style="qmark")
+    _has_content = _SQL.has_content
+    _now_minus_minutes = _SQL.now_minus_minutes
+except Exception:  # pragma: no cover
+    def _has_content(column: str) -> str:
+        return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
+
+    def _now_minus_minutes(p: str) -> str:
+        return f"datetime('now', '-' || {p} || ' minutes')"
+
+
 logger = logging.getLogger("chatlog_status")
 
 
@@ -138,7 +155,7 @@ def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, Any]:
                         "SELECT COUNT(*) as cnt FROM memory_items mi "
                         "WHERE mi.type='chat_log' "
                         "AND COALESCE(mi.is_deleted, 0) = 0 "
-                        "AND LENGTH(TRIM(COALESCE(mi.content, ''))) > 0 "
+                        f"AND {_has_content('mi.content')} "
                         "AND NOT EXISTS ("
                         "SELECT 1 FROM memory_embeddings me WHERE me.memory_id = mi.id)"
                     ).fetchone()
@@ -261,10 +278,13 @@ def _recent_write_count(config: chatlog_config.ChatlogConfig,
             # letters and POSIX paths alike), keeping this cross-platform (§1).
             uri = f"{Path(db).as_uri()}?mode=ro"
             conn = sqlite3.connect(uri, uri=True, timeout=5)
+            # Seam fragment, not the SQLite-only `datetime('now', ?)` form:
+            # that binds a "-N minutes" MODIFIER STRING, which PostgreSQL
+            # cannot parse. now_minus_minutes() binds a plain INTEGER instead.
             row = conn.execute(
                 "SELECT COUNT(*) FROM memory_items WHERE type='chat_log' "
-                "AND created_at > datetime('now', ?)",
-                (f"-{int(window_min)} minutes",),
+                f"AND created_at > {_now_minus_minutes('?')}",
+                (int(window_min),),
             ).fetchone()
             queried_ok = True  # only reached if the query itself did not raise
             n = int(row[0]) if row else 0
@@ -391,7 +411,10 @@ def _compute_warnings(
         else:
             warnings.append(
                 f"NO chatlog writes in last {recent_window_min}min "
-                "(capture may be down — verify before trusting memory)"
+                "(capture may be down — verify before trusting memory) "
+                "-> try: m3 chatlog doctor. NOTE: an MCP disconnect does NOT "
+                "cause this; capture writes to the DB directly, independent of "
+                "the MCP connection."
             )
     elif recent_writes < 0:
         warnings.append("could not query recent chatlog writes (capture status unknown)")

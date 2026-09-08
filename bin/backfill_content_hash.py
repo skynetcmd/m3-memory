@@ -63,6 +63,18 @@ DEFAULT_DB = REPO_ROOT / "memory" / "agent_memory.db"
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 from sqlite_pragmas import apply_pragmas, profile_for_db
 
+# The non-empty-content predicate comes from the backend seam so it has exactly
+# one definition (DESIGN_PHILOSOPHIES §10a: duplicated predicate logic is the
+# defect independent of correctness). This module still opens SQLite by path
+# (Finding L), so the SQLite dialect is resolved here.
+try:  # pragma: no cover - import shim for standalone execution
+    from memory.backends.sqlite_backend import SqliteDialect as _SqliteDialect
+    _has_content = _SqliteDialect(backend="sqlite", param_style="qmark").has_content
+except Exception:  # pragma: no cover
+    def _has_content(column: str) -> str:
+        return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
+
+
 DEFAULT_TYPES = ("chat_log", "message")
 DEFAULT_BATCH_SIZE = 1000
 
@@ -110,7 +122,7 @@ def _build_select(args: argparse.Namespace, after_id: str | None) -> tuple[str, 
     where = [
         "me.content_hash IS NULL",
         "COALESCE(mi.is_deleted, 0) = 0",
-        "LENGTH(TRIM(COALESCE(mi.content, ''))) > 0",
+        _has_content("mi.content"),
     ]
     params: list = []
 

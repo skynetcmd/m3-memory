@@ -35,7 +35,7 @@ https://github.com/user-attachments/assets/09ab194a-d2a0-4fe5-a7db-69ae8225e39b
 ## ⚡ Quickstart
 
 ```bash
-pip install m3-memory
+pip install m3-memory   # or: pipx install m3-memory — pick ONE and stay with it
 m3 setup            # detects your agents, wires the MCP server, provisions the local embedder
 m3 doctor           # verify: health, memory count, embedder, and which agents got wired
 ```

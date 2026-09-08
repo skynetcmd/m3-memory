@@ -441,6 +441,40 @@ m3 embedder unshared               # removes .embed_config.json
 # then restart the MCP server + loop → each loads its own in-process embedder
 ```
 
+## Draining an embed backlog
+
+Rows that failed to embed (or predate an embedder) stay FTS-searchable but are
+invisible to semantic/vector search. To drain them:
+
+```bash
+m3 embedder backfill                       # every store: main AND chatlog
+m3 embedder backfill --limit 500           # cap the run
+m3 embedder backfill --db /path/to/one.db  # target one store deliberately
+```
+
+**Sweeps every store by default, and that default matters.** On a split topology
+(the default) the chatlog is a separate database file. A `--db`-only sweep leaves
+it permanently unembedded while the cognitive loop reports no pending work,
+because the main DB is clean — observed 2026-07-25 with 6,653 unembedded chat
+turns on a host whose loop was running normally.
+
+Oversized rows are split and mean-pooled rather than dropped. `--no-subdivide-oversize`
+restores the old drop behaviour and is almost never what you want: it leaves
+those rows permanently without a vector.
+
+If the sweep aborts, read the message carefully — it distinguishes what was
+**observed** from what is merely **possible**, and content failures (a row the
+embedder refused) no longer count toward the abort threshold at all:
+
+```
+ABORT: 5 consecutive INFRASTRUCTURE failures (content failures are excluded).
+observed: 5 failed batch(es), 0 of them content-shaped; 0 row(s) embedded.
+possible: embed server unreachable, overloaded, or a network path issue.
+inspect: M3_EMBED_FALLBACK_URL. try: m3 embedder status
+```
+
+---
+
 ### When to use it
 
 - **Use shared** when multiple m3 processes embed on the same GPU and host RAM is

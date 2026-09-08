@@ -77,6 +77,67 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from embed_sweep_lib import Counters as _LibCounters  # noqa: E402
 from embed_sweep_lib import run_embed_loop
 
+# SQL fragments come from the backend seam so this module cannot drift from the
+# dialect (DESIGN_PHILOSOPHIES §10a). This module still opens SQLite by path
+# (Finding L: the connection layer is a separate port), so the SQLite dialect is
+# the correct one to resolve here -- but the FRAGMENTS now have exactly one
+# definition, shared with every other caller.
+try:  # pragma: no cover - import shim for standalone execution
+    from memory.backends.sqlite_backend import SqliteDialect as _SqliteDialect
+    _SQL = _SqliteDialect(backend="sqlite", param_style="qmark")
+    _byte_length = _SQL.byte_length
+    _has_content = _SQL.has_content
+    _now_minus_days = _SQL.now_minus_days
+except Exception:  # pragma: no cover
+    def _byte_length(column: str) -> str:
+        return f"LENGTH(CAST({column} AS BLOB))"
+
+    def _has_content(column: str) -> str:
+        return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
+
+    def _now_minus_days(p: str) -> str:
+        return f"datetime('now', '-' || {p} || ' days')"
+
+
+
+@contextmanager
+def _bound_db(db_path):
+    """Yield a seam connection bound to `db_path` for the duration of a block.
+
+    This module sweeps an ARBITRARY `--db`, while `memory.db._db()` opens from
+    the ACTIVE CONTEXT's pool — which is why every query here used to open its
+    own raw `sqlite3.connect`. `active_database(path)` closes that gap: it binds
+    the path via ContextVar for the block, so `_db()` targets the sweep's
+    database and the module inherits the backend routing, the connection pool,
+    and the pragma stack instead of hand-rolling all three.
+
+    Falls back to a raw connection when the seam is unavailable (standalone
+    execution without the payload on sys.path). Read-mostly queries only —
+    writes still funnel through `mc._db()` in the write callback, as before.
+    """
+    try:
+        from m3_core.context import M3Context  # type: ignore
+        from m3_sdk import active_database  # type: ignore
+    except Exception:  # pragma: no cover - standalone fallback
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        try:
+            conn.execute("PRAGMA busy_timeout=30000")
+            yield conn
+        finally:
+            conn.close()
+        return
+    # Deliberately NOT memory.db._db(): that calls _lazy_init(), which runs
+    # schema creation and backfills on first touch of a path. This sweeper is
+    # READ-ONLY over an arbitrary --db and must never mutate the schema of a
+    # database it was merely pointed at — a caller sweeping a bench workspace or
+    # a colleague's export would silently have it migrated. Going through the
+    # context's own pool gives the pragma stack and connection reuse WITHOUT the
+    # write-path side effects. `active_database` keeps any nested seam call
+    # (the write callback's mc._db()) pointed at the same store.
+    with active_database(str(db_path)):
+        with M3Context.for_db(str(db_path)).get_sqlite_conn() as conn:
+            yield conn
+
 
 class Counters(_LibCounters):  # type: ignore[misc, valid-type]
     """Backwards-compat shim: subclass of lib Counters with one extra attr.
@@ -181,7 +242,7 @@ def _build_query(
     """
     where = [
         "COALESCE(mi.is_deleted, 0) = 0",
-        "LENGTH(TRIM(COALESCE(mi.content, ''))) > 0",
+        _has_content("mi.content"),
         "NOT EXISTS (SELECT 1 FROM memory_embeddings me WHERE me.memory_id = mi.id)",
     ]
     params: list = []
@@ -194,11 +255,11 @@ def _build_query(
     # 174MB of logs). Mirrors the per-row cap applied during the sweep, so the
     # gate and the sweep now agree on what "pending" means.
     #
-    # DIALECT: LENGTH(CAST(x AS BLOB)) is the SQLite byte-length idiom and works
-    # on every SQLite version (octet_length() needs 3.43+). This module is
-    # SQLite-only by construction — every connection here is sqlite3.connect —
-    # so that is the correct dialect to write. A PostgreSQL port must swap this
-    # for octet_length(mi.content); the backend-agnostic protection against the
+    # DIALECT: the byte-length fragment now comes from the seam
+    # (_byte_length -> Dialect.byte_length), so a PostgreSQL port gets
+    # octet_length() for free instead of needing this call site edited. The
+    # module still opens SQLite by path (Finding L), which is why the SQLite
+    # dialect is resolved above; the backend-agnostic protection against the
     # same livelock is _MAX_DRAIN_TICKS in m3_cognitive_loop, which bounds the
     # idle-drain burst no matter which store reports the un-drainable work.
     # Only exclude them when the sweep would genuinely drop them. With
@@ -207,7 +268,7 @@ def _build_query(
     # _count_pending, or the loop would never wake up to process them.
     max_row_bytes = getattr(args, "max_row_bytes", None)
     if max_row_bytes and not getattr(args, "subdivide_oversize", False):
-        where.append("LENGTH(CAST(mi.content AS BLOB)) <= ?")
+        where.append(f"{_byte_length('mi.content')} <= ?")
         params.append(int(max_row_bytes))
 
     if after_id is not None:
@@ -231,9 +292,12 @@ def _build_query(
         where.append("mi.id LIKE ?")
         params.append(f"{args.id_prefix.lower()}%")
     if args.max_age_days is not None:
-        # Older than N days = created_at < (now - N days)
-        where.append("mi.created_at < datetime('now', ?)")
-        params.append(f"-{int(args.max_age_days)} days")
+        # Older than N days = created_at < (now - N days). The expression comes
+        # from the seam: `datetime('now', ?)` binding a "-N days" MODIFIER
+        # STRING is SQLite-only and raises on PostgreSQL. now_minus_days() binds
+        # a plain INTEGER instead, which both dialects accept.
+        where.append(f"mi.created_at < {_now_minus_days('?')}")
+        params.append(int(args.max_age_days))
 
     sql = f"""
         SELECT mi.id, mi.content, mi.title, mi.metadata_json
@@ -255,11 +319,8 @@ def _count_pending(db_path: Path, args: argparse.Namespace) -> int:
     )
     # Strip ORDER BY + LIMIT (we don't pass a LIMIT param for count)
     count_sql = count_sql.split("ORDER BY")[0]
-    conn = sqlite3.connect(str(db_path), timeout=30.0)
-    try:
+    with _bound_db(db_path) as conn:
         return conn.execute(count_sql, params).fetchone()[0]
-    finally:
-        conn.close()
 
 
 def count_oversize_excluded(db_path: Path, args: argparse.Namespace) -> int:
@@ -275,21 +336,19 @@ def count_oversize_excluded(db_path: Path, args: argparse.Namespace) -> int:
     max_row_bytes = getattr(args, "max_row_bytes", None)
     if not max_row_bytes or getattr(args, "subdivide_oversize", False):
         return 0
-    sql = """
+    sql = f"""
         SELECT COUNT(*) FROM memory_items mi
         WHERE COALESCE(mi.is_deleted, 0) = 0
-          AND LENGTH(TRIM(COALESCE(mi.content, ''))) > 0
+          AND {_has_content("mi.content")}
           AND NOT EXISTS (
               SELECT 1 FROM memory_embeddings me WHERE me.memory_id = mi.id)
-          AND LENGTH(CAST(mi.content AS BLOB)) > ?
+          AND {_byte_length("mi.content")} > ?
     """
-    conn = sqlite3.connect(str(db_path), timeout=30.0)
     try:
-        return conn.execute(sql, (int(max_row_bytes),)).fetchone()[0]
-    except sqlite3.Error:
+        with _bound_db(db_path) as conn:
+            return conn.execute(sql, (int(max_row_bytes),)).fetchone()[0]
+    except Exception:  # noqa: BLE001 — informational count; never fail the sweep
         return 0
-    finally:
-        conn.close()
 
 
 # ── Main async loop ───────────────────────────────────────────────────────
@@ -317,12 +376,8 @@ async def _run_sweep(args: argparse.Namespace, counters: Counters) -> int:
     def _fetch(after_id, limit):
         sql, params = _build_query(args, after_id=after_id)
         params_with_limit = params + [limit]
-        conn = sqlite3.connect(str(args.db), timeout=30.0)
-        try:
-            conn.execute("PRAGMA busy_timeout=30000")
+        with _bound_db(args.db) as conn:
             return conn.execute(sql, params_with_limit).fetchall()
-        finally:
-            conn.close()
 
     # ── Write callback ────────────────────────────────────────────────
     # Persists one embedding row. Uses mc._db() so writes funnel through

@@ -49,6 +49,7 @@ from .chunking import (  # noqa: F401
     _subdivide_dense_chunk,
 )
 from .db import _db
+from .tokens import TOKEN_CEILING, count_tokens
 
 # _augment_embed_text_with_anchors is RE-EXPORTED through this module (the
 # memory_core shim / write.py import it via `from .embed import ...`), so it must
@@ -719,6 +720,162 @@ _EMBED_TRANSIENT = object()   # retryable: timeout / 5xx / 413 / 429
 _EMBED_PERMANENT = object()   # non-retryable 4xx: don't retry or bisect
 
 
+class ContextLengthExceeded(EmbedError):
+    """The server rejected an input for exceeding its context window.
+
+    A TYPED signal so the recovery path does not have to parse prose. Before
+    this, the only way to recognise an n_ctx overflow was matching the error
+    STRING -- which failed completely on standalone deployments, where FastAPI's
+    default handler replaced the message with "Internal Server Error" (issue
+    #139). `observed_tokens` / `max_tokens` are best-effort: a server that
+    reports the class of error without the counts still gets recovered, it just
+    cannot inform the split ratio.
+    """
+
+    def __init__(self, message: str, observed_tokens: "int | None" = None,
+                 max_tokens: "int | None" = None):
+        super().__init__(message)
+        self.observed_tokens = observed_tokens
+        self.max_tokens = max_tokens
+
+
+# Recognises the CLASS of "too long" across llama.cpp builds and wrappers. The
+# canonical form carries the counts; the hint list catches rewordings so a
+# differently-phrased server still triggers subdivision instead of dropping the
+# row. Kept deliberately broader than _DENSE_ERR_RE, which stays as-is because
+# other call sites depend on its exact capture-group shape.
+_CTX_OVERFLOW_HINTS = (
+    "input too long",
+    "context length exceeded",
+    "maximum context length",
+    "token length exceeds",
+    "too many tokens",
+    "exceeds context window",
+    "context_length_exceeded",
+)
+
+
+def _parse_context_overflow(status_code: int, body: str) -> "ContextLengthExceeded | None":
+    """Build a typed overflow error from an HTTP response, or None.
+
+    Structured JSON first (`error.code == "context_length_exceeded"`), free text
+    second. That ordering is what makes the contract robust across the version
+    skew this issue is fundamentally about -- client and server are deployed
+    INDEPENDENTLY here, so both directions must degrade gracefully:
+
+      - new client + new server -> structured, no parsing at all;
+      - new client + old server -> falls through to the regex/hint path;
+      - old client + new server -> the 413 body still contains the original
+        "N tokens > n_ctx M", which the old client's regex already matches, so
+        upgrading the SERVER alone repairs clients in the field.
+    """
+    if not body:
+        return None
+    observed = max_tok = None
+    try:
+        payload = json.loads(body)
+        err = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(err, dict):
+            if err.get("code") == "context_length_exceeded":
+                ot, mt = err.get("observed_tokens"), err.get("max_tokens")
+                return ContextLengthExceeded(
+                    str(err.get("message") or body)[:2000],
+                    int(ot) if isinstance(ot, int) else None,
+                    int(mt) if isinstance(mt, int) else None,
+                )
+            body = str(err.get("message") or err) or body
+        elif isinstance(err, str):
+            body = err
+    except Exception:  # noqa: BLE001 — not JSON: fall through to text matching
+        pass
+    m = _DENSE_ERR_RE.search(body)
+    if m is None and not any(h in body.lower() for h in _CTX_OVERFLOW_HINTS):
+        return None
+    if m is not None:
+        observed = int(m.group(1))
+    return ContextLengthExceeded(body[:2000], observed, max_tok)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Length contract — enforced HERE, at the boundary, not at call sites
+# ──────────────────────────────────────────────────────────────────────────────
+# The contract every tier depends on: NO TEXT EXCEEDING n_ctx REACHES THE
+# EMBEDDER. Before this guard, nothing enforced it anywhere -- the Phase 0 audit
+# found 20 embedder call sites across 11 modules, and exactly 2 had any length
+# guard at all (both measuring the wrong unit: chars at write.py:395, bytes at
+# embed_sweep_lib.py:182). Each stage assumed an upstream stage had handled it.
+#
+# Guarding at the two ENTRY points (_embed / _embed_many) rather than at the six
+# HTTP post sites and the in-process calls is deliberate: every tier -- in-proc
+# Rust, CPU HTTP fallback, primary HTTP, cloud -- lives inside those two
+# functions, so one check covers all of them, and a 21st caller added later
+# inherits the protection instead of having to remember it.
+#
+# Upstream token budgets (chunking, the sweep's row guard) remain worth having
+# as OPTIMISATIONS -- they avoid a wasted round-trip -- but they are no longer
+# the only line of defence, which matters because upstream guards are exactly
+# what kept drifting out of calibration.
+#
+# Cost: ~5 us per 1024 rows with the estimator (pure arithmetic). Negligible
+# against ~15 ms/row GPU or ~150-400 ms/row CPU embedding.
+_OVERSIZE_LOG_CHARS = 120
+
+
+def _oversize_report(texts: "list[str]", counts: "list[int]") -> "list[tuple[int, int]]":
+    """(index, token_count) for every text over TOKEN_CEILING. Empty when clean."""
+    return [(i, n) for i, n in enumerate(counts) if n > TOKEN_CEILING]
+
+
+def _log_contract_violation(texts: "list[str]", over: "list[tuple[int, int]]") -> None:
+    """Report a length-contract breach loudly, with the numbers and the knob.
+
+    This is a BUG in whatever produced the text (a chunker that did not chunk,
+    a caller that bypassed one), not a user error and not an embedder fault --
+    so it is logged as an error naming the actual cause, never as the misleading
+    "check embedder availability" that sent issue #139's reporter to inspect a
+    healthy server.
+
+    Observed values are stated as fact; the remedy is offered as a knob to
+    review, because which upstream stage failed to chunk is not something this
+    layer can know.
+    """
+    worst_i, worst_n = max(over, key=lambda p: p[1])
+    sample = (texts[worst_i] or "")[:_OVERSIZE_LOG_CHARS].replace("\n", " ")
+    logger.error(
+        "EMBED_LENGTH_CONTRACT: %d of %d text(s) exceed n_ctx before dispatch; "
+        "worst is %d tokens vs ceiling %d (index %d). "
+        "cause: upstream chunking did not bound this text in TOKENS "
+        "(character/byte budgets under-count dense content -- code, JSON, CJK "
+        "and base64 tokenize 1.6-4x denser than English prose). "
+        "action: subdividing here so no row is lost. "
+        "review: M3_EMBED_TOKEN_BUDGET (chunk target), M3_EMBED_CTX (model "
+        "ceiling; do NOT raise -- bge-m3 is trained to 8192 positions). "
+        "sample: %r",
+        len(over), len(texts), worst_n, TOKEN_CEILING, worst_i, sample,
+    )
+
+
+def _enforce_length_contract(texts: "list[str]") -> "list[tuple[int, int]]":
+    """Check the batch against the model ceiling. Returns the oversize entries.
+
+    Non-fatal by design: the caller subdivides rather than failing, so an
+    unexpectedly long row degrades to "slower but correct" instead of an error.
+    Length must never be a catastrophic failure -- it is a property the client
+    can always measure and always handle locally.
+    """
+    if not texts:
+        return []
+    try:
+        counts = count_tokens(texts)
+    except Exception as e:  # noqa: BLE001 — the guard must never break the embed
+        logger.debug("length-contract check skipped (%s)", e)
+        return []
+    over = _oversize_report(texts, counts)
+    if over:
+        _log_contract_violation(texts, over)
+    return over
+
+
 async def _embedded_bulk_with_subdivide(
     embedded, texts: list[str]
 ) -> list[list[float] | None]:
@@ -752,6 +909,22 @@ async def _embedded_bulk_with_subdivide(
     return results
 
 
+async def _embed_batch_for_recovery(texts: "list[str]") -> "list[list[float] | None]":
+    """Embed sub-chunks for the single-text recovery path, via the full cascade.
+
+    Reuses ``_embed_many`` rather than re-implementing tier selection, so the
+    sub-chunks get the same in-proc/HTTP/primary/cloud fallbacks (and the same
+    identity gating) as any other embed. Each sub-chunk is already under the
+    ceiling, so this cannot recurse into the oversize branch.
+
+    Returns one vector-or-None per input, matching ``post_batch``'s contract.
+    """
+    if not texts:
+        return []
+    rows = await _embed_many(texts)
+    return [vec for vec, _model in rows]
+
+
 async def _recover_oversized_single(post_batch, text: str) -> list[float] | None:
     """Recover a lone row that a bulk/bisect path could not embed as a whole,
     when the likely cause is n_ctx overflow. Bisecting a BATCH can isolate an
@@ -762,7 +935,16 @@ async def _recover_oversized_single(post_batch, text: str) -> list[float] | None
     the caller then drops it exactly as before. Shared by tiers 2 and 3 so the
     "a single oversized row is subdivided, never silently dropped" invariant
     holds on every remote embed path, not just tier 1 in-process."""
-    if not text or len(text) <= MAX_CHARS_PER_CHUNK:
+    # Gate on TOKENS, not characters. The old `len(text) <= MAX_CHARS_PER_CHUNK`
+    # test made this a no-op for exactly the rows that need it most: a row of
+    # dense content (code/JSON/CJK/base64) can exceed n_ctx while sitting well
+    # under the 28000-CHARACTER window -- measured, a realistic mixed CJK+UUID
+    # row of 11,379 chars is 8,604 tokens against a ceiling of 8,192. Such a row
+    # returned None here and was dropped, which is the failure this recovery
+    # exists to prevent.
+    if not text:
+        return None
+    if len(text) <= MAX_CHARS_PER_CHUNK and count_tokens([text])[0] <= TOKEN_CEILING:
         return None
     subs = _chunk_for_sliding_window(text)
     sub_texts = [s for s, _ in subs]
@@ -796,11 +978,22 @@ async def _http_bulk_with_subdivide(
             results.append(vecs[0] if vecs else None)
             continue
         except Exception as e:
-            m = _DENSE_ERR_RE.search(str(e))
-            if not m:
-                results.append(None)
-                continue
-            observed = int(m.group(1))
+            observed = getattr(e, "observed_tokens", None)
+            if observed is None:
+                m = _DENSE_ERR_RE.search(str(e))
+                # Recover on the CLASS of error, not on whether the server
+                # happened to report numbers. Three ways to recognise it, in
+                # descending precision: the typed exception, the canonical
+                # "N tokens > n_ctx M" text, or any of the reworded variants a
+                # different llama.cpp build or a proxy may emit. Requiring the
+                # count would drop the row for want of a digit.
+                _low = str(e).lower()
+                if (not m
+                        and not isinstance(e, ContextLengthExceeded)
+                        and not any(h in _low for h in _CTX_OVERFLOW_HINTS)):
+                    results.append(None)
+                    continue
+                observed = int(m.group(1)) if m else 0
         # Overflow: split into sub-chunks, embed each over HTTP, mean-pool.
         try:
             subs = _subdivide_dense_chunk(text, observed)
@@ -990,6 +1183,30 @@ _EMBED_BULK_SEM = asyncio.Semaphore(EMBED_BULK_CONCURRENCY)
 # The cascade itself
 # ──────────────────────────────────────────────────────────────────────────────
 async def _embed(text: str) -> tuple[list[float] | None, str]:
+    # Length contract (see _enforce_length_contract). This path serves SEARCH
+    # QUERIES as well as single-row writes, and the query side had NO length
+    # guard of any kind -- a long query (a pasted stack trace, a CJK document,
+    # a code block) went to the embedder raw. On a standalone deployment that
+    # is the same destroyed-error 500 as issue #139, surfacing as silently
+    # degraded RETRIEVAL rather than a failed write.
+    #
+    # Recovery is the same recipe the bulk path uses: sliding-window split,
+    # embed each window, mean-pool, L2-normalize. Correct for a passage; for a
+    # very long query it is also the sane reading (the query's overall topic),
+    # and it is strictly better than the previous behaviour of failing.
+    if text and _enforce_length_contract([text]):
+        pooled = await _recover_oversized_single(
+            lambda batch: _embed_batch_for_recovery(batch), text
+        )
+        if pooled is not None:
+            model = _EMBED_GGUF_MODEL_TAG if _get_embedded_embedder() is not None \
+                else config.EMBED_MODEL
+            return pooled, model
+        # Could not subdivide (single window, or every sub-embed failed) --
+        # fall through and let the normal cascade try; it may still succeed on
+        # a tier with a larger ceiling, and if not the caller sees the usual
+        # failure rather than a new one.
+
     c_hash = _content_hash(text)
     embedded = _get_embedded_embedder()
     cache_model = _EMBED_GGUF_MODEL_TAG if embedded is not None else config.EMBED_MODEL
@@ -1399,6 +1616,35 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
     if not texts:
         return []
 
+    # Length contract (see _enforce_length_contract). Any row over the model
+    # ceiling is pulled OUT of the shared batch and recovered on its own --
+    # subdivide, embed each window, mean-pool -- so one oversized row can never
+    # sink the batch around it. That "one bad row fails everything" behaviour is
+    # what made issue #139 catastrophic rather than merely lossy.
+    #
+    # Pulling the row out here (rather than letting it fail and bisecting) is
+    # the cheap path: the sweep already pre-separates rows it can predict, and
+    # this catches the ones it could not.
+    _over = _enforce_length_contract(texts)
+    if _over:
+        _over_idx = {i for i, _n in _over}
+        _rest = [t for i, t in enumerate(texts) if i not in _over_idx]
+        _rest_pos = [i for i in range(len(texts)) if i not in _over_idx]
+        _out: list[tuple[list[float] | None, str] | None] = [None] * len(texts)
+        if _rest:
+            for _pos, _row in zip(_rest_pos, await _embed_many(_rest)):
+                _out[_pos] = _row
+        _fallback_model = (
+            _EMBED_GGUF_MODEL_TAG if _get_embedded_embedder() is not None
+            else config.EMBED_MODEL
+        )
+        for _i in sorted(_over_idx):
+            _pooled = await _recover_oversized_single(
+                _embed_batch_for_recovery, texts[_i]
+            )
+            _out[_i] = (_pooled, _fallback_model)
+        return [r if r is not None else (None, _fallback_model) for r in _out]
+
     out: list[tuple[list[float] | None, str] | None] = [None] * len(texts)
 
     embedded = _get_embedded_embedder()
@@ -1466,7 +1712,10 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
             # handles them), and only the rows tier 1 genuinely can't do fall
             # through. This keeps a single oversized row from cascading to the
             # HTTP tiers (and, when those are down, fanning out into a 4xx storm).
-            if _DENSE_ERR_RE.search(str(e)):
+            # Typed signal first, string second: a structured 413 from a
+            # current server needs no parsing, and the regex remains for
+            # older servers that only carry the message.
+            if isinstance(e, ContextLengthExceeded) or _DENSE_ERR_RE.search(str(e)):
                 resolved = await _embedded_bulk_with_subdivide(embedded, miss_texts)
                 still_missing_local = []
                 for j, (idx, vec) in enumerate(zip(miss_indices, resolved)):
@@ -1508,8 +1757,15 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
                 body = resp_.text
             except Exception:
                 pass
+            over = _parse_context_overflow(resp_.status_code, body)
+            if over is not None:
+                raise over
+            # Body limit raised 200 -> 2000. 200 chars is enough to truncate a
+            # diagnostic away entirely once a proxy (nginx/FastAPI) wraps the
+            # upstream message in its own envelope -- the very information the
+            # oversize recovery needs.
             raise RuntimeError(
-                f"CPU embedder HTTP {resp_.status_code}: {body[:200]}"
+                f"CPU embedder HTTP {resp_.status_code}: {body[:2000]}"
             )
         data_ = resp_.json()["data"]
         v_ = _order_embeddings(data_, len(chunk_texts))
@@ -1537,7 +1793,7 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
         # is too long. Mirror tier 1: subdivide the oversized row(s) over HTTP
         # and mean-pool, so a single huge row doesn't sink the batch. Only rows
         # the HTTP tier still can't embed fall through to the primary path.
-        if _DENSE_ERR_RE.search(str(e)):
+        if isinstance(e, ContextLengthExceeded) or _DENSE_ERR_RE.search(str(e)):
             resolved = await _http_bulk_with_subdivide(_fallback_post, miss_texts)
             # _accept_bulk assigns proper vectors into `out` and returns the
             # LOCAL indices still missing (None or failed identity). Feed the

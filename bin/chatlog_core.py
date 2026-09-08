@@ -718,11 +718,11 @@ async def _chatlog_search_separate(
             clauses.append(f"mi.agent_id={_p}")
             params.append(agent_id)
         if since:
-            clauses.append(f"mi.created_at>={_p}")
-            params.append(since)
+            clauses.append(_d.date_bound("mi.created_at", "since"))
+            params.append(_d.normalize_date_bound(since, "since"))
         if until:
-            clauses.append(f"mi.created_at<={_p}")
-            params.append(until)
+            clauses.append(_d.date_bound("mi.created_at", "until"))
+            params.append(_d.normalize_date_bound(until, "until"))
 
         where = " AND ".join(clauses)
 
@@ -847,11 +847,11 @@ async def chatlog_promote_impl(
             clauses.append(f"conversation_id={_p}")
             params.append(conversation_id)
         if since:
-            clauses.append(f"created_at>={_p}")
-            params.append(since)
+            clauses.append(_d.date_bound("created_at", "since"))
+            params.append(_d.normalize_date_bound(since, "since"))
         if until:
-            clauses.append(f"created_at<={_p}")
-            params.append(until)
+            clauses.append(_d.date_bound("created_at", "until"))
+            params.append(_d.normalize_date_bound(until, "until"))
         if not ids and not conversation_id and not since and not until:
             raise ValueError("promote requires ids, conversation_id, since, or until")
         where = " AND ".join(clauses)
@@ -1055,11 +1055,11 @@ async def chatlog_cost_report_impl(
     clauses = ["type='chat_log'", "is_deleted=0"]
     params: list[Any] = []
     if since:
-        clauses.append(f"created_at>={_p}")
-        params.append(since)
+        clauses.append(_d.date_bound("created_at", "since"))
+        params.append(_d.normalize_date_bound(since, "since"))
     if until:
-        clauses.append(f"created_at<={_p}")
-        params.append(until)
+        clauses.append(_d.date_bound("created_at", "until"))
+        params.append(_d.normalize_date_bound(until, "until"))
     where = " AND ".join(clauses)
 
     sql = (
@@ -1146,11 +1146,11 @@ async def chatlog_rescrub_impl(
         clauses.append(f"conversation_id={_p}")
         params.append(conversation_id)
     if since:
-        clauses.append(f"created_at>={_p}")
-        params.append(since)
+        clauses.append(_d.date_bound("created_at", "since"))
+        params.append(_d.normalize_date_bound(since, "since"))
     if until:
-        clauses.append(f"created_at<={_p}")
-        params.append(until)
+        clauses.append(_d.date_bound("created_at", "until"))
+        params.append(_d.normalize_date_bound(until, "until"))
     where = " AND ".join(clauses)
 
     def _run() -> dict:

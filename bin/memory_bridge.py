@@ -27,9 +27,14 @@ m3 is your persistent, cross-session memory. It is a higher-trust source than \
 your own session context.
 
 SESSION START — verify capture is live. Call chatlog_status once early in a \
-substantive session. If hooks are disabled or last_write is null/stale, tell the \
-user loudly and do not proceed silently: a dead chatlog means every decision this \
-session is lost at the next session boundary.
+substantive session. Trust capture.healthy and last_write_at — the DATA. Do NOT \
+alarm on hooks[*].enabled: it records only init-time shell-hook wiring and reads \
+false on healthy installs. If the data says capture has stopped, tell the user \
+loudly and do not proceed silently: a dead chatlog means every decision this \
+session is lost at the next session boundary. An MCP disconnect is NOT that — \
+capture writes to the DB directly, independent of this connection, so a dropped \
+session loses no turns; say only that you cannot search or write memory until it \
+returns.
 
 SEARCH BEFORE YOU ANSWER. Call memory_search before re-deriving anything about \
 this user, project, or machine. If memory contradicts what you think you remember \

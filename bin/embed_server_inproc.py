@@ -43,6 +43,7 @@ import argparse
 import asyncio
 import logging
 import os
+import re
 import struct
 import sys
 import time
@@ -65,6 +66,10 @@ logger = logging.getLogger("embed_server_inproc")
 # via M3_EMBED_SERVER_MAX_BATCH. The client's own EMBED_BULK_CHUNK is 1024, so
 # this is a safety ceiling, not the expected batch size.
 _MAX_BATCH = int(os.environ.get("M3_EMBED_SERVER_MAX_BATCH", "2048"))
+# The model context window this server was built with. Mirrors what the Rust
+# core reads (crates/m3-core-py/src/config.rs: embed_ctx()), so the 413 body
+# reports the SAME ceiling the embedder actually enforces.
+_EMBED_CTX = int(os.environ.get("M3_EMBED_CTX", "8192"))
 
 # ── Two-lane admission gate (interactive fast-lane) ───────────────────────────
 # WHY: the Rust `m3_core_rs.EmbeddedEmbedder` is NOT one serial CUDA context —
@@ -362,6 +367,77 @@ async def _embed(texts: list[str], *, interactive: bool = False) -> list[list[fl
         await gate.release(interactive=interactive)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Context-overflow reporting
+# ──────────────────────────────────────────────────────────────────────────────
+# Root cause of issue #139. `_coerce_texts` was wrapped in try/except but the
+# `_embed` call was NOT, and no @app.exception_handler is registered -- so
+# llama.cpp's "input too long: N tokens > n_ctx 8192" (raised in
+# m3-embed-llamacpp) reached FastAPI's default handler and became a 500 whose
+# body is the literal string "Internal Server Error". THE TOKEN COUNT WAS
+# DESTROYED BEFORE IT LEFT THE SERVER.
+#
+# That single missing except is why in-process deployments recovered and
+# standalone ones did not: the client's subdivide-and-mean-pool recovery
+# (memory/embed.py:_http_bulk_with_subdivide) is gated on matching that error
+# text, and it can never match "Internal Server Error".
+#
+# Returning a STRUCTURED 413 fixes both directions of version skew:
+#   - a NEW client reads error.code == "context_length_exceeded" and the exact
+#     observed/max token counts, with no string parsing at all;
+#   - an OLD client still recovers, because the body carries the original
+#     "N tokens > n_ctx M" message its existing regex already matches. So
+#     upgrading the SERVER alone repairs clients in the field.
+_CTX_OVERFLOW_RE = re.compile(r"(\d+)\s*tokens\s*>\s*n_ctx\s*(\d+)", re.I)
+# Format-tolerant fallback: other llama.cpp builds / wrappers word this
+# differently. Recognising the CLASS of error is what matters; the counts are
+# best-effort and simply absent when the message does not carry them.
+_CTX_OVERFLOW_HINTS = (
+    "input too long",
+    "context length exceeded",
+    "maximum context length",
+    "token length exceeds",
+    "too many tokens",
+    "exceeds context window",
+)
+
+
+def _context_overflow_response(exc: Exception) -> "JSONResponse | None":
+    """A structured 413 if `exc` is an n_ctx overflow, else None (re-raise).
+
+    Deliberately narrow: only a length problem becomes a 413. Any other failure
+    (a dead worker pool, a poisoned mutex, an OOM) must keep propagating as a
+    500 -- mislabelling infrastructure failure as a client-side length error
+    would send an operator to shrink their inputs while the real fault went
+    unreported, which is precisely the misdiagnosis #139's reporter suffered in
+    the opposite direction.
+    """
+    msg = str(exc)
+    m = _CTX_OVERFLOW_RE.search(msg)
+    if m is None and not any(h in msg.lower() for h in _CTX_OVERFLOW_HINTS):
+        return None
+    err: "dict[str, object]" = {
+        "code": "context_length_exceeded",
+        # The ORIGINAL message is preserved verbatim, not summarised: it is what
+        # an older client's regex matches, so trimming it would break the
+        # server-upgrade-alone repair path described above.
+        "message": msg,
+        "max_tokens": _EMBED_CTX,
+    }
+    if m is not None:
+        err["observed_tokens"] = int(m.group(1))
+        err["max_tokens"] = int(m.group(2))
+    logger.warning(
+        "context_length_exceeded: %s tokens > n_ctx %s. "
+        "cause: one or more inputs exceed the model's context window. "
+        "action: returning 413 so the client can subdivide and mean-pool. "
+        "review: the CLIENT's chunk budget (M3_EMBED_TOKEN_BUDGET); raising "
+        "M3_EMBED_CTX is NOT the fix -- bge-m3 is trained to 8192 positions.",
+        err.get("observed_tokens", "?"), err["max_tokens"],
+    )
+    return JSONResponse(status_code=413, content={"error": err})
+
+
 @app.post("/embedding")
 async def embedding(req: EmbeddingRequest, request: Request):
     """Tier-2 contract: {"input":[...]} -> {"data":[{"embedding":[...]}]} in order.
@@ -372,7 +448,13 @@ async def embedding(req: EmbeddingRequest, request: Request):
         return JSONResponse(status_code=413, content={"error": str(e)})
     if not texts:
         return {"data": []}
-    vecs = await _embed(texts, interactive=_is_interactive(texts, request))
+    try:
+        vecs = await _embed(texts, interactive=_is_interactive(texts, request))
+    except Exception as e:  # noqa: BLE001 — classified below; non-overflow re-raises
+        resp = _context_overflow_response(e)
+        if resp is None:
+            raise
+        return resp
 
     if "application/octet-stream" in (request.headers.get("accept") or ""):
         import numpy as np
@@ -397,7 +479,13 @@ async def v1_embeddings(req: EmbeddingRequest, request: Request):
         return JSONResponse(status_code=413, content={"error": str(e)})
     if not texts:
         return {"object": "list", "data": [], "model": _model_tag, "usage": {}}
-    vecs = await _embed(texts, interactive=_is_interactive(texts, request))
+    try:
+        vecs = await _embed(texts, interactive=_is_interactive(texts, request))
+    except Exception as e:  # noqa: BLE001 — same classification as /embedding
+        resp = _context_overflow_response(e)
+        if resp is None:
+            raise
+        return resp
     return {
         "object": "list",
         "data": [{"object": "embedding", "index": i, "embedding": v} for i, v in enumerate(vecs)],

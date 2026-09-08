@@ -636,7 +636,15 @@ def _backend_section(cfg: dict) -> None:
             from m3_sdk import resolve_db_path  # type: ignore
             core_db = resolve_db_path(None)
             try:
-                from chatlog_config import DEFAULT_DB_PATH as chat_db  # type: ignore
+                # chatlog_db_path(), NOT the DEFAULT_DB_PATH constant. That
+                # constant is evaluated at IMPORT time, so it never sees
+                # CHATLOG_DB_PATH / M3_CHATLOG_DB_PATH, the active-database
+                # ContextVar, or a `db_path` pinned in .chatlog_config.json —
+                # `m3 doctor` reported the DEFAULT path to anyone who had
+                # relocated their chatlog, i.e. was confidently wrong exactly
+                # where a user most needs the truth.
+                from chatlog_config import chatlog_db_path  # type: ignore
+                chat_db = chatlog_db_path()
             except Exception:  # noqa: BLE001
                 chat_db = ""
             try:
