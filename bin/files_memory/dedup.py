@@ -56,7 +56,24 @@ DEFAULT_LEAF_LIMIT: int = int(_os.environ.get("M3_FILES_DEDUP_LEAF_LIMIT", "1000
 
 
 def _cosine_packed(a_bytes: bytes, b_bytes: bytes, dim: int) -> float:
-    """Cosine over two packed float32 blobs. Pure numpy where available."""
+    """Cosine over two packed float32 blobs.
+
+    Routes through the Rust core when available (blob_as_f32 + cosine, both
+    SIMD), matching how every other cosine call site in m3 resolves — see
+    `memory/util.py:_cosine` and `memory/entity.py:_cosine`. This was the last
+    hand-rolled one: it operates on PACKED blobs rather than float lists, which
+    is why it was missed when the others were oxidized.
+
+    Falls back to numpy, then to pure Python, so a host without the wheel or
+    without numpy still dedups correctly — only slower (§1 offline-capable).
+    """
+    try:
+        from memory import config as _mcfg
+        _rs = _mcfg.m3_core_rs
+        if _rs is not None:
+            return float(_rs.cosine(_rs.blob_as_f32(a_bytes), _rs.blob_as_f32(b_bytes)))
+    except Exception:  # noqa: BLE001 — wheel absent/disabled or an FFI hiccup
+        pass
     try:
         import numpy as _np
         a = _np.frombuffer(a_bytes, dtype=_np.float32, count=dim)
