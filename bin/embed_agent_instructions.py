@@ -10,7 +10,6 @@ with embed=True. Idempotent: soft-deletes any prior architecture items
 import asyncio
 import json
 import os
-import sqlite3
 import sys
 
 from m3_core.paths import seam_backend, seam_dialect

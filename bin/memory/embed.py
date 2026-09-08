@@ -49,13 +49,13 @@ from .chunking import (  # noqa: F401
     _subdivide_dense_chunk,
 )
 from .db import _db
-from .tokens import TOKEN_CEILING, count_tokens
 
 # _augment_embed_text_with_anchors is RE-EXPORTED through this module (the
 # memory_core shim / write.py import it via `from .embed import ...`), so it must
 # stay imported here even though embed.py has no direct caller — ruff's
 # unused-import autofix will try to drop it; keep the noqa.
 from .textprep import _augment_embed_text_with_anchors, _content_hash  # noqa: F401
+from .tokens import TOKEN_CEILING, count_tokens
 
 logger = logging.getLogger("memory.embed")
 

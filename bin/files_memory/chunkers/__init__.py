@@ -129,8 +129,9 @@ def _enforce_leaf_token_cap(leaf: Leaf) -> "Iterator[Leaf]":
     `truncated` is set only when a piece genuinely cannot be split further, so
     the column finally means what it says.
     """
-    from files_memory.config import FILES_MAX_LEAF_TOKENS
     from memory.tokens import estimate_tokens
+
+    from files_memory.config import FILES_MAX_LEAF_TOKENS
 
     if estimate_tokens(leaf.text) <= FILES_MAX_LEAF_TOKENS:
         yield leaf

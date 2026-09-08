@@ -32,7 +32,8 @@ try:  # pragma: no cover - import shim for standalone execution
     _date_bound_op = _Dialect.date_bound_op
 except Exception:  # pragma: no cover
     import re as _re_db
-    from datetime import date as _d_db, timedelta as _td_db
+    from datetime import date as _d_db
+    from datetime import timedelta as _td_db
     _BARE = _re_db.compile(r"^\d{4}-\d{2}-\d{2}$")
 
     def _normalize_date_bound(value: str, side: str) -> str:

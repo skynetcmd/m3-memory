@@ -31,7 +31,6 @@ import argparse
 import asyncio
 import os
 import shutil
-import sqlite3
 import sys
 import time
 import uuid

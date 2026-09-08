@@ -1,8 +1,8 @@
 ---
 tool: bin/auth_utils.py
-sha1: 813b725635c7
-mtime_utc: 2026-09-08T12:19:03.866323+00:00
-generated_utc: 2026-09-08T12:25:32.488952+00:00
+sha1: 21a6ae7c30f2
+mtime_utc: 2026-09-08T23:41:01.527000+00:00
+generated_utc: 2026-09-08T23:41:23.480179+00:00
 private: false
 ---
 
@@ -50,10 +50,10 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 457)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 204)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 443)
-- `subprocess.run()` (line 472)
+- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 456)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 203)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 442)
+- `subprocess.run()` (line 471)
 
 
 ---

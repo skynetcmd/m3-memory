@@ -73,8 +73,46 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$ZERO" ] && continue          # branch deletion — nothing to scan
   if [ "$remote_sha" = "$ZERO" ]; then
     RANGES+=("$local_sha")                         # new remote branch — scan all of it
+  elif git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+    RANGES+=("$remote_sha..$local_sha")            # fast-forward — only new commits
   else
-    RANGES+=("$remote_sha..$local_sha")            # existing branch — only new commits
+    # FORCE-PUSH after a rebase: $remote_sha is the OLD, discarded tip, so
+    # $remote_sha..$local_sha re-diffs every rebased commit against history
+    # that no longer exists — pulling in content that is already public and
+    # flagging it as new. Measured 2026-09-08: pushing a rebased PR branch
+    # blocked on anonymized fixtures ("C:\Users\u\...") that had been on
+    # origin/main for weeks.
+    #
+    # That is worse than a nuisance. A gate that cries wolf on every rebase
+    # trains you to reach for --no-verify, which is exactly when a real leak
+    # walks through.
+    #
+    # The merge-base of old-vs-new tip is NOT the fix (measured: it sits far
+    # behind the rebase and still spans public commits). The right baseline is
+    # what the remote ALREADY publishes: content reachable from the remote's
+    # own branches is not newly exposed by this push, whoever put it there.
+    # Exclude every remote-tracking ref for this remote, so only genuinely new
+    # content is scanned.
+    # Baseline = the merge-base with the remote's DEFAULT branch (the trunk the
+    # branch will merge into). Everything up to there is already published, so
+    # only what this branch adds on top gets scanned. Two dots, not a rev-list
+    # exclusion: `git diff` (used by the scan below) has no `^ref` form.
+    remote_name="${1:-origin}"
+    trunk=""
+    for cand in "refs/remotes/${remote_name}/main" \
+                "refs/remotes/${remote_name}/master"; do
+      if git rev-parse --verify --quiet "$cand" >/dev/null; then trunk="$cand"; break; fi
+    done
+    base=""
+    [ -n "$trunk" ] && base="$(git merge-base "$trunk" "$local_sha" 2>/dev/null || true)"
+    # Fall back to the old tip's merge-base, then to the whole branch: a
+    # WIDER scan is the safe direction to fail: it can only over-report.
+    [ -z "$base" ] && base="$(git merge-base "$remote_sha" "$local_sha" 2>/dev/null || true)"
+    if [ -n "$base" ]; then
+      RANGES+=("$base..$local_sha")
+    else
+      RANGES+=("$local_sha")                       # unrelated histories — scan all
+    fi
   fi
 done
 

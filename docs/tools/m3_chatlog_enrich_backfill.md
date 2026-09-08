@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_chatlog_enrich_backfill.py
-sha1: 31c30512d71d
-mtime_utc: 2026-09-08T05:55:24.578504+00:00
-generated_utc: 2026-09-08T05:55:38.809871+00:00
+sha1: 84bff8abf616
+mtime_utc: 2026-09-08T23:41:01.526000+00:00
+generated_utc: 2026-09-08T23:41:23.777862+00:00
 private: false
 ---
 
@@ -29,7 +29,7 @@ Cross-platform: only depends on Python stdlib + sqlite3.
 
 ## Entry points
 
-- `def main()` (line 115)
+- `def main()` (line 116)
 - `if __name__ == "__main__"` guard
 
 ---

@@ -1,8 +1,8 @@
 ---
 tool: bin/setup_secret.py
-sha1: ed5484404534
-mtime_utc: 2026-09-08T05:12:32.200020+00:00
-generated_utc: 2026-09-08T05:14:02.306740+00:00
+sha1: a7d34b71a93d
+mtime_utc: 2026-09-08T23:41:01.511489+00:00
+generated_utc: 2026-09-08T23:41:24.046675+00:00
 private: false
 ---
 
@@ -26,7 +26,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 319)
+- `def main()` (line 318)
 - `if __name__ == "__main__"` guard
 
 ---

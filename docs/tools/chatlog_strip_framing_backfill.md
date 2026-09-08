@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_strip_framing_backfill.py
-sha1: 1a198e7cb3bd
-mtime_utc: 2026-09-07T21:22:15.075119+00:00
-generated_utc: 2026-09-07T21:37:21.457027+00:00
+sha1: 3a5607091939
+mtime_utc: 2026-09-08T23:41:01.511489+00:00
+generated_utc: 2026-09-08T23:41:23.575932+00:00
 private: false
 ---
 
@@ -51,7 +51,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 180)
+- `def main()` (line 181)
 - `if __name__ == "__main__"` guard
 
 ---

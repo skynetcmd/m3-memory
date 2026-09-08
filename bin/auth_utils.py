@@ -13,7 +13,6 @@ _crypto_lock = threading.Lock()
 import platform
 import queue
 import re
-import sqlite3
 import subprocess
 import sys
 import time

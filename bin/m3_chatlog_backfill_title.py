@@ -19,14 +19,13 @@ import argparse
 import os
 import re
 import shutil
-import sqlite3
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from m3_core.paths import seam_backend, seam_dialect
-from typing import Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from m3_sdk import get_m3_root

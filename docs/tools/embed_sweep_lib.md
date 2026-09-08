@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_sweep_lib.py
-sha1: 72291a2cf689
-mtime_utc: 2026-09-07T22:29:53.786174+00:00
-generated_utc: 2026-09-07T22:32:52.881918+00:00
+sha1: 4ff70fd67a7a
+mtime_utc: 2026-09-08T23:41:01.521488+00:00
+generated_utc: 2026-09-08T23:41:23.680140+00:00
 private: false
 ---
 
@@ -70,7 +70,8 @@ _(no subprocess / http / sqlite calls detected)_
 ## Notable external imports
 
 - `memory.embed (ContextLengthExceeded)`
-- `memory.tokens (TOKEN_BUDGET, token_budget)`
+- `memory.tokens (TOKEN_BUDGET)`
+- `memory.tokens (token_budget)`
 
 ---
 

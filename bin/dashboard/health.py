@@ -849,7 +849,6 @@ def _active_backend():
 
 def _sqlite_store(db_path: str) -> "dict | None":
     """(path, rows, last_updated) for a SQLite store file, or None if absent."""
-    import sqlite3
     if not db_path or not os.path.exists(db_path):
         return None
     try:
@@ -962,7 +961,6 @@ def _backend_block() -> dict:
 
 def _cdw_block() -> "dict | None":
     """CDW warehouse sync watermarks, or None if no warehouse is configured."""
-    import sqlite3
     try:
         from m3_sdk import resolve_cdw_pg_dsn, resolve_db_path
         cdw = (resolve_cdw_pg_dsn("") or "").strip()

@@ -90,9 +90,7 @@ def _report_unfindable() -> None:
         # doctor load. This helper is called from run(), but must not depend on
         # run()'s locals to stay independently testable.
         from m3_core.paths import resolve_engine_file
-        from memory.backends import active_backend
-
-        from memory.backends import dialect
+        from memory.backends import active_backend, dialect
 
         # Size via the dialect, NOT a bare LENGTH(): on PostgreSQL length()
         # counts CHARACTERS, so a CJK-heavy memory would be reported at roughly

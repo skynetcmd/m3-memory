@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
-import sqlite3
 import sys
 
 BIN_DIR = os.path.dirname(os.path.abspath(__file__))

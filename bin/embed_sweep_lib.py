@@ -29,7 +29,6 @@ import asyncio
 import time
 from typing import Awaitable, Callable, Optional
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Failure classification: infrastructure vs content
 # ──────────────────────────────────────────────────────────────────────────────
@@ -138,7 +137,8 @@ LogFn = Callable[[str], None]
 # memory.tokens degrades to the same conservative arithmetic rather than failing
 # to import.
 try:  # pragma: no cover - import shim for standalone execution
-    from memory.tokens import TOKEN_BUDGET as _TOKEN_BUDGET, token_budget as _token_budget
+    from memory.tokens import TOKEN_BUDGET as _TOKEN_BUDGET
+    from memory.tokens import token_budget as _token_budget
 except Exception:  # pragma: no cover
     _TOKEN_BUDGET = 7000
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_agent_instructions.py
-sha1: 3057dda712db
-mtime_utc: 2026-09-08T06:01:52.846900+00:00
-generated_utc: 2026-09-08T06:03:18.618231+00:00
+sha1: d5b4139c5c0a
+mtime_utc: 2026-09-08T23:41:01.507484+00:00
+generated_utc: 2026-09-08T23:41:23.658884+00:00
 private: false
 ---
 
@@ -20,7 +20,7 @@ with embed=True. Idempotent: soft-deletes any prior architecture items
 
 ## Entry points
 
-- `async def main()` (line 239)
+- `async def main()` (line 238)
 - `if __name__ == "__main__"` guard
 
 ---
