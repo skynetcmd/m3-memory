@@ -981,10 +981,16 @@ async def _http_bulk_with_subdivide(
             observed = getattr(e, "observed_tokens", None)
             if observed is None:
                 m = _DENSE_ERR_RE.search(str(e))
-                # A typed ContextLengthExceeded without counts is still an
-                # overflow: recover on the class of error, not on whether the
-                # server happened to report numbers.
-                if not m and not isinstance(e, ContextLengthExceeded):
+                # Recover on the CLASS of error, not on whether the server
+                # happened to report numbers. Three ways to recognise it, in
+                # descending precision: the typed exception, the canonical
+                # "N tokens > n_ctx M" text, or any of the reworded variants a
+                # different llama.cpp build or a proxy may emit. Requiring the
+                # count would drop the row for want of a digit.
+                _low = str(e).lower()
+                if (not m
+                        and not isinstance(e, ContextLengthExceeded)
+                        and not any(h in _low for h in _CTX_OVERFLOW_HINTS)):
                     results.append(None)
                     continue
                 observed = int(m.group(1)) if m else 0

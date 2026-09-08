@@ -121,6 +121,38 @@ def _order_embeddings(data: list[dict], n_inputs: int) -> list[list[float]] | No
     return [d["embedding"] for d in ordered]
 
 
+def _verify_fits_budget(parts: "list[str]") -> "list[str]":
+    """Halve any piece still over the token budget, recursively, with a floor.
+
+    The sizing in :func:`_subdivide_dense_chunk` derives ONE chars-per-token
+    ratio for a whole chunk and applies a flat 0.90 margin. The original code
+    justified never re-checking by saying that margin "should already cover" any
+    error — but density is not uniform WITHIN a chunk, and the measured spread
+    across content types is 4x (English 4.18 chars/token, base64 1.00). A chunk
+    averaging 2.4 can contain a base64 blob at 1.0, so a 10% margin does not
+    cover a 4x variance and a sub-chunk could still overflow, leaving the row
+    dropped — the exact failure the subdivision exists to prevent.
+
+    `estimate_tokens` never under-counts, so a piece that passes here genuinely
+    fits. `DENSE_MIN_SUB_CHARS` and `_MAX_SPLIT_DEPTH` stop a pathological input
+    from recursing toward single characters (§3 fail safe).
+    """
+    from .tokens import TOKEN_BUDGET, estimate_tokens
+
+    def _fit(part: str, depth: int = 0) -> "list[str]":
+        if estimate_tokens(part) <= TOKEN_BUDGET or len(part) <= DENSE_MIN_SUB_CHARS:
+            return [part]
+        if depth >= _MAX_SPLIT_DEPTH:
+            return [part]
+        mid = len(part) // 2
+        return _fit(part[:mid], depth + 1) + _fit(part[mid:], depth + 1)
+
+    out: "list[str]" = []
+    for part in parts:
+        out.extend(_fit(part))
+    return [p for p in out if p]
+
+
 def _subdivide_dense_chunk(text: str, observed_tokens: int) -> list[str]:
     """Re-split a chunk that overflowed the bge-m3 token ceiling.
 
@@ -143,7 +175,12 @@ def _subdivide_dense_chunk(text: str, observed_tokens: int) -> list[str]:
     sub_chars = int(DENSE_TARGET_TOKENS * chars_per_token * 0.90)
     sub_chars = max(sub_chars, DENSE_MIN_SUB_CHARS)
     if sub_chars >= len(text):
-        return [text]
+        # The derived window covers the whole chunk, i.e. `observed_tokens`
+        # claims this text already fits. Do NOT return it unverified: a server
+        # that UNDER-reports (an older build, a proxy that rewrote the body, or
+        # a count taken before anchor augmentation) would get the chunk back
+        # whole and it would overflow again. Verify against the text itself.
+        return _verify_fits_budget([text])
     overlap_chars = int(DENSE_TOKEN_OVERLAP * chars_per_token)
     stride = max(sub_chars - overlap_chars, sub_chars // 2)
     out: list[str] = []
@@ -153,9 +190,11 @@ def _subdivide_dense_chunk(text: str, observed_tokens: int) -> list[str]:
         end = start + sub_chars
         if end >= n:
             out.append(text[start:n])
-            return out
+            break
         out.append(text[start:end])
         start += stride
+
+    return _verify_fits_budget(out)
 
 
 def _mean_pool(vecs: list[list[float]]) -> list[float] | None:

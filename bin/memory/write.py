@@ -432,12 +432,19 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
                 err = str(e)
                 rmatch = _DENSE_ERR_RE.search(err)
                 if not rmatch:
-                    # Non-dense error: log and skip; this chunk won't get
-                    # a vector. memory_items row is already persisted, so
-                    # FTS-only retrieval still finds it.
-                    logger.warning(
-                        f"memory_write_impl: non-dense embed failure for {item_id} "
-                        f"chunk base_kind={base_kind}: {err}"
+                    # Non-dense error: this chunk gets no vector. The
+                    # memory_items row is already persisted, so FTS-only
+                    # retrieval still finds it — but it is INVISIBLE to
+                    # semantic/vector search, and nothing downstream reports
+                    # that. Logged at ERROR (not WARNING) because a silently
+                    # unembedded row is exactly the failure that leaves a
+                    # corpus looking healthy while retrieval quietly degrades.
+                    logger.error(
+                        "EMBED_NO_VECTOR: %s chunk base_kind=%s got no vector. "
+                        "cause: %s. effect: this text is FTS-searchable but NOT "
+                        "semantically searchable. try: `m3 embedder backfill` "
+                        "once the cause is resolved.",
+                        item_id, base_kind, err,
                     )
                     return []
                 observed_tokens = int(rmatch.group(1))
@@ -448,6 +455,7 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
                     f"{len(txt)/observed_tokens:.2f} c/t); subdividing into {len(subs)} sub-chunks"
                 )
                 results: list[tuple[str, str, list[float], str]] = []
+                dropped: list[int] = []
                 for j, sub in enumerate(subs):
                     try:
                         def _embed_one(s: str = sub) -> list[float]:
@@ -456,16 +464,35 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
                         if sv:
                             results.append((sub, f"_dense_{j}", sv, _EMBED_GGUF_MODEL_TAG))
                             _record_embed_backend(_embedded_label(), 1)
+                        else:
+                            # A falsy vector with NO exception. Previously this
+                            # fell through the `if sv:` with no else and left no
+                            # trace at all — the sub-chunk simply vanished.
+                            dropped.append(j)
                     except Exception as se:
-                        # Second-level failure: log and skip this sub-chunk.
-                        # Don't recurse further — would mean truly pathological
-                        # content where our chars/token estimate is wrong by
-                        # >10%, which our 10% safety margin should already
-                        # cover. Logging is sufficient.
+                        dropped.append(j)
                         logger.warning(
                             f"memory_write_impl: dense sub-chunk {j} of {len(subs)} still "
                             f"failed for {item_id}: {se}"
                         )
+                if dropped:
+                    # PARTIAL COVERAGE IS THE FAILURE MODE HERE. Sub-chunks are
+                    # stored as SEPARATE vector rows (kind `_dense_<j>`), not
+                    # mean-pooled, so a missing one does not corrupt a vector —
+                    # it silently removes a SLICE OF THE TEXT from semantic
+                    # search while the memory still looks fully indexed. Nothing
+                    # downstream can detect that, which is why it must be loud
+                    # here and carry the numbers.
+                    logger.error(
+                        "EMBED_PARTIAL_COVERAGE: %s chunk base_kind=%s — %d of %d "
+                        "sub-chunk(s) produced no vector (indices %s). "
+                        "cause: the embedder returned nothing for those pieces. "
+                        "effect: that text is NOT semantically searchable, though "
+                        "the memory row and FTS index are intact. "
+                        "review: M3_EMBED_TOKEN_BUDGET; re-run `m3 embedder backfill` "
+                        "after fixing to regenerate.",
+                        item_id, base_kind, len(dropped), len(subs), dropped,
+                    )
                 return results
 
         first_vec: list[float] | None = None

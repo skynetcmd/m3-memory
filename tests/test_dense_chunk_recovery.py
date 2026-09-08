@@ -34,17 +34,33 @@ class SubdivideDenseChunkTests(unittest.TestCase):
         self.assertGreaterEqual(len(subs), 2)
 
     def test_qwen3_style_case_higher_ratio(self):
-        # 7127bb1e case: 28000 chars, 9735 tokens => 2.88 c/t.
-        # Sub-chunks: 7000 * 2.88 * 0.9 = ~18100 chars => 2 sub-chunks
+        """7127bb1e case: 28000 chars reported as 9735 tokens (2.88 c/t).
+
+        ⚠ CONTRACT CHANGE (2026-09-07). This used to assert `len(subs) < 4`,
+        expecting ~2 pieces of ~18,100 chars from the reported ratio. That
+        expectation encoded the trust-the-report bug: 18,100 ASCII characters
+        estimate ~18,102 tokens, well past the 7,000 budget, so those "correct"
+        pieces would each still overflow.
+
+        Sizing from a single reported ratio is a HINT, not a guarantee — density
+        is not uniform within a chunk (the measured spread across content types
+        is 4x). Every piece is now verified against the real budget and halved
+        until it fits, so the honest assertion is "every piece fits", not "the
+        arithmetic produced N pieces".
+        """
+        from memory.tokens import TOKEN_BUDGET, estimate_tokens
         text = "y" * 28000
         subs = self.mc._subdivide_dense_chunk(text, observed_tokens=9735)
-        max_sub = max(len(s) for s in subs)
-        chars_per_token = 28000 / 9735
-        expected_target = int(self.mc.DENSE_TARGET_TOKENS * chars_per_token * 0.90)
-        self.assertLessEqual(max_sub, expected_target)
-        # Lighter density => fewer sub-chunks
-        self.assertLess(len(subs), 4)
         self.assertGreaterEqual(len(subs), 2)
+        for s in subs:
+            self.assertLessEqual(
+                estimate_tokens(s), TOKEN_BUDGET,
+                "a sub-chunk still exceeds the token budget")
+        # Coverage, not equality: consecutive sub-chunks OVERLAP by design, so
+        # the concatenation is longer than the input. What must hold is that no
+        # content is lost.
+        self.assertGreaterEqual("".join(subs).count("y"), 28000,
+                                "subdivision lost content")
 
     def test_min_sub_chars_floor_prevents_infinite_subdivision(self):
         # Pathologically dense input: chars_per_token=0.1 (10x denser than
@@ -184,9 +200,21 @@ class HttpBulkSubdivideTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out, [[1.0, 0.0], [1.0, 0.0]])
 
     async def test_oversized_row_is_subdivided_and_pooled(self):
-        # First call (whole row) raises n_ctx overflow with a llama.cpp-style
-        # body; the retry over sub-chunks succeeds. Result must be one pooled,
-        # unit-length vector — not None.
+        """Recovery works when the server DOES report the token count.
+
+        ⚠ SCOPE. The error string below is FABRICATED, and for years this file's
+        only overflow coverage was this shape — which is precisely how issue
+        #139 stayed green in CI while broken in production. A standalone
+        embed server did not emit this text at all: FastAPI's default handler
+        replaced it with "Internal Server Error", so the `_DENSE_ERR_RE` gate
+        this test exercises could never match in the deployment that mattered.
+
+        A hand-fed string can only prove the parser handles a string someone
+        already believed in. The real contract is covered by
+        tests/test_embed_server_413.py, which drives the ACTUAL FastAPI app and
+        asserts what it really returns; keep this test for the parser branch,
+        not as evidence the seam works end to end.
+        """
         big = "x" * 40000
         calls = {"n": 0}
 
@@ -217,6 +245,40 @@ class HttpBulkSubdivideTests(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError("connection refused")
         out = await self.me._http_bulk_with_subdivide(post_one, ["a"])
         self.assertEqual(out, [None])
+
+    async def test_overflow_without_a_token_count_still_recovers(self):
+        """The case the fabricated-string test could not reach.
+
+        A server may report the CLASS of overflow without any numbers — a
+        differently-worded llama.cpp build, or a proxy that rewrote the body.
+        Recovery must depend on knowing the input is too long, NOT on the
+        server having been chatty about it; otherwise the row is dropped for
+        want of a digit.
+        """
+        big = "x" * 40000
+
+        async def post_one(texts):
+            if len(texts) == 1 and len(texts[0]) > 30000:
+                raise RuntimeError("CPU embedder HTTP 413: maximum context length")
+            return [[1.0, 0.0] for _ in texts]
+
+        out = await self.me._http_bulk_with_subdivide(post_one, [big])
+        self.assertIsNotNone(
+            out[0], "an overflow with no reported count must still subdivide")
+
+    async def test_typed_context_error_recovers_without_string_matching(self):
+        """The structured path: a current server raises the typed error, so
+        recovery must fire with no prose parsing at all."""
+        from memory.embed import ContextLengthExceeded
+        big = "x" * 40000
+
+        async def post_one(texts):
+            if len(texts) == 1 and len(texts[0]) > 30000:
+                raise ContextLengthExceeded("too long", 24064, 8192)
+            return [[1.0, 0.0] for _ in texts]
+
+        out = await self.me._http_bulk_with_subdivide(post_one, [big])
+        self.assertIsNotNone(out[0], "typed overflow must trigger subdivision")
 
 
 class RecoverOversizedSingleTests(unittest.IsolatedAsyncioTestCase):
