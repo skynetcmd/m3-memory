@@ -31,10 +31,27 @@ from pathlib import Path
 from typing import Optional
 
 
-def _connect(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _connect(db_path: str):
+    """A read-only connection to `db_path` via the seam.
+
+    Returns an ExitStack plus the connection: this module's callers use the
+    handle across a long report body, so a bare `with` would mean re-indenting
+    all of it. Callers close the stack.
+
+    row_factory is SQLite-specific and set best-effort — psycopg2 has no such
+    attribute, and the report reads rows positionally anyway.
+    """
+    from contextlib import ExitStack
+
+    from m3_core.paths import seam_backend
+
+    stack = ExitStack()
+    conn = stack.enter_context(seam_backend().open_readonly(str(db_path)))
+    try:
+        conn.row_factory = sqlite3.Row
+    except Exception:  # noqa: BLE001 — not a SQLite connection; positional rows
+        pass
+    return stack, conn
 
 
 def _build_filter(run_id: Optional[str], variant: Optional[str]) -> tuple[str, list]:
@@ -293,9 +310,13 @@ def main() -> int:
         print(f"ERROR: db not found: {args.db}", file=sys.stderr)
         return 1
 
-    conn = _connect(args.db)
-    where, params = _build_filter(args.run_id, args.variant)
-    data = _summarize(conn, where, params)
+    # The old code never closed this handle at all (a leak the raw connect hid).
+    _stack, conn = _connect(args.db)
+    try:
+        where, params = _build_filter(args.run_id, args.variant)
+        data = _summarize(conn, where, params)
+    finally:
+        _stack.close()
     label = f"run_id={args.run_id}" if args.run_id else f"variant={args.variant}"
     md = _format(data, label)
 

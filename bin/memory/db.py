@@ -281,6 +281,24 @@ def _ensure_sync_tables(db_path: str | None = None) -> None:
     """
     if os.environ.get("M3_SKIP_MIGRATIONS", "").lower() in ("1", "true", "yes"):
         return
+    # SQLite ONLY. Everything below is the SQLite migration chain: it reads
+    # memory/migrations/*.up.sql, probes sqlite_master for schema_versions, and
+    # shells out to bin/migrate_memory.py, which has no PostgreSQL path at all.
+    # PostgreSQL gets its schema from its own pg_* migrations via
+    # backend.ensure_schema().
+    #
+    # Gated on the capability, not on `!= "postgres"` (§10a) -- and gated rather
+    # than converted, because there is no backend-neutral meaning for "compare
+    # the DB's applied version against the .up.sql files on disk". Before this
+    # gate the sqlite_master probe below simply raised on PG and was swallowed
+    # by the surrounding try, so the "fast path" never fired and every call
+    # shelled out to a migration runner that could not help it.
+    try:
+        from memory.backends import resolve_backend_name
+        if resolve_backend_name() != "sqlite":
+            return
+    except Exception:  # noqa: BLE001 — no seam yet (bootstrap) => SQLite
+        pass
     try:
         migration_script = os.path.join(config.BASE_DIR, "bin", "migrate_memory.py")
 
@@ -421,11 +439,23 @@ def _lazy_init(db_path: str | None = None) -> None:
             _ensure_sync_tables(key)
             _backfill_change_agent()
             try:
-                conn = sqlite3.connect(str(key), timeout=10.0)
-                try:
-                    ensure_pinned_column(conn)
-                finally:
-                    conn.close()
+                # DELIBERATELY a raw connection, not backend.connection().
+                # We are INSIDE _lazy_init, holding _init_lock; SqliteBackend
+                # .connection() delegates straight back to _db(), which re-enters
+                # _lazy_init -> deadlock on that same lock. This bootstrap must
+                # open its own handle by construction.
+                #
+                # It is also correct to be SQLite-shaped here: PostgreSQL gets
+                # the pinned column from its own pg_* migration chain via
+                # ensure_schema(), so this path is the SQLite one. Gated so it
+                # does not open a stale file on PG.
+                from memory.backends import resolve_backend_name
+                if resolve_backend_name() == "sqlite":
+                    conn = sqlite3.connect(str(key), timeout=10.0)
+                    try:
+                        ensure_pinned_column(conn)
+                    finally:
+                        conn.close()
             except Exception:
                 # Best-effort — never let the pinned-column bootstrap break
                 # DB init. ensure_pinned_column() also self-guards, but the

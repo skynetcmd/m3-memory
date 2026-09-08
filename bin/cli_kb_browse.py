@@ -88,10 +88,15 @@ def importance_bar(score: float, width: int = 10) -> str:
 
 # ── Fetch entries ─────────────────────────────────────────────────────────────
 def fetch(db_path: Path, type_filter: str | None, search: str | None, limit: int | None):
-    if not db_path.exists():
-        sys.exit(f"DB not found: {db_path}")
-    con = sqlite3.connect(str(db_path))
-    con.row_factory = sqlite3.Row
+    from contextlib import ExitStack
+
+    from m3_core.paths import seam_backend
+    _stack = ExitStack()
+    con = _stack.enter_context(seam_backend().open_readonly(str(db_path)))
+    try:
+        con.row_factory = sqlite3.Row
+    except Exception:  # noqa: BLE001 — non-SQLite connection
+        pass
     cur = con.cursor()
 
     query = """
@@ -133,7 +138,7 @@ def fetch(db_path: Path, type_filter: str | None, search: str | None, limit: int
 
     cur.execute(query, params)
     rows = cur.fetchall()
-    con.close()
+    _stack.close()
     return rows
 
 # ── Render one entry ──────────────────────────────────────────────────────────

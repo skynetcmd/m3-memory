@@ -91,10 +91,72 @@ _EXEMPT = {
         "Builds throwaway fixture databases.",
 
     # --- Correctly capability-gated already; converting would be wrong. ---
+    # Each of these branches on `backend.name == "sqlite"` (the capability form
+    # §10a asks for, not `!= "postgres"`) and takes a real PG path in the other
+    # arm. The raw connect is the SQLite ARM of a working branch, not an
+    # assumption that SQLite is all there is.
+    "bin/chatlog_decay.py":
+        "SQLite arm of `if backend.name == \"sqlite\"`; PG uses the pooled path.",
+    "bin/chatlog_prune.py":
+        "SQLite arm of an explicit backend branch; dialect drives the SQL.",
+    "bin/m3_enrich.py":
+        "SQLite arm of `if _backend.name == \"sqlite\"`.",
+    "bin/curator_apply.py":
+        "SQLite arm of an explicit branch; its docstring records the stale-file "
+        "write on PG that this branch FIXED.",
+    "bin/m3_cognitive_loop.py":
+        "Comment records the raw connect was already replaced; remaining use is "
+        "backend-appropriate.",
+    "bin/memory/db.py":
+        "Both sites are inside _lazy_init holding _init_lock; "
+        "backend.connection() delegates back to _db() -> _lazy_init, so a raw "
+        "handle is REQUIRED to avoid deadlock. Both are gated on "
+        "resolve_backend_name() == \"sqlite\"; PG gets these from its pg_* chain.",
+    "bin/chatlog_status.py":
+        "All sites are SQLite arms of real branches: the main/chatlog counts sit "
+        "under `_primary_is_sqlite`, the files count under `_pg_files`, and "
+        "_recent_write_count now returns its -1 unknown sentinel on non-SQLite "
+        "rather than walking candidate FILE paths that cannot exist on PG.",
+    "bin/memory/backends/selector.py":
+        "Defines require_sqlite_backend(), the fail-loud guard FOR this pattern.",
     "bin/enrich/prep.py":
         "Replays a SQLite-DIALECT migration file (executescript + sqlite_master). "
         "Returns early on any non-sqlite backend; PG gets these tables from its "
         "own pg_040 migration. Documented in the function's own docstring.",
+
+    # --- FILES: the raw connect is the SQLite ARM of a real backend branch. ---
+    # FILES fully supports PostgreSQL. The sidecar file (files_database.db)
+    # exists ONLY on SQLite; on PG the files tables live in a `files` SCHEMA of
+    # the primary DB (tasks #9-#11) and are reached through the seam. Each file
+    # below already branches on that, so the raw connect is the correct SQLite
+    # half of a working pair -- NOT an assumption that FILES is SQLite-only.
+    "bin/gen_wiki.py":
+        "Branches on backend: sidecar file on SQLite, files_memory.db._db() on "
+        "PG. Its own comment records that this routing is what keeps the files "
+        "corpus VISIBLE on PG (it previously rendered memory-only there).",
+    "bin/files_memory/db.py":
+        "Owns that branch: _is_postgres() routes to the seam on PG and to the "
+        "local sidecar only on SQLite.",
+    "bin/files_memory/entities.py":
+        "Default path goes through the seam (both backends); the raw connect is "
+        "the explicit-file escape hatch for tests and isolated mutators.",
+
+    # --- Benchmarks measure the raw baseline on purpose. ---
+    "bin/bench_memory.py":
+        "Benchmarks the pure-SQLite baseline; routing it through the pool would "
+        "measure the pool instead of the thing under test.",
+
+    # --- SQLite FILE-level operations; no cross-backend meaning. ---
+    "m3_memory/install/fs.py":
+        "PRAGMA wal_checkpoint(TRUNCATE) and Connection.backup() are SQLite "
+        "file APIs -- this copies/shrinks .db FILES during install, it does not "
+        "query a store. PG has no file to copy.",
+
+    # --- Self-test harnesses that must NOT share the app's pool. ---
+    "bin/test_debug_agent.py":
+        "Self-test harness; isolates from the live pool like test_memory_bridge.",
+    "bin/test_mcp_proxy.py":
+        "Self-test harness for the MCP proxy.",
 
     # --- Must never fail on a seam import error. ---
     "bin/hooks/chatlog/session_start_capture_check.py":
@@ -110,6 +172,42 @@ def _iter_py():
         yield rel, p
 
 
+def _code_lines(src: str):
+    """Yield (lineno, text) for lines that are CODE, not prose about code.
+
+    Skips `#` comments AND string literals — including docstrings. Both matter:
+    this file's whole purpose is finding a call, and a module that *documents*
+    why it no longer makes that call was being counted as still making it
+    (bin/embed_backfill.py, whose docstring names the idiom it removed). That
+    inflates the debt AND, worse, is the same class of blindness in reverse: a
+    real connect could hide on a line the naive scan had already learned to
+    ignore.
+
+    Uses the tokenizer rather than a regex, so it cannot be fooled by nesting
+    or quote style. Falls back to the comment-only filter if the file does not
+    parse (a syntax error is someone else's test to fail).
+    """
+    import io as _io
+    import tokenize
+
+    try:
+        toks = list(tokenize.generate_tokens(_io.StringIO(src).readline))
+    except (tokenize.TokenError, SyntaxError, IndentationError):
+        for i, line in enumerate(src.splitlines(), 1):
+            if not line.strip().startswith("#"):
+                yield i, line
+        return
+
+    prose = set()
+    for tok in toks:
+        if tok.type in (tokenize.COMMENT, tokenize.STRING):
+            for ln in range(tok.start[0], tok.end[0] + 1):
+                prose.add(ln)
+    for i, line in enumerate(src.splitlines(), 1):
+        if i not in prose:
+            yield i, line
+
+
 def _raw_sites():
     """(rel_path, lineno, line) for every non-exempt raw sqlite3.connect."""
     out = []
@@ -117,16 +215,12 @@ def _raw_sites():
         if rel in _EXEMPT:
             continue
         try:
-            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+            src = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        for i, line in enumerate(lines, 1):
-            if "sqlite3.connect" not in line:
-                continue
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue          # a comment ABOUT the idiom is not a use of it
-            out.append((rel, i, stripped))
+        for i, line in _code_lines(src):
+            if "sqlite3.connect" in line:
+                out.append((rel, i, line.strip()))
     return out
 
 
@@ -137,7 +231,7 @@ def _raw_sites():
 # "sqlite"` with an honest n/a on PG) and are fine; the rest assume SQLite
 # unconditionally. Started at 71; auth_utils' vault probe was the first
 # conversion (a real PG defect, not tidiness -- see that commit).
-_BUDGET = 51
+_BUDGET = 19
 
 
 class TestRawConnectionDrift(unittest.TestCase):

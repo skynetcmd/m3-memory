@@ -267,6 +267,28 @@ def _recent_write_count(config: chatlog_config.ChatlogConfig,
     # fn would return 0 (a real "capture down" alarm) instead of -1 (unknown) —
     # reintroducing the false-signal class this whole fix removes. So the flag is
     # set only after fetchone() returns without raising.
+    # SQLite ONLY. This walks CANDIDATE FILE PATHS (chatlog file, then main
+    # file) because a split install puts chat_log rows in a different FILE.
+    # PostgreSQL has ONE pooled store, so there are no candidates to walk and
+    # every path here is a stale/absent filename -- os.path.exists would skip
+    # them all, leaving queried_ok False, which this function reports as
+    # "never got a clean query off any candidate". That is the false
+    # capture-down alarm §3 warns about, on a perfectly healthy PG install.
+    #
+    # Gated rather than converted: "try each of these files in turn" has no
+    # backend-neutral meaning. The PG count is served by _get_row_counts above,
+    # which already routes through the seam.
+    try:
+        from memory.backends import resolve_backend_name
+        if resolve_backend_name() != "sqlite":
+            # -1 is this function's established "unknown" sentinel (see the
+            # return at the end of the loop, and
+            # test_recent_write_count_query_error_returns_unknown_not_zero).
+            # NOT 0: a 0 here reads as "capture is down" on a healthy PG store.
+            return -1
+    except Exception:  # noqa: BLE001 — no seam (bootstrap) => SQLite
+        pass
+
     queried_ok = False
     for db in candidates:
         if not os.path.exists(db):
@@ -631,10 +653,19 @@ def _get_wal_size_mb(path: str) -> float:
 
 def _get_last_turns(main_db: str) -> list[dict[str, str]]:
     turns = []
-    if os.path.exists(main_db):
+    # No os.path.exists gate: on PostgreSQL there is no main_db FILE, so the
+    # gate reported "no recent turns" for a store full of them.
+    if True:
         try:
-            conn = sqlite3.connect(main_db, timeout=2)
-            conn.row_factory = sqlite3.Row
+            from contextlib import ExitStack
+
+            from m3_core.paths import seam_backend
+            _stack = ExitStack()
+            conn = _stack.enter_context(seam_backend().open_readonly(str(main_db)))
+            try:
+                conn.row_factory = sqlite3.Row
+            except Exception:  # noqa: BLE001 — non-SQLite connection
+                pass
             try:
                 rows = conn.execute(
                     "SELECT created_at, content FROM memory_items "
@@ -672,10 +703,10 @@ def _get_last_turns(main_db: str) -> list[dict[str, str]]:
                         ts_str = ts[:10]
 
                     turns.append({"time": ts_str, "text": snippet})
-            except sqlite3.Error:
+            except Exception:  # noqa: BLE001 — psycopg errors are not sqlite3.Error
                 pass
             finally:
-                conn.close()
+                _stack.close()
         except Exception:
             pass
     return list(reversed(turns))

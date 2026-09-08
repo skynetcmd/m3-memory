@@ -64,10 +64,17 @@ def _query_eligible_groups(
     contains (id, content, role, turn_index, created_at, metadata_json) tuples
     sorted by turn_index ASC. Same shape run_observer.process_conversation expects.
     """
-    import sqlite3
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    placeholders = ",".join("?" * len(type_allowlist))
-    excl_placeholders = ",".join("?" * len(ALWAYS_SKIP_TYPES))
+    from m3_core.paths import seam_backend, seam_dialect
+    _d = seam_dialect()
+    # ExitStack rather than a `with` block: the connection is used across a
+    # long branchy body below, and re-indenting all of it would bury the
+    # behavioural change in whitespace noise. The stack closes it on ANY exit
+    # path, including the exceptions the old bare conn.close() would have leaked.
+    from contextlib import ExitStack
+    _stack = ExitStack()
+    conn = _stack.enter_context(seam_backend().open_readonly(str(db_path)))
+    placeholders = _d.placeholder(len(type_allowlist))
+    excl_placeholders = _d.placeholder(len(ALWAYS_SKIP_TYPES))
     variant_clause = ""
     variant_params: list = []
     if source_variant == "__none__":
@@ -218,7 +225,7 @@ def _query_eligible_groups(
         """
         params = list(type_allowlist) + list(ALWAYS_SKIP_TYPES) + variant_params
         rows = conn.execute(sql, params).fetchall()
-    conn.close()
+    _stack.close()
 
     # Group ALL rows first, THEN apply --limit at the conversation-group
     # level (not the row level). This ensures --limit N gives N full

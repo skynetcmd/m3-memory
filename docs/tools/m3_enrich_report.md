@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich_report.py
-sha1: a7bb69d45387
-mtime_utc: 2026-05-01T09:43:02.957544+00:00
-generated_utc: 2026-05-01T13:05:26.846156+00:00
+sha1: e5fea80d2e10
+mtime_utc: 2026-09-08T10:33:19.172210+00:00
+generated_utc: 2026-09-08T10:33:52.480952+00:00
 private: false
 ---
 
@@ -35,7 +35,7 @@ for security scans.
 
 ## Entry points
 
-- `def main()` (line 280)
+- `def main()` (line 297)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -65,16 +65,13 @@ _(none detected)_
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 35)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core.paths (seam_backend)`
 
 ---
 

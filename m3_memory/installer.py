@@ -1780,16 +1780,16 @@ def status_summary() -> dict:
         import sys as _sys
         _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
         from m3_sdk import get_m3_engine_root
+        # No is_file() gate: on PostgreSQL there is no agent_memory.db, so the
+        # gate reported 0 memories for a populated store. The backend decides
+        # whether a file is involved at all.
+        from m3_core.paths import seam_backend
         main_db = Path(get_m3_engine_root()) / "agent_memory.db"
-        if main_db.is_file():
-            conn = sqlite3.connect(f"file:{main_db.as_posix()}?mode=ro", uri=True, timeout=1.0)
-            try:
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM memory_items WHERE COALESCE(is_deleted,0)=0"
-                ).fetchone()
-                out["memories"] = int(row[0]) if row else 0
-            finally:
-                conn.close()
+        with seam_backend().open_readonly(main_db.as_posix()) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM memory_items WHERE COALESCE(is_deleted,0)=0"
+            ).fetchone()
+            out["memories"] = int(row[0]) if row else 0
     except Exception:  # noqa: BLE001
         pass
 

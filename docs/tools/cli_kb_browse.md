@@ -1,8 +1,8 @@
 ---
 tool: bin/cli_kb_browse.py
-sha1: a5494c4176c2
-mtime_utc: 2026-07-02T01:21:24.642231+00:00
-generated_utc: 2026-07-03T20:00:03.177193+00:00
+sha1: f5af37d1114d
+mtime_utc: 2026-09-08T10:33:32.450596+00:00
+generated_utc: 2026-09-08T10:33:52.229167+00:00
 private: false
 ---
 
@@ -24,7 +24,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 200)
+- `def main()` (line 205)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -58,16 +58,13 @@ Usage:
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `str(db_path)`` (line 93)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core.paths (seam_backend)`
 
 ---
 
