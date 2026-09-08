@@ -89,16 +89,24 @@ jobs:
           # access rules — that is the whole problem here — so a probe against
           # the wrong one can pass while the real call 403s, which would make
           # this guard worse than none.
-          code="$(curl -sS -o /dev/null -w '%{http_code}' \
+          # Keep the BODY, not just the status. GitHub's 403 explains itself in
+          # `message` ("Resource not accessible by personal access token", SAML
+          # enforcement, org PAT policy, …), and that sentence is the whole
+          # difference between a fixable report and another week of guessing.
+          # Discarding it with -o /dev/null is what left the first diagnosis to
+          # inference, which turned out to be wrong.
+          body="$(curl -sS -w '\n%{http_code}' \
                     -H "Authorization: Bearer $M3_STARGAZER" \
                     -H "Accept: application/vnd.github.v3.star+json" \
                     -H "X-GitHub-Api-Version: 2022-11-28" \
                     -H "User-Agent: m3-star-history-generator" \
                     "https://api.github.com/repos/${{ github.repository }}/stargazers?per_page=1")"
+          code="$(printf '%s' "$body" | tail -n1)"
+          reason="$(printf '%s' "$body" | sed '$d' | tr -d '\n' | cut -c1-400)"
           if [ "$code" = "200" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::error title=M3_STARGAZER cannot read the stargazers endpoint::GitHub returned HTTP $code for /stargazers with the starred_at media type. Badge refresh is DISABLED and README badges will go stale. Check the token's repository access and Metadata:read permission BEFORE rotating — a healthy token has already been ruled out once (2026-09-08)."
+            echo "::error title=M3_STARGAZER cannot read the stargazers endpoint::HTTP $code. GitHub said: $reason -- Badge refresh is DISABLED and README badges will go stale. Check that token BEFORE rotating it: a correctly-scoped, unexpired one was already ruled out on 2026-09-08."
             echo "present=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
