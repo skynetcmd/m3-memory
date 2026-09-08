@@ -24,6 +24,8 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+from m3_core.paths import seam_backend, seam_dialect
 from typing import Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
@@ -99,9 +101,8 @@ def _audit(
     useless_titles: tuple[str, ...],
     min_chars: int,
 ) -> tuple[int, dict]:
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        placeholders = ",".join("?" * len(useless_titles))
+    with seam_backend().open_readonly(str(db_path)) as conn:
+        placeholders = seam_dialect().placeholder(len(useless_titles))
         sql = f"""
             SELECT type, COUNT(*) AS n
             FROM memory_items
@@ -113,8 +114,6 @@ def _audit(
         """
         rows = conn.execute(sql, list(useless_titles) + [min_chars]).fetchall()
         return sum(r[1] for r in rows), {r[0]: r[1] for r in rows}
-    finally:
-        conn.close()
 
 
 def _backfill(
@@ -127,9 +126,8 @@ def _backfill(
     counters = {"updated": 0, "skipped_empty_derived": 0, "wall_s": 0.0}
     started = time.monotonic()
 
-    conn = sqlite3.connect(str(db_path), timeout=30.0)
-    try:
-        placeholders = ",".join("?" * len(useless_titles))
+    with seam_backend().connection() as conn:
+        placeholders = seam_dialect().placeholder(len(useless_titles))
         sql = f"""
             SELECT id, content
             FROM memory_items
@@ -167,8 +165,6 @@ def _backfill(
             print(f"[title-backfill] {db_path.name}: FTS rebuilt", flush=True)
         except Exception as e:  # noqa: BLE001
             print(f"[title-backfill] {db_path.name}: FTS rebuild skipped ({type(e).__name__})", flush=True)
-    finally:
-        conn.close()
 
     counters["wall_s"] = time.monotonic() - started
     return counters
@@ -207,9 +203,8 @@ def _sample_derivations(
     max_title_chars: int,
     n: int = 3,
 ) -> list[tuple[str, str]]:
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        placeholders = ",".join("?" * len(useless_titles))
+    with seam_backend().open_readonly(str(db_path)) as conn:
+        placeholders = seam_dialect().placeholder(len(useless_titles))
         sql = f"""
             SELECT title, content
             FROM memory_items
@@ -220,8 +215,6 @@ def _sample_derivations(
         """
         rows = conn.execute(sql, list(useless_titles) + [min_chars, n]).fetchall()
         return [(r[0] or "<NULL>", _derive_title(r[1] or "", max_title_chars)) for r in rows]
-    finally:
-        conn.close()
 
 
 def main() -> int:

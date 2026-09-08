@@ -21,6 +21,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from m3_core.paths import seam_backend, seam_dialect
+
 # Date bounds go through the shared seam normalizer: a bare YYYY-MM-DD compared
 # against an ISO-TEXT timestamp column is lexicographically wrong (an `until`
 # excluded the entire requested day). See memory/backends/dialect.py.
@@ -72,8 +74,7 @@ def _conversations_reverse_chrono(
     Reads `memory_items` rows where `type='chat_log'`, grouped by
     conversation_id, ordered by most-recent turn timestamp descending.
     """
-    con = sqlite3.connect(f"file:{chatlog_db}?mode=ro", uri=True, timeout=30)
-    try:
+    with seam_backend().open_readonly(str(chatlog_db)) as con:
         params: list[object] = []
         where = (
             "WHERE type='chat_log' "
@@ -95,8 +96,6 @@ def _conversations_reverse_chrono(
             params,
         )
         return [(r[0], r[1] or "", r[2]) for r in cur.fetchall()]
-    finally:
-        con.close()
 
 
 def _already_enriched(
@@ -104,16 +103,13 @@ def _already_enriched(
     target_variant: str,
 ) -> set[str]:
     """Return conversation_ids that already have observations under variant."""
-    con = sqlite3.connect(f"file:{main_db}?mode=ro", uri=True, timeout=30)
-    try:
+    with seam_backend().open_readonly(str(main_db)) as con:
         cur = con.execute(
             "SELECT DISTINCT conversation_id FROM memory_items "
-            "WHERE variant=? AND conversation_id IS NOT NULL",
+            f"WHERE variant={seam_dialect().param()} AND conversation_id IS NOT NULL",
             (target_variant,),
         )
         return {r[0] for r in cur.fetchall() if r[0]}
-    finally:
-        con.close()
 
 
 def main() -> int:

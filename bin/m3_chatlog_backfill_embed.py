@@ -39,6 +39,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from m3_core.paths import seam_backend, seam_dialect
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 
@@ -74,13 +76,12 @@ def _audit_unembedded(
     min_chars: int,
 ) -> tuple[int, dict]:
     """Return (total_eligible_rows, by_type_breakdown)."""
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
+    with seam_backend().open_readonly(str(db_path)) as conn:
         # Use length(content) >= min_chars to skip near-empty rows.
         type_clause = ""
         params: list = [min_chars]
         if type_filter:
-            placeholders = ",".join("?" * len(type_filter))
+            placeholders = seam_dialect().placeholder(len(type_filter))
             type_clause = f" AND mi.type IN ({placeholders})"
             params.extend(type_filter)
         sql = f"""
@@ -89,15 +90,13 @@ def _audit_unembedded(
             LEFT JOIN memory_embeddings me ON me.memory_id = mi.id
             WHERE COALESCE(mi.is_deleted,0)=0
               AND me.id IS NULL
-              AND length(COALESCE(mi.content,'')) >= ?
+              AND length(COALESCE(mi.content,'')) >= {seam_dialect().param()}
               {type_clause}
             GROUP BY mi.type
             ORDER BY n DESC
         """
         rows = conn.execute(sql, params).fetchall()
         return sum(r[1] for r in rows), {r[0]: r[1] for r in rows}
-    finally:
-        conn.close()
 
 
 async def _embed_one_batch(
@@ -137,11 +136,17 @@ def _write_embeddings_batch(
         return 0
     from embedding_utils import pack as _pack
     now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-    conn = sqlite3.connect(str(db_path), timeout=30.0)
-    try:
+    d = seam_dialect()
+    with seam_backend().connection() as conn:
         cur = conn.cursor()
-        # Detect schema variant — newer m3_chatlog DBs may not have content_hash column
-        embed_cols = [c[1] for c in cur.execute("PRAGMA table_info(memory_embeddings)").fetchall()]
+        # Detect schema variant — newer m3_chatlog DBs may not have content_hash
+        # column. Via the dialect: a bare `PRAGMA table_info` is SQLite-only AND
+        # puts the column name at row[1], whereas columns_of() normalises the
+        # name to row[0] on BOTH backends (it uses the pragma_table_info()
+        # table-valued function on SQLite, information_schema on PG). Reading
+        # row[1] off columns_of would silently pick up the TYPE instead.
+        _sql, _params = d.columns_of("memory_embeddings")
+        embed_cols = {r[0] for r in cur.execute(_sql, _params).fetchall()}
         has_kind = "vector_kind" in embed_cols
         has_chash = "content_hash" in embed_cols
 
@@ -150,7 +155,7 @@ def _write_embeddings_batch(
             cols.append("vector_kind")
         if has_chash:
             cols.append("content_hash")
-        placeholders = ",".join("?" * len(cols))
+        placeholders = d.placeholder(len(cols))
         sql = f"INSERT INTO memory_embeddings ({','.join(cols)}) VALUES ({placeholders})"
 
         n = 0
@@ -164,8 +169,6 @@ def _write_embeddings_batch(
             n += 1
         conn.commit()
         return n
-    finally:
-        conn.close()
 
 
 async def _backfill_db(
@@ -204,8 +207,13 @@ async def _backfill_db(
     # Important: open a read-only handle for the SELECT, write-handle for
     # the INSERT. Avoids "database is locked" if the user has another
     # m3 process running.
-    read_conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
+    # The read/write split below is deliberate and PRESERVED: a read-only
+    # handle for the streaming SELECT, a separate write handle for the INSERT,
+    # so a long backfill does not hold a write lock (and does not hit "database
+    # is locked" when another m3 process is running). open_readonly keeps that
+    # property on SQLite; on PostgreSQL there is one pooled store and MVCC makes
+    # the concern moot, which is exactly why the call site should not encode it.
+    with seam_backend().open_readonly(str(db_path)) as read_conn:
         cursor = read_conn.execute(sql, params)
         batch: list[tuple[str, str]] = []
         os.environ["M3_DATABASE"] = str(db_path)  # so memory_core._embed picks the right embed server / config
@@ -233,8 +241,6 @@ async def _backfill_db(
                           f"{counters['embedded']} embedded, {counters['failed']} failed, "
                           f"rate={rate:.1f}/s", flush=True)
                 batch = []
-    finally:
-        read_conn.close()
 
     counters["wall_s"] = time.monotonic() - started
     return counters

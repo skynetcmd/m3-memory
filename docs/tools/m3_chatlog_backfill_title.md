@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_chatlog_backfill_title.py
-sha1: 3fe5547eaf29
-mtime_utc: 2026-05-06T23:55:06.653082+00:00
-generated_utc: 2026-05-06T23:57:12.290921+00:00
+sha1: 01917ad93f79
+mtime_utc: 2026-09-08T05:34:35.698175+00:00
+generated_utc: 2026-09-08T05:35:46.073970+00:00
 private: false
 ---
 
@@ -28,7 +28,7 @@ Quick start:
 
 ## Entry points
 
-- `def main()` (line 227)
+- `def main()` (line 220)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -65,18 +65,13 @@ _(none detected)_
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 102)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 210)
-- `sqlite3.connect()  → `str(db_path)`` (line 130)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core.paths (seam_backend, seam_dialect)`
 
 ---
 

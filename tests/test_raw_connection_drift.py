@@ -131,7 +131,7 @@ def _raw_sites():
 # "sqlite"` with an honest n/a on PG) and are fine; the rest assume SQLite
 # unconditionally. Started at 71; auth_utils' vault probe was the first
 # conversion (a real PG defect, not tidiness -- see that commit).
-_BUDGET = 66
+_BUDGET = 58
 
 
 class TestRawConnectionDrift(unittest.TestCase):

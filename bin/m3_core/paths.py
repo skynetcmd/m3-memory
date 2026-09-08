@@ -498,6 +498,83 @@ def active_database(path: Optional[str]):
         _active_db.reset(token)
 
 
+def seam_backend():
+    """The active storage backend, or a SQLite-only shim during bootstrap.
+
+    ONE definition for the ~40 scripts that must open a database without
+    assuming SQLite (DESIGN_PHILOSOPHIES §10a: duplicated logic is the defect,
+    independent of correctness — three copies of this helper in three backfill
+    scripts is three things to drift). Use it as:
+
+        with seam_backend().open_readonly(db_path) as conn:   # reads
+        with seam_backend().connection() as conn:             # writes
+
+    ``open_readonly`` is backend-blind by contract: SQLite honors ``db_path``
+    and opens ``file:...?mode=ro``; PostgreSQL ignores it (there is one pooled
+    store) and yields a normal connection. So a caller stays out of
+    ``if backend ==`` ladders entirely.
+
+    The fallback exists because several of these scripts run during installer
+    bootstrap, before the seam is importable. It is only ever reached on
+    SQLite — a PostgreSQL install has the seam on sys.path long before any of
+    this runs — so a SQLite-shaped shim is the correct degradation, not a
+    second implementation of the seam.
+    """
+    try:
+        from memory.backends import active_backend  # type: ignore
+        return active_backend()
+    except Exception:  # noqa: BLE001 — bootstrap: seam not importable yet
+        import sqlite3 as _sq
+        from contextlib import contextmanager
+
+        class _SqliteOnlyShim:
+            name = "sqlite"
+
+            @staticmethod
+            @contextmanager
+            def open_readonly(db_path: str):
+                c = _sq.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30)
+                try:
+                    yield c
+                finally:
+                    c.close()
+
+            @staticmethod
+            @contextmanager
+            def connection(db_path: Optional[str] = None):
+                c = _sq.connect(str(db_path or resolve_db_path(None)), timeout=30)
+                try:
+                    yield c
+                finally:
+                    c.close()
+
+        return _SqliteOnlyShim()
+
+
+def seam_dialect():
+    """The active SQL dialect, or a SQLite-shaped default during bootstrap.
+
+    Placeholders are backend-varying (``?`` on SQLite, ``%s`` on PostgreSQL), so
+    a literal ``?`` in feature code is a portability bug. Ask for
+    ``seam_dialect().param()`` instead. Same bootstrap reasoning as
+    :func:`seam_backend`.
+    """
+    try:
+        from memory.backends import dialect  # type: ignore
+        return dialect()
+    except Exception:  # noqa: BLE001 — bootstrap: seam not importable yet
+        class _SqliteParams:
+            @staticmethod
+            def param() -> str:
+                return "?"
+
+            @staticmethod
+            def placeholder(n: int = 1) -> str:
+                return ", ".join("?" * n)
+
+        return _SqliteParams()
+
+
 def add_database_arg(parser: argparse.ArgumentParser) -> None:
     """Attach a standard --database flag to a CLI argparse parser.
 

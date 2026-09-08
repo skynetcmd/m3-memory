@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_chatlog_enrich_backfill.py
-sha1: 33f903d2033c
-mtime_utc: 2026-09-07T21:22:15.075119+00:00
-generated_utc: 2026-09-07T21:37:21.666316+00:00
+sha1: 62750cf769f1
+mtime_utc: 2026-09-08T05:35:02.575753+00:00
+generated_utc: 2026-09-08T05:35:46.077628+00:00
 private: false
 ---
 
@@ -29,7 +29,7 @@ Cross-platform: only depends on Python stdlib + sqlite3.
 
 ## Entry points
 
-- `def main()` (line 119)
+- `def main()` (line 115)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -64,15 +64,14 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{chatlog_db}?mode=ro'`` (line 75)
-- `sqlite3.connect()  → `f'file:{main_db}?mode=ro'`` (line 107)
-- `sqlite3.connect()  → `str(main_db)`` (line 186)
+- `sqlite3.connect()  → `str(main_db)`` (line 182)
 
 
 ---
 
 ## Notable external imports
 
+- `m3_core.paths (seam_backend, seam_dialect)`
 - `memory.backends.dialect (Dialect)`
 
 ---
