@@ -153,7 +153,7 @@ class SqliteDialect(Dialect):
         # Take the RESERVED lock now. A deferred BEGIN takes it at the first
         # write, so two read-modify-write passes can both read and then one
         # fails "database is locked" after doing its work.
-        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("BEGIN IMMEDIATE")  # type: ignore[attr-defined]
 
     def compact_storage(self, *, sqlite_path: "str | None" = None,
                         max_bytes: int = 500 * 1024 * 1024) -> str:

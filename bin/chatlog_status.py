@@ -34,8 +34,8 @@ except Exception:  # pragma: no cover
     def _has_content(column: str) -> str:
         return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
 
-    def _now_minus_minutes(p: str) -> str:
-        return f"datetime('now', '-' || {p} || ' minutes')"
+    def _now_minus_minutes(minutes_placeholder: str) -> str:
+        return f"datetime('now', '-' || {minutes_placeholder} || ' minutes')"
 
 
 logger = logging.getLogger("chatlog_status")

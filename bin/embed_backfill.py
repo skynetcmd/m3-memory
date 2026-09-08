@@ -95,8 +95,8 @@ except Exception:  # pragma: no cover
     def _has_content(column: str) -> str:
         return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
 
-    def _now_minus_days(p: str) -> str:
-        return f"datetime('now', '-' || {p} || ' days')"
+    def _now_minus_days(days_placeholder: str) -> str:
+        return f"datetime('now', '-' || {days_placeholder} || ' days')"
 
 
 

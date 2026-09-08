@@ -947,7 +947,7 @@ class Dialect:
         weaker-locking) behaviour rather than a NotImplementedError in the
         middle of a maintenance pass.
         """
-        conn.execute("BEGIN")
+        conn.execute("BEGIN")  # type: ignore[attr-defined]
 
 
 # ── Concrete per-backend dialects live in their backend modules ──────────────
