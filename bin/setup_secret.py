@@ -23,7 +23,33 @@ BIN_DIR = os.path.dirname(os.path.abspath(__file__))
 if BIN_DIR not in sys.path:
     sys.path.insert(0, BIN_DIR)
 
-from auth_utils import _get_fernet, _vault_db_path, get_api_key, get_master_key, set_api_key
+from auth_utils import (
+    _backend,
+    _get_fernet,
+    _vault_db_path,
+    get_api_key,
+    get_master_key,
+    set_api_key,
+)
+
+
+def _dialect():
+    """The active SQL dialect, or a SQLite-shaped default during bootstrap.
+
+    Placeholders are backend-varying (`?` on SQLite, `%s` on PostgreSQL), so a
+    literal `?` in feature code is a portability bug (DESIGN_PHILOSOPHIES §10a).
+    setup_secret can run before the seam is importable, hence the fallback --
+    which is only ever reached on SQLite, the same reasoning as auth_utils._backend.
+    """
+    try:
+        from memory.backends import dialect  # type: ignore
+        return dialect()
+    except Exception:  # noqa: BLE001 — bootstrap: seam not importable yet
+        class _SqliteParams:
+            @staticmethod
+            def param() -> str:
+                return "?"
+        return _SqliteParams()
 
 
 def _db_path() -> str:
@@ -102,18 +128,18 @@ def _check_master_key() -> None:
 
 
 def _list_vault() -> None:
-    if not os.path.exists(_db_path()):
-        print(f"vault empty (no database at {_db_path()})")
-        return
-    conn = sqlite3.connect(_db_path())
+    # No os.path.exists() gate: on PostgreSQL there is no vault FILE, so that
+    # check reports an empty vault for a store full of secrets. Ask the seam
+    # and let a missing table / unreadable store surface as the empty case.
     try:
-        cur = conn.execute(
-            "SELECT service_name, version, origin_device, updated_at "
-            "FROM synchronized_secrets ORDER BY service_name"
-        )
-        rows = cur.fetchall()
-    finally:
-        conn.close()
+        with _backend().open_readonly(_db_path()) as conn:
+            rows = conn.execute(
+                "SELECT service_name, version, origin_device, updated_at "
+                "FROM synchronized_secrets ORDER BY service_name"
+            ).fetchall()
+    except Exception:  # noqa: BLE001 — no vault yet / unreadable → report empty
+        print(f"vault empty (no secrets at {_db_path()})")
+        return
     if not rows:
         print("vault empty")
         return
@@ -125,12 +151,15 @@ def _list_vault() -> None:
 
 
 def _delete_service(service: str) -> None:
-    if not os.path.exists(_db_path()):
-        _fail(f"vault database not found at {_db_path()}")
-    conn = sqlite3.connect(_db_path())
-    try:
+    # WRITE path: goes through backend.connection() (pooled, with the same
+    # commit/rollback discipline as every other writer) rather than a private
+    # handle. No os.path.exists() gate -- on PostgreSQL there is no vault file,
+    # and "not found" would be wrong for a store that has the row.
+    d = _dialect()
+    with _backend().connection() as conn:
         cur = conn.execute(
-            "SELECT version, updated_at FROM synchronized_secrets WHERE service_name = ?",
+            "SELECT version, updated_at FROM synchronized_secrets "
+            f"WHERE service_name = {d.param()}",
             (service,),
         )
         row = cur.fetchone()
@@ -141,25 +170,26 @@ def _delete_service(service: str) -> None:
         if confirm != "y":
             print("aborted")
             return
-        conn.execute("DELETE FROM synchronized_secrets WHERE service_name = ?", (service,))
+        conn.execute(
+            f"DELETE FROM synchronized_secrets WHERE service_name = {d.param()}",
+            (service,),
+        )
         conn.commit()
         print(f"deleted {service}")
-    finally:
-        conn.close()
 
 
 def _existing_info(service: str) -> tuple[int, str] | None:
-    if not os.path.exists(_db_path()):
-        return None
-    conn = sqlite3.connect(_db_path())
     try:
-        row = conn.execute(
-            "SELECT version, updated_at FROM synchronized_secrets WHERE service_name = ?",
-            (service,),
-        ).fetchone()
-        return (row[0], row[1]) if row else None
-    finally:
-        conn.close()
+        d = _dialect()
+        with _backend().open_readonly(_db_path()) as conn:
+            row = conn.execute(
+                "SELECT version, updated_at FROM synchronized_secrets "
+                f"WHERE service_name = {d.param()}",
+                (service,),
+            ).fetchone()
+            return (row[0], row[1]) if row else None
+    except Exception:  # noqa: BLE001 — no vault yet / unreadable → treat as absent
+        return None
 
 
 def _pick_service() -> tuple[str, callable | None, str | None]:
@@ -240,14 +270,15 @@ def _interactive_add() -> None:
     # Verify the vault round-trip directly — bypass get_api_key's 3-tier lookup,
     # which would return an env var or OS keyring value from an earlier tier.
     master_key = get_master_key()
-    conn = sqlite3.connect(_db_path())
-    try:
+    d = _dialect()
+    # Deliberately NOT wrapped in try/except: this is the verification step, so
+    # an unreadable vault must surface, not be swallowed into "row missing".
+    with _backend().open_readonly(_db_path()) as conn:
         row = conn.execute(
-            "SELECT encrypted_value FROM synchronized_secrets WHERE service_name = ?",
+            "SELECT encrypted_value FROM synchronized_secrets "
+            f"WHERE service_name = {d.param()}",
             (name,),
         ).fetchone()
-    finally:
-        conn.close()
     if not row or not row[0]:
         _fail("vault round-trip failed: row missing after set_api_key")
     try:

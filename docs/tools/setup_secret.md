@@ -1,8 +1,8 @@
 ---
 tool: bin/setup_secret.py
-sha1: bb1a49785b6e
-mtime_utc: 2026-06-28T12:28:55.206642+00:00
-generated_utc: 2026-06-30T22:19:18.551878+00:00
+sha1: ed5484404534
+mtime_utc: 2026-09-08T05:12:32.200020+00:00
+generated_utc: 2026-09-08T05:14:02.306740+00:00
 private: false
 ---
 
@@ -26,7 +26,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 288)
+- `def main()` (line 319)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -50,26 +50,21 @@ Usage:
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils`
-- `auth_utils (_get_fernet, _vault_db_path, get_api_key, get_master_key, set_api_key)`
+- `auth_utils (_backend, _get_fernet, _vault_db_path, get_api_key, get_master_key, set_api_key)`
 - `m3_sdk (add_database_arg)`
 
 ---
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `_db_path()`` (line 108)
-- `sqlite3.connect()  → `_db_path()`` (line 130)
-- `sqlite3.connect()  → `_db_path()`` (line 154)
-- `sqlite3.connect()  → `_db_path()`` (line 243)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ---
 
 ## Notable external imports
 
 - `getpass`
+- `memory.backends (dialect)`
 
 ---
 

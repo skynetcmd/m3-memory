@@ -146,5 +146,65 @@ class TestVaultProbeIsBackendBlind(unittest.TestCase):
         self.assertIn("open_readonly", body)
 
 
+class TestSetupSecretIsBackendBlind(unittest.TestCase):
+    """setup_secret.py reaches the SAME synchronized_secrets table as
+    auth_utils, so it carried the identical file-shaped assumptions: an
+    os.path.exists() gate that reports "vault empty"/"not found" on PostgreSQL,
+    and literal `?` placeholders that PostgreSQL does not accept.
+
+    The delete path is the one that matters most: it is a WRITE, and the
+    os.path.exists() gate would _fail("vault database not found") for a store
+    that demonstrably holds the row.
+    """
+
+    def _mod(self):
+        import setup_secret
+        return setup_secret
+
+    def test_no_raw_connects_remain(self):
+        import inspect
+        src = "\n".join(
+            ln for ln in inspect.getsource(self._mod()).splitlines()
+            if not ln.strip().startswith("#")
+        )
+        self.assertNotIn("sqlite3.connect", src)
+
+    def test_reads_go_through_open_readonly(self):
+        seen: list = []
+        m = self._mod()
+        with mock.patch.object(m, "_backend",
+                               return_value=_backend_yielding((3, "2026-01-01"),
+                                                              seen=seen)):
+            self.assertEqual(m._existing_info("SVC"), (3, "2026-01-01"))
+        self.assertEqual(len(seen), 1)
+
+    def test_existing_info_absent_returns_none(self):
+        m = self._mod()
+        with mock.patch.object(m, "_backend",
+                               return_value=_backend_yielding(None)):
+            self.assertIsNone(m._existing_info("NOPE"))
+
+    def test_placeholders_come_from_the_dialect(self):
+        """A literal `?` is a portability bug (§10a) — PG uses %s."""
+        import inspect
+        for fn in (self._mod()._existing_info, self._mod()._delete_service):
+            src = inspect.getsource(fn)
+            self.assertIn("d.param()", src,
+                          f"{fn.__name__} must ask the dialect for placeholders")
+
+    def test_delete_uses_the_pooled_write_connection(self):
+        """Writes go through backend.connection() (pooled, commit/rollback
+        discipline), never a private handle."""
+        import inspect
+        # CODE only: the function's comment explains the os.path.exists gate it
+        # REMOVED, and a naive substring check would flag that explanation.
+        src = "\n".join(
+            ln for ln in inspect.getsource(self._mod()._delete_service).splitlines()
+            if not ln.strip().startswith("#")
+        )
+        self.assertIn("connection()", src)
+        self.assertNotIn("os.path.exists", src)
+
+
 if __name__ == "__main__":
     unittest.main()
