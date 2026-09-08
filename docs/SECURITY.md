@@ -53,10 +53,13 @@ Out of scope:
 
 ## Audit history
 
-We periodically run `bandit` (static analysis), regex-based secrets scans, and `pip-audit` (dependency CVEs) against the tree and publish the results. Each scan is dated and reproducible — every report includes the exact commands so you can verify on your own machine.
+We run `bandit` (static analysis), regex-based secrets scans, and `pip-audit` (dependency CVEs) against the tree and publish the results. Each scan is dated and reproducible — every report includes the exact commands so you can verify on your own machine.
+
+**What "periodic" means here, concretely:** a full published audit at least **quarterly**, and always before a release that changes the security surface. The dated table below is the evidence — if the newest row is more than a quarter old, the practice has lapsed, and you should read that as a gap rather than as assurance. (It did lapse once: 2026-05-01 → 2026-09-08.) Continuous coverage between audits comes from CI, which runs `pip-audit` scoped to core dependencies on every push.
 
 | Date | Report | Headline |
 |---|---|---|
+| 2026-09-08 | [security-scan-2026-09-08.md](audits/security-scan-2026-09-08.md) | 0 HIGH bandit findings across 95,883 LOC; one core-dep CVE cluster (`mcp`) closed by raising the version floor |
 | 2026-05-01 | [security-scan-2026-05-01.md](audits/security-scan-2026-05-01.md) | Clean shipped library; 14 CVEs all in opt-in / bench-only deps |
 
 CI runs `pip-audit` scoped to core dependencies on every push, so new CVEs in shipped-library deps surface immediately. See [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).

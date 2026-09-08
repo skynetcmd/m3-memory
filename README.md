@@ -44,7 +44,7 @@ That's the whole install. No cloud account, no API key, no external embedding se
 
 ### What it does, in four lines
 
-Save a decision — from any agent, or straight from the shell:
+Save a decision — your AI agent, or you from the shell:
 
 ```console
 $ m3 memory memory_write --type decision --title "auth-jwt-algorithm" \
@@ -79,7 +79,7 @@ The Quickstart above is the whole product for most people: shared memory, wired 
 <tr><td valign="top">👥</td><td><b>Multi-agent synchronization</b> · <sub><b>included in the base install</b></sub><br>agents coordinate through one store: memory scoped per <code>agent</code> / <code>org</code> / <code>user</code>, direct handoffs into another agent's inbox, shared tasks with a recursive task tree, and opt-in SQL-layer isolation so an agent's private notes stay private. Concurrent readers and writers are safe by design (WAL + retry), so a planner, an implementer and a reviewer can work at the same time. (See <a href="docs/MULTI_AGENT.md">Multi-Agent Orchestration</a>)</td></tr>
 <tr><td valign="top">🖥️</td><td><b>Web dashboard, open to all users — not just developers</b> · <sub><b>included in the base install</b></sub><br>a built-in, backend-agnostic control panel (default <code>http://127.0.0.1:8088</code>): browse memory, read your auto-generated Memory Wiki, explore the interactive knowledge graph, and watch system health / load. Just run <code>m3 dashboard</code>. (See <a href="docs/DASHBOARD.md">Dashboard Guide</a>)</td></tr>
 <tr><td valign="top">📖</td><td><b>Auto-generated wiki + Obsidian export</b> · <sub>core feature — in the base install, nothing extra to enable</sub><br><code>m3 wiki generate</code> compiles your canonical memories (pinned, high-confidence, beliefs, procedures) and indexed files into a browsable, interlinked Markdown vault — one page per topic, real hyperlinks for every relationship, and provenance links down to the source document each fact came from. Renders on GitHub, in a self-contained offline HTML viewer, or as an <b>Obsidian vault</b> (<code>--obsidian</code> for graph view + backlinks). (See <a href="docs/WIKI.md">Wiki Guide</a>)</td></tr>
-<tr><td valign="top">🐘</td><td><b>PostgreSQL</b> · <sub>needs <code>m3-memory[postgres]</code>; SQLite is the default and needs nothing</sub><br>run M3 on a first-class PostgreSQL primary backend (<code>M3_DB_BACKEND=postgres</code>) for a shared, server-hosted store, with cross-device sync to a PostgreSQL warehouse. SQLite stays the zero-infrastructure default. (See <a href="docs/ARCHITECTURE.md">Architecture</a> · <a href="docs/SYNC.md">Sync</a>)</td></tr>
+<tr><td valign="top">🐘</td><td><b>PostgreSQL</b> · <sub>optional — you do not need a database</sub><br><b>Most people should ignore this row.</b> m3 stores everything in a local SQLite file by default: nothing to install, nothing to run. Point m3 at a PostgreSQL server instead when you want <b>one shared store for several machines</b> — set <code>pip install "m3-memory[postgres]"</code> and <code>M3_DB_BACKEND=postgres</code>. It is a manual step today; <code>m3 setup</code> does not configure it for you. (See <a href="docs/ARCHITECTURE.md">Architecture</a> · <a href="docs/SYNC.md">Sync</a>)</td></tr>
 </table>
 
 <sub>Also a drop-in memory backend for <b><a href="docs/integrations/LANGCHAIN.md">LangChain / LangGraph</a></b>, <b><a href="m3_memory/integrations/crewai/README.md">CrewAI</a></b>, and <b><a href="m3_memory/integrations/pydantic_ai/README.md">PydanticAI</a></b> — see the framework guides.</sub>
@@ -300,7 +300,8 @@ M3 operates completely offline by default.
 
 ### Sovereign Local Embedder
 A high-performance BGE-M3 embedder runs locally after installation.
-*   **Default:** **in-process** via the `m3-core-rs` native module (llama.cpp linked in-process, zero IPC — *not* a separate service you have to run or monitor). CPU execution using GGUF format (`_assets/models/bge-m3-Q4_K_M.gguf`). A local HTTP embed server on `127.0.0.1:8082` exists only as an automatic fallback if the in-process path can't load.
+*   **Default:** one **shared local embed server** on `127.0.0.1:8082`, running the `m3-embed-server` binary that ships inside the `m3-core-rs` wheel. CPU execution using GGUF format (`_assets/models/bge-m3-Q4_K_M.gguf`). Every m3 process reuses that single server — one model in RAM, one GPU context — instead of each loading its own copy. It is local-only and never leaves the machine.
+*   **Optional (opt-in at `m3 setup`):** additionally embed **in-process** via the `m3-core-rs` native module (llama.cpp linked in-process, zero IPC). Latency is not the reason to choose it — an embed call is already low-µs either way. It pays off for high-volume bursts such as bulk file ingestion, where a self-contained embedder beats round-tripping every chunk. The cost is that it cannot be shared, so each process using it loads its own model.
 *   **Hardware Acceleration (GPU):** Execute `m3 embedder install-gpu` to compile with CUDA, Vulkan, or Metal.
 *   **External Provider Fallback:** Set `EMBED_BASE_URL` to route requests to Ollama, LM Studio, or vLLM.
 

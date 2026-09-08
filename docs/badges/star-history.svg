@@ -1,1 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="105" height="20" role="img" aria-label="⭐ star history"><title>⭐ star history</title><g shape-rendering="crispEdges"><rect width="0" height="20" fill="#555"/><rect x="0" width="105" height="20" fill="#181717"/></g><g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110"><image x="5" y="3" width="14" height="14" href="data:image/svg+xml;base64,PHN2ZyBmaWxsPSJ3aGl0ZSIgcm9sZT0iaW1nIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHRpdGxlPkdpdEh1YjwvdGl0bGU+PHBhdGggZD0iTTEyIC4yOTdjLTYuNjMgMC0xMiA1LjM3My0xMiAxMiAwIDUuMzAzIDMuNDM4IDkuOCA4LjIwNSAxMS4zODUuNi4xMTMuODItLjI1OC44Mi0uNTc3IDAtLjI4NS0uMDEtMS4wNC0uMDE1LTIuMDQtMy4zMzguNzI0LTQuMDQyLTEuNjEtNC4wNDItMS42MUM0LjQyMiAxOC4wNyAzLjYzMyAxNy43IDMuNjMzIDE3LjdjLTEuMDg3LS43NDQuMDg0LS43MjkuMDg0LS43MjkgMS4yMDUuMDg0IDEuODM4IDEuMjM2IDEuODM4IDEuMjM2IDEuMDcgMS44MzUgMi44MDkgMS4zMDUgMy40OTUuOTk4LjEwOC0uNzc2LjQxNy0xLjMwNS43Ni0xLjYwNS0yLjY2NS0uMy01LjQ2Ni0xLjMzMi01LjQ2Ni01LjkzIDAtMS4zMS40NjUtMi4zOCAxLjIzNS0zLjIyLS4xMzUtLjMwMy0uNTQtMS41MjMuMTA1LTMuMTc2IDAgMCAxLjAwNS0uMzIyIDMuMyAxLjIzLjk2LS4yNjcgMS45OC0uMzk5IDMtLjQwNSAxLjAyLjAwNiAyLjA0LjEzOCAzIC40MDUgMi4yOC0xLjU1MiAzLjI4NS0xLjIzIDMuMjg1LTEuMjMuNjQ1IDEuNjUzLjI0IDIuODczLjEyIDMuMTc2Ljc2NS44NCAxLjIzIDEuOTEgMS4yMyAzLjIyIDAgNC42MS0yLjgwNSA1LjYyNS01LjQ3NSA1LjkyLjQyLjM2LjgxIDEuMDk2LjgxIDIuMjIgMCAxLjYwNi0uMDE1IDIuODk2LS4wMTUgMy4yODYgMCAuMzE1LjIxLjY5LjgyNS41N0MyMC41NjUgMjIuMDkyIDI0IDE3LjU5MiAyNCAxMi4yOTdjMC02LjYyNy01LjM3My0xMi0xMi0xMiIvPjwvc3ZnPg=="/><text x="615" y="140" textLength="770" transform="scale(.1)">⭐ star history</text></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400" role="img" aria-label="Star history for skynetcmd/m3-memory: 23 stars">
+  <title>Star history for skynetcmd/m3-memory</title>
+  <style>
+    .bg { fill: #ffffff; }
+    .grid { stroke: #e1e4e8; stroke-width: 1; }
+    .tick, .axis { fill: #57606a; font: 12px -apple-system, Segoe UI, sans-serif; }
+    .title { fill: #24292f; font: 600 15px -apple-system, Segoe UI, sans-serif; }
+    .line { fill: none; stroke: #2f81f7; stroke-width: 2.5; stroke-linejoin: round; }
+    .area { fill: #2f81f7; opacity: 0.10; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .grid { stroke: #21262d; }
+      .tick, .axis { fill: #8b949e; }
+      .title { fill: #e6edf3; }
+    }
+  </style>
+  <rect class="bg" x="0" y="0" width="800" height="400" rx="6"/>
+  <text class="title" x="60" y="20">⭐ skynetcmd/m3-memory — 23 stars</text>
+  <line x1="60" y1="360.0" x2="780" y2="360.0" class="grid"/><text x="52" y="364.0" text-anchor="end" class="tick">0</text><line x1="60" y1="202.2" x2="780" y2="202.2" class="grid"/><text x="52" y="206.2" text-anchor="end" class="tick">11</text><line x1="60" y1="30.0" x2="780" y2="30.0" class="grid"/><text x="52" y="34.0" text-anchor="end" class="tick">23</text>
+  <polygon class="area" points="60.0,360.0 60.0,360.0 60.0,345.7 133.3,331.3 133.4,317.0 135.7,302.6 137.9,288.3 138.4,273.9 163.8,259.6 173.2,245.2 173.7,230.9 215.5,216.5 363.2,202.2 403.7,187.8 405.1,173.5 530.5,159.1 619.3,144.8 635.2,130.4 643.8,116.1 650.8,101.7 658.1,87.4 689.9,73.0 698.7,58.7 731.6,44.3 780.0,30.0 780.0,360.0"/>
+  <polyline class="line" points="60.0,360.0 60.0,345.7 133.3,331.3 133.4,317.0 135.7,302.6 137.9,288.3 138.4,273.9 163.8,259.6 173.2,245.2 173.7,230.9 215.5,216.5 363.2,202.2 403.7,187.8 405.1,173.5 530.5,159.1 619.3,144.8 635.2,130.4 643.8,116.1 650.8,101.7 658.1,87.4 689.9,73.0 698.7,58.7 731.6,44.3 780.0,30.0"/>
+  <text class="axis" x="60" y="388" text-anchor="start">2026-03-25</text>
+  <text class="axis" x="780" y="388" text-anchor="end">2026-08-31</text>
+  <text class="axis" x="400" y="388" text-anchor="middle">generated 2026-08-31</text>
+</svg>
