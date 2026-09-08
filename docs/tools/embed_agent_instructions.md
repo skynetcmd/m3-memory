@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_agent_instructions.py
-sha1: f427f18ea7aa
-mtime_utc: 2026-07-19T03:04:59.558781+00:00
-generated_utc: 2026-07-19T19:29:22.179855+00:00
+sha1: 3057dda712db
+mtime_utc: 2026-09-08T06:01:52.846900+00:00
+generated_utc: 2026-09-08T06:03:18.618231+00:00
 private: false
 ---
 
@@ -20,7 +20,7 @@ with embed=True. Idempotent: soft-deletes any prior architecture items
 
 ## Entry points
 
-- `async def main()` (line 237)
+- `async def main()` (line 239)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -46,17 +46,13 @@ _(no argparse arguments detected)_
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `_db_path()`` (line 244)
-- `sqlite3.connect()  → `_db_path()`` (line 285)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core.paths (seam_backend, seam_dialect)`
 
 ---
 

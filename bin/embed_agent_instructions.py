@@ -13,6 +13,8 @@ import os
 import sqlite3
 import sys
 
+from m3_core.paths import seam_backend, seam_dialect
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 
@@ -241,13 +243,13 @@ async def main() -> None:
 
     # ── Step 1: soft-delete any prior architecture items ──────────────────────
     print("\n[1/3] Cleaning prior architecture memory items...")
-    conn = sqlite3.connect(_db_path())
-    prior_ids = [
-        r[0] for r in conn.execute(
-            "SELECT id FROM memory_items WHERE agent_id = 'system' AND source = 'architecture'",
-        ).fetchall()
-    ]
-    conn.close()
+    with seam_backend().open_readonly(_db_path()) as conn:
+        prior_ids = [
+            r[0] for r in conn.execute(
+                "SELECT id FROM memory_items WHERE agent_id = 'system' "
+                "AND source = 'architecture'",
+            ).fetchall()
+        ]
 
     if prior_ids:
         for pid in prior_ids:
@@ -282,18 +284,19 @@ async def main() -> None:
 
     # ── Step 3: verify all embeddings landed ──────────────────────────────────
     print("\n[3/3] Verifying embeddings...")
-    conn = sqlite3.connect(_db_path())
-    ok = 0
-    for item_id in written_ids:
-        row = conn.execute(
-            "SELECT dim FROM memory_embeddings WHERE memory_id = ?", (item_id,)
-        ).fetchone()
-        if row:
-            ok += 1
-            print(f"  ✅  {item_id[:8]}… dim={row[0]}")
-        else:
-            print(f"  ❌  {item_id[:8]}… NO EMBEDDING")
-    conn.close()
+    _p = seam_dialect().param()
+    with seam_backend().open_readonly(_db_path()) as conn:
+        ok = 0
+        for item_id in written_ids:
+            row = conn.execute(
+                f"SELECT dim FROM memory_embeddings WHERE memory_id = {_p}",
+                (item_id,),
+            ).fetchone()
+            if row:
+                ok += 1
+                print(f"  ✅  {item_id[:8]}… dim={row[0]}")
+            else:
+                print(f"  ❌  {item_id[:8]}… NO EMBEDDING")
 
     print(f"\n{'='*60}")
     print(f"  {ok}/{len(SECTIONS)} sections embedded successfully.")

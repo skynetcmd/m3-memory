@@ -17,6 +17,8 @@ import os
 import re
 from typing import Any
 
+from m3_core.paths import seam_backend, seam_dialect
+
 
 def _fmt_dual_time(value: "object") -> str:
     """'LOCAL (ZULU)' timestamp — mirrors sections._fmt_dual_time (house convention)."""
@@ -851,14 +853,18 @@ def _sqlite_store(db_path: str) -> "dict | None":
     if not db_path or not os.path.exists(db_path):
         return None
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
-    except sqlite3.Error:
+        _d = seam_dialect()
+        _cm = seam_backend().open_readonly(str(db_path))
+    except Exception:  # noqa: BLE001 — unreachable store → no block to render
         return None
     try:
+      with _cm as conn:
         def _has(t: str) -> bool:
-            return conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (t,)
-            ).fetchone() is not None
+            # sqlite_master is a SQLite-only catalog; table_exists() renders the
+            # portable probe (information_schema on PG) with the same
+            # "one row iff present" contract.
+            _sql, _params = _d.table_exists(t)
+            return conn.execute(_sql, _params).fetchone() is not None
 
         rows, last = 0, None
         if _has("memory_items"):
@@ -871,10 +877,8 @@ def _sqlite_store(db_path: str) -> "dict | None":
         elif _has("leaves"):
             rows = conn.execute("SELECT COUNT(*) FROM leaves").fetchone()[0]
         return {"path": db_path, "rows": rows, "last_updated": _fmt_dual_time(last)}
-    except sqlite3.Error:
+    except Exception:  # noqa: BLE001 — a health probe never breaks the page
         return None
-    finally:
-        conn.close()
 
 
 def _backend_block() -> dict:
@@ -973,25 +977,23 @@ def _cdw_block() -> "dict | None":
         core_db = resolve_db_path(None)
     except Exception:  # noqa: BLE001
         return out
-    if not core_db or not os.path.exists(core_db):
+    if not core_db:
         return out
     try:
-        conn = sqlite3.connect(f"file:{core_db}?mode=ro", uri=True, timeout=5.0)
-    except sqlite3.Error:
-        return out
-    try:
-        have = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_watermarks'"
-        ).fetchone()
-        if have:
-            for direction, ts in conn.execute(
-                "SELECT direction, last_synced_at FROM sync_watermarks ORDER BY direction"
-            ).fetchall():
-                out["watermarks"].append({"direction": direction, "last_sync": _fmt_dual_time(ts)})
-    except sqlite3.Error:
+        _d = seam_dialect()
+        with seam_backend().open_readonly(str(core_db)) as conn:
+            # sqlite_master is SQLite-only; table_exists() is the portable probe.
+            _sql, _params = _d.table_exists("sync_watermarks")
+            if conn.execute(_sql, _params).fetchone():
+                for direction, ts in conn.execute(
+                    "SELECT direction, last_synced_at FROM sync_watermarks "
+                    "ORDER BY direction"
+                ).fetchall():
+                    out["watermarks"].append(
+                        {"direction": direction, "last_sync": _fmt_dual_time(ts)}
+                    )
+    except Exception:  # noqa: BLE001 — a health probe never breaks the page
         pass
-    finally:
-        conn.close()
     return out
 
 

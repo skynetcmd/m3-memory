@@ -90,6 +90,12 @@ _EXEMPT = {
     "bin/setup_test_db.py":
         "Builds throwaway fixture databases.",
 
+    # --- Correctly capability-gated already; converting would be wrong. ---
+    "bin/enrich/prep.py":
+        "Replays a SQLite-DIALECT migration file (executescript + sqlite_master). "
+        "Returns early on any non-sqlite backend; PG gets these tables from its "
+        "own pg_040 migration. Documented in the function's own docstring.",
+
     # --- Must never fail on a seam import error. ---
     "bin/hooks/chatlog/session_start_capture_check.py":
         "Session-start hook: a seam import error must not break session start.",
@@ -131,7 +137,7 @@ def _raw_sites():
 # "sqlite"` with an honest n/a on PG) and are fine; the rest assume SQLite
 # unconditionally. Started at 71; auth_utils' vault probe was the first
 # conversion (a real PG defect, not tidiness -- see that commit).
-_BUDGET = 57
+_BUDGET = 51
 
 
 class TestRawConnectionDrift(unittest.TestCase):
