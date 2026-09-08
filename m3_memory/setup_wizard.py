@@ -469,26 +469,29 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         # Upgrade of a host that already has the tier-1 native wheel: keep it
         # (don't rip out a working embedder), but this is no longer what a FRESH
         # install adds by default — the shared tier-2 server is.
-        plan.install_gpu_embedder = True  # keep it; install step refreshes the wheel
-        _ok("  Project Oxidation native embedder already installed — keeping it "
+        # (The WHEEL itself is refreshed to the pinned version by
+        # _step_rust_core regardless of this flag; this only preserves the
+        # user's existing choice to also run tier 1 IN-PROCESS.)
+        plan.install_gpu_embedder = True
+        _ok("  Tier-1 in-process embedder already active — keeping it "
             "(skipping the embedder prompt; this is an upgrade).")
     else:
         print()
-        print("  Embedder — the default is the SHARED server (tier 2, on :8082);")
-        print("  the tier-1 native in-process wheel (Project Oxidation) is OPTIONAL:")
-        print("    The shared server is installed either way and is what every m3")
-        print("    process uses. Speed is not the reason to choose between them —")
-        print("    an embed call is already low-µs, so tier 1 vs tier 2 latency is")
-        print("    typically not noticeable. The difference is SHARING: tier 1 runs")
-        print("    IN-PROCESS and can't be shared, so each m3 process would load")
-        print("    its own model/GPU context. The shared server needs just one.")
-        print("    Only install tier 1 if you specifically want a self-contained,")
-        print("    no-server in-process embedder. Installing it is a SAFE attempt:")
-        print("    if no prebuilt wheel matches, m3 stays fully functional (we")
-        print("    never auto-compile from source) and prints how to build one.")
+        print("  Embedder — the native Rust core is installed EITHER WAY (it is")
+        print("  what the shared server binary ships inside). This question is")
+        print("  only about ALSO running the in-process embedder:")
+        print("    TIER 2 (default): one shared server on :8082 that every m3")
+        print("    process reuses — one model, one GPU context.")
+        print("    TIER 1 + TIER 2: additionally embed IN-PROCESS. Speed is not")
+        print("    the reason — an embed call is already low-µs, so per-call")
+        print("    latency is typically not noticeable. Tier 1 pays off for")
+        print("    HIGH-VOLUME bursts (bulk file/directory ingestion), where a")
+        print("    self-contained embedder beats round-tripping every chunk.")
+        print("    The cost: tier 1 can't be shared, so each process that uses")
+        print("    it loads its own model/GPU context.")
         plan.install_gpu_embedder = _ask_yes_no(
-            "  Also install the tier-1 native in-process wheel? (not needed for "
-            "the shared server)",
+            "  Also run the tier-1 in-process embedder? (the shared tier-2 "
+            "server is installed regardless)",
             default=False,
         )
         if plan.install_gpu_embedder:
@@ -1845,6 +1848,86 @@ def _step_cpu_sovereign_embedder() -> bool:
         return True  # non-fatal
 
 
+def _step_rust_core(plan: "SetupPlan") -> bool:
+    """Ensure the m3-core-rs native wheel is present AND at the pinned version.
+
+    ALWAYS runs, on install and on upgrade, regardless of which embedder tier
+    the user picks. The Rust core is baseline infrastructure, not a tier choice.
+    m3 has shipped Rust-enabled by default for several versions; this step is
+    what makes that true IN FACT rather than only in the docs.
+
+    The user's actual choice is one of three, and the core is required in all
+    three:
+
+      * TIER 2 alone (default) — the shared server on :8082 runs the
+        `m3-embed-server` binary that ships INSIDE this wheel;
+        embedder_admin._server_binary() resolves it from the m3_core_rs package
+        dir. No wheel, no shared server.
+      * TIER 1 AND TIER 2 — the in-process EmbeddedEmbedder from this same
+        wheel, alongside the shared server. Tier 1 is additive, not a
+        replacement: it is the self-contained hot path for high-volume bursts
+        (bulk ingestion), while the shared server still serves every other
+        process.
+      * TIER 3 (remote endpoint) — embeddings come from elsewhere, but every
+        other oxidised path (hashing, vector ops, ranking, redaction,
+        tokenisation) still runs through this core.
+
+    So the tier question is WHICH EMBEDDER RUNS, not whether the core exists.
+    Before this step existed, declining the tier-1 prompt also declined the
+    wheel, and `m3 embedder install` then failed with "m3-embed-server binary
+    not found" — whose own fix line is `m3 embedder install-gpu`, the step the
+    user had just been asked to skip. A default install therefore advertised
+    "sovereign CPU embedder — always installed" and shipped neither the server
+    nor the core.
+
+    Version-aware by design: is_rust_core_current() compares the installed
+    __version__ against M3_CORE_RS_VERSION, so an UPGRADE with a stale wheel
+    reinstalls rather than being skipped. That is what makes "the latest core
+    is running after an upgrade" true rather than aspirational.
+
+    Never fatal, and never compiles from source unless the user opted in --
+    a host with no matching prebuilt wheel degrades to the pure-Python path
+    with guidance, exactly as before.
+    """
+    try:
+        from m3_memory.rust_core_install import (
+            M3_CORE_RS_VERSION,
+            active_embedder_tier,
+            is_rust_core_current,
+        )
+    except Exception as e:  # noqa: BLE001 — never block setup on this probe
+        _warn(f"could not probe the native core ({e}); continuing")
+        return False
+
+    try:
+        if is_rust_core_current():
+            cur = active_embedder_tier()
+            _ok(f"native core current: m3_core_rs {cur.get('version')} "
+                f"({cur.get('backend') or 'cpu'})")
+            return True
+    except Exception:  # noqa: BLE001 — fall through and (re)install
+        pass
+
+    _say(f"Step 2/5: installing native core m3-core-rs {M3_CORE_RS_VERSION} "
+         "(shared by every embedder tier)")
+    cmd = [sys.executable, "-m", "m3_memory.cli", "embedder", "install-gpu"]
+    if not plan.allow_native_source_build:
+        cmd.append("--no-source-fallback")
+    try:
+        _run(cmd)
+        _ok(f"native core installed (m3-core-rs {M3_CORE_RS_VERSION})")
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        rc = getattr(e, "returncode", "n/a")
+        _warn(f"native core not installed (exit {rc}) — m3 remains fully usable:")
+        try:
+            from m3_memory.rust_core_install import oxidation_fallback_note
+            print(oxidation_fallback_note(indent="    "))
+        except Exception:  # noqa: BLE001
+            print("    Embeddings continue via the HTTP fallback path.")
+        return False
+
+
 def _step_gpu_embedder(plan: "SetupPlan") -> bool:
     """Install the Project Oxidation native in-process embedder.
 
@@ -3072,12 +3155,13 @@ def run_setup(args: argparse.Namespace) -> int:
     print(f"  agents       : {', '.join(targets) if targets else '(none)'}")
     print(f"  capture mode : {plan.capture_mode}")
     print("  Embedder     : sovereign CPU (BGE-M3 on :8082) — always installed")
+    _src = "prebuilt; source-build if no match" if plan.allow_native_source_build \
+        else "prebuilt only (pure-Python fallback if no match)"
+    print(f"  Rust core    : m3-core-rs, verified latest ({_src})")
     if plan.install_gpu_embedder:
-        src = "prebuilt; source-build if no match" if plan.allow_native_source_build \
-            else "prebuilt only (pure-Python fallback if no match)"
-        print(f"  Oxidation    : native wheel ({src})")
+        print("  Embed tiers  : tier 1 (in-process) + tier 2 (shared :8082)")
     else:
-        print("  Oxidation    : skipped (pure-Python embed path)")
+        print("  Embed tiers  : tier 2 (shared :8082)")
     if plan.endpoint:
         print(f"  LLM endpoint : {plan.endpoint}")
     if plan.cognitive_loop:
@@ -3135,6 +3219,12 @@ def run_setup(args: argparse.Namespace) -> int:
         if not _step_install_m3(plan):
             _err("setup aborted")
             return 2
+        # The native core comes FIRST and unconditionally: tier 2's shared
+        # server binary ships inside this wheel, so installing the embedder
+        # before the core is what produced "m3-embed-server binary not found"
+        # on a default install. Also re-runs on upgrade to pull a stale wheel
+        # forward to the pinned version.
+        _step_rust_core(plan)
         _step_cpu_sovereign_embedder()
         if plan.install_gpu_embedder:
             _step_gpu_embedder(plan)

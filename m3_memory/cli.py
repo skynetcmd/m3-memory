@@ -286,6 +286,99 @@ def _warn_if_pypi_newer() -> None:
         pass
 
 
+def _offer_rust_core_upgrade(
+    *, interactive: bool, assume_yes: bool = False, skip: bool = False,
+) -> None:
+    """Offer to upgrade the native m3-core-rs wheel when it is behind the pin.
+
+    `m3 update` re-syncs the PAYLOAD; nothing in that path has ever touched the
+    native core (only `install_os.py` and `m3 embedder install-gpu` call
+    install_rust_core). So a user who runs `pipx upgrade m3-memory` and then
+    `m3 update` lands on NEW Python code with an OLD Rust core, silently: the
+    version skew is invisible and there is no prompt telling them a newer core
+    exists.
+
+    That skew is degraded, not broken -- memory/tokens.py cascades
+    Rust -> caller exact_fn -> estimator, so an old wheel simply falls back to
+    the estimator and stays correct. But the user quietly loses the exact
+    count_tokens path they upgraded to get, which is precisely the kind of
+    "it says it upgraded, so it must be fixed" trust gap that costs us.
+
+    Default is YES: the pin names a Release known to carry all 7 backends x 4
+    interpreters, so accepting is the safe, expected answer. Declining is
+    non-destructive -- the tier-2 HTTP fallback keeps embeddings working.
+
+    Best-effort and advisory: any import/probe failure is swallowed, exactly
+    like _warn_if_pypi_newer. NEVER prompts when stdin is not a TTY -- a
+    scripted `m3 update` must not block on input, and a hung prompt in CI is a
+    worse failure than a stale core.
+    """
+    try:
+        from m3_memory.rust_core_install import (
+            M3_CORE_RS_VERSION,
+            installed_rust_core_version,
+            is_rust_core_current,
+        )
+
+        if is_rust_core_current():
+            return  # already at or ahead of the pin — say nothing
+        if skip:
+            return  # caller opted out entirely (--no-core)
+
+        have = installed_rust_core_version() or "not installed"
+        print(
+            f"\n[m3] The native Rust core is behind this release: "
+            f"{have} installed, {M3_CORE_RS_VERSION} expected.\n"
+            f"     `m3 update` re-syncs the payload only — it does not replace "
+            f"the native wheel.\n"
+            f"     Embeddings still work (tier-2 fallback), but you are missing "
+            f"this version's core.",
+            file=sys.stderr,
+        )
+
+        if assume_yes:
+            print(f"     Installing m3-core-rs {M3_CORE_RS_VERSION} (--yes-core).",
+                  file=sys.stderr)
+        elif not interactive:
+            # Non-TTY (CI, piped, hook): report and leave. Blocking a scripted
+            # `m3 update` on a prompt is a worse failure than a stale core.
+            print(
+                "     Install it with:  m3 embedder install-gpu"
+                "   (or `m3 update --yes-core`)",
+                file=sys.stderr,
+            )
+            return
+        else:
+            try:
+                ans = input(
+                    f"  Install m3-core-rs {M3_CORE_RS_VERSION} now? [Y/n] "
+                ).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                print("     Skipped. Install later with:  m3 embedder install-gpu",
+                      file=sys.stderr)
+                return
+            if ans in ("n", "no"):
+                print("     Skipped. Install later with:  m3 embedder install-gpu",
+                      file=sys.stderr)
+                return
+
+        from m3_memory.rust_core_install import install_rust_core
+
+        # allow_source_fallback=False for the same reason install_os.py sets it:
+        # `m3 update` must not silently launch a multi-minute Rust+cmake build.
+        # If no prebuilt matches, install_rust_core prints the manual recipe.
+        rc = install_rust_core(allow_source_fallback=False)
+        if rc != 0:
+            print(
+                f"\n[m3] Native core install did not complete (exit {rc}). "
+                f"Embeddings continue via the tier-2 fallback.",
+                file=sys.stderr,
+            )
+    except Exception:  # noqa: BLE001 — advisory only, never fail the command
+        pass
+
+
 def _cmd_stop(args: argparse.Namespace) -> int:
     """`m3 stop` — quiesce every m3 DB-writer for this engine root.
 
@@ -344,6 +437,13 @@ def _cmd_update(args: argparse.Namespace) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     _warn_if_pypi_newer()
+    # The payload is now current but the NATIVE core is not covered by that
+    # re-sync; offer it explicitly rather than leaving a silent version skew.
+    _offer_rust_core_upgrade(
+        interactive=sys.stdin.isatty(),
+        assume_yes=getattr(args, "yes_core", False),
+        skip=getattr(args, "no_core", False),
+    )
     return 0
 
 
@@ -1282,6 +1382,15 @@ Examples:
     p_update.add_argument(
         "--tag", default=None,
         help=f"Override the GitHub tag to fetch (default: v{__version__}).",
+    )
+    p_update.add_argument(
+        "--yes-core", dest="yes_core", action="store_true",
+        help="Install the native m3-core-rs wheel without prompting when it is "
+             "behind this release (for scripted/non-interactive updates).",
+    )
+    p_update.add_argument(
+        "--no-core", dest="no_core", action="store_true",
+        help="Never offer the native m3-core-rs upgrade, even if it is stale.",
     )
     p_update.set_defaults(func=_cmd_update)
 

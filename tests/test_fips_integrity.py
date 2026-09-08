@@ -118,6 +118,36 @@ def _run_fips_subprocess(body: str, env: dict) -> dict:
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def _restore_crypto_provider():
+    """Undo `_reload_provider`'s module mutation after every test in this file.
+
+    `_reload_provider` calls `importlib.reload(crypto_provider)` to re-evaluate
+    module-level env knobs. monkeypatch restores the ENV VARS at teardown, but
+    nothing restored the MODULE: the last reload's state (typically
+    M3_CRYPTO_BACKEND=DEFAULT) leaked into every test that ran afterwards in the
+    same process.
+
+    That is a cross-file leak, not a local quirk. `crypto_provider` sits under
+    the embed path, so a later test importing `memory.embed` could bind a
+    provider object reloaded under this file's env rather than its own —
+    reproduced 2026-09-07: `test_zero_lag_write.py::test_write_defers_and_is_
+    fast_without_embedder` passes alone and FAILS when this file runs first
+    (that test's own docstring already documents being sensitive to exactly this
+    class of module eviction). The failure blames the victim, so bisecting to
+    the cause costs real time.
+
+    Reloading once more at teardown, under the pristine environment monkeypatch
+    has by then restored, returns the module to the state the next test expects.
+    """
+    yield
+    try:
+        import crypto_provider
+        importlib.reload(crypto_provider)
+    except Exception:  # noqa: BLE001 — teardown must never mask a test failure
+        pass
+
+
 def _reload_provider(monkeypatch, backend=None, fips_mode=None, strict=None):
     """Reload crypto_provider with specific env knobs (DEFAULT backend only — the
     native-wolfSSL path is exercised via _run_fips_subprocess to avoid the #85
