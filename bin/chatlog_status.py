@@ -27,10 +27,15 @@ import chatlog_config
 # (Finding L), so the SQLite dialect is resolved here.
 try:  # pragma: no cover - import shim for standalone execution
     from memory.backends.sqlite_backend import SqliteDialect as _SqliteDialect
-    _has_content = _SqliteDialect(backend="sqlite", param_style="qmark").has_content
+    _SQL = _SqliteDialect(backend="sqlite", param_style="qmark")
+    _has_content = _SQL.has_content
+    _now_minus_minutes = _SQL.now_minus_minutes
 except Exception:  # pragma: no cover
     def _has_content(column: str) -> str:
         return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
+
+    def _now_minus_minutes(p: str) -> str:
+        return f"datetime('now', '-' || {p} || ' minutes')"
 
 
 logger = logging.getLogger("chatlog_status")
@@ -273,10 +278,13 @@ def _recent_write_count(config: chatlog_config.ChatlogConfig,
             # letters and POSIX paths alike), keeping this cross-platform (§1).
             uri = f"{Path(db).as_uri()}?mode=ro"
             conn = sqlite3.connect(uri, uri=True, timeout=5)
+            # Seam fragment, not the SQLite-only `datetime('now', ?)` form:
+            # that binds a "-N minutes" MODIFIER STRING, which PostgreSQL
+            # cannot parse. now_minus_minutes() binds a plain INTEGER instead.
             row = conn.execute(
                 "SELECT COUNT(*) FROM memory_items WHERE type='chat_log' "
-                "AND created_at > datetime('now', ?)",
-                (f"-{int(window_min)} minutes",),
+                f"AND created_at > {_now_minus_minutes('?')}",
+                (int(window_min),),
             ).fetchone()
             queried_ok = True  # only reached if the query itself did not raise
             n = int(row[0]) if row else 0

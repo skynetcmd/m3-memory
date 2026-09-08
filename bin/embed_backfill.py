@@ -87,12 +87,16 @@ try:  # pragma: no cover - import shim for standalone execution
     _SQL = _SqliteDialect(backend="sqlite", param_style="qmark")
     _byte_length = _SQL.byte_length
     _has_content = _SQL.has_content
+    _now_minus_days = _SQL.now_minus_days
 except Exception:  # pragma: no cover
     def _byte_length(column: str) -> str:
         return f"LENGTH(CAST({column} AS BLOB))"
 
     def _has_content(column: str) -> str:
         return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
+
+    def _now_minus_days(p: str) -> str:
+        return f"datetime('now', '-' || {p} || ' days')"
 
 
 
@@ -249,9 +253,12 @@ def _build_query(
         where.append("mi.id LIKE ?")
         params.append(f"{args.id_prefix.lower()}%")
     if args.max_age_days is not None:
-        # Older than N days = created_at < (now - N days)
-        where.append("mi.created_at < datetime('now', ?)")
-        params.append(f"-{int(args.max_age_days)} days")
+        # Older than N days = created_at < (now - N days). The expression comes
+        # from the seam: `datetime('now', ?)` binding a "-N days" MODIFIER
+        # STRING is SQLite-only and raises on PostgreSQL. now_minus_days() binds
+        # a plain INTEGER instead, which both dialects accept.
+        where.append(f"mi.created_at < {_now_minus_days('?')}")
+        params.append(int(args.max_age_days))
 
     sql = f"""
         SELECT mi.id, mi.content, mi.title, mi.metadata_json

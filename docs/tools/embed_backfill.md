@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_backfill.py
-sha1: 889ee46a5fb0
-mtime_utc: 2026-09-07T21:42:25.291356+00:00
-generated_utc: 2026-09-07T21:45:35.813373+00:00
+sha1: fedbf86fcc43
+mtime_utc: 2026-09-08T01:08:09.053387+00:00
+generated_utc: 2026-09-08T01:08:56.766614+00:00
 private: false
 ---
 
@@ -60,7 +60,7 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 
 ## Entry points
 
-- `def main()` (line 544)
+- `def main()` (line 551)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -111,10 +111,10 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 
 **sqlite**
 
-- `sqlite3.connect()  → `str(args.db)`` (line 338)
-- `sqlite3.connect()  → `str(db_path)`` (line 147)
-- `sqlite3.connect()  → `str(db_path)`` (line 276)
-- `sqlite3.connect()  → `str(db_path)`` (line 304)
+- `sqlite3.connect()  → `str(args.db)`` (line 345)
+- `sqlite3.connect()  → `str(db_path)`` (line 151)
+- `sqlite3.connect()  → `str(db_path)`` (line 283)
+- `sqlite3.connect()  → `str(db_path)`` (line 311)
 
 
 ---
