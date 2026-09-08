@@ -100,6 +100,45 @@ except Exception:  # pragma: no cover
 
 
 
+@contextmanager
+def _bound_db(db_path):
+    """Yield a seam connection bound to `db_path` for the duration of a block.
+
+    This module sweeps an ARBITRARY `--db`, while `memory.db._db()` opens from
+    the ACTIVE CONTEXT's pool — which is why every query here used to open its
+    own raw `sqlite3.connect`. `active_database(path)` closes that gap: it binds
+    the path via ContextVar for the block, so `_db()` targets the sweep's
+    database and the module inherits the backend routing, the connection pool,
+    and the pragma stack instead of hand-rolling all three.
+
+    Falls back to a raw connection when the seam is unavailable (standalone
+    execution without the payload on sys.path). Read-mostly queries only —
+    writes still funnel through `mc._db()` in the write callback, as before.
+    """
+    try:
+        from m3_core.context import M3Context  # type: ignore
+        from m3_sdk import active_database  # type: ignore
+    except Exception:  # pragma: no cover - standalone fallback
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        try:
+            conn.execute("PRAGMA busy_timeout=30000")
+            yield conn
+        finally:
+            conn.close()
+        return
+    # Deliberately NOT memory.db._db(): that calls _lazy_init(), which runs
+    # schema creation and backfills on first touch of a path. This sweeper is
+    # READ-ONLY over an arbitrary --db and must never mutate the schema of a
+    # database it was merely pointed at — a caller sweeping a bench workspace or
+    # a colleague's export would silently have it migrated. Going through the
+    # context's own pool gives the pragma stack and connection reuse WITHOUT the
+    # write-path side effects. `active_database` keeps any nested seam call
+    # (the write callback's mc._db()) pointed at the same store.
+    with active_database(str(db_path)):
+        with M3Context.for_db(str(db_path)).get_sqlite_conn() as conn:
+            yield conn
+
+
 class Counters(_LibCounters):  # type: ignore[misc, valid-type]
     """Backwards-compat shim: subclass of lib Counters with one extra attr.
 
@@ -280,11 +319,8 @@ def _count_pending(db_path: Path, args: argparse.Namespace) -> int:
     )
     # Strip ORDER BY + LIMIT (we don't pass a LIMIT param for count)
     count_sql = count_sql.split("ORDER BY")[0]
-    conn = sqlite3.connect(str(db_path), timeout=30.0)
-    try:
+    with _bound_db(db_path) as conn:
         return conn.execute(count_sql, params).fetchone()[0]
-    finally:
-        conn.close()
 
 
 def count_oversize_excluded(db_path: Path, args: argparse.Namespace) -> int:
@@ -308,13 +344,11 @@ def count_oversize_excluded(db_path: Path, args: argparse.Namespace) -> int:
               SELECT 1 FROM memory_embeddings me WHERE me.memory_id = mi.id)
           AND {_byte_length("mi.content")} > ?
     """
-    conn = sqlite3.connect(str(db_path), timeout=30.0)
     try:
-        return conn.execute(sql, (int(max_row_bytes),)).fetchone()[0]
-    except sqlite3.Error:
+        with _bound_db(db_path) as conn:
+            return conn.execute(sql, (int(max_row_bytes),)).fetchone()[0]
+    except Exception:  # noqa: BLE001 — informational count; never fail the sweep
         return 0
-    finally:
-        conn.close()
 
 
 # ── Main async loop ───────────────────────────────────────────────────────
@@ -342,12 +376,8 @@ async def _run_sweep(args: argparse.Namespace, counters: Counters) -> int:
     def _fetch(after_id, limit):
         sql, params = _build_query(args, after_id=after_id)
         params_with_limit = params + [limit]
-        conn = sqlite3.connect(str(args.db), timeout=30.0)
-        try:
-            conn.execute("PRAGMA busy_timeout=30000")
+        with _bound_db(args.db) as conn:
             return conn.execute(sql, params_with_limit).fetchall()
-        finally:
-            conn.close()
 
     # ── Write callback ────────────────────────────────────────────────
     # Persists one embedding row. Uses mc._db() so writes funnel through
