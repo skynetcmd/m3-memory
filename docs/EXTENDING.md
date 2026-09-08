@@ -91,6 +91,55 @@ change to the seam signature.
 
 ---
 
+## Recipe 1b — Open a database from feature code
+
+Recipe 1 is for the person *adding* a backend. This one is for everyone else —
+the authors who, per DESIGN_PHILOSOPHIES §1, "actually leak backend
+assumptions". If you are writing a script, sweeper, probe or tool that needs to
+read or write a database, **do not call `sqlite3.connect`**.
+
+A raw connection is not untidy, it is a site that cannot work on any backend but
+SQLite — and PostgreSQL ships today. It also bypasses backend routing, the
+connection pool, and the pragma stack (`busy_timeout`/WAL/`foreign_keys`), which
+is how two files ended up with different busy_timeouts for the same database.
+
+Pick by intent:
+
+| You need | Use | Notes |
+|---|---|---|
+| Read a specific DB by path | `active_backend().open_readonly(path)` | SQLite honors the path; PG ignores it and yields a pooled connection. Backend-blind at the call site. |
+| Read/write the ACTIVE store | `M3Context.for_db(path).get_sqlite_conn()` | Pooled, pragmas applied. |
+| Scope a whole block to one DB | `with active_database(path): …` then the normal seam calls | Binds the path via ContextVar so `memory.db._db()` targets it. |
+
+```python
+from memory.backends import active_backend       # NOT get_backend()
+
+with active_backend().open_readonly(db_path) as conn:
+    row = conn.execute("SELECT 1 FROM my_table LIMIT 1").fetchone()
+```
+
+Three traps worth naming, each of which has bitten:
+
+- **`os.path.exists(db_path)` is itself a SQLite assumption.** On PostgreSQL
+  there is no file, so the guard returns False and the code concludes the store
+  is empty. That is exactly how `_vault_has_secrets()` reported an existing
+  vault as empty — an answer that makes the caller mint a fresh device salt and
+  orphan every encrypted secret.
+- **`memory.db._db()` is not a drop-in for an arbitrary `--db`.** It calls
+  `_lazy_init()`, which runs migrations on first touch. A read-only sweeper
+  pointed at a bench workspace or a colleague's export would silently migrate
+  it. Use `active_database(path)` or the context's pool instead.
+- **Literal `?` placeholders don't port.** Ask the dialect
+  (`dialect().param()` / `placeholder(n)`); PostgreSQL uses `%s`.
+
+Legitimate exceptions exist — migrations must bootstrap a schema before a seam
+exists, and the backends themselves must open something. They are enumerated,
+with a reason each, in `tests/test_raw_connection_drift.py::_EXEMPT`. That test
+also ratchets the count of unconverted sites, so the debt can only shrink; if
+you convert some, lower its `_BUDGET` in the same change.
+
+---
+
 ## Recipe 2 — Add an agent framework
 
 An agent framework (LangChain is the shipped example) is a **thin adapter** — it

@@ -100,6 +100,39 @@ def _vault_db_path() -> str:
         return DB_PATH
 
 
+def _backend():
+    """The active storage backend, or a minimal SQLite-only shim.
+
+    auth_utils runs during installer bootstrap, where the seam may not be
+    importable yet (it is also the module the seam's own config path imports,
+    hence the lazy import in _vault_db_path above). Falling back keeps the
+    bootstrap working; the shim implements only open_readonly, and only for
+    SQLite, because that is the sole situation in which the seam is absent --
+    a PostgreSQL install always has the seam on sys.path by the time secrets
+    are read.
+    """
+    try:
+        from memory.backends import active_backend  # type: ignore
+        return active_backend()
+    except Exception:  # noqa: BLE001 — bootstrap: seam not importable yet
+        import sqlite3 as _sq
+        from contextlib import contextmanager
+
+        class _SqliteOnlyShim:
+            @staticmethod
+            @contextmanager
+            def open_readonly(db_path: str):
+                if not os.path.exists(db_path):
+                    raise FileNotFoundError(db_path)
+                c = _sq.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2)
+                try:
+                    yield c
+                finally:
+                    c.close()
+
+        return _SqliteOnlyShim()
+
+
 def get_master_key() -> str | None:
     """Retrieves the AGENT_OS_MASTER_KEY from the native OS keyring or environment."""
     val = os.getenv("AGENT_OS_MASTER_KEY", "").strip()
@@ -143,16 +176,18 @@ def _vault_has_secrets() -> bool:
     Any error → False (treat as 'no vault yet', i.e. let a fresh salt mint)."""
     try:
         vault_path = _vault_db_path()
-        if not os.path.exists(vault_path):
-            return False
-        conn = sqlite3.connect(vault_path, timeout=2)
-        try:
+        # synchronized_secrets lives in the MAIN store, so this must follow the
+        # store wherever it is. `os.path.exists` + sqlite3.connect asserted a
+        # local file, which on PostgreSQL is a stale-or-absent SQLite path: the
+        # probe returned False and a caller then treated an EXISTING install as
+        # fresh -- the exact "must NOT regenerate" case this function exists to
+        # prevent. open_readonly() is backend-blind (SQLite honors db_path, PG
+        # ignores it and yields a pooled connection).
+        with _backend().open_readonly(vault_path) as conn:
             row = conn.execute(
                 "SELECT 1 FROM synchronized_secrets LIMIT 1"
             ).fetchone()
             return row is not None
-        finally:
-            conn.close()
     except Exception:  # noqa: BLE001 — missing table / locked / unreadable → treat as empty
         return False
 

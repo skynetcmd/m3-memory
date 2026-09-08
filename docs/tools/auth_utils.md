@@ -1,8 +1,8 @@
 ---
 tool: bin/auth_utils.py
-sha1: 6a8a1d2b20d4
-mtime_utc: 2026-07-03T13:11:05.960523+00:00
-generated_utc: 2026-07-03T20:00:02.968340+00:00
+sha1: abb1762f6b62
+mtime_utc: 2026-09-08T04:58:30.665100+00:00
+generated_utc: 2026-09-08T05:08:53.548117+00:00
 private: false
 ---
 
@@ -50,16 +50,15 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 369)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 118)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 355)
-- `subprocess.run()` (line 384)
+- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 404)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 151)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 390)
+- `subprocess.run()` (line 419)
 
 **sqlite**
 
-- `sqlite3.connect()  → `_vault_db_path()`` (line 468)
-- `sqlite3.connect()  → `vault_path`` (line 148)
-- `sqlite3.connect()  → `vault_path`` (line 401)
+- `sqlite3.connect()  → `_vault_db_path()`` (line 503)
+- `sqlite3.connect()  → `vault_path`` (line 436)
 
 
 ---
@@ -69,6 +68,7 @@ _(no argparse arguments detected)_
 - `base64`
 - `cryptography.fernet (Fernet)`
 - `keyring`
+- `memory.backends (active_backend)`
 - `platform`
 - `unicodedata`
 
