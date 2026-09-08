@@ -69,21 +69,36 @@ jobs:
             exit 0
           fi
 
-          # PRESENT is not the same as VALID. A fine-grained PAT expires, and an
-          # expired one sails past a `-z` check straight into a hard 403 in the
-          # generator. That is exactly what happened: the PAT set 2026-07-14
-          # expired, and this workflow then failed EVERY Monday from at least
-          # 2026-08-10 to 2026-09-07 — five silent failures, ~13s each, while the
-          # README quietly served seven-week-old numbers. Nobody watches a green
-          # cron; nobody watches a red one either, unless it says why.
+          # PRESENT is not the same as WORKS. This workflow failed EVERY Monday
+          # from at least 2026-08-10 to 2026-09-07 — five silent failures, ~13s
+          # each, on `GitHub API 403 for skynetcmd/m3-memory: Forbidden`, while
+          # the README quietly served seven-week-old numbers. Nobody watches a
+          # green cron; nobody watches a red one either, unless it says why.
+          #
+          # The cause is NOT expiry and NOT scope. Checked directly on
+          # 2026-09-08: the M3_STARGAZER PAT has NO expiration date, was "last
+          # used within the last week", is scoped to exactly this repository,
+          # and carries "Read access to metadata" — precisely what the header
+          # above prescribes. The secret's timestamp matches the token's
+          # creation date, so the secret does hold that token. Why GitHub still
+          # answers 403 for it in Actions is UNRESOLVED; do not "fix" this by
+          # rotating a healthy token.
+          #
+          # Probe the endpoint the generator ACTUALLY calls (/stargazers with
+          # the starred_at media type), not /repos/{repo}. They have different
+          # access rules — that is the whole problem here — so a probe against
+          # the wrong one can pass while the real call 403s, which would make
+          # this guard worse than none.
           code="$(curl -sS -o /dev/null -w '%{http_code}' \
                     -H "Authorization: Bearer $M3_STARGAZER" \
-                    -H "Accept: application/vnd.github+json" \
-                    "https://api.github.com/repos/${{ github.repository }}")"
+                    -H "Accept: application/vnd.github.v3.star+json" \
+                    -H "X-GitHub-Api-Version: 2022-11-28" \
+                    -H "User-Agent: m3-star-history-generator" \
+                    "https://api.github.com/repos/${{ github.repository }}/stargazers?per_page=1")"
           if [ "$code" = "200" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::error title=M3_STARGAZER token is invalid::GitHub API returned HTTP $code for the repo endpoint. The badge refresh is DISABLED until this is fixed, and README badges will go stale. Rotate the fine-grained PAT (Metadata:read on this repo) and update the M3_STARGAZER secret."
+            echo "::error title=M3_STARGAZER cannot read the stargazers endpoint::GitHub returned HTTP $code for /stargazers with the starred_at media type. Badge refresh is DISABLED and README badges will go stale. Check the token's repository access and Metadata:read permission BEFORE rotating — a healthy token has already been ruled out once (2026-09-08)."
             echo "present=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
