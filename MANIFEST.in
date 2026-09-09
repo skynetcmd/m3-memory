@@ -28,6 +28,29 @@ global-exclude __pycache__/*
 global-exclude *.py[cod]
 global-exclude *.pdb
 
+# BUILD-TIME cost, not shipped content. None of these were ever IN the sdist,
+# but sdist assembly still WALKS them, and they dwarf the source: measured
+# 2026-09-09 a source install took ~4 minutes against a tree carrying
+# .mypy_cache 213M, build/ 133M, dist/ 39M and a 1.3G .venv (that venv is now
+# removed; these remain). Pruning them here is the difference between setuptools
+# stat-ing ~400M of junk on every `pip install .` and skipping it outright.
+#
+# NOTE the constraint recorded in pyproject.toml: package DISCOVERY must stay in
+# setup.py — declaring [tool.setuptools.packages.find] in pyproject overrides
+# setup.py's `packages=` and silently drops the payload from the wheel. MANIFEST
+# is the safe lever, because it controls sdist contents without touching
+# discovery.
+prune .mypy_cache
+prune .pytest_cache
+prune .ruff_cache
+prune build
+prune dist
+prune .venv
+prune venv
+prune .git
+prune .scratch
+global-exclude *.orig *.rej
+
 # Node build artifacts from the example frontends. These are GITIGNORED, but
 # setuptools packages by DIRECTORY, not by git status — so a developer who has
 # run `npm install` in examples/ ships their entire node_modules tree.

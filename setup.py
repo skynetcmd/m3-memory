@@ -60,7 +60,24 @@ def _payload_mapping():
         if not os.path.isdir(disk_root):
             continue
         for dirpath, dirnames, _files in os.walk(disk_root):
-            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            # Prune BUILD ARTIFACTS, not just __pycache__. This walk drives
+            # package_data = ["*"], so anything it descends into SHIPS.
+            #
+            # node_modules was the expensive miss: measured 2026-09-09 the
+            # published 2026.9.8.0 wheel carried **6,098 files / ~122 MB** of
+            # examples/homelab-dashboard/frontend/node_modules — a vendored JS
+            # dependency tree downloaded and installed by every
+            # `pip install m3-memory` user, none of whom asked for it. MANIFEST.in
+            # already prunes it, but MANIFEST governs the SDIST; the wheel is
+            # built from this mapping, which bypassed it entirely. The two lists
+            # have to agree, and only this one decides what ships in the wheel.
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in {
+                    "__pycache__", "node_modules", ".venv", "venv", ".git",
+                    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+                }
+            ]
             rel = os.path.relpath(dirpath, disk_root)
             pkg = pkg_root if rel == "." else pkg_root + "." + rel.replace(os.sep, ".")
             package_dir[pkg] = dirpath.replace(os.sep, "/")
