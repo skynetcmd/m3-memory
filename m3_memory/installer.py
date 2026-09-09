@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -1779,11 +1778,11 @@ def status_summary() -> dict:
     try:
         import sys as _sys
         _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
-        from m3_sdk import get_m3_engine_root
         # No is_file() gate: on PostgreSQL there is no agent_memory.db, so the
         # gate reported 0 memories for a populated store. The backend decides
         # whether a file is involved at all.
         from m3_core.paths import seam_backend
+        from m3_sdk import get_m3_engine_root
         main_db = Path(get_m3_engine_root()) / "agent_memory.db"
         with seam_backend().open_readonly(main_db.as_posix()) as conn:
             row = conn.execute(
@@ -2590,11 +2589,64 @@ def _agent_config_section() -> None:
         print("  [i] Run `m3 doctor --fix` to repoint the broken configs to the live install.")
 
 
+def _heal_config_bridge_path(*, apply: bool) -> "list[str]":
+    """Repoint the installer config's ``bridge_path`` at the live payload.
+
+    The bridge's canonical-path guard (memory_bridge.py) warns on every start
+    when ``Path(__file__)`` disagrees with this key, and tells the user to
+    "Run `m3 doctor --fix` to repoint it". Until now ``--fix`` did NOT touch
+    this key -- it repoints agent MCP configs, which is a DIFFERENT thing -- so
+    the command printed "1 repointed / Repair Summary: OK" and the warning
+    fired again on the very next start. A remedy that reports success without
+    remedying is worse than no remedy: it spends the user's trust in the
+    warning (§3 -- a false signal trains you to ignore the real one).
+
+    Found 2026-09-09 on an install whose config still named a legacy
+    ``~/.m3-memory/repo/bin`` path months after the payload moved into the
+    pipx venv. Harmless there only because the two files happened to be
+    byte-identical.
+
+    ONLY the wheel-packaged payload is recorded. ``find_bridge()`` also honours
+    ``$M3_PATH_BIN`` and a dev-checkout sibling, and writing either of those
+    into the config would record a developer's working tree (or a one-off env
+    override) as "the install" -- turning a transient path into persistent
+    state. In those cases the divergence is legitimate and expected, so we
+    leave the record alone and stay quiet.
+    """
+    packaged = Path(__file__).resolve().parent / "bin" / "memory_bridge.py"
+    if not packaged.is_file():
+        return []                      # not a packaged install — nothing to record
+    resolved = find_bridge()
+    if not resolved or Path(resolved).resolve() != packaged:
+        return []                      # env override or dev sibling — deliberate
+    cfg = load_config()
+    if not cfg:
+        return []                      # no install record to repair
+    current = cfg.get("bridge_path")
+    try:
+        if current and Path(current).expanduser().resolve() == packaged:
+            return []                  # already correct
+    except OSError:
+        pass                           # unresolvable path — treat as stale, rewrite
+    if not apply:
+        return [f"[!] config bridge_path is stale: {current} -> {packaged}"]
+    cfg["bridge_path"] = str(packaged)
+    save_config(cfg)
+    return [f"[+] repointed config bridge_path -> {packaged}"]
+
+
 def _heal_all_agents(*, force: bool = False) -> int:
     """Repoint every broken (or all, if force) agent ``memory`` config. Returns
     the count of files changed. Used by ``m3 doctor --fix`` and ``m3 setup``.
     """
     changed = 0
+    # The installer config's own bridge_path — the value the bridge's start-up
+    # warning names. Repaired here so `doctor --fix` actually does what that
+    # warning tells the user it will do.
+    for line in _heal_config_bridge_path(apply=True):
+        print(f"  {line}")
+        if line.lstrip().startswith("[+]"):
+            changed += 1
     for label, path in _known_agent_settings():
         msg = _heal_agent_settings(path, force=force)
         if msg:
@@ -2643,6 +2695,8 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
                   else "agent MCP configs: all healthy.")
         else:
             _agent_config_section()
+            for line in _heal_config_bridge_path(apply=False):
+                print(f"  {line}")
         _duplicate_registration_section()
         _deprecated_env_config_section()
         bridge = find_bridge()
@@ -2721,6 +2775,8 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
         print(f"  {n} config(s) repointed." if n else "  nothing to repoint — all healthy.")
     else:
         _agent_config_section()
+        for line in _heal_config_bridge_path(apply=False):
+            print(f"  {line}")
 
     _duplicate_registration_section()
 
