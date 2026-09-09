@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-08-12T00:59:01.840717+00:00._
+_Generated 2026-09-08T23:37:14.009535+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -127,6 +127,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/test_unified_router.py](test_unified_router.md) | (no docstring) |  |
 | [bin/thermal_utils.py](thermal_utils.md) | (no docstring) |  |
 | [bin/unified_ai.py](unified_ai.md) | Unified chat client across Gemini, Claude, and LM Studio. |  |
+| [bin/watch_pr_checks.py](watch_pr_checks.md) | Watch CI checks on one or more PRs until every check is terminal, then print a |  |
 | [bin/web_research_bridge.py](web_research_bridge.md) | (no docstring) |  |
 | [bin/weekly_auditor.py](weekly_auditor.md) | Weekly Audit Report -- M3 Memory |  |
 | [install_os.py](install_os.md) | (no docstring) |  |
