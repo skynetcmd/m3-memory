@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-09-08T23:37:14.009535+00:00._
+_Generated 2026-09-09T11:22:40.641999+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -30,6 +30,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/chatlog_status.py](chatlog_status.md) | chatlog_status.py — single-call summary of the chat log subsystem state. |  |
 | [bin/chatlog_status_line.py](chatlog_status_line.md) | chatlog_status_line.py — anomaly-only status line generator. |  |
 | [bin/chatlog_strip_framing_backfill.py](chatlog_strip_framing_backfill.md) | chatlog_strip_framing_backfill.py — one-off backfill that removes harness |  |
+| [bin/chatlog_timing.py](chatlog_timing.md) | Per-turn wall-clock timing from the chatlog — who spent the time, objectively. |  |
 | [bin/check_control_chars.py](check_control_chars.md) | Detect stray control characters in text files — the PowerShell backtick trap. |  |
 | [bin/check_tool_catalog_drift.py](check_tool_catalog_drift.md) | Single source of truth for the tool-catalog pre-push drift gate. |  |
 | [bin/cleanup_logs.sh](cleanup_logs_sh.md) | (no docstring) |  |
