@@ -26,7 +26,23 @@ sys.path.insert(0, str(_BIN))
 from conftest import pg_dsn
 
 pytestmark = pytest.mark.requires_pg
-_DSN = pg_dsn()
+
+
+def _dsn() -> str:
+    """Resolve the DSN LAZILY, at fixture time — never at module import.
+
+    A module-level ``_DSN = pg_dsn()`` is evaluated during pytest COLLECTION,
+    while conftest's autouse sandbox fixture clears M3_PG_URL/PG_URL per test
+    (deliberately — an ambient dev DSN must not leak into sqlite-default tests).
+    Whether this module saw the var then depends on collection/run ORDERING, so
+    the file passes alone and fails in a full lane on `assert _DSN is not None`.
+    """
+    d = pg_dsn()
+    assert d is not None, (
+        "no Postgres DSN — set M3_PRIMARY_PG_URL or M3_PG_URL. (The requires_pg "
+        "marker should have skipped this module.)"
+    )
+    return d
 
 
 @pytest.fixture()
@@ -35,7 +51,7 @@ def pg_conn():
     stray test table/version."""
     import migrate_pg
 
-    conn = migrate_pg._connect(_DSN)
+    conn = migrate_pg._connect(_dsn())
     cur = conn.cursor()
     # Ensure schema_versions exists with the baseline row; clean any prior test state.
     cur.execute(

@@ -25,7 +25,21 @@ _FORBIDDEN = [
 from conftest import pg_dsn
 
 pytestmark = pytest.mark.requires_pg
-_DSN = pg_dsn()
+def _dsn() -> str:
+    """Resolve the DSN LAZILY, at fixture time — never at module import.
+
+    A module-level ``_dsn() = pg_dsn()`` is evaluated during pytest COLLECTION,
+    while conftest's autouse sandbox fixture clears M3_PG_URL/PG_URL per test
+    (deliberately — an ambient dev DSN must not leak into sqlite-default tests).
+    Whether this module saw the var then depends on collection/run ORDERING, so
+    the file passes alone and fails in a full lane on `assert _dsn() is not None`.
+    """
+    d = pg_dsn()
+    assert d is not None, (
+        "no Postgres DSN — set M3_PRIMARY_PG_URL or M3_PG_URL. (The requires_pg "
+        "marker should have skipped this module.)"
+    )
+    return d
 
 
 def _blob(vec):
@@ -35,11 +49,10 @@ def _blob(vec):
 @pytest.fixture()
 def pg_seeded(monkeypatch):
     """Seed 3 deterministic items+embeddings on the PG cluster; backend selected."""
-    assert _DSN is not None
-    if any(f in _DSN for f in _FORBIDDEN):
+    if any(f in _dsn() for f in _FORBIDDEN):
         pytest.fail("refusing to run destructive tests against a forbidden host")
     monkeypatch.setenv("M3_DB_BACKEND", "postgres")
-    monkeypatch.setenv("M3_PG_URL", _DSN)
+    monkeypatch.setenv("M3_PG_URL", _dsn())
 
     from memory.backends import selector as _selector
     from memory.embed import _compatible_model_names
@@ -64,7 +77,7 @@ def pg_seeded(monkeypatch):
     ]
     qvec = unit(0)  # aligned with sp_a
 
-    b = PostgresBackend(dsn=_DSN)
+    b = PostgresBackend(dsn=_dsn())
     with b.connection() as c:
         cur = c.cursor()
         # Own the schema (other live tests recreate memory_items with different
@@ -132,7 +145,7 @@ def test_pg_memory_write_impl_end_to_end(monkeypatch):
     full write path (dialected SQL + connection routing + sqlite-compat adapter +
     JSONB empty-metadata normalization) works end to end."""
     monkeypatch.setenv("M3_DB_BACKEND", "postgres")
-    monkeypatch.setenv("M3_PG_URL", _DSN)
+    monkeypatch.setenv("M3_PG_URL", _dsn())
 
     from memory.backends import selector as _selector
 
@@ -140,7 +153,7 @@ def test_pg_memory_write_impl_end_to_end(monkeypatch):
     from memory.backends.postgres_backend import PostgresBackend
     from memory.write import memory_write_impl
 
-    b = PostgresBackend(dsn=_DSN)
+    b = PostgresBackend(dsn=_dsn())
     # Own the schema deterministically: other live tests recreate memory_items
     # with varying columns, so drop and build the full shape the write path binds
     # (21 columns) rather than relying on IF NOT EXISTS against a polluted table.
@@ -194,7 +207,7 @@ def test_pg_write_supersede_lifecycle_persists(monkeypatch):
     the caller logged success but nothing persisted. This exercises the whole
     chain end-to-end and asserts persistence."""
     monkeypatch.setenv("M3_DB_BACKEND", "postgres")
-    monkeypatch.setenv("M3_PG_URL", _DSN)
+    monkeypatch.setenv("M3_PG_URL", _dsn())
 
     from memory.backends import selector as _selector
 
@@ -202,7 +215,7 @@ def test_pg_write_supersede_lifecycle_persists(monkeypatch):
     from memory.backends.postgres_backend import PostgresBackend
     from memory.write import memory_supersede_impl, memory_write_impl
 
-    b = PostgresBackend(dsn=_DSN)
+    b = PostgresBackend(dsn=_dsn())
     # Own the schema: other live tests recreate memory_items with a minimal shape
     # (no updated_at etc.), so drop the core tables and let ensure_schema rebuild
     # the full schema — including memory_history/agents/corroborations.

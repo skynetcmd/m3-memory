@@ -31,26 +31,45 @@ _FORBIDDEN = [
 from conftest import pg_dsn
 
 pytestmark = pytest.mark.requires_pg
-_DSN = pg_dsn()
+
+
+def _dsn() -> str:
+    """Resolve the DSN LAZILY, at fixture time — never at module import.
+
+    A module-level ``_DSN = pg_dsn()`` is evaluated during pytest COLLECTION,
+    while conftest's autouse sandbox fixture clears M3_PG_URL/PG_URL per test
+    (deliberately: an ambient dev DSN must not leak into sqlite-default tests).
+    Whether the module saw the var therefore depends on collection/run ordering
+    — so the whole file passes alone and fails in a full lane with
+    `assert _DSN is not None`. Measured 2026-09-09: 15 failed / 25 errors in the
+    requires_pg lane, 0 when any of these files ran on its own.
+    """
+    d = pg_dsn()
+    assert d is not None, (
+        "no Postgres DSN — set M3_PRIMARY_PG_URL or M3_PG_URL. (The requires_pg "
+        "marker should have skipped this module; reaching here means the DSN was "
+        "scrubbed after collection.)"
+    )
+    return d
 
 
 @pytest.fixture()
 def backend(monkeypatch):
     """A PostgresBackend bound to the throwaway cluster, pool torn down after."""
-    assert _DSN is not None
+    _dsn_val = _dsn()
     for forbidden in _FORBIDDEN:
-        if forbidden in _DSN:
+        if forbidden in _dsn_val:
             pytest.fail(
                 f"refusing to run destructive tests against forbidden host {forbidden}"
             )
     monkeypatch.setenv("M3_DB_BACKEND", "postgres")
-    monkeypatch.setenv("M3_PG_URL", _DSN)
+    monkeypatch.setenv("M3_PG_URL", _dsn_val)
     from memory.backends import selector as _selector
 
     _selector._reset_for_tests()
     from memory.backends.postgres_backend import PostgresBackend
 
-    b = PostgresBackend(dsn=_DSN)
+    b = PostgresBackend(dsn=_dsn_val)
     yield b
     b.close()
 
@@ -197,7 +216,7 @@ def test_cas_supersede_exactly_one_winner(backend):
     import concurrent.futures as cf
     import threading
 
-    dsn = _DSN
+    dsn = _dsn()
     import psycopg2
 
     def setup():
