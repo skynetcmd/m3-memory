@@ -608,8 +608,23 @@ def has_entity_work(core_db: Optional[str], chatlog_db: Optional[str]) -> bool:
 
         return False
     except Exception as e:
-        logger.debug(f"Entity work check failed (non-fatal): {e}")
-        return True # Default to True to be safe
+        # Fail CLOSED, and say so at WARNING. This gate used to return True
+        # "to be safe", which is the opposite of safe: `more_work` feeds the
+        # idle-backlog drain, so a probe that keeps failing pins the loop to
+        # its ~1s floor forever (burst spent -> full interval -> re-arm ->
+        # burst again) on work it can never confirm exists. The eight sibling
+        # gates all return False on error and say "conservative"; only this one
+        # and has_enrich_work diverged, so the SAME outage produced opposite
+        # behaviour depending on which probe hit it first.
+        # debug-level also made it invisible (§3: never silent) -- this is a
+        # store that would not answer, not routine noise.
+        logger.warning(
+            "observed: entity work-gate probe failed (%s: %s); "
+            "assuming NO entity work this cycle -- a real backlog will be seen "
+            "once the store answers. inspect: store reachability / migrations",
+            type(e).__name__, e,
+        )
+        return False  # conservative: no work unless we can confirm some
 
 def has_enrich_work(core_db: Optional[str]) -> bool:
     """SQL check: Is the observation_queue or reflector_queue non-empty?
@@ -622,8 +637,16 @@ def has_enrich_work(core_db: Optional[str]) -> bool:
         res_ref = _probe_core(core_db, "SELECT 1 FROM reflector_queue LIMIT 1")
         return len(res_obs) > 0 or len(res_ref) > 0
     except Exception as e:
-        logger.debug(f"Enrich work check failed (non-fatal): {e}")
-        return True
+        # Fail CLOSED at WARNING, matching the sibling gates. See the note in
+        # has_entity_work: returning True here pins the idle-backlog drain to
+        # its short floor on work that was never confirmed.
+        logger.warning(
+            "observed: enrich work-gate probe failed (%s: %s); "
+            "assuming NO enrich work this cycle. inspect: observation_queue / "
+            "reflector_queue reachability",
+            type(e).__name__, e,
+        )
+        return False  # conservative: no LLM work unless we can confirm some
 
 
 def has_files_extract_work(files_db: Optional[str] = None) -> bool:
@@ -1081,7 +1104,15 @@ def has_classify_work(core_db: Optional[str]) -> bool:
         sql = "SELECT 1 FROM memory_items WHERE type='auto' AND COALESCE(is_deleted,0)=0 LIMIT 1"
         return len(_probe_core(core_db, sql)) > 0
     except Exception as e:  # noqa: BLE001 — conservative gate; don't spin on error
-        logger.debug(f"Classify work check failed (non-fatal): {e}")
+        # Already fails closed (correct); raised to WARNING so a store that
+        # will not answer is visible rather than looking like a healthy idle
+        # loop (§3: never silent).
+        logger.warning(
+            "observed: classify work-gate probe failed (%s: %s); "
+            "assuming NO classify work this cycle. inspect: core store "
+            "reachability / memory_items migrations",
+            type(e).__name__, e,
+        )
         return False
 
 
