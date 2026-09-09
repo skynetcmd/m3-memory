@@ -74,11 +74,33 @@ def register_backend(
     def _decorator(
         factory: "Callable[[], StorageBackend]",
     ) -> "Callable[[], StorageBackend]":
-        if name in _REGISTRY:
-            raise ValueError(
-                f"backend {name!r} is already registered; two modules must not "
-                f"claim the same backend name"
+        prior = _REGISTRY.get(name)
+        if prior is not None:
+            # A RE-IMPORT of the SAME module is idempotent, not a conflict. The
+            # guard exists to catch two DIFFERENT modules claiming one backend
+            # name; it cannot tell that from `importlib.reload` or a cleared
+            # sys.modules, which re-run this decorator on the same class.
+            #
+            # That false positive was real: the requires_pg lane failed with
+            # "backend 'postgres' is already registered" at fixture setup
+            # (measured 2026-09-09, 11 errors in test_postgres_backend_live.py
+            # alone) because its fixture re-imports PostgresBackend after
+            # _reset_for_tests(). Comparing __module__ + __qualname__ keeps the
+            # real invariant — a genuinely different claimant still raises —
+            # while letting the same class re-register itself.
+            same = (
+                getattr(prior.backend_factory, "__module__", None)
+                == getattr(factory, "__module__", object())
+                and getattr(prior.backend_factory, "__qualname__", None)
+                == getattr(factory, "__qualname__", object())
             )
+            if not same:
+                raise ValueError(
+                    f"backend {name!r} is already registered by "
+                    f"{getattr(prior.backend_factory, '__module__', '?')}."
+                    f"{getattr(prior.backend_factory, '__qualname__', '?')}; two "
+                    f"modules must not claim the same backend name"
+                )
         _REGISTRY[name] = _Entry(backend_factory=factory, dialect=dialect)
         return factory
 
