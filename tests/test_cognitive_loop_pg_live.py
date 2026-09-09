@@ -80,6 +80,18 @@ def test_work_gates_on_pg(pg):
             "INSERT INTO chat_log_items (id,type,content,scope) VALUES (%s,'chat_log','y','agent')",
             (str(uuid.uuid4()),),
         )
+        # has_entity_work counts only rows the extractor will ACTUALLY process:
+        # its `type IN (...)` list is m3_entities.DEFAULT_TYPES, and 'auto' is
+        # deliberately NOT in it (an 'auto' row is un-classified — the
+        # classification sweep relabels it first, and only then is it entity
+        # work). So the 'auto' row above exercises has_classify_work, and this
+        # 'note' row is what makes the entity gate true. Asserting the gate on
+        # the 'auto' row alone asserted a premise the production SQL has never
+        # held, on either backend.
+        cur.execute(
+            "INSERT INTO memory_items (id,type,content,scope) VALUES (%s,'note','z','agent')",
+            (str(uuid.uuid4()),),
+        )
     try:
         assert L.has_classify_work(None) is True   # the 'auto' row
         assert L.has_enrich_work(None) is True      # observation_queue non-empty
