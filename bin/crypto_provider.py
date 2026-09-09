@@ -244,6 +244,13 @@ if _fips_mode() or _fips_strict():
     BACKEND = "WOLFSSL"
 
 class CryptoProvider:
+    # One-shot latch for the open-source-build notice. CLASS level, not instance:
+    # several providers may be constructed in one process (pool workers, a
+    # re-exec'd CLI, the bridge plus a sweeper), and the fact being reported is a
+    # property of the LOADED LIBRARY, not of any one instance — so it is worth
+    # saying once per process, never once per object.
+    _non_fips_notice_emitted = False
+
     def __init__(self, backend="DEFAULT"):
         self.backend = backend
         self._initialized = False
@@ -404,13 +411,39 @@ class CryptoProvider:
             # exposes the FIPS service symbols AND its POST passed. This flag
             # gates M3_FIPS_STRICT in __init__.
             self._fips_validated = has_post and has_entropy_cb
-            if (_fips_mode() or _fips_strict()) and not self._fips_validated:
-                logger.warning(
-                    "M3 Crypto: loaded wolfSSL is the OPEN-SOURCE (non-FIPS) build "
-                    "— hardened wolfCrypt crypto is active, but this is NOT the "
-                    "CMVP-validated FIPS module. Set M3_FIPS_STRICT=1 only with the "
-                    "commercial wolfSSL FIPS build."
-                )
+            if not self._fips_validated:
+                # SEVERITY BY ACTIONABILITY (§3: a warning that fires when nothing
+                # is wrong trains you to ignore the one that matters).
+                #
+                # Under M3_FIPS_STRICT the open-source build IS a real problem —
+                # strict REQUIRES the validated module, and __init__ refuses to
+                # start on it. Keep that loud.
+                #
+                # Under plain M3_FIPS_MODE it is the DOCUMENTED, EXPECTED state:
+                # hardened wolfCrypt is active and the open-source build is what
+                # the installer ships (see install_wolfssl.py: "works with
+                # M3_FIPS_MODE=1"). Warning on it announces a permanent, correct
+                # configuration on EVERY process start — measured 2026-09-09:
+                # 1,714 copies in sync_all.log alone, plus one on every CLI
+                # invocation, drowning the lines that do need reading.
+                #
+                # So: INFO, and only ONCE per process. The fact stays available
+                # (M3_DEBUG / -v, and `m3 doctor` reports the crypto tier in
+                # full) without being repeated to someone who cannot act on it.
+                if _fips_strict():
+                    logger.warning(
+                        "M3 Crypto: M3_FIPS_STRICT=1 but the loaded wolfSSL is the "
+                        "OPEN-SOURCE build — strict mode requires the CMVP-validated "
+                        "FIPS module. Install the commercial wolfSSL FIPS build or "
+                        "unset M3_FIPS_STRICT."
+                    )
+                elif _fips_mode() and not CryptoProvider._non_fips_notice_emitted:
+                    CryptoProvider._non_fips_notice_emitted = True
+                    logger.info(
+                        "M3 Crypto: hardened wolfCrypt active (open-source build; "
+                        "not the CMVP-validated FIPS module — expected under "
+                        "M3_FIPS_MODE)."
+                    )
 
             # 4. Application-level power-up Known-Answer-Tests. Proves THIS
             #    process's bindings compute the documented answers before any
