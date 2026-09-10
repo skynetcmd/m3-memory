@@ -351,6 +351,86 @@ class TestFailOpenCanary(unittest.TestCase):
         self.assertNotEqual(r.status_code, 401)
 
 
+class TestPortability(unittest.TestCase):
+    """The support matrix is 3 OSes x 2 DBs x Python 3.11-3.14.
+
+    These pin the properties that would otherwise only surface on a platform
+    nobody develops on, and they are cheap enough to be worth stating outright.
+    """
+
+    def test_no_platform_specific_imports(self):
+        """Auth must not grow an OS-specific dependency.
+
+        Secret storage already handles per-OS keyrings behind auth_utils; this
+        module reaching for `winreg`, `pwd`, or a `security`/`cmdkey` subprocess
+        would fork that seam and break the other two platforms silently.
+        """
+        import ast
+
+        src = (_BIN / "m3_http_auth.py").read_text(encoding="utf-8")
+        imported = set()
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.Import):
+                imported.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+        for banned in ("winreg", "pwd", "grp", "msvcrt", "fcntl", "subprocess"):
+            self.assertNotIn(banned, imported, f"{banned} is not portable across the matrix")
+
+    def test_vault_probe_is_dialect_parameterized(self):
+        """A literal '?' placeholder is a portability bug on PostgreSQL.
+
+        The probe must ask auth_utils for the active dialect's placeholder rather
+        than hardcoding SQLite's, or it raises a syntax error on PG -- which the
+        probe would swallow, silently collapsing PRESENT_UNDECRYPTABLE into
+        MISSING and pointing the operator at the wrong remedy.
+        """
+        src = (_BIN / "m3_http_auth.py").read_text(encoding="utf-8")
+        probe = src[src.index("def _vault_row_exists") : src.index("def resolve_token")]
+        self.assertIn("_dialect_param()", probe)
+        self.assertNotIn("service_name = ?", probe)
+
+    def test_no_os_path_gate_on_the_vault(self):
+        """On PostgreSQL the vault has no FILE.
+
+        auth_utils documents this: an os.path.exists gate above the vault read
+        makes every secret silently resolve to None on PG. The probe must not
+        reintroduce one.
+
+        Parses the AST rather than substring-matching the source: the function's
+        own docstring says "no os.path.exists gate", and a text search cannot
+        tell CODE from PROSE ABOUT CODE -- it failed on exactly that comment
+        first time round. Same trap as the repo's drift guard that tripped over a
+        docstring warning against an import.
+        """
+        import ast
+
+        src = (_BIN / "m3_http_auth.py").read_text(encoding="utf-8")
+        fn = next(
+            n for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.FunctionDef) and n.name == "_vault_row_exists"
+        )
+        calls = {
+            ast.unparse(n.func)
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        self.assertNotIn("os.path.exists", calls)
+        self.assertNotIn("pathlib.Path.exists", calls)
+
+    def test_token_charset_is_url_and_header_safe(self):
+        """token_urlsafe output must survive a URL query param and an HTTP header.
+
+        The dashboard hands the token off as `?token=...`, so a character needing
+        percent-encoding would arrive altered and fail the comparison.
+        """
+        import string
+
+        allowed = set(string.ascii_letters + string.digits + "-_")
+        for _ in range(20):
+            self.assertTrue(set(A.generate_token()) <= allowed)
+
+
 class TestBridgeWiring(unittest.TestCase):
     """The bridge's http branch, asserted at the source rather than by running it.
 
