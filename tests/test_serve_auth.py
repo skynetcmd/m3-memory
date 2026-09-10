@@ -129,6 +129,25 @@ class TestPreflight(unittest.TestCase):
         tok = A.generate_token()
         self.assertEqual(A.preflight("0.0.0.0", tok, A.TokenState.OK), tok)
 
+    def test_messages_name_the_secret_actually_probed(self):
+        """resolve_token takes a service name, so preflight must too.
+
+        Hardcoding SECRET_NAME made every diagnosis say M3_SERVE_TOKEN even when
+        a different secret was probed -- naming the wrong secret sends the
+        operator to fix something that is not broken, the same class of failure
+        the MISSING/UNDECRYPTABLE split exists to avoid. Caught against a real
+        undecryptable row in the local vault, not a fixture.
+        """
+        for state, token in (
+            (A.TokenState.PRESENT_UNDECRYPTABLE, None),
+            (A.TokenState.MISSING, None),
+            (A.TokenState.OK, "short"),
+        ):
+            with self.assertRaises(A.AuthConfigError) as ctx:
+                A.preflight("127.0.0.1", token, state, service="SOME_OTHER_SECRET")
+            self.assertIn("SOME_OTHER_SECRET", str(ctx.exception))
+            self.assertNotIn(A.SECRET_NAME, str(ctx.exception))
+
 
 class TestHostPatternExpansion(unittest.TestCase):
     """A7b: the MCP host validator matches exact strings or `base:*` prefixes only.

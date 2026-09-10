@@ -200,16 +200,23 @@ def resolve_token(service: str = SECRET_NAME) -> "tuple[str | None, TokenState]"
     return None, TokenState.MISSING
 
 
-def preflight(host: str, token: "str | None", state: TokenState) -> str:
+def preflight(
+    host: str, token: "str | None", state: TokenState, service: str = SECRET_NAME
+) -> str:
     """Validate startup auth config. Returns the token, or raises AuthConfigError.
 
     The refusal is UNCONDITIONAL -- it does not exempt loopback. A loopback
     exemption would be a silent bypass, because the tunnels this feature exists
     to support bind loopback and publish it. `host` only shapes the wording.
+
+    ``service`` names the secret in the message. It defaults to the serve token
+    but is a parameter because resolve_token accepts one: naming the wrong secret
+    in a diagnosis sends the operator to fix something that is not broken, which
+    is the same class of failure the MISSING/UNDECRYPTABLE split exists to avoid.
     """
     if state is TokenState.PRESENT_UNDECRYPTABLE:
         raise AuthConfigError(
-            f"A '{SECRET_NAME}' secret exists in the vault but THIS DEVICE cannot decrypt it.\n"
+            f"A '{service}' secret exists in the vault but THIS DEVICE cannot decrypt it.\n"
             "  Cause: the encryption salt / master key is per-device, and secrets are\n"
             "         replicated between machines -- so this row was almost certainly\n"
             "         written on a different machine.\n"
@@ -226,7 +233,7 @@ def preflight(host: str, token: "str | None", state: TokenState) -> str:
             else f"'{host}' -- a NON-LOOPBACK bind, reachable beyond this machine"
         )
         raise AuthConfigError(
-            f"No {SECRET_NAME} configured; refusing to start an unauthenticated HTTP bridge.\n"
+            f"No {service} configured; refusing to start an unauthenticated HTTP bridge.\n"
             f"  Bind is {exposure}.\n"
             "  The HTTP surface exposes destructive tools (memory_delete, gdpr_forget).\n"
             "  Generate a token:  m3 serve --generate-token"
@@ -234,7 +241,7 @@ def preflight(host: str, token: "str | None", state: TokenState) -> str:
 
     if len(token) < TOKEN_MIN_LEN:
         raise AuthConfigError(
-            f"{SECRET_NAME} is {len(token)} chars; the minimum is {TOKEN_MIN_LEN}.\n"
+            f"{service} is {len(token)} chars; the minimum is {TOKEN_MIN_LEN}.\n"
             "  A weak token on a publicly reachable bridge is fail-open by another name.\n"
             "  Generate a strong one:  m3 serve --generate-token --force"
         )
