@@ -1,8 +1,8 @@
 ---
 tool: bin/pg_sync.py
-sha1: 8e2797f85340
-mtime_utc: 2026-09-10T06:59:39.533495+00:00
-generated_utc: 2026-09-10T07:00:53.370797+00:00
+sha1: f5af585fa941
+mtime_utc: 2026-09-10T10:55:13.942746+00:00
+generated_utc: 2026-09-10T10:56:05.316941+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 1466)
+- `def main()` (line 1550)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -50,9 +50,9 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 1606)
-- `sqlite3.connect()  → `db_path`` (line 1622)
-- `sqlite3.connect()  → `target.db_path`` (line 1558)
+- `sqlite3.connect()  → `db_path`` (line 1690)
+- `sqlite3.connect()  → `db_path`` (line 1706)
+- `sqlite3.connect()  → `target.db_path`` (line 1642)
 
 
 ---
@@ -62,6 +62,7 @@ _(none detected)_
 - `doctor.embed_space_probe (_family)`
 - `memory.backends (active_backend)`
 - `memory.backends (dialect)`
+- `memory.backends.dialect (chatlog_table_for)`
 - `memory.backends.dialect (dialect_for)`
 - `psycopg2 (Binary)`
 - `psycopg2.extras (execute_values)`

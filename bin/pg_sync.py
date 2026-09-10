@@ -1461,6 +1461,90 @@ def _sync_generic_db(sl_cur, pg_cur, sl_conn, manifest: dict[str, Any],
             logger.error(f"[{target_name}] Table {table_name} sync failed: {e}")
 
 
+# ── Sync targets ──────────────────────────────────────────────────────────────
+#
+# A "target" is one (STORE, TABLE-SET) pair to sync — deliberately not a file
+# path, because the same deployment has a different SHAPE on each backend:
+#
+#   SQLite    TWO stores, each using the CORE table names. The chatlog is a
+#             separate .db file that runs its own migration chain, so
+#             agent_memory.db and agent_chatlog.db both contain `memory_items`.
+#   Postgres  ONE store holding BOTH families: core `memory_items` plus the
+#             chatlog clones `chat_log_items`, `chat_log_embeddings`, ... in the
+#             same schema (see dialect._CHATLOG_TABLES, which states the rule and
+#             keys off an explicit `backend == "sqlite"` predicate so a third
+#             backend lands on the chat_log_* names with no edit).
+#
+# Iterating FILES therefore has no meaning on PostgreSQL, and a port that kept
+# the file loop would not crash — it would sync the wrong table set, silently.
+# That is why this resolves from the BACKEND rather than the filesystem.
+
+class SyncTarget:
+    """One (store, table-set) pair. `uri` is a path on SQLite, a DSN on PG."""
+
+    __slots__ = ("name", "uri", "table_map")
+
+    def __init__(self, name: str, uri: "str | None", table_map: "dict[str, str]"):
+        self.name = name
+        self.uri = uri
+        # role -> physical table name in THIS store, e.g. {"items": "chat_log_items"}
+        self.table_map = table_map
+
+    def table(self, role: str) -> str:
+        """The physical table for a logical role, or the role itself if unmapped."""
+        return self.table_map.get(role, role)
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
+        return f"SyncTarget(name={self.name!r}, uri={self.uri!r})"
+
+
+_CORE_ROLES = ("items", "embeddings", "relationships")
+
+
+def resolve_sync_targets(main_uri: "str | None" = None) -> "list[SyncTarget]":
+    """The stores and table-sets to sync, resolved from the ACTIVE backend.
+
+    SQLite yields up to two targets (main + chatlog file) both using core table
+    names; PostgreSQL yields ONE target covering core names AND the chat_log_*
+    clones. A third backend inherits the PG shape via `chatlog_table_for`, which
+    already keys on `backend == "sqlite"` rather than assuming everything else is
+    Postgres.
+
+    Never raises: a chatlog store that cannot be resolved is simply absent from
+    the list. Skipping a store we cannot find is right; refusing to sync the one
+    we CAN find because of it is not.
+    """
+    from memory.backends.dialect import chatlog_table_for
+
+    backend = _local_backend()
+    # The CORE table names, whatever the backend. chatlog_table_for(role,
+    # "sqlite") returns them by construction (SQLite's chatlog reuses the core
+    # names in a separate file), so this asks the mapper rather than restating
+    # "memory_items" here — one source for the naming, per §2.
+    core_map = {r: chatlog_table_for(r, "sqlite") for r in _CORE_ROLES}
+
+    if backend.name != "sqlite":
+        # ONE store, TWO families: the chatlog rows live beside the core ones
+        # under chat_log_* names, so a single connection covers both.
+        chat_map = {r: chatlog_table_for(r, backend.name) for r in _CORE_ROLES}
+        return [
+            SyncTarget("main", main_uri, core_map),
+            SyncTarget("chatlog", main_uri, chat_map),
+        ]
+
+    # SQLite: separate FILES, each using the core table names.
+    out: "list[SyncTarget]" = []
+    try:
+        import migrate_memory
+
+        for t in migrate_memory.targets("all"):
+            out.append(SyncTarget(t.name, t.db_path, dict(core_map)))
+    except Exception as exc:  # noqa: BLE001 — fall back to the single main store
+        logger.warning(f"Could not enumerate SQLite sync targets ({exc}); using main only.")
+        out = [SyncTarget("main", main_uri, dict(core_map))]
+    return out
+
+
 # ── main() ────────────────────────────────────────────────────────────────────
 
 def main():
