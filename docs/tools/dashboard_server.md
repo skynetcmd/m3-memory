@@ -1,8 +1,8 @@
 ---
 tool: bin/dashboard_server.py
-sha1: 4a8d4f9dbdb9
-mtime_utc: 2026-08-30T03:03:12.299302+00:00
-generated_utc: 2026-08-30T03:09:49.059509+00:00
+sha1: 913bbed58631
+mtime_utc: 2026-09-10T01:55:53.715033+00:00
+generated_utc: 2026-09-10T01:56:17.168805+00:00
 private: false
 ---
 
@@ -70,6 +70,7 @@ you intend to launch the server with (typically ``.venv``).
 | `--foreground` | Run the server in THIS process (used by the detached child and the boot task). Default launches detached. | `False` |  | store_true |  |
 | `--stop` | Stop a running dashboard. | `False` |  | store_true |  |
 | `--status` | Report dashboard status. | `False` |  | store_true |  |
+| `--show-url` | Print the one-time sign-in URL (includes the token) for opening the dashboard on another device. | `False` |  | store_true |  |
 | `--log-file` | argparse.SUPPRESS | None |  | str |  |
 
 ---
@@ -89,6 +90,7 @@ you intend to launch the server with (typically ``.venv``).
 - `chatlog_config (DEFAULT_DB_PATH)`
 - `chatlog_config (resolve_config)`
 - `m3_halt`
+- `m3_http_auth`
 - `m3_sdk (acquire_or_exit)`
 - `m3_sdk (active_database)`
 - `m3_sdk (resolve_db_path)`
@@ -102,11 +104,11 @@ you intend to launch the server with (typically ``.venv``).
 
 **subprocess**
 
-- `subprocess.Popen()  → `[exe, script, '--foreground']`` (line 2870)
-- `subprocess.Popen()  → `[sys.executable, script, '--foreground']`` (line 2880)
-- `subprocess.Popen()  → `cmd`` (line 2591)
-- `subprocess.run()  → `['powershell', '-NoProfile', '-Command', ps]`` (line 2750)
-- `subprocess.run()  → `['taskkill', '/F', '/PID', str(pid)]`` (line 2785)
+- `subprocess.Popen()  → `[exe, script, '--foreground']`` (line 3049)
+- `subprocess.Popen()  → `[sys.executable, script, '--foreground']`` (line 3059)
+- `subprocess.Popen()  → `cmd`` (line 2720)
+- `subprocess.run()  → `['powershell', '-NoProfile', '-Command', ps]`` (line 2929)
+- `subprocess.run()  → `['taskkill', '/F', '/PID', str(pid)]`` (line 2964)
 
 
 ---
@@ -121,7 +123,7 @@ you intend to launch the server with (typically ``.venv``).
 - `dashboard.templates (_WIKI_PAGE_HTML, AUDIT_HTML, BROWSE_HTML, HEADER_HTML, INDEX_HTML, STYLE_CSS)`
 - `difflib`
 - `fastapi (FastAPI, Form, HTTPException, Request)`
-- `fastapi.responses (FileResponse, HTMLResponse, JSONResponse, StreamingResponse)`
+- `fastapi.responses (FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse)`
 - `files_memory.config (files_table)`
 - `files_memory.db (_db)`
 - `files_memory.db (_is_postgres)`
@@ -133,6 +135,7 @@ you intend to launch the server with (typically ``.venv``).
 - `memory.db (_db)`
 - `memory.db (_record_history)`
 - `memory.search (memory_search_scored_impl)`
+- `starlette.middleware.base (BaseHTTPMiddleware)`
 - `uvicorn`
 
 ---

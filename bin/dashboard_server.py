@@ -50,6 +50,7 @@ import html
 import json
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -119,8 +120,10 @@ from fastapi.responses import (
     FileResponse,
     HTMLResponse,
     JSONResponse,
+    RedirectResponse,
     StreamingResponse,
 )
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # Ensure bin/ is on path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -562,6 +565,132 @@ app = FastAPI(
     description="Observability and Browser Portal.",
     lifespan=lifespan
 )
+
+
+# ── Authentication ────────────────────────────────────────────────────────────
+# The dashboard has always been loopback-only with no auth, and that default is
+# PRESERVED: a loopback bind with no token configured behaves exactly as before.
+# Breaking every existing user to close a hazard they do not have would be its
+# own §3 failure.
+#
+# The gate engages when there is something to protect:
+#   * a token is configured (the operator opted in), or
+#   * the bind is non-loopback (reachable beyond this machine).
+#
+# A browser cannot set an Authorization header by navigating, so the token is
+# accepted once as `?token=...` and exchanged for an HttpOnly cookie; every
+# subsequent navigation and HTMX partial carries it automatically. All of the
+# page's hx-get/hx-post targets are relative paths, so the same-origin cookie
+# covers them with no per-call wiring.
+_COOKIE_NAME = "m3_dash"
+
+
+def _dashboard_auth_config() -> "tuple[object | None, bool]":
+    """Return (verifier, required). Never raises -- a probe must not break startup."""
+    try:
+        import m3_http_auth as _auth
+    except Exception:  # noqa: BLE001 -- module missing => historical no-auth behavior
+        return None, False
+
+    host, _port = _resolve_host_port(None, None)
+    try:
+        token, _state = _auth.resolve_token()
+    except Exception:  # noqa: BLE001
+        token = None
+
+    if token:
+        return _auth.StaticTokenVerifier(token), True
+    # No usable token. On a non-loopback bind that is a refusal condition, handled
+    # at startup in main(); here it means "deny everything" rather than "allow".
+    return None, not _auth.is_loopback(host)
+
+
+class DashboardAuthMiddleware(BaseHTTPMiddleware):
+    """Bearer header OR session cookie OR one-time `?token=` handoff.
+
+    The config is resolved PER REQUEST (behind a short TTL), not once at
+    construction. Caching it at startup meant that running
+    `m3 serve --generate-token` against a live dashboard left it unprotected
+    until someone restarted it -- silently, while the operator had every reason
+    to believe they had just secured it. A gate that can be stale in the OPEN
+    direction is the failure mode this whole change exists to remove.
+
+    The TTL keeps this off the vault on every request; 5s is short enough that
+    "I generated a token" and "it is enforced" are the same moment in practice.
+    """
+
+    _TTL_SECONDS = 5.0
+
+    def __init__(self, app):
+        super().__init__(app)
+        self._cached: "tuple[object | None, bool] | None" = None
+        self._cached_at = 0.0
+        # Resolve once up front so a misconfiguration surfaces at startup rather
+        # than on the first request.
+        self._refresh()
+
+    def _refresh(self):
+        self._cached = _dashboard_auth_config()
+        self._cached_at = time.monotonic()
+        return self._cached
+
+    def _config(self):
+        if self._cached is None or (time.monotonic() - self._cached_at) > self._TTL_SECONDS:
+            return self._refresh()
+        return self._cached
+
+    # Kept for tests and callers that want the current view without a request.
+    @property
+    def _verifier(self):
+        return self._config()[0]
+
+    @property
+    def _required(self):
+        return self._config()[1]
+
+    async def dispatch(self, request, call_next):
+        verifier, required = self._config()
+        if not required:
+            return await call_next(request)
+
+        # 1. Authorization: Bearer <token> -- scripted/API callers.
+        header = request.headers.get("authorization", "")
+        if verifier is not None and header.lower().startswith("bearer "):
+            if verifier.matches(header[7:].strip()):
+                return await call_next(request)
+
+        # 2. Session cookie set by a previous handoff.
+        if verifier is not None and verifier.matches(request.cookies.get(_COOKIE_NAME)):
+            return await call_next(request)
+
+        # 3. One-time `?token=` handoff -> cookie, then redirect WITHOUT the query
+        #    param so the token does not linger in history, logs, or Referer.
+        supplied = request.query_params.get("token")
+        if verifier is not None and request.method == "GET" and verifier.matches(supplied):
+            clean = request.url.remove_query_params("token")
+            response = RedirectResponse(url=str(clean), status_code=303)
+            response.set_cookie(
+                _COOKIE_NAME,
+                supplied,
+                httponly=True,
+                samesite="strict",
+                secure=request.url.scheme == "https",
+                max_age=60 * 60 * 24 * 30,
+                path="/",
+            )
+            return response
+
+        # Identical response whether the token was absent, malformed or wrong --
+        # no oracle. `verifier is None` (non-loopback bind, no token) lands here
+        # too, so an exposed dashboard denies rather than serves.
+        return JSONResponse(
+            {"error": "unauthorized"},
+            status_code=401,
+            headers={"WWW-Authenticate": 'Bearer realm="m3-dashboard"'},
+        )
+
+
+app.add_middleware(DashboardAuthMiddleware)
 
 # --- Helpers ---
 # --- Helpers & DB Selectors ---
@@ -2683,6 +2812,56 @@ def _resolve_host_port(host: "str | None", port: "int | None") -> "tuple[str, in
     return resolved_host, resolved_port
 
 
+def dashboard_show_url(host: "str | None" = None, port: "int | None" = None) -> int:
+    """Print the one-time sign-in URL for opening the dashboard on another device.
+
+    The URL carries the token as a query param -- the only credential a browser
+    can present by navigation. Visiting it once exchanges the token for an
+    HttpOnly cookie and redirects to a clean URL, so the secret does not stay in
+    the address bar or in history.
+    """
+    resolved_host, resolved_port = _resolve_host_port(host, port)
+    try:
+        import m3_http_auth as _auth
+    except ImportError:
+        print("Auth module unavailable; the dashboard is running without a token.",
+              file=sys.stderr)
+        return 1
+
+    token, _state = _auth.resolve_token()
+    if _state is _auth.TokenState.PRESENT_UNDECRYPTABLE:
+        print(f"{_auth.SECRET_NAME} exists but cannot be decrypted on this device.",
+              file=sys.stderr)
+        return 1
+    if not token:
+        if _auth.is_loopback(resolved_host):
+            print(f"No token configured; the dashboard is open on loopback.\n"
+                  f"  Open it directly:  http://{resolved_host}:{resolved_port}/\n"
+                  f"  To require a token: m3 serve --generate-token")
+            return 0
+        print(f"No {_auth.SECRET_NAME} configured (run: m3 serve --generate-token).",
+              file=sys.stderr)
+        return 1
+
+    # Loopback is not reachable from another device; name the real address so the
+    # printed URL is one that can actually be opened on a phone.
+    display_host = resolved_host
+    if _auth.is_loopback(resolved_host) or resolved_host in ("0.0.0.0", "::", ""):
+        import socket  # local: matches _port_already_serving's existing pattern
+
+        try:
+            display_host = socket.gethostname()
+        except Exception:  # noqa: BLE001
+            pass
+
+    print("Open this once on the target device (the token is exchanged for a cookie):\n")
+    print(f"    http://{display_host}:{resolved_port}/?token={token}\n")
+    if resolved_host not in ("0.0.0.0", "::"):
+        print(f"NOTE: the dashboard is bound to {resolved_host}, so another device can only\n"
+              f"reach it if that address is routable from it (e.g. a VPN/tailnet address).")
+    return 0
+
+
 def _port_already_serving(host: str, port: int, timeout: float = 1.0) -> bool:
     """True if something already accepts TCP on host:port (a live dashboard).
 
@@ -2902,6 +3081,26 @@ def run_dashboard(host: "str | None" = None, port: "int | None" = None,
     """
     resolved_host, resolved_port = _resolve_host_port(host, port)
 
+    # A non-loopback bind with no token would publish the portal -- and every
+    # /api/audit/*-delete route on it -- to the network. Refuse rather than serve.
+    # A loopback bind with no token is the historical default and still starts.
+    try:
+        import m3_http_auth as _auth
+
+        _tok, _state = _auth.resolve_token()
+        if not _tok and not _auth.is_loopback(resolved_host):
+            print(
+                f"Refusing to bind {resolved_host}: no {_auth.SECRET_NAME} configured.\n"
+                "  The dashboard exposes memory browsing and delete/override routes.\n"
+                "  Generate a token first:  m3 serve --generate-token\n"
+                "  (loopback binds still start without one)",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 1
+    except ImportError:
+        pass  # auth module unavailable -> historical behavior
+
     if background:
         # INTERACTIVE launch path (`m3 dashboard`): don't spawn a second detached
         # server. These probes are an informational "already up → here's the URL"
@@ -2994,6 +3193,9 @@ if __name__ == "__main__":
     _p.add_argument("--status", action="store_true", help="Report dashboard status.")
     # --log-file is accepted for scheduled-task parity (self-logging); the task
     # runtime consumes it, so we just tolerate it here.
+    _p.add_argument("--show-url", action="store_true",
+                    help="Print the one-time sign-in URL (includes the token) for "
+                         "opening the dashboard on another device.")
     _p.add_argument("--log-file", default=None, help=argparse.SUPPRESS)
     _a = _p.parse_args()
 
@@ -3009,4 +3211,6 @@ if __name__ == "__main__":
         sys.exit(dashboard_stop())
     if _a.status:
         sys.exit(dashboard_status(_a.host, _a.port))
+    if _a.show_url:
+        sys.exit(dashboard_show_url(_a.host, _a.port))
     sys.exit(run_dashboard(_a.host, _a.port, background=not _a.foreground))
