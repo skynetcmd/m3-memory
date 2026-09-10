@@ -173,6 +173,34 @@ def table_exists(conn, table: str) -> bool:
         return False
 
 
+def available_columns(conn, table: str) -> set:
+    """The set of columns ``table`` actually has, via the dialect seam.
+
+    The companion to :func:`table_exists` for the column axis. The dashboard
+    can be pointed at stores with DIFFERENT schemas — the chatlog store is a
+    deliberate SUBSET of main (see ``migrate_memory.py``: same memory_items /
+    memory_embeddings / FTS, none of the trust or history machinery) — so a
+    SELECT naming a main-only column ("confidence", "corroboration_count", ...)
+    is a hard error there, not a soft miss. Issue #141: browsing the chatlog DB
+    died with "no such column: mi.confidence".
+
+    Use this to BUILD the column list up front. Do NOT select the column and
+    catch the error: on PostgreSQL an UndefinedColumn aborts the whole
+    transaction, so the retry dies with InFailedSqlTransaction (see
+    ``Dialect.column_exists``). An up-front probe is the only backend-uniform
+    shape, and ``dialect().columns_of()`` normalises the row shape so the name
+    is at ``row[0]`` on both SQLite and PostgreSQL.
+
+    Returns an EMPTY set on any probe failure. Callers must treat that as
+    "unknown, select only the guaranteed core" — never as "no columns".
+    """
+    try:
+        sql, params = _active_backend().dialect().columns_of(table)
+        return {r[0] for r in conn.execute(sql, params).fetchall()}
+    except Exception:  # noqa: BLE001 — same contract as table_exists: probe failure => degrade, never crash
+        return set()
+
+
 # --- Advanced search-query grammar (Memory Browser + Knowledge Graph) ---------
 # Mirrors the JS parser in the graph window so both behave identically. Grammar:
 #   unquoted word / +word  → must-have (AND)      "UAC window" == "+UAC +window"
@@ -2024,15 +2052,6 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
             return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning files DB: {_h(str(e))}</p>'
 
     try:
-        query = """
-            SELECT mi.id, mi.type, mi.title, mi.content, mi.metadata_json,
-                   mi.importance, mi.origin_device, mi.change_agent,
-                   mi.created_at, mi.updated_at, mi.confidence, mi.pinned,
-                   mi.source, mi.valid_from, mi.valid_to,
-                   mi.corroboration_count, mi.contradiction_count
-            FROM memory_items AS mi
-            WHERE mi.is_deleted = 0
-        """
         params = []
         _backend = _active_backend()
         ph = _backend.dialect().placeholder  # ?/%s, backend-agnostic
@@ -2051,6 +2070,18 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
             type_filter=type or "",
         )
 
+        # Columns every store carrying memory_items is guaranteed to have. The
+        # card cannot render without these, so they are never probed away — a
+        # store missing one is genuinely broken and SHOULD fail loud (§3).
+        _CORE_COLS = ("id", "type", "title", "content", "importance")
+
+        # Provenance/trust columns that exist on the MAIN store but not on every
+        # store. The chatlog schema is a deliberate subset (migrate_memory.py),
+        # so these are absent there and naming one in the SELECT is a hard
+        # error, not an empty column (issue #141). Probed per-request against
+        # the store actually selected; `_provenance_html` already renders an
+        # absent column as nothing via `_row_get`, so dropping one degrades the
+        # card silently rather than breaking the page.
         _PROV_COLS = (
             "metadata_json", "origin_device", "change_agent", "created_at",
             "updated_at", "confidence", "pinned", "source", "valid_from",
@@ -2060,6 +2091,19 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
         from m3_sdk import active_database
         with active_database(selected_db_path):
             with _db() as db:
+                # Build the column list from what THIS store actually has.
+                # Probe once per request, through the dialect seam — never a
+                # raw PRAGMA (SQLite-only) and never select-then-catch (an
+                # UndefinedColumn aborts the transaction on PostgreSQL).
+                _present = available_columns(db, "memory_items")
+                # An empty probe result means "couldn't tell" — fall back to the
+                # core columns only, which every store has. Better a card with
+                # no provenance strip than a 500.
+                _prov = tuple(c for c in _PROV_COLS if c in _present) if _present else ()
+                _sel = ", ".join(f"mi.{c}" for c in (*_CORE_COLS, *_prov))
+                query = (
+                    f"SELECT {_sel} FROM memory_items AS mi WHERE mi.is_deleted = 0"
+                )
                 if q.strip():
                     # RANKED keyword search through the seam: FTS5+bm25 on
                     # SQLite, tsvector+ts_rank on PostgreSQL. This replaced a
@@ -2072,7 +2116,9 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
                         db, q, limit=int(limit),
                         tenancy_sql=_tenancy_sql,
                         tenancy_params=tuple(_tenancy_params),
-                        extra_columns=_PROV_COLS,
+                        # Probed set, not the static tuple: the SEARCH path
+                        # hits the same subset-schema wall as the browse path.
+                        extra_columns=_prov,
                     )
                 else:
                     # No query: this is a BROWSE, not a search. Keyword ranking
@@ -2145,6 +2191,12 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
         return "\n".join(cards)
 
     except Exception as e:
+        # Fail SAFE for the viewer, LOUD for the operator (§3). The banner alone
+        # made a schema mismatch and a real fault indistinguishable, and issue
+        # #141 was reported as a bare "Error scanning DB" string with no
+        # traceback anywhere to diagnose it from.
+        import traceback
+        traceback.print_exc()
         return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning DB: {_h(str(e))}</p>'
 
 
@@ -2442,7 +2494,13 @@ async def get_audit_timeline(request: Request, q: str = "", limit: int = 25):
         with active_database(selected_db_path):
             with _db() as db:
                 if not table_exists(db, "memory_history"):
-                    return '<p style="color: hsl(210, 15%, 55%); text-align: center; font-size: 0.85rem; padding: 2rem 0;">History table memory_history does not exist in this database.</p>'
+                    # Not damage: the chatlog store is a deliberate subset of
+                    # main and never carries edit history. Say what the store
+                    # does, not which table is missing (issue #141).
+                    return ('<p style="color: hsl(210, 15%, 55%); text-align: center; '
+                            'font-size: 0.85rem; padding: 2rem 0;">This store does not track '
+                            'edit history — the audit log is available on the main database. '
+                            'Switch the DB selector to <strong>main</strong> to view it.</p>')
 
                 # Fetch distinct memory IDs that have history, sorted by their latest activity
                 sql_ids = """

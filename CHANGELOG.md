@@ -19,7 +19,40 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **The dashboard no longer breaks when pointed at the chatlog database.**
+  Switching the DB selector to the chatlog store killed two panels: the KB
+  Browser died with `Error scanning DB: no such column: mi.confidence`, and the
+  Conflict & Audit Log reported `History table memory_history does not exist in
+  this database.` The chatlog schema is a *deliberate* subset of main — same
+  `memory_items` / `memory_embeddings` / FTS, none of the trust or history
+  machinery — so it legitimately has no `confidence`,
+  `corroboration_count` / `contradiction_count`, and no `memory_history`. The
+  dashboard had the main store's full provenance column list **hardcoded** into
+  its browse *and* search SELECT, making any subset store a hard SQL error.
+  Notably the *render* layer had already been hardened for exactly this case
+  (`_row_get`: "a store that predates a column must render a card, not a 500");
+  only the SELECT layer was missing, so the query died before reaching it.
+
+  The column list is now derived from the store itself through the dialect seam
+  (`dialect().columns_of()`, via a new `available_columns()` helper beside
+  `table_exists()`), so absent provenance columns are simply not selected and
+  the card renders without that strip. Two portability traps this deliberately
+  avoids: `PRAGMA table_info` is SQLite-only, and select-then-catch is not a
+  portable fallback because on PostgreSQL an `UndefinedColumn` aborts the whole
+  transaction (the retry then dies with `InFailedSqlTransaction`) — the probe
+  has to happen up front. Deriving the list also means the next provenance
+  column added to main cannot silently break the chatlog view the way this one
+  did (§10a), which a drift guard now enforces.
+
+  The audit panel's message now states the capability instead of naming a
+  missing table, and the KB handler prints a traceback before its error banner
+  so a schema mismatch and a genuine fault are no longer indistinguishable (§3).
+
+  Reported by [@fuzengjie](https://github.com/fuzengjie) in
+  [#141](https://github.com/skynetcmd/m3-memory/issues/141), with clear repro
+  steps and screenshots that pinned it to the DB switcher immediately.
 
 ---
 
