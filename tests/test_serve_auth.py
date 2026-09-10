@@ -391,6 +391,110 @@ class TestBridgeWiring(unittest.TestCase):
             self.assertNotIn(token, stdio)
 
 
+class TestCliSurface(unittest.TestCase):
+    """`m3 serve` flags and their refusal paths.
+
+    Stubs the auth module's resolution + storage so nothing here touches the real
+    keyring or vault -- these must be runnable on a CI box that has neither.
+    """
+
+    def setUp(self):
+        from m3_memory import cli
+
+        self.cli = cli
+        self._real_import = cli._import_http_auth
+        cli._import_http_auth = lambda: A
+        self._real_resolve = A.resolve_token
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        self.cli._import_http_auth = self._real_import
+        A.resolve_token = self._real_resolve
+
+    def _args(self, **kw):
+        import argparse
+
+        base = dict(
+            host="127.0.0.1", port=8080, path="/mcp", public_host=None,
+            generate_token=False, show_token=False, force=False,
+        )
+        base.update(kw)
+        return argparse.Namespace(**base)
+
+    def test_serve_refuses_without_a_token(self):
+        """The property that matters: no token -> nonzero exit, bridge never runs."""
+        A.resolve_token = lambda *a, **k: (None, A.TokenState.MISSING)
+        ran = []
+        real_run = self.cli._run_bridge
+        self.cli._run_bridge = lambda: ran.append(True)
+        try:
+            rc = self.cli._cmd_serve(self._args())
+        finally:
+            self.cli._run_bridge = real_run
+        self.assertEqual(rc, 1)
+        self.assertEqual(ran, [], "_run_bridge must not be reached without a token")
+
+    def test_serve_starts_when_a_token_is_present(self):
+        A.resolve_token = lambda *a, **k: (A.generate_token(), A.TokenState.OK)
+        ran = []
+        real_run = self.cli._run_bridge
+        self.cli._run_bridge = lambda: ran.append(True)
+        try:
+            rc = self.cli._cmd_serve(self._args())
+        finally:
+            self.cli._run_bridge = real_run
+        self.assertEqual(rc, 0)
+        self.assertEqual(ran, [True])
+
+    def test_public_host_is_passed_to_the_bridge_env(self):
+        """--public-host must reach the bridge, or tunnels 421 before auth."""
+        import os
+
+        A.resolve_token = lambda *a, **k: (A.generate_token(), A.TokenState.OK)
+        real_run = self.cli._run_bridge
+        self.cli._run_bridge = lambda: None
+        prior = os.environ.get("M3_HTTP_PUBLIC_HOST")
+        try:
+            self.cli._cmd_serve(self._args(public_host=["a.example.com", "b.example.com"]))
+            self.assertEqual(os.environ["M3_HTTP_PUBLIC_HOST"], "a.example.com,b.example.com")
+        finally:
+            self.cli._run_bridge = real_run
+            if prior is None:
+                os.environ.pop("M3_HTTP_PUBLIC_HOST", None)
+            else:
+                os.environ["M3_HTTP_PUBLIC_HOST"] = prior
+
+    def test_generate_token_refuses_to_clobber_without_force(self):
+        """Rotation invalidates live connectors, and the row replicates by version."""
+        A.resolve_token = lambda *a, **k: ("an-existing-token-value-0123456789", A.TokenState.OK)
+        self.assertEqual(self.cli._cmd_serve(self._args(generate_token=True)), 1)
+
+    def test_generate_token_refuses_on_undecryptable_without_force(self):
+        """The worst clobber case: replicate a new token over one that still works."""
+        A.resolve_token = lambda *a, **k: (None, A.TokenState.PRESENT_UNDECRYPTABLE)
+        self.assertEqual(self.cli._cmd_serve(self._args(generate_token=True)), 1)
+
+    def test_show_token_never_prints_the_secret(self):
+        import contextlib
+        import io
+
+        secret = "super-secret-token-value-0123456789abc"
+        A.resolve_token = lambda *a, **k: (secret, A.TokenState.OK)
+        buf, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
+            rc = self.cli._cmd_serve(self._args(show_token=True))
+        self.assertEqual(rc, 0)
+        self.assertNotIn(secret, buf.getvalue() + err.getvalue())
+
+    def test_show_token_reports_missing_with_nonzero_exit(self):
+        import contextlib
+        import io
+
+        A.resolve_token = lambda *a, **k: (None, A.TokenState.MISSING)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(self.cli._cmd_serve(self._args(show_token=True)), 1)
+
+
 class TestResolveTokenStates(unittest.TestCase):
     """resolve_token's three-way outcome, with the secret seam stubbed."""
 

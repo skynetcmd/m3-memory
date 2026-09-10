@@ -650,6 +650,120 @@ def _cmd_fips(args: argparse.Namespace) -> int:
         return 1
 
 
+def _import_http_auth():
+    """Import bin/m3_http_auth.py, putting bin/ on sys.path the way _run_bridge does."""
+    from m3_memory.installer import find_bridge
+
+    bridge = find_bridge()
+    if bridge is not None:
+        bin_dir = str(bridge.parent)
+        if bin_dir not in sys.path:
+            sys.path.insert(0, bin_dir)
+    import m3_http_auth  # noqa: PLC0415 — needs bin/ on sys.path first
+
+    return m3_http_auth
+
+
+def _cmd_serve_generate_token(args: argparse.Namespace) -> int:
+    """Mint, store and display a bearer token, then exit WITHOUT starting the server.
+
+    Deliberately does not fall through to serving: the token is printed once, and
+    a process that then streams server logs into the same terminal invites it into
+    a scrollback buffer, a CI log, or a screen share.
+    """
+    auth = _import_http_auth()
+
+    existing, state = auth.resolve_token()
+    if state is auth.TokenState.PRESENT_UNDECRYPTABLE and not args.force:
+        # Overwriting here is the WORST case: the row replicates by version bump,
+        # so a new token would propagate and orphan the one that still works on
+        # whichever machine can decrypt it.
+        print(
+            f"Error: a {auth.SECRET_NAME} already exists but cannot be decrypted on "
+            "this device.\n"
+            "  Generating a new one would replicate it and may clobber the working "
+            "token elsewhere.\n"
+            "  Restore this device's salt (M3_AGENT_OS_SALT_HEX) or confirm "
+            "AGENT_OS_MASTER_KEY is in the keyring.\n"
+            "  Override only if you are sure:  m3 serve --generate-token --force",
+            file=sys.stderr,
+        )
+        return 1
+    if existing and not args.force:
+        print(
+            f"Error: a {auth.SECRET_NAME} is already configured.\n"
+            "  Rotating it invalidates every connector using the old value.\n"
+            "  Replace it deliberately:  m3 serve --generate-token --force",
+            file=sys.stderr,
+        )
+        return 1
+
+    token = auth.generate_token()
+    try:
+        from auth_utils import set_api_key
+
+        set_api_key(auth.SECRET_NAME, token)
+    except ValueError as e:
+        # set_api_key raises when AGENT_OS_MASTER_KEY is absent from the keyring.
+        # Surface the remediation, not a traceback.
+        print(
+            f"Error: could not store the token: {e}\n"
+            "  The vault needs AGENT_OS_MASTER_KEY in your OS keyring.\n"
+            f"  Alternatively export it for this process:  {auth.SECRET_NAME}=<token>",
+            file=sys.stderr,
+        )
+        return 1
+    except Exception as e:  # noqa: BLE001 — any storage failure must not look like success
+        print(f"Error: could not store the token: {e}", file=sys.stderr)
+        return 1
+
+    print("Generated a new m3 serve token (shown once):\n")
+    print(f"    {token}\n")
+    print("Add it to your Claude connector under Request headers:")
+    print("    Header : Authorization")
+    print(f"    Value  : Bearer {token}")
+    print(
+        "\nEnter the value EXACTLY as shown -- Claude sends it verbatim and adds no\n"
+        '"Bearer " prefix of its own; a bare token is rejected with 401.'
+    )
+
+    # get_api_key reads os.environ FIRST, so an env var set in this shell wins over
+    # what was just written to the vault -- the server would then require a
+    # different token than the one printed here.
+    #
+    # Printed to stdout, not stderr, deliberately: this warning is only meaningful
+    # directly beneath the token it contradicts, and interleaving two streams puts
+    # it above the token (or into a different pipe) exactly when it matters most.
+    if os.environ.get(auth.SECRET_NAME):
+        sys.stdout.flush()
+        print(
+            f"\nWARNING: {auth.SECRET_NAME} is ALSO set in this environment, and the\n"
+            "environment takes precedence over the vault. The server will expect the\n"
+            "ENV value, NOT the token above. Unset it, or keep using its value."
+        )
+    return 0
+
+
+def _cmd_serve_show_token(args: argparse.Namespace) -> int:
+    """Report whether a token is configured. Never prints the token itself."""
+    auth = _import_http_auth()
+    _token, state = auth.resolve_token()
+    if state is auth.TokenState.OK:
+        print(f"{auth.SECRET_NAME}: configured")
+        return 0
+    if state is auth.TokenState.PRESENT_UNDECRYPTABLE:
+        print(
+            f"{auth.SECRET_NAME}: PRESENT but NOT DECRYPTABLE on this device.\n"
+            "  Most likely written on another machine (the vault replicates, the\n"
+            "  encryption salt does not). Restore M3_AGENT_OS_SALT_HEX or check\n"
+            "  AGENT_OS_MASTER_KEY.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"{auth.SECRET_NAME}: not configured (run: m3 serve --generate-token)")
+    return 1
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     """Run the bridge with the streamable-http transport for claude.ai connectors.
 
@@ -659,8 +773,32 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     it after the user exposes the port via cloudflared / tailscale / ngrok / a
     reverse proxy.
 
-    Env vars override flags so the same config works under systemd / docker.
+    The HTTP transport REQUIRES a bearer token (`--generate-token`); it refuses to
+    start without one, loopback included, because tunnels bind loopback and
+    publish it.
+
+    Flags win over env vars: each has an argparse default, which is always set, so
+    the env var only applies when this function is bypassed (e.g. running
+    memory_bridge.py directly under systemd/docker).
     """
+    if getattr(args, "generate_token", False):
+        return _cmd_serve_generate_token(args)
+    if getattr(args, "show_token", False):
+        return _cmd_serve_show_token(args)
+
+    # Preflight HERE as well as in the bridge: this process can print a clean
+    # message and return an exit code, whereas the bridge is exec'd and its
+    # failure surfaces as a log line. The bridge keeps its own check because
+    # `M3_TRANSPORT=http python memory_bridge.py` bypasses this path entirely.
+    auth = _import_http_auth()
+    host = args.host or "127.0.0.1"
+    try:
+        token, state = auth.resolve_token()
+        auth.preflight(host, token, state)
+    except auth.AuthConfigError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
     os.environ["M3_TRANSPORT"] = "http"
     if args.host:
         os.environ["M3_HTTP_HOST"] = args.host
@@ -668,6 +806,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         os.environ["M3_HTTP_PORT"] = str(args.port)
     if args.path:
         os.environ["M3_HTTP_PATH"] = args.path
+    if getattr(args, "public_host", None):
+        os.environ["M3_HTTP_PUBLIC_HOST"] = ",".join(args.public_host)
     _run_bridge()
     return 0
 
@@ -1540,6 +1680,18 @@ Examples:
                          help="TCP port (default: 8080).")
     p_serve.add_argument("--path", default="/mcp",
                          help="HTTP mount path for the streamable-http endpoint (default: /mcp).")
+    p_serve.add_argument("--public-host", action="append", metavar="HOST",
+                         help="Public hostname a tunnel/proxy presents in the Host header "
+                              "(e.g. m3.example.com). Repeatable. Without it the transport "
+                              "rejects tunnelled requests with 421 before auth runs.")
+    p_serve.add_argument("--generate-token", action="store_true",
+                         help="Mint a bearer token, store it in the m3 vault, print it once "
+                              "and exit. The HTTP transport refuses to start without one.")
+    p_serve.add_argument("--show-token", action="store_true",
+                         help="Report whether a serve token is configured (never prints it).")
+    p_serve.add_argument("--force", action="store_true",
+                         help="With --generate-token: replace an existing token. Rotating "
+                              "invalidates every connector using the old value.")
     p_serve.set_defaults(func=_cmd_serve)
 
     p_dashboard = subparsers.add_parser(
