@@ -198,14 +198,15 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=youruser
-ExecStart=/home/youruser/.local/bin/m3 serve --host 127.0.0.1 --port 8080 \
+User=<user>
+ExecStart=/home/<user>/.local/bin/m3 serve --host 127.0.0.1 --port 8080 \
           --public-host mcp.example.com
 Restart=on-failure
 RestartSec=5
 
-# m3-memory needs HOME for ~/.m3-memory; set it explicitly under a service unit.
-Environment=HOME=/home/youruser
+# m3-memory needs HOME to resolve ~/.m3/engine and ~/.m3/config; set it
+# explicitly under a service unit.
+Environment=HOME=/home/<user>
 
 # The bearer token. A systemd unit does NOT inherit your login session's keyring,
 # so a token stored only in the OS keyring is unreachable here and the service
@@ -239,7 +240,7 @@ journalctl -u m3-memory -f
     <key>Label</key><string>dev.m3-memory.serve</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/youruser/.local/bin/m3</string>
+        <string>/Users/<user>/.local/bin/m3</string>
         <string>serve</string>
         <string>--host</string><string>127.0.0.1</string>
         <string>--port</string><string>8080</string>
