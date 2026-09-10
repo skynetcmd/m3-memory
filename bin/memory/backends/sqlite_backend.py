@@ -408,6 +408,35 @@ class SqliteBackend:
         cur.executemany(sql, rows)
         return len(rows)
 
+    def bulk_insert_ignore(
+        self,
+        conn: object,
+        table: str,
+        columns: "list[str]",
+        rows: "list[tuple]",
+        *,
+        conflict_target: str,
+    ) -> int:
+        """`INSERT OR IGNORE` — SQLite puts the decision in the VERB.
+
+        `conflict_target` is accepted for seam symmetry and deliberately unused:
+        OR IGNORE skips on ANY constraint violation, not a named one. Narrowing
+        it would need the ON CONFLICT form, which SQLite also supports but which
+        would diverge from the dialect's `insert_or_ignore()` idiom the rest of
+        the codebase uses.
+        """
+        if not rows:
+            return 0
+        del conflict_target  # see docstring
+        d = self.dialect()
+        sql = (
+            f"{d.insert_or_ignore()} {table} ({', '.join(columns)}) "
+            f"VALUES ({d.placeholder(len(columns))})"
+        )
+        cur = conn.cursor()  # type: ignore[attr-defined]
+        cur.executemany(sql, rows)
+        return len(rows)
+
     def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
         """WAL checkpoint: PASSIVE mid-batch, TRUNCATE at clean exit (§10).
 

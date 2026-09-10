@@ -226,3 +226,56 @@ class TestBackendForFactory:
 
         with pytest.raises(ValueError):
             backend_for("")
+
+
+class TestBulkInsertIgnore:
+    """`bulk_insert_ignore` — conflicts leave the existing row ALONE.
+
+    Separate from bulk_upsert because the two backends put the decision at
+    opposite ends of the statement: SQLite in the verb (`INSERT OR IGNORE`),
+    PostgreSQL in a trailing clause (`ON CONFLICT ... DO NOTHING`). No single
+    template expresses both, which is why it is a primitive rather than a
+    parameter.
+    """
+
+    def test_conflicting_row_is_left_alone(self, conn):
+        b = SqliteBackend()
+        b.bulk_insert_ignore(conn, "t", ["id", "val"], [("a", "first")],
+                             conflict_target="(id)")
+        b.bulk_insert_ignore(conn, "t", ["id", "val"],
+                             [("a", "SECOND"), ("b", "new")],
+                             conflict_target="(id)")
+        assert _rows(conn) == {"a": "first", "b": "new"}
+
+    def test_empty_rows_is_a_noop(self, conn):
+        assert SqliteBackend().bulk_insert_ignore(
+            conn, "t", ["id", "val"], [], conflict_target="(id)"
+        ) == 0
+
+    def test_is_on_the_protocol(self):
+        """A future backend that omits it fails conformance automatically."""
+        from memory.backends.base import StorageBackend
+
+        assert "bulk_insert_ignore" in StorageBackend.__protocol_attrs__
+
+    def test_postgres_batches_rather_than_looping(self):
+        """Same round-trip cliff as bulk_upsert; same fix.
+
+        AST-inspected: the method's own docstring mentions executemany by name
+        when explaining why it is NOT used, so a substring check would fail on
+        the explanation rather than the code.
+        """
+        import ast
+        import inspect
+        import textwrap
+
+        from memory.backends import postgres_backend
+
+        src = textwrap.dedent(
+            inspect.getsource(postgres_backend.PostgresBackend.bulk_insert_ignore)
+        )
+        called = {
+            n.func.attr for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        assert "executemany" not in called

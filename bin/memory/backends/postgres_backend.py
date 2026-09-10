@@ -746,6 +746,33 @@ class PostgresBackend:
         execute_values(cur, sql, rows, page_size=_UPSERT_PAGE_SIZE)
         return len(rows)
 
+    def bulk_insert_ignore(
+        self,
+        conn: object,
+        table: str,
+        columns: "list[str]",
+        rows: "list[tuple]",
+        *,
+        conflict_target: str,
+    ) -> int:
+        """`ON CONFLICT ... DO NOTHING` — PostgreSQL puts the decision at the END.
+
+        Batched with execute_values for the same reason bulk_upsert is: psycopg2's
+        executemany is one round trip per row.
+        """
+        if not rows:
+            return 0
+        from psycopg2.extras import execute_values
+
+        d = self.dialect()
+        sql = (
+            f"{d.insert_or_ignore()} {table} ({', '.join(columns)}) VALUES %s "
+            f"{d.on_conflict_ignore(conflict_target=conflict_target)}"
+        )
+        cur = conn.cursor()  # type: ignore[attr-defined]
+        execute_values(cur, sql, rows, page_size=_UPSERT_PAGE_SIZE)
+        return len(rows)
+
     def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
         """No-op: PostgreSQL manages its own WAL (checkpointer + bgwriter).
 

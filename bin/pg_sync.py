@@ -297,14 +297,14 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
     # 1. PUSH: Local to Remote (delta — only changed rows since last push)
     watermark = _get_watermark(sl_cur, "pg_push", target_name)
     if watermark:
-        sl_cur.execute("""
+        sl_cur.execute(f"""
             SELECT id, type, title, content, metadata_json, agent_id, model_id,
                    change_agent, importance, source, origin_device, is_deleted,
                    expires_at, decay_rate, created_at, updated_at,
                    COALESCE(user_id, '') as user_id, COALESCE(scope, 'agent') as scope,
                    valid_from, valid_to, COALESCE(content_hash, '') as content_hash
             FROM memory_items
-            WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)
+            WHERE updated_at > {_LOCAL_PARAM} OR (updated_at IS NULL AND created_at > {_LOCAL_PARAM})
         """, (watermark, watermark))
         logger.info(f"[{target_name}] Delta push: rows changed since {watermark}")
     else:
@@ -495,7 +495,10 @@ def sync_memory_relationships(sl_cur, pg_cur, sl_conn, target_name: str):
     # 1. PUSH: Local to Remote
     watermark = _get_watermark(sl_cur, "rel_push", target_name)
     if watermark:
-        sl_cur.execute("SELECT id, from_id, to_id, relationship_type, created_at FROM memory_relationships WHERE created_at > ?", (watermark,))
+        sl_cur.execute(
+            f"SELECT id, from_id, to_id, relationship_type, created_at "
+            f"FROM memory_relationships WHERE created_at > {_LOCAL_PARAM}",
+            (watermark,))
     else:
         sl_cur.execute("SELECT id, from_id, to_id, relationship_type, created_at FROM memory_relationships")
 
@@ -530,8 +533,17 @@ def sync_memory_relationships(sl_cur, pg_cur, sl_conn, target_name: str):
     pull_count = 0
     if remote_rows:
         try:
-            sl_cur.executemany("INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING", remote_rows)
-            pull_count = len(remote_rows)
+            # DO NOTHING, not an upsert: an edge is immutable, so an existing row
+            # is authoritative and a re-push must be a no-op. The two backends
+            # spell that at OPPOSITE ENDS of the statement (SQLite in the verb,
+            # PG in a trailing clause), which is why it is a seam primitive
+            # rather than a template a caller could fill in.
+            pull_count = _local_backend().bulk_insert_ignore(
+                sl_conn, "memory_relationships",
+                ["id", "from_id", "to_id", "relationship_type", "created_at"],
+                [tuple(r) for r in remote_rows],
+                conflict_target="(id)",
+            )
             sl_conn.commit()
         except Exception as exc:
             logger.warning(f"[{target_name}] Batch Relationship pull failed: {type(exc).__name__}")
@@ -574,18 +586,27 @@ def sync_secrets(sl_cur, pg_cur, target_name: str):
     pull_count = 0
     if remote_rows:
         try:
-            sl_cur.executemany("""
-                INSERT INTO synchronized_secrets (service_name, encrypted_value, version, origin_device, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (service_name) DO UPDATE SET
-                    encrypted_value = excluded.encrypted_value,
-                    version = excluded.version,
-                    origin_device = excluded.origin_device,
-                    updated_at = excluded.updated_at
-                WHERE excluded.version > synchronized_secrets.version
-                   OR (excluded.version = synchronized_secrets.version AND excluded.updated_at > synchronized_secrets.updated_at)
-            """, remote_rows)
-            pull_count = len(remote_rows)
+            # ⚠ VERSION precedence, NOT last-write-wins. A secret's version number
+            # is authoritative; the timestamp only breaks ties WITHIN one version.
+            # Reshaping this into an updated_at comparison would silently
+            # mis-merge the highest-value rows in the store — which is exactly
+            # why bulk_upsert takes guard_sql as a pass-through fragment rather
+            # than an LWW-shaped parameter.
+            guard = (
+                "WHERE excluded.version > synchronized_secrets.version "
+                "OR (excluded.version = synchronized_secrets.version "
+                "AND excluded.updated_at > synchronized_secrets.updated_at)"
+            )
+            pull_count = _local_backend().bulk_upsert(
+                sl_cur.connection, "synchronized_secrets",
+                ["service_name", "encrypted_value", "version", "origin_device",
+                 "updated_at"],
+                [tuple(r) for r in remote_rows],
+                conflict_target="(service_name)",
+                update_columns=["encrypted_value", "version", "origin_device",
+                                "updated_at"],
+                guard_sql=guard,
+            )
         except Exception as exc:
             logger.warning(f"[{target_name}] Batch Secret pull failed: {type(exc).__name__}")
 
@@ -642,7 +663,8 @@ def sync_tasks(sl_cur, pg_cur, sl_conn, target_name: str):
     watermark = _get_watermark(sl_cur, "tasks_push", target_name)
     if watermark:
         sl_cur.execute(
-            f"SELECT {task_cols} FROM tasks WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)",
+            f"SELECT {task_cols} FROM tasks WHERE updated_at > {_LOCAL_PARAM} "
+            f"OR (updated_at IS NULL AND created_at > {_LOCAL_PARAM})",
             (watermark, watermark),
         )
         logger.info(f"[{target_name}] Delta task push: rows changed since {watermark}")
@@ -696,26 +718,23 @@ def sync_tasks(sl_cur, pg_cur, sl_conn, target_name: str):
     pull_count = 0
     if remote_rows:
         try:
-            upsert = f"""
-                INSERT INTO tasks ({task_cols})
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (id) DO UPDATE SET
-                    title            = excluded.title,
-                    description      = excluded.description,
-                    state            = excluded.state,
-                    owner_agent      = excluded.owner_agent,
-                    parent_task_id   = excluded.parent_task_id,
-                    result_memory_id = excluded.result_memory_id,
-                    metadata_json    = excluded.metadata_json,
-                    updated_at       = excluded.updated_at,
-                    completed_at     = excluded.completed_at,
-                    deleted_at       = excluded.deleted_at
-                WHERE tasks.updated_at IS NULL OR excluded.updated_at > tasks.updated_at
-            """
+            # Columns the remote may overwrite. Deliberately NOT `created_by` or
+            # `created_at`: provenance stays as first written.
+            update_cols = [
+                "title", "description", "state", "owner_agent", "parent_task_id",
+                "result_memory_id", "metadata_json", "updated_at", "completed_at",
+                "deleted_at",
+            ]
+            guard = ("WHERE tasks.updated_at IS NULL "
+                     "OR excluded.updated_at > tasks.updated_at")
+            cols = [c.strip() for c in task_cols.split(",")]
             for i in range(0, len(remote_rows), BATCH_SIZE):
                 batch = [tuple(r) for r in remote_rows[i:i+BATCH_SIZE]]
-                sl_cur.executemany(upsert, batch)
-                pull_count += len(batch)
+                pull_count += _local_backend().bulk_upsert(
+                    sl_conn, "tasks", cols, batch,
+                    conflict_target="(id)", update_columns=update_cols,
+                    guard_sql=guard,
+                )
                 sl_conn.commit()
         except Exception as exc:
             logger.error(f"[{target_name}] Batch task pull failed: {type(exc).__name__}: {exc}")
@@ -802,12 +821,12 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target_name: str):
     watermark = _get_watermark(sl_cur, "emb_push", target_name)
     if watermark:
         # memory_embeddings has no updated_at, so filter by parent memory_item timestamps
-        sl_cur.execute("""
+        sl_cur.execute(f"""
             SELECT id, memory_id, embedding, embed_model, dim
             FROM memory_embeddings
             WHERE memory_id IN (
                 SELECT id FROM memory_items
-                WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)
+                WHERE updated_at > {_LOCAL_PARAM} OR (updated_at IS NULL AND created_at > {_LOCAL_PARAM})
             )
         """, (watermark, watermark))
         logger.info(f"[{target_name}] Delta embedding push: rows changed since {watermark}")
@@ -900,15 +919,19 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target_name: str):
                         row_list[2] = bytes(row_list[2])
                     batch.append(tuple(row_list))
 
-                sl_cur.executemany("""
-                    INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT (id) DO UPDATE SET
-                        embedding = excluded.embedding,
-                        embed_model = excluded.embed_model,
-                        dim = excluded.dim
-                """, batch)
-                pull_count += len(batch)
+                # No guard, deliberately: an embedding is DERIVED from its
+                # memory's content, so the newest vector for a given id is always
+                # the right one and there is no edit to protect. The parent
+                # memory_items merge carries the last-write-wins decision; adding
+                # a second one here could strand a row's vector a version behind
+                # its content.
+                pull_count += _local_backend().bulk_upsert(
+                    sl_conn, "memory_embeddings",
+                    ["id", "memory_id", "embedding", "embed_model", "dim"],
+                    [tuple(r) for r in batch],
+                    conflict_target="(id)",
+                    update_columns=["embedding", "embed_model", "dim"],
+                )
                 sl_conn.commit()
         except Exception as exc:
             logger.error(f"[{target_name}] Batch embedding pull failed: {type(exc).__name__}: {exc}")

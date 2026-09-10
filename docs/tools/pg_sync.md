@@ -1,8 +1,8 @@
 ---
 tool: bin/pg_sync.py
-sha1: 98c7b975fac5
-mtime_utc: 2026-09-10T06:48:48.393479+00:00
-generated_utc: 2026-09-10T06:49:35.937686+00:00
+sha1: 8e2797f85340
+mtime_utc: 2026-09-10T06:59:39.533495+00:00
+generated_utc: 2026-09-10T07:00:53.370797+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 1443)
+- `def main()` (line 1466)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -50,9 +50,9 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 1583)
-- `sqlite3.connect()  → `db_path`` (line 1599)
-- `sqlite3.connect()  → `target.db_path`` (line 1535)
+- `sqlite3.connect()  → `db_path`` (line 1606)
+- `sqlite3.connect()  → `db_path`` (line 1622)
+- `sqlite3.connect()  → `target.db_path`` (line 1558)
 
 
 ---

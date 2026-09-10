@@ -413,6 +413,37 @@ class StorageBackend(Protocol):
         """
         ...
 
+    def bulk_insert_ignore(
+        self,
+        conn: object,
+        table: str,
+        columns: "list[str]",
+        rows: "list[tuple]",
+        *,
+        conflict_target: str,
+    ) -> int:
+        """Insert many rows, SKIPPING any that conflict. Returns rows SENT.
+
+        Separate from `bulk_upsert` because "ignore on conflict" is not an upsert
+        with an empty SET list — it is a different statement whose spelling is
+        SPLIT ACROSS the statement on the two backends:
+
+          SQLite   — ``INSERT OR IGNORE INTO t …`` with NO trailing clause.
+          Postgres — ``INSERT INTO t … ON CONFLICT (pk) DO NOTHING``.
+          MySQL/MariaDB — ``INSERT IGNORE INTO t …``, again a prefix.
+
+        A caller cannot express that with one template, which is why the dialect
+        already exposes the halves as `insert_or_ignore()` (the verb) and
+        `on_conflict_ignore()` (the suffix, empty on SQLite). This primitive
+        pairs them correctly and batches the rows, so no call site has to know
+        that one backend puts the decision at the front and another at the back.
+
+        Use this where a conflicting row must be LEFT ALONE — immutable records
+        such as relationship edges, where the existing row is authoritative and a
+        re-push must be a no-op rather than a rewrite.
+        """
+        ...
+
     def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
         """Bound the write-ahead log during a long-running write. Backend-blind.
 
