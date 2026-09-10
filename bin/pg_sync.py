@@ -143,12 +143,18 @@ def _get_pg_url() -> str:
 # ── Watermarks ───────────────────────────────────────────────────────────────
 
 def _ensure_watermark_table(sl_cur) -> None:
-    """Guarantee the sync_watermarks table exists on the SQLite side.
+    """Guarantee the sync_watermarks table exists on the local store.
 
-    It is created by migration 005_perf_and_wal.sql for agent_memory.db, but
-    other target DBs (e.g. agent_chatlog.db) run a different migration set that
-    never creates it. Without this, the watermark INSERT raises 'no such table',
-    the delta cursor is never persisted, and every sync redoes a full reconcile.
+    Declared by migration 005_perf_and_wal.sql (SQLite) and pg_053 (PostgreSQL),
+    so on the MAIN store this is a no-op. It stays because OTHER sync targets —
+    agent_chatlog.db above all — run a different migration set that never creates
+    it, and there is no migration chain that covers every target. Without the
+    self-heal the watermark INSERT raises 'no such table', the delta cursor is
+    never persisted, and every sync silently redoes a full reconcile: slow, and
+    invisible until someone wonders why sync takes minutes.
+
+    Kept deliberately, unlike sync_all's copy of this DDL (removed in favour of
+    pg_053) — that one ran against the PG PRIMARY, which the migration covers.
     Idempotent — safe to call once per target before syncing.
     """
     sl_cur.execute(
@@ -935,19 +941,22 @@ def _set_warehouse_search_path(pg_conn) -> str:
     return "public"
 
 
-def _ensure_sync_state_table(sl_cur) -> None:
-    """Guarantee the sync_state table (the lock holder) exists on the SQLite side.
+def _ensure_sync_lock_table(sl_cur) -> None:
+    """Guarantee the sync_locks table exists.
 
-    Like sync_watermarks, this table is NOT created by every target DB's migration
-    set — and it is created by NO migration at all for the lock's use here. Without
-    it, the lock SELECT below raised 'no such table', which the old bare-except
-    swallowed into "lock acquisition failed" -> treated as "another sync in
-    progress" -> EVERY sync silently skipped forever (root cause of stale
-    warehouse sync, 2026-07-19). Ensuring the table makes a fresh DB acquire the
-    lock cleanly on first run. Idempotent."""
+    Declared by migration 044 (SQLite) / pg_053 (PostgreSQL), so on a
+    migrated store this is a no-op. It stays as a self-heal for the case that
+    caused the 2026-07-19 outage: the lock used to live in `sync_state`, a
+    ChromaDB table that migration 040 legitimately dropped, after which the lock
+    SELECT raised "no such table", a bare-except read that as "another sync is in
+    progress", and EVERY sync silently skipped thereafter.
+
+    A store that predates 044, or a target DB running a different migration set,
+    must therefore still be able to take the lock on first run rather than
+    wedging. Idempotent."""
     sl_cur.execute(
-        "CREATE TABLE IF NOT EXISTS sync_state "
-        "(collection_name TEXT PRIMARY KEY, last_pull_at TEXT)"
+        "CREATE TABLE IF NOT EXISTS sync_locks "
+        "(lock_name TEXT PRIMARY KEY, holder TEXT, acquired_at TEXT)"
     )
 
 
@@ -956,36 +965,93 @@ def _ensure_sync_state_table(sl_cur) -> None:
 # liveness handles the common same-host crash immediately; this bounds the rest.
 _SYNC_LOCK_STALE_SECONDS = 3600
 
+# The single row in sync_locks that pg_sync coordinates on. Named rather than a
+# literal so the acquire/release/probe sites cannot drift apart.
+_SYNC_LOCK_NAME = "pg_sync"
+
+# Bind placeholder for the LOCAL store. The local half is SQLite today (Phase 3
+# ports it), but a literal '?' in feature code is a portability bug the moment a
+# second local backend lands — ask the seam, which knows. Falls back to the
+# SQLite form when the seam is unavailable (installer bootstrap), matching
+# auth_utils._dialect_param's own fallback.
+def _local_param() -> str:
+    try:
+        from memory.backends import dialect
+        return dialect().param()
+    except Exception:  # noqa: BLE001 — bootstrap: seam not importable yet
+        return "?"
+
+
+_LOCAL_PARAM = _local_param()
+
+
+def _this_host() -> str:
+    """This machine's name, for lock ownership. Never raises."""
+    try:
+        import socket
+        return socket.gethostname() or "unknown-host"
+    except Exception:  # noqa: BLE001 — a lock must not fail to be taken over this
+        return "unknown-host"
+
 
 def _lock_value(now_iso: str) -> str:
-    """The value stored in the lock row: '<iso_timestamp>|<pid>'. The PID lets a
-    crashed sync's lock be reclaimed IMMEDIATELY (the process is gone) instead of
-    waiting out the staleness window. Backward-compatible: a legacy value with no
-    '|pid' just falls back to the timestamp check."""
-    return f"{now_iso}|{os.getpid()}"
+    """The value stored in the lock row: '<iso_timestamp>|<pid>@<host>'.
+
+    The PID lets a crashed sync's lock be reclaimed IMMEDIATELY (the process is
+    gone) instead of waiting out the staleness window.
+
+    The HOST matters once the store can be shared. On SQLite the lock lives in a
+    per-machine file, so a recorded PID is always local and always meaningful.
+    On a PostgreSQL primary that two machines both sync from, they share one lock
+    row — and a bare PID lets machine A read machine B's live PID, find no such
+    process locally, judge the lock stale and steal it: two concurrent syncs.
+    Recording the host lets a reader tell "not my host, cannot evaluate" from
+    "my host, the process is gone".
+
+    Backward-compatible in both directions: a legacy '<ts>|<pid>' value parses
+    with host=None, and a legacy READER seeing '<pid>@<host>' fails its int()
+    and falls back to the timestamp ceiling — the safe direction.
+    """
+    return f"{now_iso}|{os.getpid()}@{_this_host()}"
 
 
-def _parse_lock_value(raw: str) -> "tuple[str, int | None]":
-    """Split a lock value into (iso_timestamp, pid|None). Tolerates the legacy
-    no-PID form."""
-    ts, _, pid_s = raw.partition("|")
+def _parse_lock_value(raw: str) -> "tuple[str, int | None, str | None]":
+    """Split a lock value into (iso_timestamp, pid|None, host|None).
+
+    Tolerates the legacy '<ts>|<pid>' and '<ts>' forms, both of which yield
+    host=None and are then treated as unevaluable ownership.
+    """
+    ts, _, rest = raw.partition("|")
+    if not rest:
+        return ts, None, None
+    pid_s, _, host = rest.partition("@")
     try:
-        return ts, (int(pid_s) if pid_s else None)
+        return ts, (int(pid_s) if pid_s else None), (host or None)
     except ValueError:
-        return ts, None
+        return ts, None, (host or None)
 
 
 def _sync_lock_is_stale(raw: str) -> bool:
-    """True if a held lock can be stolen: its owner PID is dead (immediate
-    recovery from a crashed sync), or — when the PID is unknown/unevaluable — it
-    is older than the staleness ceiling."""
-    ts, pid = _parse_lock_value(raw)
-    if pid is not None:
-        # Same-host crash recovery: if the recorded process is gone, the lock is
-        # abandoned. (A live PID means a sync really is in progress -> not stale.)
-        # NOTE: on a multi-host layout a PID is only meaningful on its own host;
-        # a foreign live PID that happens to match a local process is the rare
-        # case the timestamp ceiling still covers.
+    """True if a held lock can be stolen.
+
+    A PID is only evidence on the host that wrote it, so the PID shortcut applies
+    only when the lock names THIS host. Anything else — a foreign host, a legacy
+    value with no host, an unparseable PID — falls through to the staleness
+    ceiling, which is the conservative direction: waiting out the window costs a
+    delayed sync, whereas stealing a live lock costs two concurrent writers.
+    """
+    ts, pid, host = _parse_lock_value(raw)
+    # A legacy value carries no host. Treating it as foreign would COST the
+    # immediate crash-recovery this check exists for — a dead-pid lock left by
+    # the previous build would block for the full hour. Legacy values only ever
+    # came from a per-machine SQLite file, where the pid WAS local by
+    # construction, so treating them as same-host preserves the old behaviour
+    # exactly. A shared store can only contain host-tagged values, since only
+    # this build writes there.
+    same_host = host is None or host == _this_host()
+    if pid is not None and same_host:
+        # Same-host crash recovery: the recorded process is gone -> abandoned.
+        # (A live PID means a sync really is in progress -> not stale.)
         try:
             from m3_halt import pid_is_alive
             if not pid_is_alive(pid):
@@ -1003,29 +1069,39 @@ def _acquire_sync_lock(sl_cur) -> bool:
     """Attempts to acquire a global sync lock. Returns True if successful.
 
     A MISSING lock table is "not locked" (create + acquire), NOT "locked" — the
-    latter was a footgun that silently skipped every sync on any DB whose
-    sync_state table was never created. A HELD lock whose owner process has died
-    is reclaimed immediately (PID liveness) rather than blocking for the full
-    staleness window."""
+    latter was a footgun that silently skipped every sync on any DB whose lock
+    table was absent (see _ensure_sync_lock_table for the outage). A HELD lock
+    whose owner process has died is reclaimed immediately (PID liveness), but
+    ONLY when the lock names this host — see _sync_lock_is_stale."""
     # Self-heal: a missing table must never read as "held". Create-if-absent
     # BEFORE the lock check so the SELECT can't fail with 'no such table'.
     try:
-        _ensure_sync_state_table(sl_cur)
+        _ensure_sync_lock_table(sl_cur)
     except Exception as e:
         # If we can't even create the table, we cannot coordinate — proceed
         # UNLOCKED (fail-open) rather than block all syncs forever. A rare
         # concurrent double-sync is far less harmful than a permanent no-sync.
-        logger.warning(f"Could not ensure sync_state table ({e}); proceeding without lock.")
+        logger.warning(f"Could not ensure sync_locks table ({e}); proceeding without lock.")
         return True
     try:
-        sl_cur.execute("SELECT last_pull_at FROM sync_state WHERE collection_name = 'pg_sync_lock'")
+        sl_cur.execute(
+            f"SELECT holder FROM sync_locks WHERE lock_name = {_LOCAL_PARAM}",
+            (_SYNC_LOCK_NAME,)
+        )
         row = sl_cur.fetchone()
         if row and row[0] and not _sync_lock_is_stale(row[0]):
             return False  # a live sync holds it
 
+        # Upsert rather than INSERT OR REPLACE: the latter is SQLite-only syntax.
+        # ON CONFLICT ... DO UPDATE is spelled identically on both current
+        # backends, so this one statement serves either local store.
+        now_iso = datetime.now(timezone.utc).isoformat()
         sl_cur.execute(
-            "INSERT OR REPLACE INTO sync_state (collection_name, last_pull_at) VALUES ('pg_sync_lock', ?)",
-            (_lock_value(datetime.now(timezone.utc).isoformat()),)
+            f"INSERT INTO sync_locks (lock_name, holder, acquired_at) "
+            f"VALUES ({_LOCAL_PARAM}, {_LOCAL_PARAM}, {_LOCAL_PARAM}) "
+            f"ON CONFLICT (lock_name) DO UPDATE SET "
+            f"holder = excluded.holder, acquired_at = excluded.acquired_at",
+            (_SYNC_LOCK_NAME, _lock_value(now_iso), now_iso)
         )
         return True
     except Exception as e:
@@ -1036,7 +1112,10 @@ def _acquire_sync_lock(sl_cur) -> bool:
 def _release_sync_lock(sl_cur):
     """Releases the global sync lock."""
     try:
-        sl_cur.execute("DELETE FROM sync_state WHERE collection_name = 'pg_sync_lock'")
+        sl_cur.execute(
+            f"DELETE FROM sync_locks WHERE lock_name = {_LOCAL_PARAM}",
+            (_SYNC_LOCK_NAME,)
+        )
     except Exception as e:
         logger.warning(f"Lock release failed: {e}")
 

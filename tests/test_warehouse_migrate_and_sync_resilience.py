@@ -171,25 +171,33 @@ class TestStaleLockRecovery:
         assert self.P._sync_lock_is_stale("garbage") is True
 
     def test_lock_value_roundtrips(self):
+        # The value gained a host segment ('<ts>|<pid>@<host>') so a shared store
+        # can tell whose pid it is; _parse_lock_value now returns a 3-tuple.
         v = self.P._lock_value("2026-07-19T00:00:00+00:00")
-        ts, pid = self.P._parse_lock_value(v)
+        ts, pid, host = self.P._parse_lock_value(v)
         assert ts == "2026-07-19T00:00:00+00:00"
         assert pid == self.os.getpid()
+        assert host == self.P._this_host()
 
     def test_acquire_reclaims_dead_pid_lock(self):
         # End-to-end against an in-memory sqlite: a dead-PID lock is reclaimed.
         import sqlite3
         conn = sqlite3.connect(":memory:")
         cur = conn.cursor()
-        self.P._ensure_sync_state_table(cur)
-        # plant a crashed sync's lock (recent, dead PID)
+        self.P._ensure_sync_lock_table(cur)
+        # plant a crashed sync's lock (recent, dead PID). Deliberately in the
+        # LEGACY host-less form: that is what a lock left by the previous build
+        # looks like, and reclaiming it immediately is the property under test.
         cur.execute(
-            "INSERT INTO sync_state (collection_name, last_pull_at) VALUES "
-            "('pg_sync_lock', ?)", (f"{self.now.isoformat()}|999999999",))
+            "INSERT INTO sync_locks (lock_name, holder, acquired_at) VALUES "
+            "(?, ?, ?)", (self.P._SYNC_LOCK_NAME,
+                          f"{self.now.isoformat()}|999999999",
+                          self.now.isoformat()))
         assert self.P._acquire_sync_lock(cur) is True  # reclaimed
         # and the row is now stamped with OUR live pid
-        cur.execute("SELECT last_pull_at FROM sync_state WHERE collection_name='pg_sync_lock'")
-        _, pid = self.P._parse_lock_value(cur.fetchone()[0])
+        cur.execute("SELECT holder FROM sync_locks WHERE lock_name = ?",
+                    (self.P._SYNC_LOCK_NAME,))
+        _, pid, _host = self.P._parse_lock_value(cur.fetchone()[0])
         assert pid == self.os.getpid()
         conn.close()
 
@@ -197,11 +205,13 @@ class TestStaleLockRecovery:
         import sqlite3
         conn = sqlite3.connect(":memory:")
         cur = conn.cursor()
-        self.P._ensure_sync_state_table(cur)
+        self.P._ensure_sync_lock_table(cur)
         # a lock owned by THIS (live) process, recent -> a second acquire is blocked
         cur.execute(
-            "INSERT INTO sync_state (collection_name, last_pull_at) VALUES "
-            "('pg_sync_lock', ?)", (self.P._lock_value(self.now.isoformat()),))
+            "INSERT INTO sync_locks (lock_name, holder, acquired_at) VALUES "
+            "(?, ?, ?)", (self.P._SYNC_LOCK_NAME,
+                          self.P._lock_value(self.now.isoformat()),
+                          self.now.isoformat()))
         assert self.P._acquire_sync_lock(cur) is False
         conn.close()
 

@@ -291,13 +291,12 @@ def _fdw_run(primary_backend, pg_fdw_sync, warehouse_dsn: str, dry_run: bool) ->
 
     with primary_backend.connection() as primary_conn:
         primary_conn.autocommit = False
-        with primary_conn.cursor() as wc:
-            # TODO(pg_053): this DDL is created ad-hoc here AND in pg_sync.py,
-            # with different SQL at each site, and belongs in a migration. Phase 2
-            # of the PG-local-sync work removes both copies.
-            wc.execute("CREATE TABLE IF NOT EXISTS sync_watermarks "
-                       "(direction TEXT PRIMARY KEY, last_synced_at TEXT)")
-
+        # No ad-hoc CREATE TABLE here: sync_watermarks is declared by pg_053 on
+        # the PostgreSQL primary, which is the only store this path touches. The
+        # DDL that used to live here was a second, independently-written copy of
+        # pg_sync's — same table, different SQL, no owner — and a table created
+        # by whichever code path ran first is how it ended up undeclared on PG
+        # in the first place.
         def get_wm(direction: str):
             with primary_conn.cursor() as c:
                 c.execute(

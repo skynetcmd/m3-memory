@@ -81,6 +81,20 @@ _SHARED_CORE_TABLES = {
     # SQLite schema instead of this list precisely so the next such table is
     # caught without anyone remembering to add it here.
     "synchronized_secrets",
+    # Sync bookkeeping, declared by 005/044 (SQLite) and pg_053 (PostgreSQL).
+    #
+    # ⚠ These are PER-MACHINE state and must NEVER be replicated to the
+    # warehouse — a shared watermark makes two machines resume from each other's
+    # position, and a shared lock makes one block or steal the other's. That is a
+    # constraint on pg_sync's TABLE LIST, not on the schema: both backends must
+    # still HAVE the tables, which is what this list checks.
+    #
+    # (An earlier version of this file excluded sync_watermarks as "SQLite-side
+    # by design". That was wrong: sync_all.py created it on the PG primary too,
+    # just ad-hoc rather than by migration. Per-machine is not the same as
+    # per-backend.)
+    "sync_watermarks",
+    "sync_locks",
 }
 
 
@@ -208,13 +222,6 @@ _SQLITE_ONLY_TABLES = {
     "memory_items_fts_config",
     # SQLite migration bookkeeping; PG tracks versions in schema_versions.
     "schema_migrations",
-    # SQLite-side sync bookkeeping, BY DESIGN. bin/pg_sync.py documents it as
-    # "SQLite side, per direction+target", only touches it through `sl_cur`, and
-    # creates it itself (:146-155). It records how far THIS local store has synced
-    # to a remote; a copy on the PG side would be a second, divergent bookkeeping
-    # row for the same relationship. Verified by reading the call sites, not
-    # assumed from the name.
-    "sync_watermarks",
 }
 
 
