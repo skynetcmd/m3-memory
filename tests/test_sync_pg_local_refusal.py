@@ -1,0 +1,206 @@
+"""Phase 0: a PostgreSQL local store must never sync silently-nothing.
+
+Three defects made a PG-primary deployment report success while moving no data.
+Each test here pins one of them, and each would pass vacuously if the fix were
+reverted to "log a warning and continue" — so they assert the REFUSAL, not just
+the message.
+
+Why this matters more than an ordinary bug: on a replication path a wrong
+SUCCESS is silent divergence discovered weeks later, once both stores have moved
+on. A wrong refusal is a red cron job someone fixes the same morning.
+
+Hermetic: no PostgreSQL, no network, no real store. The backend seam and the
+FDW module are stubbed; nothing here touches a live cluster.
+"""
+from __future__ import annotations
+
+import pathlib
+import sys
+
+import pytest
+
+_BIN = pathlib.Path(__file__).resolve().parents[1] / "bin"
+sys.path.insert(0, str(_BIN))
+
+import sync_all  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _clear_fdw_reason():
+    """The fall-back reason is module state; keep tests independent of order."""
+    sync_all._set_fdw_reason("")
+    yield
+    sync_all._set_fdw_reason("")
+
+
+class TestGenericBridgeRefusesNonSqliteLocal:
+    """`bin/pg_sync.py` opens the local side with sqlite3.connect().
+
+    On a PG primary that finds no file, or opens a stale/empty agent_memory.db,
+    reads zero rows and reports success. Until the Phase 3 port lands, reaching
+    that bridge with a non-SQLite local store must be a refusal.
+    """
+
+    def test_postgres_local_refuses(self, monkeypatch):
+        monkeypatch.setattr(sync_all, "_local_backend_name", lambda: "postgres")
+        monkeypatch.setattr(sync_all, "_try_pg_fdw_fastpath", lambda dry_run: None)
+        ran = []
+        monkeypatch.setattr(sync_all, "run_pg_sync_for_db",
+                            lambda db, dry: ran.append(db) or True)
+
+        assert sync_all.run_pg_sync(dry_run=False) is False
+        assert ran == [], "the generic bridge must not run on a non-SQLite local store"
+
+    def test_a_future_backend_also_refuses(self, monkeypatch):
+        """The check is `!= sqlite`, not `== postgres`.
+
+        A MariaDB backend would hit the same SQLite-only bridge; keying on the
+        capability rather than enumerating known-bad backends means it inherits
+        the refusal with no edit here.
+        """
+        monkeypatch.setattr(sync_all, "_local_backend_name", lambda: "mariadb")
+        monkeypatch.setattr(sync_all, "_try_pg_fdw_fastpath", lambda dry_run: None)
+        assert sync_all.run_pg_sync(dry_run=False) is False
+
+    def test_sqlite_local_still_runs(self, monkeypatch):
+        """The refusal must not fire on a healthy existing user.
+
+        This is the regression that matters most: a mis-detection turns every
+        SQLite deployment's hourly cron red.
+        """
+        monkeypatch.setattr(sync_all, "_local_backend_name", lambda: "sqlite")
+        monkeypatch.setattr(sync_all, "_try_pg_fdw_fastpath", lambda dry_run: None)
+        monkeypatch.setattr(sync_all, "_resolve_dbs",
+                            lambda: [pathlib.Path("/nonexistent/agent_memory.db")])
+        ran = []
+        monkeypatch.setattr(sync_all, "run_pg_sync_for_db",
+                            lambda db, dry: ran.append(db) or True)
+
+        assert sync_all.run_pg_sync(dry_run=False) is True
+        assert ran, "SQLite deployments must still reach the generic bridge"
+
+    def test_backend_probe_failure_defaults_to_sqlite(self, monkeypatch):
+        """An unresolvable seam must not refuse.
+
+        Defaulting to 'sqlite' keeps the historical shape working when the seam
+        is unavailable (installer bootstrap, partial install) rather than
+        breaking a user whose backend simply could not be read.
+        """
+        import memory.backends as backends
+
+        def _boom():
+            raise RuntimeError("seam unavailable")
+
+        monkeypatch.setattr(backends, "active_backend", _boom)
+        assert sync_all._local_backend_name() == "sqlite"
+
+    def test_refusal_names_the_fdw_reason(self, monkeypatch, caplog):
+        """On a PG primary this refusal is ALWAYS downstream of an FDW fallback.
+
+        Reporting only "the bridge is unsupported" would leave the operator
+        unaware that the supported path was one `CREATE EXTENSION` away.
+        """
+        monkeypatch.setattr(sync_all, "_local_backend_name", lambda: "postgres")
+        monkeypatch.setattr(sync_all, "_try_pg_fdw_fastpath", lambda dry_run: None)
+        sync_all._set_fdw_reason("FDW fast-path unavailable: postgres_fdw not installed")
+
+        with caplog.at_level("ERROR"):
+            sync_all.run_pg_sync(dry_run=False)
+
+        blob = caplog.text
+        assert "postgres_fdw not installed" in blob
+        assert "M3_PRIMARY_PG_URL" in blob, "the message must name the fix, not only the fault"
+
+
+class TestFdwUsesThePrimaryNotTheWarehouse:
+    """`ctx.pg_connection()` is the WAREHOUSE role by contract.
+
+    Using it as `primary_conn` wired postgres_fdw from the warehouse back to
+    itself: the primary was never touched and the run reported success.
+    """
+
+    def test_missing_primary_dsn_falls_back_rather_than_guessing(self, monkeypatch):
+        """No primary DSN must NOT silently fall back to the warehouse DSN."""
+        import memory.backends as backends
+        from m3_core import paths
+
+        monkeypatch.setattr(backends, "active_backend",
+                            lambda: type("B", (), {"name": "postgres"})())
+        monkeypatch.setattr(paths, "resolve_primary_pg_dsn", lambda default=None: None)
+        # A warehouse DSN IS available — the point is that it must not be used
+        # as the primary just because it is the only one present.
+        monkeypatch.setenv("M3_CDW_PG_URL", "postgresql://u@wh/warehouse")
+
+        assert sync_all._try_pg_fdw_fastpath(dry_run=True) is None
+
+    def test_same_database_is_refused_not_fallen_back(self, monkeypatch):
+        """primary == warehouse is a misconfiguration, not an unavailability.
+
+        Returning None here would fall through to the generic bridge and mask a
+        setup error that silently syncs a store with itself; the run must fail.
+        """
+        import memory.backends as backends
+        from m3_core import paths
+        from memory.backends import postgres_backend as pgb
+
+        monkeypatch.setattr(backends, "active_backend",
+                            lambda: type("B", (), {"name": "postgres"})())
+        monkeypatch.setattr(paths, "resolve_primary_pg_dsn",
+                            lambda default=None: "postgresql://u@h/same")
+        monkeypatch.setenv("M3_CDW_PG_URL", "postgresql://u@h/same")
+
+        def _reject(url):
+            raise RuntimeError("primary DSN names the SAME database as the warehouse")
+
+        monkeypatch.setattr(pgb, "_reject_same_as_warehouse", _reject)
+        assert sync_all._try_pg_fdw_fastpath(dry_run=True) is False
+
+    def test_guard_is_invoked_explicitly(self):
+        """PostgresBackend(dsn=...) BYPASSES the guard.
+
+        `__init__` is `self._dsn = dsn or _resolve_dsn()`, and
+        _reject_same_as_warehouse lives inside _resolve_dsn. Passing a DSN skips
+        it entirely, so sync_all must call the guard itself — relying on
+        construction would silently re-permit the failure being fixed.
+        """
+        import inspect
+
+        from memory.backends import postgres_backend as pgb
+
+        init_src = inspect.getsource(pgb.PostgresBackend.__init__)
+        assert "dsn or _resolve_dsn()" in init_src, (
+            "if this changed, re-check whether the explicit guard call is still needed"
+        )
+        assert "_reject_same_as_warehouse" in inspect.getsource(sync_all), (
+            "sync_all must invoke the same-database guard itself"
+        )
+
+
+class TestNeverCreateTheLocalStore:
+    """sqlite3.connect() creates a missing file; the sync then 'succeeds' empty."""
+
+    def test_absent_target_is_skipped_not_created(self, tmp_path):
+        """Per-TARGET paths were never existence-checked.
+
+        main() gates the primary db_path, but migrate_memory.targets("all")
+        yields others (agent_chatlog.db) that went straight to sqlite3.connect.
+        """
+        import pg_sync
+
+        src = (_BIN / "pg_sync.py").read_text(encoding="utf-8")
+        start = src.index("for target in targets:")
+        end = src.index("sl_conn.row_factory", start)
+        block = src[start:end]
+        assert "os.path.exists(target.db_path)" in block, (
+            "per-target paths must be existence-checked before sqlite3.connect"
+        )
+        assert "continue" in block
+
+        # And the guard's premise: connect() really does create the file.
+        import sqlite3
+
+        ghost = tmp_path / "not_there.db"
+        assert not ghost.exists()
+        sqlite3.connect(str(ghost)).close()
+        assert ghost.exists(), "premise check: sqlite3.connect creates a missing file"
+        assert pg_sync is not None

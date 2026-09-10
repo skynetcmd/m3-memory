@@ -1,8 +1,8 @@
 ---
 tool: bin/pg_sync.py
-sha1: 49dee376e885
-mtime_utc: 2026-08-07T23:53:52.242940+00:00
-generated_utc: 2026-08-08T14:40:50.066931+00:00
+sha1: faeb286572c9
+mtime_utc: 2026-09-10T05:39:13.615710+00:00
+generated_utc: 2026-09-10T05:41:11.407895+00:00
 private: false
 ---
 
@@ -50,9 +50,9 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 1435)
-- `sqlite3.connect()  → `db_path`` (line 1451)
-- `sqlite3.connect()  → `target.db_path`` (line 1387)
+- `sqlite3.connect()  → `db_path`` (line 1448)
+- `sqlite3.connect()  → `db_path`` (line 1464)
+- `sqlite3.connect()  → `target.db_path`` (line 1400)
 
 
 ---

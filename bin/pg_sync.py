@@ -1383,6 +1383,19 @@ def main():
 
                 for target in targets:
                     logger.info(f"--- Synchronizing target: {target.name} ({target.db_path}) ---")
+                    # NEVER let sqlite3.connect CREATE the local store. It happily
+                    # creates a missing file, and the sync then reads zero rows,
+                    # writes zero rows, and reports success — a silent no-op on a
+                    # replication path. main() gates the primary db_path at :1359,
+                    # but these per-TARGET paths (e.g. agent_chatlog.db) were never
+                    # checked, so an absent chatlog store was manufactured empty
+                    # and "synced".
+                    if not os.path.exists(target.db_path):
+                        logger.warning(
+                            f"[{target.name}] local store not present at "
+                            f"{target.db_path} — skipping (refusing to create it)."
+                        )
+                        continue
                     try:
                         sl_conn = sqlite3.connect(target.db_path, timeout=30)
                         sl_conn.row_factory = sqlite3.Row

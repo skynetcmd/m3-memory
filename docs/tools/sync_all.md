@@ -1,8 +1,8 @@
 ---
 tool: bin/sync_all.py
-sha1: 5b90e0107b3a
-mtime_utc: 2026-07-19T06:36:07.540590+00:00
-generated_utc: 2026-07-19T19:29:22.929632+00:00
+sha1: fc5e098c3d6e
+mtime_utc: 2026-09-10T05:40:15.946122+00:00
+generated_utc: 2026-09-10T05:41:11.468274+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ DB list:
 
 ## Entry points
 
-- `def main()` (line 240)
+- `def main()` (line 357)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -77,7 +77,10 @@ DB list:
 
 ## Notable external imports
 
+- `m3_core.paths (resolve_primary_pg_dsn)`
 - `memory.backends (active_backend)`
+- `memory.backends.postgres_backend (PostgresBackend)`
+- `memory.backends.postgres_backend (_reject_same_as_warehouse)`
 
 ---
 
