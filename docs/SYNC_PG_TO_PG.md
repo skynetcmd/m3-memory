@@ -18,9 +18,32 @@ on the server — bulk, streaming, no per-row Python round-trips.
 | **PostgreSQL** | **PostgreSQL** | **FDW fast-path** (this page) |
 | MariaDB (future) | PostgreSQL | Generic bridge (no FDW-to-Postgres) |
 
-If the fast-path can't run (extension missing, warehouse unreachable, permissions),
-m3 **automatically falls back** to the generic bridge — you never lose sync by
-enabling it.
+⚠ **On a PostgreSQL primary the fast path is not optional — it is the only path.**
+If it can't run (extension missing, warehouse unreachable, permissions), m3
+**refuses and exits non-zero** rather than falling back. The generic bridge opens
+the local store as SQLite, so on a PG primary it would find no file — or worse, a
+stale one — read zero rows, write zero rows, and report success. A sync that
+silently moves nothing is worse than one that fails, so it fails.
+
+The error names both the condition and the FDW reason behind it, e.g.:
+
+```
+Local store is 'postgres' (M3_DB_BACKEND), but the generic sync bridge
+supports only a SQLite local store.
+  FDW fast-path unavailable: postgres_fdw extension not installed on the primary
+  Refusing to run rather than syncing an empty database.
+  Fix: ensure M3_PRIMARY_PG_URL points at the primary store and, for the fast
+  path, ask an administrator for `CREATE EXTENSION postgres_fdw;` on it.
+```
+
+A **SQLite** primary is unaffected: it uses the generic bridge as it always has,
+and nothing on this page applies.
+
+⚠ **`M3_PRIMARY_PG_URL` must point at your PRIMARY, not the warehouse.** Earlier
+releases resolved the "primary" connection through the warehouse resolver, so the
+fast path wired `postgres_fdw` from the warehouse back to itself and synced the
+warehouse with itself — the primary was never touched, and the run reported
+success. m3 now refuses when the two DSNs name the same `(host, port, dbname)`.
 
 ---
 
@@ -106,9 +129,23 @@ WHERE <target>.updated_at < EXCLUDED.updated_at;   -- last-writer-wins
   other change and stay recoverable.
 
 Tables synced: `memory_items` (incl. chat-log rows), `memory_embeddings`,
-`memory_relationships`. Only the **columns shared** between your primary and the
-warehouse are synced — local-only columns (belief/knowledge-graph fields) stay on
-the primary by design.
+`memory_relationships`, `tasks`, and `synchronized_secrets` — the **same five**
+the generic bridge covers. Only the **columns shared** between your primary and
+the warehouse are synced; local-only columns (belief/knowledge-graph fields) stay
+on the primary by design.
+
+> Earlier releases synced only the first three here, so a deployment on the fast
+> path silently did not sync its tasks or its secrets vault — no error, those
+> tables simply never moved. If you were on the fast path before this change,
+> expect the first run afterwards to move a backlog of both.
+
+**`synchronized_secrets` resolves conflicts by VERSION, not by timestamp.** The
+version number is authoritative and `updated_at` only breaks ties within one
+version, so a secret whose version was bumped without its timestamp moving still
+propagates. Every other table is last-writer-wins on `updated_at`;
+`memory_embeddings` and `memory_relationships` have no conflict guard at all — an
+embedding is derived from its memory's content, so the newest is always right, and
+a relationship edge is immutable.
 
 ---
 

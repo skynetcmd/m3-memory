@@ -4,8 +4,15 @@ m3-memory's sync system keeps your memory database in sync between your local
 machine and a central PostgreSQL warehouse. This lets you switch machines
 (desktop ↔ laptop, work ↔ home) without losing context.
 
-This page covers the **default sync** — `agent_memory.db` only. If you also
-run benchmarks (most users don't), see [BENCH_SYNC.md](BENCH_SYNC.md).
+This page covers the **default sync** — a SQLite local store (`agent_memory.db`)
+to a PostgreSQL warehouse. If you also run benchmarks (most users don't), see
+[BENCH_SYNC.md](BENCH_SYNC.md).
+
+> **If your local store is PostgreSQL**, this page's row-by-row bridge does not
+> apply to you — it opens the local side as SQLite. Use
+> [SYNC_PG_TO_PG.md](SYNC_PG_TO_PG.md) instead, which is the only supported path
+> for a PG primary. m3 refuses rather than falling back, because falling back
+> would sync nothing while reporting success.
 
 ## What gets synced
 

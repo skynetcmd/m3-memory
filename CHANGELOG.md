@@ -21,6 +21,19 @@ the policy is forward-going only.
 
 ### ⚠ Breaking
 
+- **A PostgreSQL primary now REFUSES to sync rather than silently syncing
+  nothing.** The generic bridge (`pg_sync.py`) opens the local store as SQLite,
+  so on a PG primary it found no file — or a stale one — read zero rows, wrote
+  zero rows, and reported **success**. Three defects combined to make this
+  invisible: the FDW fast path resolved its "primary" connection through the
+  *warehouse* resolver (so it wired `postgres_fdw` from the warehouse back to
+  itself and never touched the primary); `postgres_fdw` needs a one-time
+  superuser install that m3 cannot perform, so the fall-back was the common
+  path; and `sqlite3.connect` CREATES a missing file, manufacturing the empty
+  database it then "synced". A PG deployment that was reporting green hourly
+  syncs will now fail loudly and name the fix (`M3_PRIMARY_PG_URL`). **SQLite
+  deployments are unaffected.** See [SYNC_PG_TO_PG.md](docs/SYNC_PG_TO_PG.md).
+
 - **`m3 serve` now requires a bearer token and refuses to start without one.**
   The HTTP transport publishes the whole catalog — `memory_delete` and
   `gdpr_forget` included — and Claude's custom connectors reach it *from
@@ -34,6 +47,26 @@ the policy is forward-going only.
   error names the exact command.
 
 ### Added
+
+- **The FDW fast path now syncs all five tables**, matching the generic bridge.
+  It covered three, so a PostgreSQL deployment with the fast path *working*
+  silently lost its `tasks` and its `synchronized_secrets` vault — no error,
+  those tables simply never moved. A parity test derives the generic path's table
+  list from its own `sync_*` functions, so the two cannot diverge again.
+  `synchronized_secrets` keeps VERSION precedence rather than timestamp
+  last-writer-wins; giving it the default guard would have mis-merged the
+  highest-value rows in the store.
+- **`sync_watermarks` and the sync lock are declared by migrations** (044 /
+  pg_053) instead of created at runtime by whichever code path ran first. The
+  lock previously squatted in `sync_state`, a ChromaDB table that migration 040
+  legitimately dropped — after which every sync silently skipped, for good. Its
+  holder is now `host|pid`, so on a shared store one machine cannot judge
+  another's live lock stale and steal it.
+- **Seam primitives** `bulk_upsert`, `bulk_insert_ignore` and `list_tables` on
+  `StorageBackend`, plus `backend_for(uri)` and a path-bindable `SqliteBackend`.
+  `bulk_upsert` uses `execute_values` on PostgreSQL: psycopg2's `executemany`
+  runs the statement once per row, measured at **26.7x slower** for 3,000 rows
+  over a local bridge, and worse with network latency.
 
 - `m3 serve --public-host HOST` (repeatable) — allowlists the hostname a tunnel
   presents. Without it the transport rejected tunnelled requests with `421`

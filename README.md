@@ -12,10 +12,14 @@
 
 Under the hood, M3 treats agent memory as a **distributed-systems infrastructure problem**, not a simple retrieval feature — a **shared, evolving, bitemporal, contradiction-aware knowledge base** that multiple heterogeneous agents and machines read and write, built to stay consistent over months and years.
 
+**The memory improves without being asked.** M3 is not only a store you write to and read back. An **autonomous Cognitive Loop** (`m3_cognitive_loop.py`) runs in the background and keeps working on what you already saved: **deferred enrichment** — classification, embedding, and entity extraction — runs off the hot path, so a write stays fast while the understanding of it deepens afterwards, and the loop builds an **entity relationship graph** from memories that arrived as plain text. **Curation is m3's own work, not an LLM's.** Near-duplicate detection is cosine similarity over embeddings against a threshold; decay and pruning are age-and-signal rules; and applying a curation plan — bulk deletes, merges, supersessions — is one deterministic function issuing direct SQL, with **no model in the loop**. That is deliberate: the apply step *used* to be an LLM agent, and it failed by looping single-row deletes across hundreds of IDs until it ran out of budget. An agent's judgement is still welcome for the genuinely subjective calls ("is this worth keeping?"), but it emits a *plan* and m3 executes it — one round-trip instead of N, and no model needed for the mechanical part. Contradiction supersession and promotion of chat turns are separate, deliberate steps rather than loop work.
+
 **It runs where your data has to stay.** A single `pip install` with no account, no
 API key, and no outbound calls — at home in a **homelab**, on a **corporate or
-government network**, or **fully air-gapped**. The embedder runs in-process and
-local, the store is a file you own, and installation works with no internet at all.
+government network**, or **fully air-gapped**. Embedding runs on your own hardware
+via a **shared local embed server** — one model in RAM that every m3 process
+reuses, rather than a copy per process — the store is a file you own, and
+installation works with no internet at all.
 On the metric that isolates the memory layer — **retrieval accuracy, no answer model
 or judge involved** — M3 reaches **99.2% session-hit-rate @ k=10 and 100% @ k=20** on
 LongMemEval-S.
