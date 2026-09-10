@@ -168,10 +168,17 @@ def _get_watermark(sl_cur, direction: str, target_name: str) -> str | None:
     # Prefix direction with target_name for separate watermarks per DB
     prefixed_direction = f"{target_name}_{direction}" if target_name != "main" else direction
     try:
-        sl_cur.execute("SELECT last_synced_at FROM sync_watermarks WHERE direction = ?", (prefixed_direction,))
+        sl_cur.execute(
+            f"SELECT last_synced_at FROM sync_watermarks WHERE direction = {_LOCAL_PARAM}",
+            (prefixed_direction,))
         row = sl_cur.fetchone()
         return row[0] if row else None
-    except sqlite3.OperationalError as exc:
+    except Exception as exc:
+        # Narrow by MEANING, not by exception class: sqlite3.OperationalError and
+        # psycopg2's UndefinedTable are unrelated types for the same condition,
+        # and a third backend brings a third. The seam classifies it.
+        if not _local_dialect().is_undefined_object_error(exc):
+            raise
         # The table is ensured before sync, so this is unexpected — surface it
         # rather than silently forcing a full reconcile every run.
         logger.warning(f"[{target_name}] watermark read failed ({exc}); treating as first sync")
@@ -183,12 +190,14 @@ def _set_watermark(sl_cur, direction: str, ts: str, target_name: str) -> None:
     prefixed_direction = f"{target_name}_{direction}" if target_name != "main" else direction
     try:
         sl_cur.execute(
-            """INSERT INTO sync_watermarks (direction, last_synced_at)
-               VALUES (?, ?)
-               ON CONFLICT(direction) DO UPDATE SET last_synced_at = excluded.last_synced_at""",
+            f"INSERT INTO sync_watermarks (direction, last_synced_at) "
+            f"VALUES ({_LOCAL_PARAM}, {_LOCAL_PARAM}) "
+            f"{_local_dialect().on_conflict_update('(direction)', ['last_synced_at'])}",
             (prefixed_direction, ts),
         )
-    except sqlite3.OperationalError as exc:
+    except Exception as exc:
+        if not _local_dialect().is_undefined_object_error(exc):
+            raise
         # Never swallow silently: an unwritten watermark means the next run
         # re-reconciles the whole table. Ensure the table exists up front.
         logger.error(f"[{target_name}] watermark write failed for {prefixed_direction}: {exc}")
@@ -197,8 +206,16 @@ def _set_watermark(sl_cur, direction: str, ts: str, target_name: str) -> None:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _table_exists(sl_cur, table_name: str) -> bool:
-    """Check if a table exists in the local SQLite DB."""
-    sl_cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+    """Check if a table exists in the local store.
+
+    Via the dialect rather than `sqlite_master`: enumerating tables is one of the
+    least portable things in SQL, and a hardcoded sqlite_master query returns
+    NOTHING on every other engine rather than failing — so every gated table
+    would silently be treated as absent and skipped. Silent skip is the worst
+    shape for a sync.
+    """
+    sql, params = _local_dialect().table_exists(table_name)
+    sl_cur.execute(sql, params)
     return sl_cur.fetchone() is not None
 
 
@@ -424,43 +441,42 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
 
     if remote_rows:
         try:
-            # SQLite batch UPSERT
-            upsert_query = """
-                INSERT INTO memory_items (
-                    id, type, title, content, metadata_json, agent_id, model_id,
-                    change_agent, importance, source, origin_device, is_deleted,
-                    expires_at, decay_rate, created_at, updated_at, user_id, scope,
-                    valid_from, valid_to, content_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (id) DO UPDATE SET
-                    title = excluded.title,
-                    content = excluded.content,
-                    metadata_json = excluded.metadata_json,
-                    updated_at = excluded.updated_at,
-                    is_deleted = excluded.is_deleted,
-                    change_agent = excluded.change_agent,
-                    user_id = excluded.user_id,
-                    scope = excluded.scope,
-                    valid_from = excluded.valid_from,
-                    valid_to = excluded.valid_to,
-                    content_hash = excluded.content_hash
-                WHERE (memory_items.updated_at IS NULL OR excluded.updated_at > memory_items.updated_at)
-                  AND (
-                      (memory_items.change_agent NOT IN ('manual', 'system'))
-                      OR (excluded.change_agent = 'manual')
-                  )
-            """
-            # Process in batches
+            cols = [
+                "id", "type", "title", "content", "metadata_json", "agent_id",
+                "model_id", "change_agent", "importance", "source", "origin_device",
+                "is_deleted", "expires_at", "decay_rate", "created_at", "updated_at",
+                "user_id", "scope", "valid_from", "valid_to", "content_hash",
+            ]
+            # Columns the remote may overwrite. Deliberately NOT every column:
+            # created_at, agent_id, importance and friends stay as first written.
+            update_cols = [
+                "title", "content", "metadata_json", "updated_at", "is_deleted",
+                "change_agent", "user_id", "scope", "valid_from", "valid_to",
+                "content_hash",
+            ]
+            # Last-write-wins, plus the manual/system protection: a locally
+            # curated row is not overwritten by an automated remote one, but a
+            # remote MANUAL edit still wins. Passed through verbatim — the text is
+            # valid on both backends (excluded/EXCLUDED are interchangeable).
+            guard = (
+                "WHERE (memory_items.updated_at IS NULL "
+                "OR excluded.updated_at > memory_items.updated_at) "
+                "AND ((memory_items.change_agent NOT IN ('manual', 'system')) "
+                "OR (excluded.change_agent = 'manual'))"
+            )
             for i in range(0, len(remote_rows), BATCH_SIZE):
                 batch = []
                 for row in remote_rows[i:i+BATCH_SIZE]:
                     row_list = list(row)
                     if isinstance(row_list[4], dict):
                         row_list[4] = json.dumps(row_list[4])
-                    batch.append(row_list)
+                    batch.append(tuple(row_list))
 
-                sl_cur.executemany(upsert_query, batch)
-                pull_count += len(batch)
+                pull_count += _local_backend().bulk_upsert(
+                    sl_conn, "memory_items", cols, batch,
+                    conflict_target="(id)", update_columns=update_cols,
+                    guard_sql=guard,
+                )
                 sl_conn.commit()
         except Exception as exc:
             logger.error(f"[{target_name}] Batch pull failed: {type(exc).__name__}: {exc}")
@@ -974,10 +990,43 @@ _SYNC_LOCK_NAME = "pg_sync"
 # second local backend lands — ask the seam, which knows. Falls back to the
 # SQLite form when the seam is unavailable (installer bootstrap), matching
 # auth_utils._dialect_param's own fallback.
-def _local_param() -> str:
+def _local_dialect():
+    """The LOCAL store's dialect — placeholders, upsert clause, error classes.
+
+    Resolved per call rather than cached: unlike _LOCAL_PARAM (a string baked at
+    import for use inside f-strings), the dialect object is consulted for
+    behaviour, and a test that flips M3_DB_BACKEND must see the change.
+
+    Falls back to the SQLite dialect when the seam is unavailable (installer
+    bootstrap), matching auth_utils._dialect_param's own fallback — the local
+    store IS SQLite in every deployment that can reach that state.
+    """
     try:
         from memory.backends import dialect
-        return dialect().param()
+        return dialect()
+    except Exception:  # noqa: BLE001 — bootstrap: seam not importable yet
+        from memory.backends.dialect import dialect_for
+        return dialect_for("sqlite")
+
+
+def _local_backend():
+    """The LOCAL store's backend, for seam primitives like bulk_upsert.
+
+    Returns the ACTIVE backend: the local store is whatever this deployment is
+    configured to use. Sync's remote half is addressed separately (an explicit
+    warehouse DSN), so there is no ambiguity about which store this means.
+
+    Cheap — active_backend() is memoized — so call sites need not thread it
+    through as a parameter, which keeps the sync_* signatures unchanged.
+    """
+    from memory.backends import active_backend
+
+    return active_backend()
+
+
+def _local_param() -> str:
+    try:
+        return _local_dialect().param()
     except Exception:  # noqa: BLE001 — bootstrap: seam not importable yet
         return "?"
 
@@ -1168,15 +1217,22 @@ def _sync_table_generic(
             # below makes a re-push idempotent, so the only cost is a little
             # redundant traffic — far better than permanent row loss.
             sl_cur.execute(
-                f"SELECT * FROM {name} WHERE {ts_col} > ? OR {ts_col} IS NULL",
+                f"SELECT * FROM {name} WHERE {ts_col} > {_LOCAL_PARAM} "
+                f"OR {ts_col} IS NULL",
                 (watermark,),
             )
             logger.info(f"[{target_name}] [{name}] Delta push: rows changed since {watermark}")
         else:
             sl_cur.execute(f"SELECT * FROM {name}")
             logger.info(f"[{target_name}] [{name}] Full push (no watermark or no timestamp col)")
-    except sqlite3.OperationalError as exc:
-        logger.warning(f"[{target_name}] [{name}] Cannot query SQLite: {exc}")
+    except Exception as exc:
+        # Only a MISSING table/column is a skip: a manifest may legitimately name
+        # a table this store does not have. Anything else — a locked database, a
+        # corrupt page, a type error — must propagate, or a real fault is logged
+        # as a skipped table and the sync reports success having moved nothing.
+        if not _local_dialect().is_undefined_object_error(exc):
+            raise
+        logger.warning(f"[{target_name}] [{name}] Table/column missing locally: {exc}")
         return
 
     local_rows = sl_cur.fetchall()
