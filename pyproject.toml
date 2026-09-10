@@ -442,6 +442,15 @@ filterwarnings = [
     "ignore:unclosed <socket.socket.*:ResourceWarning",
     "ignore:unclosed transport.*:ResourceWarning",
     "ignore:Implicitly cleaning up.*:ResourceWarning",
+    # (A) third-party: mcp's StreamableHTTP session manager hands each initialized
+    # session a pair of anyio memory streams and closes them when the manager
+    # shuts down; the receive halves are finalized by GC afterwards, so they read
+    # as unclosed under -W error. VERIFIED UPSTREAM, not ours: a bare
+    # `FastMCP(...).streamable_http_app()` driven by TestClient with NO m3 code in
+    # the path reproduces it identically. Our own per-test leak (one app+lifespan
+    # per test method) was fixed at the source in tests/test_serve_auth.py first;
+    # this covers only the residue mcp itself leaves behind.
+    "ignore:Unclosed <MemoryObject.*:ResourceWarning",
 ]
 
 [tool.bandit]

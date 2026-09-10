@@ -183,6 +183,174 @@ class TestBuildAuth(unittest.TestCase):
         self.assertFalse(verifier.matches(A.generate_token()))
 
 
+class TestAttachGuard(unittest.TestCase):
+    """`attach` must refuse rather than half-wire a live instance."""
+
+    def _fastmcp(self):
+        from mcp.server.fastmcp import FastMCP
+
+        return FastMCP("test-attach")
+
+    def test_attach_sets_both_fields_on_the_real_instance(self):
+        mcp = self._fastmcp()
+        tok = A.generate_token()
+        verifier = A.attach(mcp, "127.0.0.1", 8080, tok)
+        self.assertIs(mcp._token_verifier, verifier)
+        self.assertIsNotNone(mcp.settings.auth)
+
+    def test_refuses_when_the_private_attribute_is_gone(self):
+        """A rename upstream must be a loud refusal, not a new unread attribute.
+
+        Checked against the object actually being mutated -- a throwaway probe
+        can be healthy while the instance in hand is not.
+        """
+
+        class Renamed:
+            settings = type("S", (), {"auth": None, "transport_security": None})()
+
+        with self.assertRaises(A.AuthConfigError) as ctx:
+            A.attach(Renamed(), "127.0.0.1", 8080, A.generate_token())
+        self.assertIn("refusing to start unauthenticated", str(ctx.exception))
+
+    def test_refuses_when_settings_has_no_auth_field(self):
+        class NoAuthField:
+            _token_verifier = None
+            settings = type("S", (), {})()
+
+        with self.assertRaises(A.AuthConfigError):
+            A.attach(NoAuthField(), "127.0.0.1", 8080, A.generate_token())
+
+    def test_public_host_reaches_transport_security(self):
+        mcp = self._fastmcp()
+        A.attach(mcp, "127.0.0.1", 8080, A.generate_token(), ["m3.example.com"])
+        hosts = mcp.settings.transport_security.allowed_hosts
+        self.assertIn("m3.example.com", hosts)
+        self.assertIn("m3.example.com:*", hosts)
+
+
+class TestHttpEnforcement(unittest.TestCase):
+    """The end-to-end property: the real ASGI app refuses unauthenticated calls.
+
+    Drives the actual Starlette app FastMCP builds -- not a hand-rolled stand-in
+    -- because the thing worth pinning is that the middleware is really in the
+    request path, which only the real app can demonstrate.
+    """
+
+    _HEADERS = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    _INIT = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "t", "version": "1"},
+        },
+    }
+
+    # One FastMCP + one lifespan for the whole class. Each `streamable_http_app()`
+    # spins a StreamableHTTP session manager whose memory streams are closed by
+    # the app's lifespan, so a per-test app that is entered and exited repeatedly
+    # leaks streams -- which this repo's `-W error` config correctly turns red.
+    # Policy is to fix such leaks at the source rather than filter them, so the
+    # app is built once and its lifespan entered once.
+    @classmethod
+    def setUpClass(cls):
+        from mcp.server.fastmcp import FastMCP
+        from starlette.testclient import TestClient
+
+        cls.token = A.generate_token()
+        mcp = FastMCP("test-http")
+        # "testserver" is the Host TestClient sends; without it the transport's
+        # DNS-rebinding guard 421s before auth is ever consulted -- which is the
+        # tunnel footgun this allowlist exists to fix.
+        A.attach(mcp, "127.0.0.1", 8080, cls.token, ["testserver"])
+        cls._ctx = TestClient(mcp.streamable_http_app())
+        cls.client = cls._ctx.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._ctx.__exit__(None, None, None)
+
+    def _post(self, token: "str | None"):
+        headers = dict(self._HEADERS)
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        return self.client.post("/mcp", json=self._INIT, headers=headers)
+
+    def test_no_authorization_header_is_401(self):
+        self.assertEqual(self._post(None).status_code, 401)
+
+    def test_wrong_token_is_401(self):
+        self.assertEqual(self._post(A.generate_token()).status_code, 401)
+
+    def test_wrong_token_and_missing_token_are_indistinguishable(self):
+        """No oracle: a caller must not learn whether a token merely existed."""
+        missing = self._post(None)
+        wrong = self._post(A.generate_token())
+        self.assertEqual(missing.status_code, wrong.status_code)
+        self.assertEqual(missing.content, wrong.content)
+
+    def test_correct_token_is_not_rejected(self):
+        r = self._post(self.token)
+        self.assertNotEqual(r.status_code, 401)
+        self.assertNotEqual(r.status_code, 403)
+
+
+class TestForeignHostRejection(unittest.TestCase):
+    """Footgun A, pinned: an unlisted Host 421s BEFORE auth runs.
+
+    This is why `--public-host` exists. Without it a tunnel forwarding its own
+    public Host header fails in a way that reads as a broken tunnel rather than
+    an allowlist rejection. Separate class so it gets its own app + lifespan
+    (see the leak note in TestHttpEnforcement).
+    """
+
+    def test_foreign_host_is_rejected_when_not_allowlisted(self):
+        from mcp.server.fastmcp import FastMCP
+        from starlette.testclient import TestClient
+
+        token = A.generate_token()
+        mcp = FastMCP("test-host")
+        A.attach(mcp, "127.0.0.1", 8080, token)  # no public_hosts -> loopback only
+        with TestClient(mcp.streamable_http_app()) as c:
+            r = c.post(
+                "/mcp",
+                json=TestHttpEnforcement._INIT,
+                headers={**TestHttpEnforcement._HEADERS, "Authorization": f"Bearer {token}"},
+            )
+        self.assertEqual(r.status_code, 421)
+
+
+class TestFailOpenCanary(unittest.TestCase):
+    """§11: pins that the MIDDLEWARE is what gates, not something ambient.
+
+    Builds the same app WITHOUT attach() and confirms an unauthenticated call is
+    NOT 401. If a refactor drops the wiring, this goes red alongside the 401
+    tests instead of them silently passing for the wrong reason.
+    """
+
+    def test_app_without_attach_does_not_401(self):
+        from mcp.server.fastmcp import FastMCP
+        from mcp.server.transport_security import TransportSecuritySettings
+        from starlette.testclient import TestClient
+
+        mcp = FastMCP("test-open")
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False
+        )
+        with TestClient(mcp.streamable_http_app()) as c:
+            r = c.post(
+                "/mcp",
+                json=TestHttpEnforcement._INIT,
+                headers=TestHttpEnforcement._HEADERS,
+            )
+        self.assertNotEqual(r.status_code, 401)
+
+
 class TestResolveTokenStates(unittest.TestCase):
     """resolve_token's three-way outcome, with the secret seam stubbed."""
 

@@ -314,29 +314,11 @@ def build_transport_security(host: str, public_hosts: "list[str] | None" = None)
 
 
 def build_auth(host: str, port: int, token: str):
-    """Build ``(AuthSettings, StaticTokenVerifier)`` for the HTTP transport.
-
-    Version guard: the bridge attaches the verifier by assigning FastMCP's
-    PRIVATE ``_token_verifier`` (the constructor cross-validates auth args, and
-    the bridge's FastMCP is built at import time before the transport is known).
-    If a future mcp release renames that attribute the assignment would become a
-    silent no-op -- i.e. a server that starts with auth "enabled" and enforces
-    nothing. Asserting the shape here converts that into a loud refusal, which
-    is the entire point of the feature (§3).
-    """
+    """Build ``(AuthSettings, StaticTokenVerifier)`` for the HTTP transport."""
     try:
         from mcp.server.auth.settings import AuthSettings
-        from mcp.server.fastmcp import FastMCP
     except ImportError as exc:  # pragma: no cover - dependency is pinned
         raise AuthConfigError(f"MCP auth support unavailable: {exc}") from exc
-
-    if "auth" not in getattr(FastMCP, "model_fields", {}) and not hasattr(
-        FastMCP("_probe").settings, "auth"
-    ):  # pragma: no cover - defensive
-        raise AuthConfigError(
-            "incompatible mcp version: FastMCP settings has no 'auth' field -- "
-            "refusing to start unauthenticated"
-        )
 
     verifier = StaticTokenVerifier(token)
 
@@ -361,3 +343,59 @@ def build_auth(host: str, port: int, token: str):
         required_scopes=[],
     )
     return auth_settings, verifier
+
+
+# Attribute names this module mutates on the live FastMCP instance. Named here so
+# the guard below and the bridge cannot drift apart about what "wired" means.
+_VERIFIER_ATTR = "_token_verifier"
+
+
+def attach(mcp, host: str, port: int, token: str, public_hosts: "list[str] | None" = None):
+    """Attach bearer auth + the host allowlist to a live FastMCP instance.
+
+    Why the bridge calls this instead of assigning the fields itself: the
+    verifier is attached by setting FastMCP's PRIVATE ``_token_verifier``. The
+    constructor cross-validates auth arguments and the bridge's FastMCP is built
+    at import time, before the transport is known, so passing them at
+    construction is not available. Post-construction assignment works because
+    ``streamable_http_app()`` re-reads both fields at call time.
+
+    That private attribute is the risk this function exists to contain. If a
+    future mcp release renames it, a bare ``mcp._token_verifier = v`` would
+    silently create a NEW attribute that nothing reads -- a server that logs
+    "auth ENABLED" and enforces nothing, which is the exact failure mode this
+    whole feature exists to prevent. So:
+
+      * refuse if the attribute is not already present on the instance
+        (present == the version we validated against; absent == renamed/removed),
+      * refuse if ``settings`` has no ``auth`` field,
+      * and VERIFY AFTER WRITING that both landed.
+
+    Checks run against the REAL object being mutated, never a throwaway probe --
+    a probe can be healthy while the instance in hand is not.
+    """
+    if not hasattr(mcp, _VERIFIER_ATTR):
+        raise AuthConfigError(
+            f"incompatible mcp version: FastMCP has no '{_VERIFIER_ATTR}' attribute -- "
+            "refusing to start unauthenticated (the token would be silently ignored)"
+        )
+    settings = getattr(mcp, "settings", None)
+    if settings is None or not hasattr(settings, "auth"):
+        raise AuthConfigError(
+            "incompatible mcp version: FastMCP settings has no 'auth' field -- "
+            "refusing to start unauthenticated"
+        )
+
+    auth_settings, verifier = build_auth(host, port, token)
+    settings.auth = auth_settings
+    setattr(mcp, _VERIFIER_ATTR, verifier)
+    settings.transport_security = build_transport_security(host, public_hosts)
+
+    # Read back: an assignment that did not stick is indistinguishable from one
+    # that was never made, and both serve the catalog unauthenticated.
+    if getattr(mcp, _VERIFIER_ATTR, None) is not verifier or settings.auth is not auth_settings:
+        raise AuthConfigError(
+            "auth wiring did not take effect on the FastMCP instance -- "
+            "refusing to start unauthenticated"
+        )
+    return verifier
