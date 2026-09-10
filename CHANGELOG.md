@@ -19,7 +19,55 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-### None pending
+### ⚠ Breaking
+
+- **`m3 serve` now requires a bearer token and refuses to start without one.**
+  The HTTP transport publishes the whole catalog — `memory_delete` and
+  `gdpr_forget` included — and Claude's custom connectors reach it *from
+  Anthropic's cloud*, so a real deployment is publicly reachable. There was no
+  application-layer auth; security was delegated entirely to whatever tunnel the
+  operator put in front. Mint a token once with `m3 serve --generate-token`
+  (`--show-token` reports whether one is configured; `--force` rotates). The
+  refusal is unconditional — loopback included, because tunnels bind loopback and
+  publish it, so a loopback bind is not evidence of a private deployment.
+  Existing scripted `m3 serve` invocations will exit 1 until a token is set; the
+  error names the exact command.
+
+### Added
+
+- `m3 serve --public-host HOST` (repeatable) — allowlists the hostname a tunnel
+  presents. Without it the transport rejected tunnelled requests with `421`
+  *before* auth ran, which read as a broken tunnel rather than a host-allowlist
+  rejection. Pre-existing; surfaced while adding auth.
+- Dashboard authentication using the same token: `Authorization: Bearer`, a
+  session cookie, or a one-time `?token=` handoff that exchanges the token for an
+  `HttpOnly` cookie and drops it from the URL. `dashboard_server.py --show-url`
+  prints that link for signing in on another device. **A loopback dashboard with
+  no token configured is unchanged**; the gate engages when a token exists or the
+  bind is non-loopback.
+- `StorageBackend.list_tables()` seam primitive — enumerating tables is one of
+  the least portable questions in SQL (`sqlite_master` vs `information_schema`
+  vs `table_schema = DATABASE()`), and it is now asked through the seam. A future
+  backend that omits it fails the protocol conformance test.
+
+### Fixed
+
+- **`synchronized_secrets` was missing from the PostgreSQL primary schema**
+  (`pg_051`). The encrypted-vault tier of secret resolution queries that table
+  unconditionally, so on a PG primary the query raised `UndefinedTable`, the
+  caller swallowed it, and **every vault-stored secret silently resolved to
+  `None`** — only env vars and the OS keyring worked. Four more tables
+  (`activity_logs`, `project_decisions`, `system_focus`, `hardware_specs`) had
+  the same gap and are ported in `pg_052`.
+- Schema-parity and tool-count gates were **freshness checks, not completeness
+  checks** — both iterated hand-maintained allowlists, so anything nobody
+  remembered to list was invisible. Both now enumerate the source of truth; each
+  found real drift on its first run.
+- Stale `87-tool` counts in `claude_ai_connector.md` / `claude_code_plugin.md`,
+  and a stale `96 tools` in `examples/AGENT_RULES.md`, none of which the drift
+  gate could see (hyphenated and interposed-qualifier forms were not matched).
+- `docs/MCP_TOOLS.md` is generated but never said so, leaving no way to tell its
+  counts from hand-written prose.
 
 ## [2026.8.30.1] — 2026-08-30 — the console nothing could suppress
 

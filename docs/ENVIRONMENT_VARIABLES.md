@@ -274,6 +274,7 @@ server; set these to run the bridge over HTTP or bind to a specific interface.
 | `M3_HTTP_HOST` | — | Bind host for the bridge when `M3_TRANSPORT=http`. |
 | `M3_HTTP_PORT` | — | Bind port for the bridge when `M3_TRANSPORT=http`. |
 | `M3_HTTP_PATH` | — | URL path the HTTP bridge serves the MCP endpoint on. |
+| `M3_HTTP_PUBLIC_HOST` | — | Comma-separated public hostname(s) a tunnel/proxy presents in the `Host` header. Required when tunnelling, or the transport rejects requests with `421` before auth runs. (`m3 serve --public-host` sets this.) |
 | `M3_MCP_PROXY_HOST` | — | Bind host for the MCP proxy (see [MCP Proxy](#mcp-proxy-binmcp_proxypy)). |
 | `M3_TOOLS_LAZY` | — | When set, defer loading tool implementations until first use (faster bridge startup). |
 | `M3_PATH_BIN` | _(payload)_ | Path to the m3 `bin/` directory the bridge dispatches to. |

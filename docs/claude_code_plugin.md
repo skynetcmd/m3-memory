@@ -99,7 +99,7 @@ Run `/m3:help` to see the full list. Highlights:
 | `/m3:install` | Install / upgrade |
 | `/m3:help` | This list |
 
-The full 87-tool catalog is still callable via tool calls — these
+The full 100+ tool catalog is still callable via tool calls — these
 slash commands are shortcuts to the high-leverage subset. The catalog is
 domain-gated by default so unused tools don't burn context; see the
 [lazy-loading note](../README.md#-domain-gating-the-full-catalog-without-the-context-cost) in the README for details.
