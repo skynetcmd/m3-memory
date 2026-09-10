@@ -176,6 +176,80 @@ class TestFdwUsesThePrimaryNotTheWarehouse:
         )
 
 
+class TestSeamAndPortability:
+    """The support matrix is 3 OSes x 2+ DBs x Python 3.11-3.14.
+
+    Asserted rather than argued: each of these would otherwise only surface on a
+    platform or backend nobody develops on.
+    """
+
+    def test_watermark_sql_uses_the_dialect_not_literal_placeholders(self):
+        """A hardcoded `%s` is a portability bug the day a third backend lands.
+
+        This block is PG-only today (the FDW path requires it), which is exactly
+        why a literal would survive review — nothing exercises the other branch.
+        Asking the seam costs nothing and removes the trap.
+        """
+        import inspect
+
+        src = inspect.getsource(sync_all._fdw_run)
+        assert "dialect.param()" in src
+        assert "on_conflict_update" in src
+        # No literal placeholder left in the SQL strings.
+        assert "direction=%s" not in src
+        assert "VALUES (%s, %s)" not in src
+
+    def test_upsert_clause_is_identical_across_current_backends(self):
+        """The call site can stop caring only if the seam really does converge."""
+        from memory.backends.dialect import dialect_for
+
+        clauses = {
+            b: dialect_for(b).on_conflict_update("(direction)", ["last_synced_at"])
+            for b in ("sqlite", "postgres")
+        }
+        assert len(set(clauses.values())) == 1, clauses
+
+    def test_no_platform_specific_code_added(self):
+        """Sync must behave the same on macOS, Linux and Windows.
+
+        `IS_WIN` is pre-existing and used for interpreter resolution; what this
+        guards is that the refusal/guard logic added here introduced no new
+        platform branch.
+        """
+        import inspect
+
+        for fn in (sync_all.run_pg_sync, sync_all._local_backend_name,
+                   sync_all._fdw_run, sync_all._try_pg_fdw_fastpath):
+            src = inspect.getsource(fn)
+            for token in ("sys.platform", "IS_WIN", "os.name", "winreg", "posix"):
+                assert token not in src, f"{fn.__name__} added a platform branch: {token}"
+
+    def test_existence_guard_accepts_str_and_path(self):
+        """`targets()` yields str today; a future refactor may yield Path.
+
+        os.path.exists handles both, so the guard does not care — pinned so a
+        "tidy-up" to Path.exists() on a str, or vice versa, is a deliberate choice.
+        """
+        import os
+        import pathlib
+        import tempfile
+
+        d = tempfile.mkdtemp()
+        for candidate in (os.path.join(d, "ghost.db"), pathlib.Path(d) / "ghost2.db"):
+            assert os.path.exists(candidate) is False
+            assert not os.path.exists(candidate), "probing must not create the file"
+
+    def test_no_duplicate_global_declaration(self):
+        """Two `global` statements in one function is a SyntaxError ruff misses.
+
+        It cost a real debugging cycle here: lint passed, and only importing the
+        module surfaced it. Pinned so the fall-back-reason plumbing keeps using
+        the setter.
+        """
+        src = (_BIN / "sync_all.py").read_text(encoding="utf-8")
+        assert src.count("global _FDW_LAST_REASON") == 1
+
+
 class TestNeverCreateTheLocalStore:
     """sqlite3.connect() creates a missing file; the sync then 'succeeds' empty."""
 

@@ -198,7 +198,16 @@ def _try_pg_fdw_fastpath(dry_run: bool) -> "bool | None":
         ctx = M3Context.for_db(None)
         warehouse_dsn = ctx.get_secret("PG_URL") or os.environ.get("M3_CDW_PG_URL")
         if not warehouse_dsn:
-            log.info("PG-primary but no warehouse DSN — nothing to sync.")
+            # Deliberate skip, not a failure: sync is opt-in, and main() already
+            # exits cleanly when SYNC_TARGET_IP is unset (:390). Returning True
+            # keeps that contract. Worded to say WHY nothing happened, so this
+            # does not read like the silent success the rest of this change
+            # exists to remove — "nothing to sync" implied there was nothing TO
+            # sync, when in fact nothing was CONFIGURED.
+            log.info(
+                "PG primary, but no warehouse DSN is configured "
+                "(M3_CDW_PG_URL / PG_URL) — sync not set up on this peer; skipping."
+            )
             return True
         # ── The PRIMARY store, not the warehouse ──────────────────────────────
         # `ctx.pg_connection()` is the WAREHOUSE role by contract: it resolves
@@ -270,25 +279,38 @@ def _fdw_run(primary_backend, pg_fdw_sync, warehouse_dsn: str, dry_run: bool) ->
     closed in a `finally` there without wrapping the whole body in another level
     of try. Exceptions propagate: the caller owns the fall-back decision.
     """
+    # Placeholders and the upsert clause come from the DIALECT, not hardcoded
+    # `%s`. This block is PG-only *today* (the FDW fast-path requires it), but a
+    # literal placeholder is a portability bug the moment a third backend lands
+    # — and it costs nothing to ask the seam instead. `on_conflict_update`
+    # renders identically on both current backends, which is the point: the call
+    # site stops caring.
+    dialect = primary_backend.dialect()
+    p = dialect.param()
+    upsert_clause = dialect.on_conflict_update("(direction)", ["last_synced_at"])
+
     with primary_backend.connection() as primary_conn:
         primary_conn.autocommit = False
         with primary_conn.cursor() as wc:
+            # TODO(pg_053): this DDL is created ad-hoc here AND in pg_sync.py,
+            # with different SQL at each site, and belongs in a migration. Phase 2
+            # of the PG-local-sync work removes both copies.
             wc.execute("CREATE TABLE IF NOT EXISTS sync_watermarks "
                        "(direction TEXT PRIMARY KEY, last_synced_at TEXT)")
 
         def get_wm(direction: str):
             with primary_conn.cursor() as c:
-                c.execute("SELECT last_synced_at FROM sync_watermarks WHERE direction=%s",
-                          (direction,))
+                c.execute(
+                    f"SELECT last_synced_at FROM sync_watermarks WHERE direction={p}",
+                    (direction,))
                 row = c.fetchone()
                 return row[0] if row else None
 
         def set_wm(direction: str, ts: str):
             with primary_conn.cursor() as c:
                 c.execute(
-                    "INSERT INTO sync_watermarks (direction, last_synced_at) "
-                    "VALUES (%s, %s) ON CONFLICT (direction) DO UPDATE "
-                    "SET last_synced_at = EXCLUDED.last_synced_at", (direction, ts))
+                    f"INSERT INTO sync_watermarks (direction, last_synced_at) "
+                    f"VALUES ({p}, {p}) {upsert_clause}", (direction, ts))
 
         res = pg_fdw_sync.sync_pg_to_pg(primary_conn, warehouse_dsn,
                                         get_wm, set_wm, dry_run=dry_run)

@@ -1,8 +1,8 @@
 ---
 tool: bin/sync_all.py
-sha1: fc5e098c3d6e
-mtime_utc: 2026-09-10T05:40:15.946122+00:00
-generated_utc: 2026-09-10T05:41:11.468274+00:00
+sha1: f0d5b014932a
+mtime_utc: 2026-09-10T05:50:30.132904+00:00
+generated_utc: 2026-09-10T05:57:21.547084+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ DB list:
 
 ## Entry points
 
-- `def main()` (line 357)
+- `def main()` (line 379)
 - `if __name__ == "__main__"` guard
 
 ---
