@@ -437,7 +437,46 @@ if __name__ == "__main__":
         host = _os.environ.get("M3_HTTP_HOST", "127.0.0.1")
         port = int(_os.environ.get("M3_HTTP_PORT", "8080"))
         path = _os.environ.get("M3_HTTP_PATH", "/mcp")
+        # Public hostnames a tunnel/proxy will present in the Host header.
+        # Comma-separated so a single env var covers the systemd/docker case;
+        # `m3 serve --public-host` sets this for the CLI path.
+        public_hosts = [
+            h.strip()
+            for h in (_os.environ.get("M3_HTTP_PUBLIC_HOST", "") or "").split(",")
+            if h.strip()
+        ]
+
+        # ── Bearer auth: MANDATORY on the HTTP transport ──────────────────────
+        # Unlike stdio (a pipe to a child process this machine already trusts),
+        # the HTTP surface publishes the whole catalog -- memory_delete and
+        # gdpr_forget included -- to whoever can reach the port. Anthropic's
+        # connectors dial in from their cloud, so a real deployment IS publicly
+        # reachable. There is no safe unauthenticated configuration here, so a
+        # missing/weak token is a startup REFUSAL, not a warning: an operator
+        # sees a server that won't start immediately, whereas one that starts
+        # unauthenticated is a public memory store nobody notices.
+        #
+        # Loopback is NOT exempt -- cloudflared/ngrok bind loopback and publish
+        # it, so a loopback bind is not evidence of a private deployment.
+        import m3_http_auth as _auth
+
+        try:
+            _token, _state = _auth.resolve_token()
+            _token = _auth.preflight(host, _token, _state)
+            # attach() owns the FastMCP mutation and its version guard: the
+            # verifier goes on a PRIVATE attribute, so a silent upstream rename
+            # would otherwise yield a server logging "auth enabled" while
+            # enforcing nothing.
+            _auth.attach(mcp, host, port, _token, public_hosts)
+        except _auth.AuthConfigError as _e:
+            logger.error(f"refusing to start the HTTP transport:\n{_e}")
+            sys.exit(1)
+
         logger.info(f"Transport: streamable-http on http://{host}:{port}{path}")
+        logger.info(
+            "Bearer auth ENABLED (token required on every request)"
+            + (f"; public hosts: {', '.join(public_hosts)}" if public_hosts else "")
+        )
         # FastMCP exposes the host/port/path settings via its Settings object.
         mcp.settings.host = host
         mcp.settings.port = port

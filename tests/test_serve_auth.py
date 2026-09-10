@@ -351,6 +351,46 @@ class TestFailOpenCanary(unittest.TestCase):
         self.assertNotEqual(r.status_code, 401)
 
 
+class TestBridgeWiring(unittest.TestCase):
+    """The bridge's http branch, asserted at the source rather than by running it.
+
+    The transport block lives under `if __name__ == "__main__":`, so it cannot be
+    imported and called. These read the source instead -- coarse, but they pin the
+    properties that would otherwise regress silently: that the refusal EXITS, and
+    that no code path reaches `mcp.run` after an AuthConfigError.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.src = (_BIN / "memory_bridge.py").read_text(encoding="utf-8")
+        start = cls.src.index('if transport in ("http"')
+        end = cls.src.index("        mcp.run(transport=", start)
+        cls.http_block = cls.src[start:end]
+
+    def test_http_branch_preflights_before_running(self):
+        self.assertIn("preflight(", self.http_block)
+        self.assertIn("attach(", self.http_block)
+
+    def test_refusal_exits_nonzero_rather_than_falling_through(self):
+        """A caught AuthConfigError must terminate, not continue to mcp.run()."""
+        self.assertIn("AuthConfigError", self.http_block)
+        self.assertIn("sys.exit(1)", self.http_block)
+
+    def test_exit_uses_a_name_that_exists_in_scope(self):
+        """`_sys.exit` would NameError -- i.e. the fail-closed path would crash.
+
+        The bridge aliases `import os as _os` inside __main__ but has no `_sys`,
+        so this pins the one that is actually bound.
+        """
+        self.assertNotIn("_sys.exit", self.http_block)
+
+    def test_stdio_branch_does_not_mention_auth(self):
+        """§4/§12: the default path runs zero new code -- no lookup, no warning."""
+        stdio = self.src[self.src.index('logger.info("Transport: stdio")') :]
+        for token in ("m3_http_auth", "preflight", "resolve_token", "AuthConfigError"):
+            self.assertNotIn(token, stdio)
+
+
 class TestResolveTokenStates(unittest.TestCase):
     """resolve_token's three-way outcome, with the secret seam stubbed."""
 
