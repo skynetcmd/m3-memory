@@ -12,7 +12,7 @@ Cycle-break (§2): resolve `M3Context` lazily; do not top-level-import
 """
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 
 from .base import BackendName, Capabilities, KeywordHit, VectorHit
@@ -189,9 +189,36 @@ SQLITE = SqliteDialect()
 
 @register_backend("sqlite", dialect=SQLITE)
 class SqliteBackend:
-    """Adapter exposing the current SQLite path through the `StorageBackend` seam."""
+    """Adapter exposing the current SQLite path through the `StorageBackend` seam.
+
+    ``SqliteBackend()`` addresses the ACTIVE store — whatever `active_database()`
+    / `M3_DATABASE` / the default resolver points at — which is what every
+    existing caller wants and what the class has always done.
+
+    ``SqliteBackend(db_path=...)`` addresses ONE SPECIFIC file. Sync needs this:
+    it holds a local store and a remote warehouse open at the same time, and the
+    local one is not necessarily the process's configured store (the agent_memory
+    path sweeps main AND chatlog in one run). Without it, a backend built "for"
+    another file would silently read and write the default database — the exact
+    class of silent-wrong-store bug this whole effort exists to remove, which is
+    why `backend_for()` refused to return one until this existed.
+
+    Binding is by M3Context, not a second pool: `M3Context.for_db(path)` is
+    process-registered and already owns a pool per path, so a path-bound backend
+    reuses the same connection machinery, pragmas and lazy-init as the default
+    path rather than opening a parallel one.
+    """
 
     name: BackendName = "sqlite"
+
+    def __init__(self, db_path: "str | None" = None) -> None:
+        self._db_path = db_path
+
+    def _ctx(self):
+        """The M3Context for this backend's store (pinned, or the active one)."""
+        from m3_sdk import M3Context, resolve_db_path
+
+        return M3Context.for_db(self._db_path or resolve_db_path(None))
 
     def dialect(self) -> Dialect:
         """The SQLite SQL dialect (qmark placeholders, PRAGMA introspection)."""
@@ -203,11 +230,15 @@ class SqliteBackend:
         return
 
     def schema_version(self) -> "int | None":
-        """MAX(version) from schema_versions, or None if the table is absent."""
-        from .. import db as _db_mod
+        """MAX(version) from schema_versions, or None if the table is absent.
 
+        Reads THIS backend's store: via connection(), so a pinned instance
+        reports the pinned file's version rather than the process-active one.
+        Answering about a different database than the caller addressed is the
+        silent-wrong-store bug the pinning exists to prevent.
+        """
         try:
-            with _db_mod._db() as conn:
+            with self.connection() as conn:
                 row = conn.execute(
                     "SELECT name FROM sqlite_master "
                     "WHERE type='table' AND name='schema_versions'"
@@ -230,9 +261,8 @@ class SqliteBackend:
         """
         vector_accel = "none"
         try:
-            from .. import db as _db_mod
-
-            with _db_mod._db() as conn:
+            # connection(), not _db(): capabilities are a property of THIS store.
+            with self.connection() as conn:
                 if self._detect_vector_accelerator(conn):
                     vector_accel = "sqlite_vec"
         except Exception:
@@ -260,15 +290,46 @@ class SqliteBackend:
         except Exception:
             return False
 
-    def connection(self) -> AbstractContextManager:
-        """The pooled SQLite connection context manager used everywhere today.
+    @contextmanager
+    def _pinned_connection(self):
+        """Read/write connection to the PINNED store, with _db()'s discipline.
 
-        Delegates to `memory.db._db()`, so this is byte-for-byte the current
-        behavior: same pool, same pragmas, same commit/rollback discipline.
+        Mirrors `memory.db._db()`'s SQLite arm exactly — lazy-init, pooled
+        connection, commit on clean exit, rollback on exception — but against
+        this instance's path instead of the process-active one. Kept in lockstep
+        with that arm deliberately: if the pooling or commit discipline there
+        changes, this must follow, which is why it delegates to the same
+        `_lazy_init` and `get_sqlite_conn` rather than reimplementing them.
         """
         from .. import db as _db_mod
 
-        return _db_mod._db()
+        ctx = self._ctx()
+        _db_mod._lazy_init(ctx.db_path)
+        with ctx.get_sqlite_conn() as conn:
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+    def connection(self) -> AbstractContextManager:
+        """The pooled SQLite connection context manager used everywhere today.
+
+        With no pinned path, delegates to `memory.db._db()` — byte-for-byte the
+        current behavior: same pool, same pragmas, same commit/rollback
+        discipline, and still honouring `active_database()` at call time.
+
+        With a pinned path, opens that store instead. The unpinned branch is left
+        untouched rather than routed through the pinned one so the default path
+        every existing caller uses keeps its exact semantics, including the
+        ContextVar re-resolution that a captured path would freeze.
+        """
+        from .. import db as _db_mod
+
+        if self._db_path is None:
+            return _db_mod._db()
+        return self._pinned_connection()
 
     def open_readonly(self, db_path: str) -> AbstractContextManager:
         """A READ-ONLY connection to a SPECIFIC db file (SQLite-only semantics).

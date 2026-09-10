@@ -156,18 +156,12 @@ def backend_for(uri: str) -> StorageBackend:
     guards itself; this function deliberately does not, because it has no way to
     know which ROLE (primary vs warehouse) the caller means the URI to play.
 
-    ⚠⚠ SQLITE PATHS ARE NOT YET ADDRESSABLE, AND THIS REFUSES RATHER THAN LYING.
-    `SqliteBackend` has no per-instance path: its `connection()` delegates to
-    `memory.db._db()`, the process-wide CONFIGURED store, so a SqliteBackend
-    built "for" /some/other.db would silently read and write the default
-    database instead. Returning one here would produce exactly the failure this
-    whole effort exists to remove — a caller believing it addressed store A
-    while touching store B, with no error.
-
-    Until SqliteBackend accepts a path, a SQLite URI raises. Callers that need a
-    specific SQLite FILE today have two honest options: `open_readonly(path)`
-    for reads, or the existing `active_database(path)` context manager, which
-    scopes the resolver process-wide. Both are explicit about what they do.
+    A SQLite path returns a PATH-BOUND backend (`SqliteBackend(db_path=…)`),
+    which addresses that file rather than the process-active store. This
+    deliberately raised until SqliteBackend could take a path: returning an
+    unpinned backend "for" /some/other.db would have silently read and written
+    the DEFAULT database — a caller believing it addressed store A while touching
+    store B, with no error, which is the precise failure this effort removes.
     """
     if not uri:
         raise ValueError("backend_for() needs a store URI; got an empty value.")
@@ -179,17 +173,12 @@ def backend_for(uri: str) -> StorageBackend:
     if scheme:
         raise ValueError(
             f"Unrecognized store URI scheme {scheme!r} in {uri!r}. Supported: a "
-            "postgresql:// DSN. Refusing rather than guessing a backend for an "
-            "unknown scheme."
+            "filesystem path (SQLite) or a postgresql:// DSN. Refusing rather "
+            "than guessing a backend for an unknown scheme."
         )
-    raise NotImplementedError(
-        f"backend_for() cannot address a specific SQLite file yet ({uri!r}). "
-        "SqliteBackend has no per-instance path — its connection() resolves the "
-        "process-wide configured store — so returning one here would silently "
-        "operate on a DIFFERENT database than the caller asked for. Use "
-        "open_readonly(path) for reads, or active_database(path) to scope the "
-        "resolver, until SqliteBackend takes a path."
-    )
+    from .sqlite_backend import SqliteBackend
+
+    return SqliteBackend(db_path=uri)
 
 
 def _reset_for_tests() -> None:

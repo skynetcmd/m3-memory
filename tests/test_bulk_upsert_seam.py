@@ -171,23 +171,48 @@ class TestBackendForFactory:
         for uri in ("postgresql://u@h/db", "postgres://u@h/db"):
             assert isinstance(backend_for(uri), PostgresBackend)
 
-    def test_sqlite_path_refuses_rather_than_returning_the_wrong_store(self):
+    def test_sqlite_path_returns_a_PATH_BOUND_backend(self, tmp_path):
         """The footgun this factory could easily have shipped.
 
-        SqliteBackend has no per-instance path — connection() delegates to the
-        process-wide configured store — so returning one "for" /some/other.db
-        would silently operate on a DIFFERENT database with no error. That is
-        precisely the failure mode the PG-local-sync work exists to remove, so
-        the factory refuses until SqliteBackend can take a path.
+        Until SqliteBackend took a path, returning one "for" /some/other.db
+        would have silently read and written the process-wide configured store —
+        a caller believing it addressed store A while touching store B, with no
+        error. So this asserts the DATA LANDS IN THE PINNED FILE, not merely that
+        an object of the right class came back: the wrong-store bug would pass a
+        type check.
         """
-        from memory.backends.selector import backend_for
+        import sqlite3
 
-        with pytest.raises(NotImplementedError) as ctx:
-            backend_for("/some/other.db")
-        msg = str(ctx.value)
-        assert "open_readonly" in msg and "active_database" in msg, (
-            "the refusal must name the honest alternatives, not just decline"
-        )
+        from memory.backends.selector import backend_for
+        from memory.backends.sqlite_backend import SqliteBackend
+
+        pinned = tmp_path / "pinned.db"
+        backend = backend_for(str(pinned))
+        assert isinstance(backend, SqliteBackend)
+
+        with backend.connection() as conn:
+            conn.execute("CREATE TABLE marker (x TEXT)")
+            conn.execute("INSERT INTO marker VALUES ('pinned')")
+
+        raw = sqlite3.connect(pinned)
+        try:
+            assert raw.execute("SELECT x FROM marker").fetchone()[0] == "pinned"
+        finally:
+            raw.close()
+
+    def test_unpinned_backend_still_uses_the_active_store(self):
+        """The default path must keep resolving at CALL time.
+
+        `active_database()` is a ContextVar; an unpinned backend that captured a
+        path at construction would freeze it and quietly ignore a later scope
+        change. Left routing through _db() for exactly this reason.
+        """
+        import inspect
+
+        from memory.backends.sqlite_backend import SqliteBackend
+
+        src = inspect.getsource(SqliteBackend.connection)
+        assert "_db_mod._db()" in src, "the unpinned branch must delegate to _db()"
 
     def test_unknown_scheme_refuses(self):
         """A future backend registers its scheme HERE; it is not guessed."""
