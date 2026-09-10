@@ -167,6 +167,7 @@ Short version: M3 is the **local-first, MCP-native** option that stays *yours* a
 | **M3 Is Not** | An LLM · A chatbot · A plain vector database · A RAG framework · An IDE |
 | **Core Promise** | Private, offline-capable, locally owned memory shared securely across all your developer tools — with FIPS 140-3-ready crypto and atomic multi-agent writes for regulated and multi-agent environments. |
 | **Deploys In** | Homelabs and self-hosted stacks · corporate and government networks · **air-gapped and classified environments** · regulated industries (FIPS 140-3-ready, GDPR tooling, audit logs). No account, no API key, no outbound calls. See [Sovereign & Air-Gapped Deployments](#-sovereign--air-gapped-deployments). |
+| **Speed** | A write that defers embedding returns in **~2 ms** (vs ~31 ms embedding inline) — the [Cognitive Loop](docs/ARCHITECTURE.md#-the-cognitive-loop) does the expensive work off your critical path. Warehouse sync upserts 3,000 rows in **25 ms** where a row-at-a-time bridge takes 615 ms. Measured on a stock Windows desktop; see [Performance](docs/PERFORMANCE.md) for the hardware, the CPU-only numbers, and the caveats. |
 | **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10, 100% @ k=20** on LongMemEval-S (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. SHR measures the memory layer alone — no answer model, no judge — which is why it, not end-to-end QA, is the like-for-like comparison between memory systems. See [Benchmarks](#-benchmarks). |
 | **Context Efficiency** | Exposes 100+ tools but occupies just **~1.8% of a 200K context window** at startup — lazy domain-gating loads the rest on demand. |
 | **Maturity** | Stable, battle-tested core engine (2,700+ tests) that's safe to build on today; new features and integrations are added actively. **SQLite by default; PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam. (See [features.json](docs/features.json)) |
@@ -307,7 +308,7 @@ M3 operates completely offline by default.
 ### Sovereign Local Embedder
 A high-performance BGE-M3 embedder runs locally after installation.
 *   **Default:** one **shared local embed server** on `127.0.0.1:8082`, running the `m3-embed-server` binary that ships inside the `m3-core-rs` wheel. CPU execution using GGUF format (`_assets/models/bge-m3-Q4_K_M.gguf`). Every m3 process reuses that single server — one model in host RAM — and one GPU context when a GPU wheel is installed — instead of each loading its own copy. It is local-only and never leaves the machine.
-*   **Optional (opt-in at `m3 setup`):** additionally embed **in-process** via the `m3-core-rs` native module (llama.cpp linked in-process, zero IPC). Latency is not the main reason to choose it — on the reference host a single small embed is P50 ~33 ms through the shared server vs ~28 ms in-process, so the localhost round-trip costs ~10-15% on one small request and amortises to near-nothing across a batch. It pays off for high-volume bursts such as bulk file ingestion, where a self-contained embedder beats round-tripping every chunk. The cost is that it cannot be shared, so each process using it loads its own model.
+*   **Optional (opt-in at `m3 setup`):** additionally embed **in-process** via the `m3-core-rs` native module (llama.cpp linked in-process, zero IPC). On measured real text it is **faster** than the shared server — ~1.9× on short chunks, ~1.75× on medium — so the reason to prefer shared is **memory, not latency**: in-process loads one model copy *per process*, and a typical setup runs several (MCP server, cognitive loop, CLI), while the shared server keeps one model in RAM for all of them. Choose in-process when you have RAM to spare and a short-text workload. ([measurements and caveats](docs/PERFORMANCE.md#embedding-and-the-shared-vs-in-process-question))
 *   **Hardware Acceleration (GPU):** Execute `m3 embedder install-gpu` to compile with CUDA, Vulkan, or Metal.
 *   **External Provider Fallback:** Set `M3_EMBED_URL` to point at any OpenAI-compatible `/v1/embeddings` endpoint (Ollama, LM Studio, vLLM, or another machine's m3 embed server), and `M3_EMBED_FALLBACK_URL` for a second endpoint to try if the first is unreachable.
 
@@ -365,6 +366,7 @@ M3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch
 | ⬆️ [Upgrade Guide](docs/HOW-TO-UPGRADE.md) | 🩺 [Health FAQ](docs/M3_HEALTH_FAQ.md) | 🧬 [Dual Embedding](docs/DUAL_EMBED.md) |
 | 📜 [Changelog](CHANGELOG.md) | 🤝 [Code of Conduct](docs/CODE_OF_CONDUCT.md) | 🏗️ [Build Wheels](docs/BUILD_WHEELS.md) |
 | 📊 [Web Dashboard](docs/DASHBOARD.md) | 🧰 [Underlying Tools](docs/UNDERLYING_TOOLS.md) | 🐘 [PostgreSQL Sync](docs/SYNC_PG_TO_PG.md) |
+| ⚡ [Performance](docs/PERFORMANCE.md) | | |
 
 ---
 
@@ -399,6 +401,7 @@ M3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch
 
 *   **Benchmarked Retrieval:** State-of-the-art for a local-first substrate — 99.2% session-hit-rate @ k=10, 100% @ k=20 on LongMemEval-S — with a published, reproducible methodology and no oracle routing. See [Benchmarks](#-benchmarks).
 *   **Robust Coverage:** Over **2,700 tests** guarding correct behavior across search, sync, GDPR lifecycle, and files ingestion — run with warnings-as-errors, so a new warning fails the suite.
+*   **Measured, Not Asserted:** Latency for the write, search, sync and embed paths is published with its method, its hardware, and its limits — including what the numbers look like **without a GPU** (~7× slower on embedding). See [Performance](docs/PERFORMANCE.md).
 *   **Audit Reports:** Regular vulnerability reports (Bandit, secrets scans, pip-audit) published directly under [`docs/audits/`](docs/audits/).
 *   **Explainable Retrieval:** No black-box queries; retrieval math is open, readable, and scoring parameters are outputted directly.
 *   **Open Source:** Apache 2.0 licensed, free, with no SaaS walls or usage limits.
