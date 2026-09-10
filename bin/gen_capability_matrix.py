@@ -72,7 +72,11 @@ def main() -> int:
     lines.append("")
     lines.append(
         f"**{len(tools)} tools across {len([d for d in domains if d in by_domain])} "
-        "capability groups.** A ⚠️ marks a destructive tool (mutates or deletes)."
+        "capability groups.** The **Consent** column reflects the dispatch gate: "
+        "a ⚠️ tool will not run until it is explicitly allowed (it deletes, "
+        "exports, or runs a bulk/long operation), while a default-allowed tool "
+        "runs without extra opt-in. It is **not** a read/write distinction — "
+        "`memory_write` is default-allowed, and read-only `memory_export` is not."
     )
     lines.append("")
     lines.append(
@@ -108,10 +112,19 @@ def main() -> int:
         if blurb:
             lines.append(f"_{blurb}_")
             lines.append("")
-        lines.append("| Tool | Description | Mutates? |")
+        lines.append("| Tool | Description | Consent |")
         lines.append("|---|---|---|")
         for t in sorted(by_domain[d], key=lambda x: x["name"]):
-            flag = "⚠️ yes" if t.get("destructive") else "read-only"
+            # NOT a mutation flag. `destructive` in the manifest is
+            # `not spec.default_allowed` -- the dispatch gate at
+            # catalog/dispatch.py:225 -- i.e. "needs an explicit opt-in before
+            # it will run". Rendering it as "Mutates?" was wrong in BOTH
+            # directions: memory_write/memory_update/task_delete showed
+            # "read-only", while read-only memory_export/gdpr_export/
+            # memory_search_routed showed a mutation warning. The catalog has
+            # no per-tool mutation field, so the column now says what the data
+            # actually means rather than inferring one.
+            flag = "⚠️ opt-in required" if t.get("destructive") else "default-allowed"
             lines.append(f"| `{_escape(t['name'])}` | {_escape(t.get('summary'))} | {flag} |")
         lines.append("")
 

@@ -9,7 +9,7 @@
   - `tasklist | findstr python` (Windows)
 
 ### PostgreSQL sync failures
-- **Check**: Verify `PG_URL` is set correctly (environment variable or OS keyring).
+- **Check**: Verify `M3_CDW_PG_URL` is set correctly (environment variable or OS keyring). `PG_URL` still works but is deprecated. If your *local* store is PostgreSQL too, `M3_PRIMARY_PG_URL` must point at the primary, not the warehouse — see [SYNC_PG_TO_PG.md](SYNC_PG_TO_PG.md).
 - **Check**: Confirm the PostgreSQL server is reachable from this machine.
 - **Note**: Sync is optional. M3 Memory works fully without PostgreSQL.
 
@@ -18,8 +18,8 @@
 ## Embedding Issues
 
 ### "Embedding failed" or "Connection refused"
-- **Cause**: Your local embedding server isn't running.
-- **Solution**: Start Ollama (`ollama serve`) or verify LM Studio is running on its configured port.
+- **Cause**: The shared local embed server isn't running. m3 ships its own (`m3-embed-server`, from the `m3-core-rs` wheel) and uses it by default on `127.0.0.1:8082` — Ollama and LM Studio are optional alternatives, not the default.
+- **Solution**: Check it with `m3 embedder status`, then `m3 embedder start`. If you deliberately route to an external provider, verify `M3_EMBED_URL` points at a live OpenAI-compatible `/v1/embeddings` endpoint.
 
 ### Semantic search returning poor results
 - **Solution**: Run `memory_maintenance` to decay importance of stale items.

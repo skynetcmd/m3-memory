@@ -1,8 +1,8 @@
 ---
 tool: bin/gen_capability_matrix.py
-sha1: 041c5748597c
-mtime_utc: 2026-08-07T23:53:52.029891+00:00
-generated_utc: 2026-08-08T14:40:49.842561+00:00
+sha1: 06d2e7e97cd5
+mtime_utc: 2026-09-10T19:09:49.642235+00:00
+generated_utc: 2026-09-10T19:11:22.556623+00:00
 private: false
 ---
 

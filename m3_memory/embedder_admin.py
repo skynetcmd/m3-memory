@@ -920,16 +920,36 @@ def cmd_shared(args: argparse.Namespace) -> int:
 
 
 def cmd_unshared(args: argparse.Namespace) -> int:
-    """Revert to per-process in-process embedders (remove .embed_config.json).
+    """Remove .embed_config.json — does NOT by itself enable in-process embedding.
 
-    Each m3 process goes back to loading its OWN GPU embedder (more RAM, but no
-    dependency on a shared server). Restart the m3 processes after."""
+    This used to claim each process "goes back to loading its OWN embedder". It
+    does not, and saying so was dangerous: with NO config file present,
+    memory/embed.py sets `_INPROC_ALLOWED = _EMBED_INPROC_OPT_IN`, and
+    `M3_EMBED_INPROC` defaults to "0". Removing the file therefore routes every
+    process to the SHARED server (safe-by-default, added to stop a misresolved
+    config root from spinning up a per-process CUDA context). An operator who
+    ran this AND stopped the shared server was left with no embedder at all,
+    while being told the opposite. So: remove the file, then say what is
+    actually required to get in-process embedding."""
     path = _embed_config_path()
     if os.path.exists(path):
         os.remove(path)
-        print(f"[OK] removed {path} — processes will use their own in-process embedder again.")
+        print(f"[OK] removed {path}")
     else:
-        print(f"[~] {path} not present — already unshared (per-process embedders).")
+        print(f"[~] {path} not present — nothing to remove.")
+    inproc_on = os.environ.get("M3_EMBED_INPROC", "0") == "1"
+    print("")
+    if inproc_on:
+        print("     M3_EMBED_INPROC=1 is set, so processes WILL load their own "
+              "in-process embedder.")
+    else:
+        print("     NOTE: removing the config does NOT enable in-process embedding.")
+        print("     With no config file and M3_EMBED_INPROC unset (default 0), every")
+        print("     process routes to the SHARED server on 127.0.0.1:8082 instead.")
+        print("     To actually run in-process, set M3_EMBED_INPROC=1 in the")
+        print("     environment of each m3 process (MCP server registration + hooks).")
+        print("     Keep the shared server running until you have done so, or you")
+        print("     will have NO embedder and writes will defer embedding.")
     print("     Restart the MCP server + cognitive loop to apply.")
     return 0
 

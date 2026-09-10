@@ -50,12 +50,31 @@ LFS-tracked model file and any extra wheels you'll need offline.
    pip download m3-memory -d _assets/python_wheels
    ```
 
-   Until `m3-core-rs` publishes wheels to PyPI, the optional Rust core is
-   not bundled with m3-memory. If you want it on the air-gapped target,
-   also build `m3-core-rs` (Rust ≥1.94 + maturin) from a git checkout of
-   `github.com/skynetcmd/m3-core-rs@v0.9.0` and stage the resulting wheel
-   under `_assets/python_wheels/`. The base m3-memory install works
-   without it.
+   The Rust core is a separate distribution, so `pip download m3-memory`
+   does not pull it in — stage it explicitly for an air-gapped target.
+
+   **Get it from the GitHub Release — that is the official channel.** The
+   Release for tag `v2026.9.7` carries every wheel (7 os/backend packages ×
+   cp311–cp314, 28 assets), so it is complete by construction:
+
+   ```bash
+   # add -p '*linux*cuda*cp313*' to fetch only the wheel you need
+   gh release download v2026.9.7 --repo skynetcmd/m3-core-rs --dir _assets/python_wheels
+   ```
+
+   Do **not** treat PyPI as the source here. It cannot carry the CUDA wheels at
+   all — they exceed its 100 MB per-file limit by an order of magnitude
+   (windows-cuda ~244 MiB, linux-cuda ~949 MiB), so that gap is permanent rather
+   than a publishing backlog — and the PyPI-eligible backends are currently
+   *stale*, still serving 3.7.4 while the Release ships 3.9.7. A PyPI-first
+   fetch would quietly stage an old core and exit 0, which is why
+   `m3_memory/rust_core_install.py` cascades **GitHub Release → PyPI → source**
+   in that order. Building from source (Rust ≥1.94 + maturin) is the last
+   resort, when no prebuilt wheel matches your platform + Python version.
+
+   m3-memory installs and runs correctly without the wheel — the pure-Python
+   fallback is results-equivalent, just slower — so staging it is a performance
+   decision, not a functional prerequisite.
 
 3. **Bundle for transfer:**
 

@@ -235,7 +235,7 @@ Call `memory_write` to persist any fact, decision, preference, observation, or k
 
 | Parameter | Required | Notes |
 |-----------|----------|-------|
-| `type` | Yes | One of (34 canonical, alphabetical): `auto`, `belief`, `chat_log`, `code`, `config`, `conversation`, `decision`, `event_extraction`, `fact`, `fact_enriched`, `home`, `home_automation`, `infrastructure`, `knowledge`, `linux_only`, `local_device`, `log`, `macos_only`, `message`, `migration-log`, `network_config`, `note`, `observation`, `plan`, `preference`, `reference`, `scratchpad`, `security`, `snippet`, `summary`, `task`, `to_do`, `user_fact`, `windows_only`. Live source of truth: `bin/mcp_tool_catalog.py:VALID_MEMORY_TYPES`. |
+| `type` | Yes | One of (36 canonical, alphabetical): `auto`, `belief`, `chat_log`, `code`, `config`, `conversation`, `decision`, `event_extraction`, `fact`, `fact_enriched`, `home`, `home_automation`, `infrastructure`, `knowledge`, `linux_only`, `local_device`, `log`, `macos_only`, `message`, `migration-log`, `network_config`, `note`, `observation`, `plan`, `preference`, `procedure`, `reference`, `scratchpad`, `security`, `snippet`, `summary`, `synthesis`, `task`, `to_do`, `user_fact`, `windows_only`. Live source of truth: `bin/catalog/spec.py:VALID_MEMORY_TYPES` (re-exported from `bin/mcp_tool_catalog.py`). |
 | `content` | Yes | The memory content (max 50,000 chars) |
 | `title` | No | Short descriptive title — used for contradiction matching |
 | `importance` | No | 0.0–1.0 (default 0.5). Higher = slower decay, higher search ranking |
@@ -274,7 +274,7 @@ graph TD
     H --> DB
 ```
 
-- Contradiction detection runs automatically — if a same-type, same-title memory exists with different content (cosine > 0.85), the old one is superseded
+- Contradiction detection runs automatically — if a same-type memory exists with different content (cosine ≥ 0.92, `M3_CONTRADICTION_THRESHOLD`), the old one is superseded. The title gate is `loose` by default, so titles need not match
 - Auto-linking connects the new memory to the most related existing memory (cosine > 0.7)
 - Content safety check rejects XSS, SQL injection, Python injection, and prompt injection
 - SHA-256 content hash is computed and stored for tamper detection
@@ -339,7 +339,7 @@ Recommended as a safer alternative to manual `adaptive_k` tuning.
 
 | Tool | When to Use |
 |------|-------------|
-| `memory_link(from_id, to_id, type)` | Create a relationship. Types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates` |
+| `memory_link(from_id, to_id, type)` | Create a relationship. All 11 types (`bin/memory_core.py:VALID_RELATIONSHIP_TYPES`): `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `precedes`, `follows`, `message`, `handoff`. The last four are used by chat-log and multi-agent handoff flows. |
 | `memory_graph(id, depth)` | Explore connected memories up to 3 hops. Use when context around a memory matters. |
 | `memory_history(id)` | View the full audit trail for a memory — every create, update, delete, supersede event |
 

@@ -599,6 +599,8 @@ def _cmd_wiki(args: argparse.Namespace) -> int:
             argv.append("--check")
         if getattr(args, "no_files", False):
             argv.append("--no-files")
+        if getattr(args, "check_drift", False):
+            argv.append("--check-drift")
         if getattr(args, "no_networkx", False):
             argv.append("--no-networkx")
         if getattr(args, "synthesize", False):
@@ -1619,6 +1621,10 @@ Examples:
                             help="Exit non-zero if the on-disk vault is stale.")
     p_wiki_gen.add_argument("--no-files", action="store_true",
                             help="Memory-only vault (skip the files corpus).")
+    p_wiki_gen.add_argument("--check-drift", action="store_true",
+                            help="Report-only: ask an LLM judge whether each compiled "
+                                 "synthesis still matches its sources. Mutually "
+                                 "exclusive with --check.")
     p_wiki_gen.add_argument("--no-networkx", action="store_true",
                             help="Force the pure-Python clustering fallback.")
     p_wiki_gen.add_argument("--synthesize", action="store_true",

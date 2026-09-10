@@ -20,11 +20,13 @@ installs (one `apt`/`dnf`/`brew` call). Re-runs are idempotent.
 Flags:
 
 ```
---cognitive-loop                             enable the background autonomous loop (v2026.5.4.5)
 --capture-mode {both|stop|precompact|none}   default: both
 --endpoint URL                               pin LLM_ENDPOINTS_CSV
 --skip-prereqs                               assume pipx/git/sqlite3 already present
---no-install-m3                              stop after pipx install (don't fetch payload)
+--no-setup                                   stop after install (skip the interactive setup)
+--install-gpu-embedder                       build the GPU embedder (CUDA/Vulkan/Metal)
+--no-native-wheel                            skip the m3-core-rs native wheel
+--allow-native-source-build                  allow building m3-core-rs from source
 ```
 
 ---

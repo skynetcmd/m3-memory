@@ -12,7 +12,9 @@
 
 Under the hood, M3 treats agent memory as a **distributed-systems infrastructure problem**, not a simple retrieval feature — a **shared, evolving, bitemporal, contradiction-aware knowledge base** that multiple heterogeneous agents and machines read and write, built to stay consistent over months and years.
 
-**The memory improves without being asked.** M3 is not only a store you write to and read back. An **autonomous Cognitive Loop** (`m3_cognitive_loop.py`) runs in the background and keeps working on what you already saved: **deferred enrichment** — classification, embedding, and entity extraction — runs off the hot path, so a write stays fast while the understanding of it deepens afterwards, and the loop builds an **entity relationship graph** from memories that arrived as plain text. **Curation is m3's own work, not an LLM's.** Near-duplicate detection is cosine similarity over embeddings against a threshold; decay and pruning are age-and-signal rules; and applying a curation plan — bulk deletes, merges, supersessions — is one deterministic function issuing direct SQL, with **no model in the loop**. That is deliberate: the apply step *used* to be an LLM agent, and it failed by looping single-row deletes across hundreds of IDs until it ran out of budget. An agent's judgement is still welcome for the genuinely subjective calls ("is this worth keeping?"), but it emits a *plan* and m3 executes it — one round-trip instead of N, and no model needed for the mechanical part. Contradiction supersession and promotion of chat turns are separate, deliberate steps rather than loop work.
+**The memory improves without being asked.** M3 is not only a store you write to and read back. An **autonomous Cognitive Loop** (`m3_cognitive_loop.py`) runs in the background and keeps working on what you already saved: **deferred enrichment** — classification, embedding, and entity extraction — runs off the hot path, so a write stays fast while the understanding of it deepens afterwards, and the loop builds an **entity relationship graph** from memories that arrived as plain text. **Curation is m3's own work, not an LLM's.** Near-duplicate detection is cosine similarity over embeddings against a threshold; decay and pruning are age-and-signal rules; and applying a curation plan — bulk deletes, merges, supersessions — is one deterministic function issuing direct SQL, with **no model in the loop**. That is deliberate: the apply step *used* to be an LLM agent, and it failed by looping single-row deletes across hundreds of IDs until it ran out of budget. An agent's judgement is still welcome for the genuinely subjective calls ("is this worth keeping?"), but it emits a *plan* and m3 executes it — one round-trip instead of N, and no model needed for the mechanical part.
+
+**Contradictions are caught on three paths**, not one: deterministically on the write path (cosine similarity against a threshold, no model), by the loop's **Reflector pass** during enrichment (which writes `supersedes` edges), and by an explicit curation plan. Promotion of chat turns into long-term memory is the one thing that stays deliberate — nothing promotes on your behalf.
 
 **It runs where your data has to stay.** A single `pip install` with no account, no
 API key, and no outbound calls — at home in a **homelab**, on a **corporate or
@@ -167,7 +169,7 @@ Short version: M3 is the **local-first, MCP-native** option that stays *yours* a
 | **Deploys In** | Homelabs and self-hosted stacks · corporate and government networks · **air-gapped and classified environments** · regulated industries (FIPS 140-3-ready, GDPR tooling, audit logs). No account, no API key, no outbound calls. See [Sovereign & Air-Gapped Deployments](#-sovereign--air-gapped-deployments). |
 | **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10, 100% @ k=20** on LongMemEval-S (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. SHR measures the memory layer alone — no answer model, no judge — which is why it, not end-to-end QA, is the like-for-like comparison between memory systems. See [Benchmarks](#-benchmarks). |
 | **Context Efficiency** | Exposes 100+ tools but occupies just **~1.8% of a 200K context window** at startup — lazy domain-gating loads the rest on demand. |
-| **Maturity** | Stable, battle-tested core engine (2,400+ tests) that's safe to build on today; new features and integrations are added actively. **SQLite by default; PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam. (See [features.json](docs/features.json)) |
+| **Maturity** | Stable, battle-tested core engine (2,700+ tests) that's safe to build on today; new features and integrations are added actively. **SQLite by default; PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam. (See [features.json](docs/features.json)) |
 
 ---
 
@@ -304,13 +306,13 @@ M3 operates completely offline by default.
 
 ### Sovereign Local Embedder
 A high-performance BGE-M3 embedder runs locally after installation.
-*   **Default:** one **shared local embed server** on `127.0.0.1:8082`, running the `m3-embed-server` binary that ships inside the `m3-core-rs` wheel. CPU execution using GGUF format (`_assets/models/bge-m3-Q4_K_M.gguf`). Every m3 process reuses that single server — one model in RAM, one GPU context — instead of each loading its own copy. It is local-only and never leaves the machine.
-*   **Optional (opt-in at `m3 setup`):** additionally embed **in-process** via the `m3-core-rs` native module (llama.cpp linked in-process, zero IPC). Latency is not the reason to choose it — an embed call is already low-µs either way. It pays off for high-volume bursts such as bulk file ingestion, where a self-contained embedder beats round-tripping every chunk. The cost is that it cannot be shared, so each process using it loads its own model.
+*   **Default:** one **shared local embed server** on `127.0.0.1:8082`, running the `m3-embed-server` binary that ships inside the `m3-core-rs` wheel. CPU execution using GGUF format (`_assets/models/bge-m3-Q4_K_M.gguf`). Every m3 process reuses that single server — one model in host RAM — and one GPU context when a GPU wheel is installed — instead of each loading its own copy. It is local-only and never leaves the machine.
+*   **Optional (opt-in at `m3 setup`):** additionally embed **in-process** via the `m3-core-rs` native module (llama.cpp linked in-process, zero IPC). Latency is not the main reason to choose it — on the reference host a single small embed is P50 ~33 ms through the shared server vs ~28 ms in-process, so the localhost round-trip costs ~10-15% on one small request and amortises to near-nothing across a batch. It pays off for high-volume bursts such as bulk file ingestion, where a self-contained embedder beats round-tripping every chunk. The cost is that it cannot be shared, so each process using it loads its own model.
 *   **Hardware Acceleration (GPU):** Execute `m3 embedder install-gpu` to compile with CUDA, Vulkan, or Metal.
-*   **External Provider Fallback:** Set `EMBED_BASE_URL` to route requests to Ollama, LM Studio, or vLLM.
+*   **External Provider Fallback:** Set `M3_EMBED_URL` to point at any OpenAI-compatible `/v1/embeddings` endpoint (Ollama, LM Studio, vLLM, or another machine's m3 embed server), and `M3_EMBED_FALLBACK_URL` for a second endpoint to try if the first is unreachable.
 
 ### Rust-Oxidized Performance Core
-M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MMR re-ranking, batch cosine distance calculations, and FTS compilations by **90× to 800×**. If absent, M3 falls back to pure Python execution automatically. Disable with `M3_CORE_RS_DISABLE=1`. (See [Oxidation Benchmarks](docs/OXIDATION_BENCHMARKS.md)).
+M3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch cosine distance calculations, and FTS compilations by **90× to 800×**. It is installed **by default** (the installer's `--no-native-wheel` is the opt-*out*), not an optional add-on. A pure-Python fallback covers every code path and is **results-equivalent** — exact for FTS compilation and graph traversal, and within float tolerance for vector math, enforced by `tests/test_oxidation_parity.py`, `test_fts_parity.py` and `test_graph_neighbor_parity.py`. So the core changes speed, never answers: if the wheel is absent, or you set `M3_CORE_RS_DISABLE=1`, M3 falls back automatically and returns the same results more slowly. (See [Oxidation Benchmarks](docs/OXIDATION_BENCHMARKS.md)).
 
 ### Enterprise Security & Compliance
 *   **FIPS 140-3 Ready:** Standardized encryption pathways allow routing through validated cryptographic modules (e.g., wolfSSL via `M3_FIPS_MODE=1`).
@@ -375,7 +377,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
     infrastructure); PostgreSQL when you want a shared store across machines.
 *   **You operate under sovereignty or data-residency requirements** — corporate,
     government, defence, healthcare, or any regulated environment: memory and
-    embeddings never leave your boundary. The embedder is in-process and local, the
+    embeddings never leave your boundary. The embedder runs on your own hardware, the
     store is a file you control, and installation works **fully air-gapped** from
     pre-compiled wheels. FIPS 140-3-ready crypto (`M3_FIPS_MODE=1`), GDPR
     `gdpr_forget` / `gdpr_export`, audit logs, and relocatable storage roots so
@@ -396,7 +398,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 ## 🛡️ Why Trust This
 
 *   **Benchmarked Retrieval:** State-of-the-art for a local-first substrate — 99.2% session-hit-rate @ k=10, 100% @ k=20 on LongMemEval-S — with a published, reproducible methodology and no oracle routing. See [Benchmarks](#-benchmarks).
-*   **Robust Coverage:** Over **2,400 tests** guarding correct behavior across search, sync, GDPR lifecycle, and files ingestion — run with warnings-as-errors, so a new warning fails the suite.
+*   **Robust Coverage:** Over **2,700 tests** guarding correct behavior across search, sync, GDPR lifecycle, and files ingestion — run with warnings-as-errors, so a new warning fails the suite.
 *   **Audit Reports:** Regular vulnerability reports (Bandit, secrets scans, pip-audit) published directly under [`docs/audits/`](docs/audits/).
 *   **Explainable Retrieval:** No black-box queries; retrieval math is open, readable, and scoring parameters are outputted directly.
 *   **Open Source:** Apache 2.0 licensed, free, with no SaaS walls or usage limits.

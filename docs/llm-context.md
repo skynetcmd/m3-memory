@@ -82,8 +82,8 @@ The real tools:
         ┌────────────────────────────────────┼────────────────────────────────────┐
         ▼                                     ▼                                     ▼
 [ SQLite FTS5 ]                     [ BGE-M3 vector ]                     [ Bitemporal ledger ]
- (lexical match)                (semantic; in-process llama.cpp            (valid_from/valid_to +
-                                 or llama-server HTTP :8082 fallback)       created_at = txn time)
+ (lexical match)                (semantic; shared llama-server              (valid_from/valid_to +
+                                 on :8082; in-process opt-in)             created_at = txn time)
         └──────────────────── fused + MMR-diversified in memory_search ─────────────┘
 ```
 
@@ -91,7 +91,7 @@ The real tools:
 
 | Symptom | Likely cause | Corrective action |
 |---|---|---|
-| Embedding/search returns errors or empty vectors | Local embedder not reachable | Run `embedder_status`; the CPU HTTP fallback listens on port `8082` (override via `M3_EMBED_F…` env). Ensure the embed server is running. |
+| Embedding/search returns errors or empty vectors | Local embedder not reachable | Run `embedder_status`; the shared embed server — the DEFAULT topology, not a fallback — listens on `8082` (override via `M3_EMBED_F…` env). Ensure the embed server is running. |
 | Embedder can't find the model | `M3_EMBED_GGUF` not set / wrong path | Point `M3_EMBED_GGUF` at a local BGE-M3 GGUF file (e.g. `bge-m3-GGUF-Q4_K_M.gguf`). **M3 does not fetch weights via Git LFS** — weights are a local file you provide. |
 | `unknown_tool` | Called an invented tool name | Use a name from §2 / the catalog; e.g. `memory_write`, not `m3_remember`. |
 

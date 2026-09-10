@@ -210,8 +210,9 @@ community detection, which is a **base dependency** of m3-memory — it installs
 with the core package, nothing extra to enable. Clustering is deterministic
 run-to-run, so `m3 wiki generate --check` stays byte-reproducible.
 
-> The old `[wiki]` optional extra (and the `--no-networkx` flag) are gone:
-> networkx is now always present. `pip install "m3-memory[wiki]"` still works as a
+> The old `[wiki]` optional extra is gone: networkx is now always present, so the
+> `--no-networkx` flag (still accepted on `generate` and `compile`) only forces the
+> pure-Python clustering fallback — it is no longer needed to avoid a missing dep. `pip install "m3-memory[wiki]"` still works as a
 > no-op back-compat alias so existing scripts don't break, but it installs nothing
 > beyond the base package.
 

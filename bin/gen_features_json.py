@@ -61,7 +61,7 @@ def main() -> int:
             "search_modes": ["hybrid", "semantic", "keyword"],
             "default_mode": "hybrid",
             "hybrid_pillars": ["SQLite FTS5 (lexical)", "dense vector (BGE-M3)", "MMR (diversity rerank)"],
-            "embedder": "BGE-M3 (GGUF, e.g. Q4_K_M) via local llama.cpp in-process or llama-server HTTP",
+            "embedder": "BGE-M3 (GGUF, e.g. Q4_K_M) served by a shared local llama-server on 127.0.0.1:8082 by default — one model in host RAM reused by every m3 process; an in-process llama.cpp embedder is an opt-in per-process alternative",
             # 8082 is specifically the CPU HTTP fallback embed-server port, not "the" port.
             "cpu_http_fallback_port": 8082,
             "knowledge_graph": True,

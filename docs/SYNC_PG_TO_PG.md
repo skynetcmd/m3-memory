@@ -153,10 +153,12 @@ a relationship edge is immutable.
 
 These are the real traps (some we hit building it):
 
-- **The extension needs superuser; your app role can't self-enable it.** If you
-  only have the app role, `CREATE EXTENSION` fails silently-ish — m3 detects the
-  missing extension and falls back to the generic bridge rather than erroring. If
-  you *expected* the fast-path and don't see it, check step 1 ran as superuser.
+- **The extension needs superuser; your app role can't self-enable it.** m3
+  probes for `postgres_fdw` rather than trying to create it, and on a PostgreSQL
+  primary a missing extension is **fatal, not a downgrade**: the generic bridge
+  opens the local store as SQLite, so falling back would sync nothing while
+  reporting success. m3 refuses and exits non-zero, naming the missing extension.
+  Ask an administrator to run step 1.
 - **The `m3_warehouse` grant is the #1 cause of "sync does nothing".** The
   warehouse tables live in `m3_warehouse`, not `public`. A sync role that can
   reach `public` (so `tasks`/`secrets` sync fine) but lacks `m3_warehouse` USAGE
@@ -193,10 +195,12 @@ These are the real traps (some we hit building it):
   the sync role accordingly.
 - **Bidirectional, single-driver.** Both directions run from the primary side.
   You don't need to configure a foreign server on the warehouse pointing back.
-- **Automatic fallback is not a silent downgrade you should ignore.** If m3 falls
-  back to the generic bridge, sync still works but slower. Check the sync log
-  (`logs/sync_all.log`) for a `FdwUnavailable` / fallback line if you expected the
-  fast-path and want to know why it didn't engage.
+- **There is no fallback on a PostgreSQL primary — it fails instead.** Earlier
+  releases fell back to the generic bridge here, which was worse than failing:
+  that bridge is SQLite-only on the local side, so it synced nothing and still
+  reported success. Check `logs/sync_all.log` for the `FdwUnavailable` reason; the
+  refusal message names it. (A **SQLite** primary uses the generic bridge as its
+  normal path and is unaffected.)
 - **Vector search on a PG primary is currently brute-force cosine.** (Unrelated to
   sync, but relevant if you're standing up a PG primary — pgvector/HNSW ANN
   indexing is a future item; see [ARCHITECTURE.md](ARCHITECTURE.md).)

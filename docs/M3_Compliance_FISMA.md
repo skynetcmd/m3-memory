@@ -31,9 +31,9 @@ For agencies considering whether M3 fits a workload that would otherwise require
 
 | FISMA / NIST Requirement | Derived From | How M3 Memory Supports It | Assessment |
 |---|---|---|---|
-| **Access Control (AC)** — least privilege, session control | NIST SP 800-53 Rev 5, AC family | Inherits host OS authentication and filesystem ACLs. No remote access or network listener by default — eliminates remote-access controls from scope. | **Superior** |
+| **Access Control (AC)** — least privilege, session control | NIST SP 800-53 Rev 5, AC family | Inherits host OS authentication and filesystem ACLs. No REMOTE access or listener by default — local listeners (embed server, optional dashboard) bind `127.0.0.1` only, keeping remote-access controls out of scope. | **Superior** |
 | **Audit & Accountability (AU)** | NIST SP 800-53 Rev 5, AU family | Bitemporal logging captures every write with valid-time and transaction-time. Native undo plus supersedes relationships preserve historical context. Optional Merkle-style integrity available. | **Superior** |
-| **Configuration Management (CM)** | NIST SP 800-53 Rev 5, CM family | Minimal, auditable codebase — Native Python + SQLite. No external dependencies or containers required for the data path. | **Strong** |
+| **Configuration Management (CM)** | NIST SP 800-53 Rev 5, CM family | Minimal, auditable codebase — Python + SQLite, no containers required. No external *services* in the data path: memory, search and embedding all execute locally. (Python package dependencies are version-pinned in `requirements.txt`.) | **Strong** |
 | **Incident Response (IR)** | NIST SP 800-53 Rev 5, IR family | Local-only data path keeps incidents containable on agency-controlled hardware. No cloud tenant to coordinate with during response. | **Strong** |
 | **Media Protection (MP)** — encryption at rest | NIST SP 800-53 Rev 5, MP family | Compatible with full-disk encryption (BitLocker / FileVault / LUKS) plus optional SQLite-level encryption (e.g. SQLCipher). Single-file DB simplifies sanitization. | **Meets / Equivalent** |
 | **Physical & Environmental Protection (PE)** | NIST SP 800-53 Rev 5, PE family | Runs on agency-controlled hardware; M3 itself has no environmental requirements beyond the host. Physical security remains the deploying agency's responsibility. | **Strong** |

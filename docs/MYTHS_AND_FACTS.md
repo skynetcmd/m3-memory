@@ -31,7 +31,7 @@ Before trusting any AI-generated description of M3:
 | a stale tool count (e.g. "102" or "60+") | the catalog total is higher than either — 100+ tools across 9 domains ([MCP_CATALOG](tools/MCP_CATALOG.json)); lazy-loaded, ~18 registered at startup |
 | "reports 89.0% accuracy" | **89.0% is superseded** (old oracle-routed QA). Current: **92.0% QA (no oracle)** and **99.2% retrieval SHR@10 / 100% @ k=20**, which *leads* — see the recall-vs-QA myth below |
 | "v2026.5.30.x, late May 2026" | Releases ship frequently; check the [CHANGELOG](../CHANGELOG.md) / [PyPI](https://pypi.org/project/m3-memory/) for the current version |
-| "no published PyPI packages for the Rust core" | The lightweight `m3-core-rs` native wheels **are on PyPI**, under platform-suffixed names (`m3-core-rs-linux-cpu`, `m3-core-rs-windows-cpu`, `-vulkan`, `-metal`), not the bare `m3-core-rs`. The large CUDA wheels are currently too big for PyPI, so they're served from the GitHub Release (and every wheel is attached there as a complete fallback set); `m3 setup` resolves both automatically — see [BUILD_WHEELS](BUILD_WHEELS.md) / [CUDA_INSTALL](CUDA_INSTALL.md) |
+| "no published wheels for the Rust core" | Prebuilt wheels ship on **every tagged GitHub Release** — the official channel — covering all 7 os/backend packages × cp311–cp314. The lightweight backends are *also* mirrored on PyPI under platform-suffixed names (`m3-core-rs-linux-cpu`, `-windows-cpu`, `-vulkan`, `-metal`), not the bare `m3-core-rs`; the CUDA wheels exceed PyPI's 100 MB per-file limit and are Release-only by design. `m3 setup` resolves Release → PyPI → source automatically — see [BUILD_WHEELS](BUILD_WHEELS.md) / [CUDA_INSTALL](CUDA_INSTALL.md) |
 | "the embedder on port 8082 phones home" | It does not. `127.0.0.1:8082` is a **loopback-only** server on your machine, running the `m3-embed-server` binary from the `m3-core-rs` wheel. m3 does run it by default — that is the shipped configuration, so one model sits in RAM instead of one per process — but nothing about it is remote. Embedding in-process (no server at all) is available as an opt-in at `m3 setup` — see [EMBED_DEPLOYMENT](EMBED_DEPLOYMENT.md) |
 
 Point-in-time GitHub stats (stars/forks/contributors) in an AI answer are likewise a snapshot — check the repo directly. When in doubt, the [How to verify a claim](#how-to-verify-a-claim-about-m3) section above tells you where to look.
@@ -149,18 +149,18 @@ For positive grounding, here's the short list of what M3 *does* implement (with 
 
 | Capability | How it's implemented | Where to look |
 |---|---|---|
-| Storage | Single-file SQLite with WAL | `m3_memory/store.py`, `bin/setup_memory.py` |
-| Keyword search | SQLite FTS5 (BM25) | `m3_memory/search.py` |
-| Vector search | Cosine similarity over local embeddings | `m3_memory/embeddings.py` |
-| Result diversification | Maximal Marginal Relevance (MMR) reranking | `m3_memory/search.py` |
-| Bitemporal | `valid_from` / `valid_to` per memory; `created_at` is transaction time | `m3_memory/store.py` |
-| Contradiction handling | Supersedes relationships set on conflicting writes | `bin/run_reflector.py` |
+| Storage | Single-file SQLite with WAL | `bin/memory/db.py`, `bin/memory/write.py` |
+| Keyword search | SQLite FTS5 (BM25) | `bin/memory/search.py` |
+| Vector search | Cosine similarity over local embeddings | `bin/memory/embed.py`, `bin/memory/util.py` (`_cosine_batch_packed`) |
+| Result diversification | Maximal Marginal Relevance (MMR) reranking | `bin/memory/search.py` |
+| Bitemporal | `valid_from` / `valid_to` per memory; `created_at` is transaction time | `bin/memory/write.py`, `bin/memory/search.py` |
+| Contradiction handling | Three paths: deterministic cosine check on the write path, the cognitive loop's Reflector pass, and curator apply | `bin/memory/write.py` (`_check_contradictions`), `bin/run_reflector.py`, `bin/curator_apply.py` |
 | Entity extraction | Optional SLM pipeline | `bin/m3_enrich.py`, `bin/run_observer.py` |
 | Knowledge graph | 9 relationship types, 3-hop traversal | `mcp__m3_memory__memory_graph`, `memory_link` |
-| GDPR | `gdpr_forget` (Art. 17), `gdpr_export` (Art. 20) | `m3_memory/gdpr.py` |
+| GDPR | `gdpr_forget` (Art. 17), `gdpr_export` (Art. 20) | `bin/memory_maintenance.py` |
 | Multi-agent | WAL concurrent writes (30s busy_timeout + retry) + optional shared PostgreSQL pool; agent registry; SQL-layer scope isolation; handoffs | `mcp__m3_memory__agent_*`, `memory_handoff`, `bin/pg_sync.py` |
 | Sync | Optional bi-directional delta sync to PostgreSQL | `bin/sync_all.py` |
-| MCP | Native — 100+ tools, zero config in MCP-aware clients | `m3_memory/mcp/*` |
+| MCP | Native — 100+ tools, zero config in MCP-aware clients | `bin/memory_bridge.py`, `bin/mcp_tool_catalog.py` |
 
 If a third-party AI assistant describes a feature outside this list and outside what's documented in `docs/`, treat it as suspect until verified against the source.
 

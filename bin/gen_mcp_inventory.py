@@ -143,6 +143,40 @@ def get_category_map():
     }
     return mapping
 
+# Domain -> section heading, for tools the hardcoded map above does not name.
+# The hardcoded map has to be hand-extended per tool, so it silently fell 43
+# tools behind the catalog (every files_* tool among them) and they all rendered
+# under "Uncategorized". `tool_domains.domain_of_tool` is the lazy-loader's own
+# routing table, so it is complete for every tool by construction -- using it as
+# the fallback means a new tool lands in a real section without an edit here.
+_DOMAIN_HEADINGS = {
+    "memory":        "Memory Operations",
+    "chatlog":       "Chat Log System",
+    "files":         "Files Memory",
+    "entity":        "Knowledge Graph",
+    "conversations": "Conversations",
+    "agent":         "Agent Registry & Notifications",
+    "tasks":         "Task Management",
+    "diagnostics":   "Diagnostics",
+    "admin":         "Lifecycle & Maintenance",
+}
+
+
+def _category_for(name, cat_map):
+    """Hardcoded category first, then the tool's lazy-loading domain."""
+    if name in cat_map:
+        return cat_map[name]
+    try:
+        import tool_domains
+
+        return _DOMAIN_HEADINGS.get(tool_domains.domain_of_tool(name), "Uncategorized")
+    except Exception:
+        # Proxy-only tools (mcp_proxy PROTOCOL_TOOLS/DEBUG_TOOLS) are not in the
+        # catalog, so domain_of_tool cannot see them; they are all named in the
+        # hardcoded map above.
+        return "Uncategorized"
+
+
 def generate_markdown(all_tools, counts=None):
     cat_map = get_category_map()
 
@@ -150,7 +184,7 @@ def generate_markdown(all_tools, counts=None):
     categorized = {}
     for tool in all_tools:
         name = tool['name']
-        cat = cat_map.get(name, "Uncategorized")
+        cat = _category_for(name, cat_map)
         if cat not in categorized:
             categorized[cat] = []
         categorized[cat].append(tool)
@@ -159,6 +193,7 @@ def generate_markdown(all_tools, counts=None):
     cat_order = [
         "Memory Operations", "Knowledge Graph", "Conversations", "Task Management",
         "Agent Registry & Notifications", "Multi-Agent Coordination", "Chat Log System",
+        "Files Memory", "Diagnostics",
         "Operational Protocol", "Debug Agent", "Lifecycle & Maintenance",
         "Data Governance", "Infrastructure Operations"
     ]
@@ -193,11 +228,11 @@ def generate_markdown(all_tools, counts=None):
     md += "| Name | Category | Description |\n"
     md += "| --- | --- | --- |\n"
 
-    all_sorted = sorted(all_tools, key=lambda x: (cat_order.index(cat_map.get(x['name'], "Uncategorized")) if cat_map.get(x['name']) in cat_order else 99, x['name']))
+    all_sorted = sorted(all_tools, key=lambda x: (cat_order.index(_category_for(x['name'], cat_map)) if _category_for(x['name'], cat_map) in cat_order else 99, x['name']))
 
     for tool in all_sorted:
         name = tool['name']
-        cat = cat_map.get(name, "Uncategorized")
+        cat = _category_for(name, cat_map)
         desc = tool['description'].split('\n')[0] # First line
         md += f"| `{name}` | {cat} | {desc} |\n"
 
@@ -281,6 +316,25 @@ def main():
     if len(all_tools) != EXPECTED_TOOL_COUNT:
         print(f"Warning: Expected {EXPECTED_TOOL_COUNT} tools, found {len(all_tools)} — update EXPECTED_TOOL_COUNT in gen_mcp_inventory.py if a tool was added/removed.")
 
+    # A count check alone did NOT catch the real failure: the count stayed right
+    # while 43 tools -- every files_* tool included -- rendered under
+    # "Uncategorized", because the hardcoded map was never extended and nothing
+    # asserted otherwise. Categorisation is now checked directly, and it is
+    # fatal: a doc that files a third of the tool surface under "Uncategorized"
+    # is worse than a failed build.
+    _cm = get_category_map()
+    orphans = sorted(
+        t["name"] for t in all_tools if _category_for(t["name"], _cm) == "Uncategorized"
+    )
+    if orphans:
+        print(
+            "ERROR: no category for "
+            f"{len(orphans)} tool(s): {', '.join(orphans)}\n"
+            "  Add them to get_category_map(), or map their domain in "
+            "_DOMAIN_HEADINGS."
+        )
+        return 1
+
     # 3. Render — pass the catalog/proxy split so the intro can disclose exactly
     # what the total counts (otherwise "122 tools" silently disagrees with the
     # catalog's 111 and the "100+" prose — three numbers, no reconciliation).
@@ -299,4 +353,6 @@ def main():
     print(f"Successfully created {output_path} with {len(all_tools)} entries.")
 
 if __name__ == "__main__":
-    main()
+    # main() returns 1 when a tool has no category; propagate it, or the
+    # "fatal" guard prints an error and still exits 0 (it did, when first added).
+    sys.exit(main() or 0)

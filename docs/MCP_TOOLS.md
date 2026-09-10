@@ -10,23 +10,31 @@ This document provides a comprehensive inventory of all 121 MCP tools available 
 
 | Name | Category | Description |
 | --- | --- | --- |
+| `curate_memory_apply` | Memory Operations | Deterministically apply a memory.db curator plan in ONE call. No LLM in the loop — the apply phase is a pure function over the structured plan. Replaces the agent-driven APPLY-mode loop. Plan sections: delete (soft, list of UUIDs), delete_hard (cascade, list of UUIDs), link (list of {from_id, to_id, relationship_type}), update (list of {id, importance, metadata, ...}). Any section may be omitted. Returns structured per-section results + summary. |
+| `memory_count_entities` | Memory Operations | Count distinct entities mentioned in a single conversation. Direct-index aggregation — no LLM, no embedding. Use this for 'how many distinct X did I mention' inventory questions where top-k embedding retrieval would miss instances spread thinly across many turns. Returns {count, conversation_id, entity_type, pattern}. |
+| `memory_count_mentions` | Memory Operations | Per-entity mention frequency within a single conversation, sorted DESC by count. Use for 'what are the most-mentioned X' or 'rank entities by frequency.' Returns {total, rows: [{entity_id, canonical_name, entity_type, mention_count}, ...]}. |
 | `memory_delete` | Memory Operations | Deletes a MemoryItem (soft or hard). id MUST be the full UUID — a prefix is rejected (full UUID required for mutation safety; memory_get accepts a prefix, this does not). |
 | `memory_delete_bulk` | Memory Operations | Deletes a list of MemoryItems (soft or hard) in one transaction per chunk. Use for curation/dedup passes deleting many items; falls back to per-id memory_delete behavior with the same hard-cascade semantics. Returns a structured {succeeded, not_found, mode} dict. |
 | `memory_feedback` | Memory Operations | Provide feedback on a memory item to improve quality. |
 | `memory_get` | Memory Operations | Retrieves a full MemoryItem; accepts full UUID or 8-char prefix; ambiguous prefixes return an error. |
+| `memory_lifecycle_summary` | Memory Operations | Windowed summary of lifecycle & contradiction activity over the last `window_days` days: counts of create/update/delete/supersede events, corroboration vs contradiction events, and the most-revised / most-contradicted memories. Read-only aggregate over memory_history (mig 009) + memory_corroborations (mig 036). Answers 'what did the memory system do to itself?' and 'we updated this belief N times'. Degrades gracefully on pre-036 DBs (contradiction counts = 0). |
+| `memory_link_bulk` | Memory Operations | Create many memory_relationships rows in one transaction per chunk. Use for curation passes adding many LINK edges (device pairs, supersession chains, etc.). Validates existence of every referenced memory_id; skips duplicates without raising. Returns a structured {created, skipped_missing, skipped_duplicate, total} dict. |
 | `memory_pin` | Memory Operations | Pin a memory to exempt it from decay, expiry, and retention purges. Pinned memories are never auto-archived, never importance/confidence-decayed, and never expiry- or TTL-purged by memory_maintenance — use for facts that must survive indefinitely regardless of access recency. |
 | `memory_search` | Memory Operations | Search across memory items using semantic similarity or keyword matching. Filter by user_id and scope for isolation. |
 | `memory_search_multi_db` | Memory Operations | Search across multiple SQLite databases (e.g. agent_memory.db AND agent_chatlog.db) in one call. Each DB is searched independently via hybrid FTS5+vector search and the top results are merged by score. Returns the global top-K with each item tagged with its source database. Caveat: FTS5 BM25 scores depend on per-DB corpus stats so cross-DB ranks are approximate; works well for small fan-out (typically 2-5 DBs sharing the same embed_model). |
 | `memory_search_routed` | Memory Operations | Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k+temporal_k_bump; non-temporal queries to (optionally fact-fused) max-kind search at k. Pass fact_variant for two-tier fact-fusion. Optional graph_depth and expand_sessions add post-retrieval neighbor expansion. |
 | `memory_search_scored` | Memory Operations | Structured hybrid FTS5+vector+MMR search. Returns ranked rows [(score, item)] with content + metadata (id, valid_from, conversation_id, user_id) — NOT formatted text. Use when a caller needs parseable rows rather than an LLM-readable block (e.g. a memory-provider backend). Empty query + type_filter = filter-only listing. Same bench-data gate as memory_search. |
 | `memory_suggest` | Memory Operations | Preview which memories would be retrieved for a query, with score breakdowns explaining why each was selected. |
+| `memory_supersede` | Memory Operations | Explicitly supersede an existing memory with a new one. Use this to record an intentional update — 'this fact replaces that specific memory' — when you know the old memory's id. Unlike memory_write's automatic contradiction detection (a cosine + title heuristic that may link the wrong prior memory or none at all), this targets the given old_id deterministically. Non-destructive: the old memory is retained, its validity interval is closed (is_deleted=1, valid_to set), and a 'supersedes' edge is recorded new -> old. The old memory stays retrievable by id and via memory_history, and as_of-filtered search still sees it valid before the supersession point — it is only dropped from default search. Fields you omit (type, title, importance, scope) are inherited from the old memory, so pass only what changed. To hard-delete instead, that is a separate gated tool (memory_delete). old_id MUST be the full UUID — a prefix is rejected (full UUID required for mutation safety; memory_get accepts a prefix, this does not). Note: each supersede creates a NEW successor memory; call it once with the full id, do not chain supersedes. |
 | `memory_unpin` | Memory Operations | Unpin a memory, restoring normal decay/expiry/retention handling. |
 | `memory_update` | Memory Operations | Updates a MemoryItem by ID. |
+| `memory_update_bulk` | Memory Operations | Apply many metadata-only updates in one transaction per chunk. Designed for curation passes that retroactively set retention, importance, or supersession metadata. Per-id reembed is NOT supported here (use memory_update for reembed, or re_embed_all for the bulk reembed case). Returns structured {succeeded, not_found, no_change, total}. |
 | `memory_verify` | Memory Operations | Verify content integrity by comparing stored hash with computed hash. Returns OK if content hasn't been tampered with. |
 | `memory_write` | Memory Operations | Creates a MemoryItem and optionally embeds it for semantic search. Contradiction detection is automatic — if new content conflicts with an existing memory of the same type/title, the old one is superseded. Use type='auto' to let the LLM decide the best category. |
 | `memory_write_from_file` | Memory Operations | Write a memory whose content is read from a file on disk. Use this when the memory body is large (>1k chars) to avoid the autoregressive decode latency of streaming a multi-thousand-token JSON `input` field through tool_use — write the body with the Write tool first (off the streaming path, fast), then call this tool with just the path + tiny metadata. The MCP server reads the file, writes the row through the same path as memory_write (all gates apply), and by default deletes the source file on success. Path must be absolute on the host running this MCP server. Files >200000 bytes are rejected; underlying content is still capped at 50000 chars by memory_write_impl. |
 | `enrich_pending` | Knowledge Graph | Enrich pending memory items with SLM-distilled facts. Default dry_run=true reports count + ETA; pass dry_run=false to execute. |
 | `entity_get` | Knowledge Graph | Load a single entity with its full neighborhood: predecessors, successors, and linked memory items. |
+| `entity_mentions` | Knowledge Graph | List memory_ids that mention a specific entity in a single conversation. Pass either entity_id (preferred — exact match) or canonical_name (case-insensitive, optionally disambiguated by entity_type). Returns {entity_id, canonical_name, entity_type, total, memory_ids: [...]}. Caller fetches text via existing read paths (which carry their own authz). Companion to entity_search and entity_get; lives in the 'entity' domain. |
 | `entity_search` | Knowledge Graph | Search entities by canonical_name and optionally by entity_type. Returns list of matching entities with optional neighbor counts. |
 | `extract_pending` | Knowledge Graph | Extract pending entities from the queue. Default dry_run=true reports count + ETA; pass dry_run=false to execute. |
 | `memory_graph` | Knowledge Graph | Returns the local graph neighborhood of a memory item (connected memories up to N hops, max 3). |
@@ -67,6 +75,35 @@ This document provides a comprehensive inventory of all 121 MCP tools available 
 | `chatlog_status` | Chat Log System | One-call health summary of the chat log subsystem: mode, DB paths, row counts, queue depth, spill files, embed backlog, hook timestamps, redaction state, warnings. |
 | `chatlog_write` | Chat Log System | Append one chat turn to the chat log DB. Provenance (host_agent, provider, model_id, conversation_id) is required. Writes are async-queued — returns the row id immediately. |
 | `chatlog_write_bulk` | Chat Log System | Bulk-append N chat turns. Each item needs the same required fields as chatlog_write. |
+| `curate_chatlog_apply` | Chat Log System | Deterministically apply a chatlog.db curator plan in ONE call. No LLM in the loop. Plan sections: decay (True/dict to run chatlog_decay), dedup (list of {keep_id, drop_ids}), promote (list of {ids, target_type}), prune (list of {conversation_id, reason}). Any section may be omitted. Returns structured per-section results + summary. |
+| `files_corpus_create` | Files Memory | Register a new corpus with optional default overrides. `default=True` marks this corpus as the installation's default (clears the flag on any prior default in the same transaction). |
+| `files_corpus_delete` | Files Memory | Delete a corpus's settings row. Cascade=True also deletes every file_node in the corpus -- DESTRUCTIVE. Without cascade, refuses when the corpus has file_nodes. |
+| `files_corpus_get` | Files Memory | Fetch a single corpus's settings + counts. |
+| `files_corpus_list` | Files Memory | Enumerate corpora with row counts. |
+| `files_corpus_set` | Files Memory | Update settings for an existing corpus. None args are no-ops. Creates the corpus_settings row if absent. |
+| `files_dedup` | Files Memory | Scan leaf embeddings for near-duplicates above cosine threshold. Detection only -- pairs land in semantic_dedup_candidates for human review. |
+| `files_dedup_list` | Files Memory | List near-duplicate candidate pairs with text snippets and paths. |
+| `files_dedup_review` | Files Memory | Record a review decision on a near-duplicate candidate: 'kept' | 'merged' | 'ignored'. |
+| `files_entity_coalesce` | Files Memory | Detect provisional-entity coalescing candidates (quarantine noise + flag near-duplicate entities). Detection only -- never merges, never auto-applies; candidates land in entity_coalesce_candidates for review. dry_run=True estimates without writing or embedding. |
+| `files_entity_coalesce_apply` | Files Memory | Apply the reversible same_as/cluster overlay. Union of explicit candidate_uuids (reviewed 'merge' or 'unapplied' tombstone) and -- if include_auto_merge -- the LATEST run's 'merge' band (or resolution_run). Members are never deleted; reverse with files_entity_coalesce_unapply. WRITES the core graph: a real apply MUST pass confirm=True; dry_run=True previews without writing. |
+| `files_entity_coalesce_list` | Files Memory | List entity-coalescing candidate pairs (name + score + band). |
+| `files_entity_coalesce_review` | Files Memory | Record entity-coalescing review decisions in BULK: a list of {uuid, action} where action is 'merge' | 'related' | 'reject' | 'defer'. Records intent only; materialize with files_entity_coalesce_apply. |
+| `files_entity_coalesce_unapply` | Files Memory | Reverse one coalescence cluster (drop edges, clear flags, strip aliases, tombstone the candidate so auto-merge won't resurrect it). Members are never deleted; re-apply via files_entity_coalesce_apply with candidate_uuids. |
+| `files_extract_pending` | Files Memory | Drain leaves with extraction_status='pending' through the LLM fact extractor. Used after a queue-mode ingest. Safe to call repeatedly. |
+| `files_get` | Files Memory | Fetch one record by UUID. Tries file_nodes then leaves. |
+| `files_health` | Files Memory | DB integrity + FTS5 sync check. Set rebuild=True to fix drift. |
+| `files_index` | Files Memory | Return file-level summaries for triage (wiki-index primitive). Cheap-first retrieval -- no leaf content. Use BEFORE files_search to decide which files are worth deep-reading. |
+| `files_ingest` | Files Memory | Walk a directory and ingest supported files into files.db. Idempotent: same content_sha256 -> no-op; changed content -> new file_node version supersedes prior. Use extract_mode to opt into fact extraction; use original_path (or a <path>.m3meta.json sidecar) to point search results at a source-of-truth file when the ingested file is a conversion. |
+| `files_link_rename` | Files Memory | Re-point an existing file_node at a new path (rename / move). NOT a supersession -- content stays identical. Use this only when staleness review surfaces a rename candidate. |
+| `files_promotable` | Files Memory | List top promotion candidates by usage-weighted heuristic score. Suggestion-only; use files_promote to actually ascend any. |
+| `files_promote` | Files Memory | Promote (ascend) a fact / leaf / file_summary from files.db to memory.db. Source stays untouched; copy lands in memory.db with a metadata back-pointer. Idempotent. |
+| `files_promotion_list` | Files Memory | List existing promotions. source_superseded=True surfaces promotions whose source file has since been superseded -- candidates for review. |
+| `files_search` | Files Memory | Hybrid FTS5 + vector search over file-ingestion leaves. Default: current versions only. Set include_history=True for time-travel queries. Use `corpora` for fan-out across multiple corpora. |
+| `files_staleness_review` | Files Memory | Compare filesystem against files.db. Surfaces stale, touched-only, missing, new, failed-extraction, drifted-promotion files, and rename candidates. Report-only. |
+| `files_stats` | Files Memory | Corpus-level counters: file_nodes, leaves, embed coverage, by-filetype. |
+| `files_watch_once` | Files Memory | Single-pass staleness check + notification dispatch. Suitable for cron / scheduled runners. Notifications are emitted via the memory.db notifications inbox; cooldown suppresses duplicates within the window. |
+| `memory_doctor` | Diagnostics | Self-service diagnostic for the m3-memory embedding cascade. Probes tier-1 (in-proc GGUF), tier-2 (m3-embed-server :8082), DB integrity, and end-to-end embed roundtrip — all concurrently with bounded 2s per-probe timeouts. Returns a structured dict with status ('healthy' | 'degraded' | 'broken'), per-tier details, issues, and actionable recommendations. Use this when memory_search hangs, embeddings look wrong, or you're standing up a new deployment. |
+| `memory_doctor_fix` | Diagnostics | Run the m3-memory self-repair mode (m3 doctor --fix). Attempts to auto-fix the most common deployment issues in order: (1) apply pending SQLite migrations, (2) rebuild the FTS5 full-text index, (3) embed-backfill items that are missing vector embeddings (capped at 500/run), (4) rebuild the m3_system_cohesion table if absent. Set dry_run=True to see what *would* be done without making any changes. Returns a structured dict with per-action outcomes and a summary status ('ok' | 'partial' | 'nothing_to_do' | 'failed'). |
 | `check_thermal_load` | Operational Protocol | Protocol #2 - Check M3 Max thermal/RAM pressure. Returns Nominal|Fair|Serious|Critical. |
 | `log_activity` | Operational Protocol | Archive activity to the agent log (Protocols #1-#3). category=thought for complex reasoning, hardware after thermal check, decision when user agrees to any code change, file move, or direction. |
 | `query_decisions` | Operational Protocol | Protocol #4 - MUST call before starting any new task. Full-text search across project_decisions table for prior decisions. |
@@ -78,63 +115,73 @@ This document provides a comprehensive inventory of all 121 MCP tools available 
 | `debug_history` | Debug Agent | Search past debugging sessions and patterns. No LLM required. |
 | `debug_report` | Debug Agent | Generate and persist a structured debugging report to memory. |
 | `debug_trace` | Debug Agent | Execution flow analysis - reads source, finds callers, identifies failure points. |
+| `extract_entities` | Lifecycle & Maintenance | Accepts raw text, extracts entities and relationship predicates based on the configured pluggable entity-extraction backend, and returns them as structured JSON without modifying the database. Use this to preview what entities and relationships would be extracted from raw content. |
+| `m3_call` | Lifecycle & Maintenance | Invoke ANY m3 catalog tool by name without loading its domain — the low-token path to the full tool surface. Single call: pass `tool` (e.g. 'files_stats') and `args` (an object). Batch: pass `batch`, a list of {tool, args} (each isolated — one failure won't abort the rest; capped at 100). Set `dry_run` to validate args + check the destructive gate WITHOUT executing. Returns JSON. Call `m3_index` first if you don't know a tool's args. Destructive tools require MCP_PROXY_ALLOW_DESTRUCTIVE=1. |
+| `m3_help_capabilities` | Lifecycle & Maintenance | Discover m3-memory tool capabilities, parameters, and availability. Allows filtering by a logical domain (memory, chatlog, files, entity, agent, tasks, conversations, admin, diagnostics) or searching by keywords. |
+| `m3_index` | Lifecycle & Maintenance | List m3 catalog tools (optionally one domain) as structured rows: name, domain, one-line summary, destructive flag, and arg specs (name/type/required). Use this to discover the exact args for any tool before calling it via m3_call — cheaper than a failed call. Read-only catalog metadata; never returns tool output. Domains: memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin. |
 | `memory_consolidate` | Lifecycle & Maintenance | Consolidate old memories of the same type into summaries using the local LLM. Reduces clutter while preserving knowledge. |
 | `memory_dedup` | Lifecycle & Maintenance | Find (and optionally soft-delete) near-duplicate memory items by cosine similarity over embeddings. Returns {count, groups: [{a, b, title_a, title_b, score}, ...], threshold, scanned, applied}. Use dry_run=True (default) for a preview; dry_run=False soft-deletes the second item of each pair. |
 | `memory_maintenance` | Lifecycle & Maintenance | Runs maintenance tasks on the memory store. |
 | `memory_set_retention` | Lifecycle & Maintenance | Set or update per-agent memory retention policy. Controls max memory count, TTL expiry, and auto-archival. |
+| `tools_list_domains` | Lifecycle & Maintenance | List m3 tool domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin) and their tool counts. Call `tools_load_domain` to expose a domain's full tool surface. |
+| `tools_load_domain` | Lifecycle & Maintenance | Register a tool domain's full surface for the current MCP session. Use when you need tools beyond the essentials (memory_search, memory_write, memory_get, chatlog_search, chatlog_write, files_search). Valid domains: memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin. |
 | `gdpr_export` | Data Governance | Export all memories for a data subject (GDPR data portability). Returns JSON with all memory items for the given user_id. |
 | `gdpr_forget` | Data Governance | Right to be forgotten — hard-deletes ALL data for a user_id including memories, embeddings, relationships, and history. |
 | `memory_export` | Data Governance | Export memories as portable JSON. Filter by agent, type, or date. |
 | `memory_import` | Data Governance | Import memories from a JSON export. UPSERT semantics — safe to re-run. |
 | `embedder_status` | Infrastructure Operations | Check the status of the local sovereign embedder server (default port 8082, override via M3_EMBED_FALLBACK_URL). |
 | `memory_cost_report` | Infrastructure Operations | Returns current session operation counts and estimated token usage for memory operations. |
-| `curate_chatlog_apply` | Uncategorized | Deterministically apply a chatlog.db curator plan in ONE call. No LLM in the loop. Plan sections: decay (True/dict to run chatlog_decay), dedup (list of {keep_id, drop_ids}), promote (list of {ids, target_type}), prune (list of {conversation_id, reason}). Any section may be omitted. Returns structured per-section results + summary. |
-| `curate_memory_apply` | Uncategorized | Deterministically apply a memory.db curator plan in ONE call. No LLM in the loop — the apply phase is a pure function over the structured plan. Replaces the agent-driven APPLY-mode loop. Plan sections: delete (soft, list of UUIDs), delete_hard (cascade, list of UUIDs), link (list of {from_id, to_id, relationship_type}), update (list of {id, importance, metadata, ...}). Any section may be omitted. Returns structured per-section results + summary. |
-| `entity_mentions` | Uncategorized | List memory_ids that mention a specific entity in a single conversation. Pass either entity_id (preferred — exact match) or canonical_name (case-insensitive, optionally disambiguated by entity_type). Returns {entity_id, canonical_name, entity_type, total, memory_ids: [...]}. Caller fetches text via existing read paths (which carry their own authz). Companion to entity_search and entity_get; lives in the 'entity' domain. |
-| `extract_entities` | Uncategorized | Accepts raw text, extracts entities and relationship predicates based on the configured pluggable entity-extraction backend, and returns them as structured JSON without modifying the database. Use this to preview what entities and relationships would be extracted from raw content. |
-| `files_corpus_create` | Uncategorized | Register a new corpus with optional default overrides. `default=True` marks this corpus as the installation's default (clears the flag on any prior default in the same transaction). |
-| `files_corpus_delete` | Uncategorized | Delete a corpus's settings row. Cascade=True also deletes every file_node in the corpus -- DESTRUCTIVE. Without cascade, refuses when the corpus has file_nodes. |
-| `files_corpus_get` | Uncategorized | Fetch a single corpus's settings + counts. |
-| `files_corpus_list` | Uncategorized | Enumerate corpora with row counts. |
-| `files_corpus_set` | Uncategorized | Update settings for an existing corpus. None args are no-ops. Creates the corpus_settings row if absent. |
-| `files_dedup` | Uncategorized | Scan leaf embeddings for near-duplicates above cosine threshold. Detection only -- pairs land in semantic_dedup_candidates for human review. |
-| `files_dedup_list` | Uncategorized | List near-duplicate candidate pairs with text snippets and paths. |
-| `files_dedup_review` | Uncategorized | Record a review decision on a near-duplicate candidate: 'kept' | 'merged' | 'ignored'. |
-| `files_entity_coalesce` | Uncategorized | Detect provisional-entity coalescing candidates (quarantine noise + flag near-duplicate entities). Detection only -- never merges, never auto-applies; candidates land in entity_coalesce_candidates for review. dry_run=True estimates without writing or embedding. |
-| `files_entity_coalesce_apply` | Uncategorized | Apply the reversible same_as/cluster overlay. Union of explicit candidate_uuids (reviewed 'merge' or 'unapplied' tombstone) and -- if include_auto_merge -- the LATEST run's 'merge' band (or resolution_run). Members are never deleted; reverse with files_entity_coalesce_unapply. WRITES the core graph: a real apply MUST pass confirm=True; dry_run=True previews without writing. |
-| `files_entity_coalesce_list` | Uncategorized | List entity-coalescing candidate pairs (name + score + band). |
-| `files_entity_coalesce_review` | Uncategorized | Record entity-coalescing review decisions in BULK: a list of {uuid, action} where action is 'merge' | 'related' | 'reject' | 'defer'. Records intent only; materialize with files_entity_coalesce_apply. |
-| `files_entity_coalesce_unapply` | Uncategorized | Reverse one coalescence cluster (drop edges, clear flags, strip aliases, tombstone the candidate so auto-merge won't resurrect it). Members are never deleted; re-apply via files_entity_coalesce_apply with candidate_uuids. |
-| `files_extract_pending` | Uncategorized | Drain leaves with extraction_status='pending' through the LLM fact extractor. Used after a queue-mode ingest. Safe to call repeatedly. |
-| `files_get` | Uncategorized | Fetch one record by UUID. Tries file_nodes then leaves. |
-| `files_health` | Uncategorized | DB integrity + FTS5 sync check. Set rebuild=True to fix drift. |
-| `files_index` | Uncategorized | Return file-level summaries for triage (wiki-index primitive). Cheap-first retrieval -- no leaf content. Use BEFORE files_search to decide which files are worth deep-reading. |
-| `files_ingest` | Uncategorized | Walk a directory and ingest supported files into files.db. Idempotent: same content_sha256 -> no-op; changed content -> new file_node version supersedes prior. Use extract_mode to opt into fact extraction; use original_path (or a <path>.m3meta.json sidecar) to point search results at a source-of-truth file when the ingested file is a conversion. |
-| `files_link_rename` | Uncategorized | Re-point an existing file_node at a new path (rename / move). NOT a supersession -- content stays identical. Use this only when staleness review surfaces a rename candidate. |
-| `files_promotable` | Uncategorized | List top promotion candidates by usage-weighted heuristic score. Suggestion-only; use files_promote to actually ascend any. |
-| `files_promote` | Uncategorized | Promote (ascend) a fact / leaf / file_summary from files.db to memory.db. Source stays untouched; copy lands in memory.db with a metadata back-pointer. Idempotent. |
-| `files_promotion_list` | Uncategorized | List existing promotions. source_superseded=True surfaces promotions whose source file has since been superseded -- candidates for review. |
-| `files_search` | Uncategorized | Hybrid FTS5 + vector search over file-ingestion leaves. Default: current versions only. Set include_history=True for time-travel queries. Use `corpora` for fan-out across multiple corpora. |
-| `files_staleness_review` | Uncategorized | Compare filesystem against files.db. Surfaces stale, touched-only, missing, new, failed-extraction, drifted-promotion files, and rename candidates. Report-only. |
-| `files_stats` | Uncategorized | Corpus-level counters: file_nodes, leaves, embed coverage, by-filetype. |
-| `files_watch_once` | Uncategorized | Single-pass staleness check + notification dispatch. Suitable for cron / scheduled runners. Notifications are emitted via the memory.db notifications inbox; cooldown suppresses duplicates within the window. |
-| `m3_call` | Uncategorized | Invoke ANY m3 catalog tool by name without loading its domain — the low-token path to the full tool surface. Single call: pass `tool` (e.g. 'files_stats') and `args` (an object). Batch: pass `batch`, a list of {tool, args} (each isolated — one failure won't abort the rest; capped at 100). Set `dry_run` to validate args + check the destructive gate WITHOUT executing. Returns JSON. Call `m3_index` first if you don't know a tool's args. Destructive tools require MCP_PROXY_ALLOW_DESTRUCTIVE=1. |
-| `m3_help_capabilities` | Uncategorized | Discover m3-memory tool capabilities, parameters, and availability. Allows filtering by a logical domain (memory, chatlog, files, entity, agent, tasks, conversations, admin, diagnostics) or searching by keywords. |
-| `m3_index` | Uncategorized | List m3 catalog tools (optionally one domain) as structured rows: name, domain, one-line summary, destructive flag, and arg specs (name/type/required). Use this to discover the exact args for any tool before calling it via m3_call — cheaper than a failed call. Read-only catalog metadata; never returns tool output. Domains: memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin. |
-| `memory_count_entities` | Uncategorized | Count distinct entities mentioned in a single conversation. Direct-index aggregation — no LLM, no embedding. Use this for 'how many distinct X did I mention' inventory questions where top-k embedding retrieval would miss instances spread thinly across many turns. Returns {count, conversation_id, entity_type, pattern}. |
-| `memory_count_mentions` | Uncategorized | Per-entity mention frequency within a single conversation, sorted DESC by count. Use for 'what are the most-mentioned X' or 'rank entities by frequency.' Returns {total, rows: [{entity_id, canonical_name, entity_type, mention_count}, ...]}. |
-| `memory_doctor` | Uncategorized | Self-service diagnostic for the m3-memory embedding cascade. Probes tier-1 (in-proc GGUF), tier-2 (m3-embed-server :8082), DB integrity, and end-to-end embed roundtrip — all concurrently with bounded 2s per-probe timeouts. Returns a structured dict with status ('healthy' | 'degraded' | 'broken'), per-tier details, issues, and actionable recommendations. Use this when memory_search hangs, embeddings look wrong, or you're standing up a new deployment. |
-| `memory_doctor_fix` | Uncategorized | Run the m3-memory self-repair mode (m3 doctor --fix). Attempts to auto-fix the most common deployment issues in order: (1) apply pending SQLite migrations, (2) rebuild the FTS5 full-text index, (3) embed-backfill items that are missing vector embeddings (capped at 500/run), (4) rebuild the m3_system_cohesion table if absent. Set dry_run=True to see what *would* be done without making any changes. Returns a structured dict with per-action outcomes and a summary status ('ok' | 'partial' | 'nothing_to_do' | 'failed'). |
-| `memory_lifecycle_summary` | Uncategorized | Windowed summary of lifecycle & contradiction activity over the last `window_days` days: counts of create/update/delete/supersede events, corroboration vs contradiction events, and the most-revised / most-contradicted memories. Read-only aggregate over memory_history (mig 009) + memory_corroborations (mig 036). Answers 'what did the memory system do to itself?' and 'we updated this belief N times'. Degrades gracefully on pre-036 DBs (contradiction counts = 0). |
-| `memory_link_bulk` | Uncategorized | Create many memory_relationships rows in one transaction per chunk. Use for curation passes adding many LINK edges (device pairs, supersession chains, etc.). Validates existence of every referenced memory_id; skips duplicates without raising. Returns a structured {created, skipped_missing, skipped_duplicate, total} dict. |
-| `memory_supersede` | Uncategorized | Explicitly supersede an existing memory with a new one. Use this to record an intentional update — 'this fact replaces that specific memory' — when you know the old memory's id. Unlike memory_write's automatic contradiction detection (a cosine + title heuristic that may link the wrong prior memory or none at all), this targets the given old_id deterministically. Non-destructive: the old memory is retained, its validity interval is closed (is_deleted=1, valid_to set), and a 'supersedes' edge is recorded new -> old. The old memory stays retrievable by id and via memory_history, and as_of-filtered search still sees it valid before the supersession point — it is only dropped from default search. Fields you omit (type, title, importance, scope) are inherited from the old memory, so pass only what changed. To hard-delete instead, that is a separate gated tool (memory_delete). old_id MUST be the full UUID — a prefix is rejected (full UUID required for mutation safety; memory_get accepts a prefix, this does not). Note: each supersede creates a NEW successor memory; call it once with the full id, do not chain supersedes. |
-| `memory_update_bulk` | Uncategorized | Apply many metadata-only updates in one transaction per chunk. Designed for curation passes that retroactively set retention, importance, or supersession metadata. Per-id reembed is NOT supported here (use memory_update for reembed, or re_embed_all for the bulk reembed case). Returns structured {succeeded, not_found, no_change, total}. |
-| `tools_list_domains` | Uncategorized | List m3 tool domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin) and their tool counts. Call `tools_load_domain` to expose a domain's full tool surface. |
-| `tools_load_domain` | Uncategorized | Register a tool domain's full surface for the current MCP session. Use when you need tools beyond the essentials (memory_search, memory_write, memory_get, chatlog_search, chatlog_write, files_search). Valid domains: memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin. |
 
 ---
 
 ## Memory Operations
+
+### `curate_memory_apply`
+
+Deterministically apply a memory.db curator plan in ONE call. No LLM in the loop — the apply phase is a pure function over the structured plan. Replaces the agent-driven APPLY-mode loop. Plan sections: delete (soft, list of UUIDs), delete_hard (cascade, list of UUIDs), link (list of {from_id, to_id, relationship_type}), update (list of {id, importance, metadata, ...}). Any section may be omitted. Returns structured per-section results + summary.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `plan` | `object` | Yes | Curator plan; see tool description for schema. | `-` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `memory_count_entities`
+
+Count distinct entities mentioned in a single conversation. Direct-index aggregation — no LLM, no embedding. Use this for 'how many distinct X did I mention' inventory questions where top-k embedding retrieval would miss instances spread thinly across many turns. Returns {count, conversation_id, entity_type, pattern}.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `conversation_id` | `string` | Yes | Required. The conversation to scope the count to. Empty / missing → ValueError (cross-conversation scans are not supported). | `-` |
+| `entity_type` | `string` | No | Optional type filter (e.g. 'product', 'place', 'person'). Empty = all types. | `` |
+| `pattern` | `string` | No | Optional case-insensitive substring filter on canonical_name. Max length 256. | `` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `memory_count_mentions`
+
+Per-entity mention frequency within a single conversation, sorted DESC by count. Use for 'what are the most-mentioned X' or 'rank entities by frequency.' Returns {total, rows: [{entity_id, canonical_name, entity_type, mention_count}, ...]}.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `conversation_id` | `string` | Yes | Required. The conversation to scope the count to. | `-` |
+| `entity_type` | `string` | No | Optional type filter. | `` |
+| `pattern` | `string` | No | Optional case-insensitive substring filter on canonical_name. Max length 256. | `` |
+| `limit` | `integer` | No | Max rows to return. 0 = default (1000). Hard cap = 10000. | `0` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_delete`
 
@@ -192,6 +239,36 @@ Retrieves a full MemoryItem; accepts full UUID or 8-char prefix; ambiguous prefi
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
 | `id` | `string` | Yes | Memory item id — 36-char UUID or 8-char prefix. Ambiguous prefixes return an error listing the matching ids. | `-` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `memory_lifecycle_summary`
+
+Windowed summary of lifecycle & contradiction activity over the last `window_days` days: counts of create/update/delete/supersede events, corroboration vs contradiction events, and the most-revised / most-contradicted memories. Read-only aggregate over memory_history (mig 009) + memory_corroborations (mig 036). Answers 'what did the memory system do to itself?' and 'we updated this belief N times'. Degrades gracefully on pre-036 DBs (contradiction counts = 0).
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `window_days` | `integer` | No | Look-back window in days. | `7` |
+| `top_n` | `integer` | No | Max rows in the most-revised / most-contradicted lists (0 = omit them). | `5` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `memory_link_bulk`
+
+Create many memory_relationships rows in one transaction per chunk. Use for curation passes adding many LINK edges (device pairs, supersession chains, etc.). Validates existence of every referenced memory_id; skips duplicates without raising. Returns a structured {created, skipped_missing, skipped_duplicate, total} dict.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `links` | `array` | Yes | List of link specs. relationship_type per entry overrides the outer default. | `-` |
+| `relationship_type` | `string` | No | Default link type for entries that omit it. | `related` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -366,6 +443,35 @@ Preview which memories would be retrieved for a query, with score breakdowns exp
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
+### `memory_supersede`
+
+Explicitly supersede an existing memory with a new one. Use this to record an intentional update — 'this fact replaces that specific memory' — when you know the old memory's id. Unlike memory_write's automatic contradiction detection (a cosine + title heuristic that may link the wrong prior memory or none at all), this targets the given old_id deterministically. Non-destructive: the old memory is retained, its validity interval is closed (is_deleted=1, valid_to set), and a 'supersedes' edge is recorded new -> old. The old memory stays retrievable by id and via memory_history, and as_of-filtered search still sees it valid before the supersession point — it is only dropped from default search. Fields you omit (type, title, importance, scope) are inherited from the old memory, so pass only what changed. To hard-delete instead, that is a separate gated tool (memory_delete). old_id MUST be the full UUID — a prefix is rejected (full UUID required for mutation safety; memory_get accepts a prefix, this does not). Note: each supersede creates a NEW successor memory; call it once with the full id, do not chain supersedes.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `old_id` | `string` | Yes | FULL UUID of the memory being superseded (not an 8-char prefix — a prefix is rejected for mutation safety). Must exist and not already be deleted/superseded. | `-` |
+| `content` | `string` | Yes | Body of the replacement memory (max 50000 chars). | `-` |
+| `type` | `string` | No | Memory type of the replacement. Omit to inherit the old memory's type. One of: auto, belief, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, home_automation, infrastructure, knowledge, linux_only, local_device, log, macos_only, message, migration-log, network_config, note, observation, plan, preference, procedure, reference, scratchpad, security, snippet, summary, synthesis, task, to_do, user_fact, windows_only. | `` |
+| `title` | `string` | No | Title of the replacement. Omit to inherit the old memory's title. | `` |
+| `metadata` | `string` | No | JSON-encoded metadata object for the replacement. | `{}` |
+| `agent_id` | `string` | No | Owning agent id. Injected by the orchestrator. | `` |
+| `model_id` | `string` | No | Originating model id. | `` |
+| `change_agent` | `string` | No | Agent causing the supersede (audit). | `` |
+| `importance` | `number` | No | 0.0-1.0 relevance of the replacement. Omit (leave at -1) to inherit the old memory's importance. | `-1.0` |
+| `source` | `string` | No | Provenance tag. | `agent` |
+| `embed` | `boolean` | No | Embed the replacement for semantic search. | `True` |
+| `user_id` | `string` | No | Data subject id. | `` |
+| `scope` | `string` | No | Isolation scope of the replacement. Omit to inherit the old memory's scope. | `` |
+| `valid_from` | `string` | No | ISO-8601 validity start of the replacement; also the point at which the old memory's validity is closed. Defaults to now. | `` |
+| `variant` | `string` | No | Pipeline identifier for A/B variant tracking. | `` |
+| `embed_text` | `string` | No | Override text used for embedding; falls back to content when empty. | `` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
 ### `memory_unpin`
 
 Unpin a memory, restoring normal decay/expiry/retention handling.
@@ -399,6 +505,20 @@ Updates a MemoryItem by ID.
 | `refresh_on` | `string` | No | New refresh timestamp. 'clear' removes the reminder; empty = no change. | `` |
 | `refresh_reason` | `string` | No | New refresh reason. 'clear' removes; empty = no change. | `` |
 | `conversation_id` | `string` | No | New conversation id. 'clear' removes; empty = no change. | `` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `memory_update_bulk`
+
+Apply many metadata-only updates in one transaction per chunk. Designed for curation passes that retroactively set retention, importance, or supersession metadata. Per-id reembed is NOT supported here (use memory_update for reembed, or re_embed_all for the bulk reembed case). Returns structured {succeeded, not_found, no_change, total}.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `updates` | `array` | Yes | List of update specs. Each MUST include `id`. Any subset of {content, title, importance, metadata, refresh_on, refresh_reason, conversation_id} may be set. Field semantics match memory_update. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -514,6 +634,24 @@ Load a single entity with its full neighborhood: predecessors, successors, and l
 | --- | --- | --- | --- | --- |
 | `entity_id` | `string` | Yes | The entity ID to fetch. | `-` |
 | `depth` | `integer` | No | Graph depth for neighborhood walk (currently unused; reserved for future multi-hop). | `1` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `entity_mentions`
+
+List memory_ids that mention a specific entity in a single conversation. Pass either entity_id (preferred — exact match) or canonical_name (case-insensitive, optionally disambiguated by entity_type). Returns {entity_id, canonical_name, entity_type, total, memory_ids: [...]}. Caller fetches text via existing read paths (which carry their own authz). Companion to entity_search and entity_get; lives in the 'entity' domain.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `conversation_id` | `string` | Yes | Required. | `-` |
+| `entity_id` | `string` | No | Preferred lookup — the entities.id. If supplied, canonical_name and entity_type are ignored. | `` |
+| `canonical_name` | `string` | No | Alternative lookup. Case-insensitive exact match. One of entity_id OR canonical_name is required. | `` |
+| `entity_type` | `string` | No | Optional disambiguator when canonical_name is ambiguous across types. | `` |
+| `limit` | `integer` | No | Max memory_ids to return. 0 = default (1000). Hard cap = 10000. | `0` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -1189,6 +1327,483 @@ Bulk-append N chat turns. Each item needs the same required fields as chatlog_wr
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
+### `curate_chatlog_apply`
+
+Deterministically apply a chatlog.db curator plan in ONE call. No LLM in the loop. Plan sections: decay (True/dict to run chatlog_decay), dedup (list of {keep_id, drop_ids}), promote (list of {ids, target_type}), prune (list of {conversation_id, reason}). Any section may be omitted. Returns structured per-section results + summary.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `plan` | `object` | Yes | Chatlog curator plan; see tool description for schema. | `-` |
+| `db_path` | `string` | No | Optional chatlog DB path override. | `` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+---
+
+## Files Memory
+
+### `files_corpus_create`
+
+Register a new corpus with optional default overrides. `default=True` marks this corpus as the installation's default (clears the flag on any prior default in the same transaction).
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | `string` | Yes |  | `-` |
+| `description` | `string` | No |  | `null` |
+| `extract_mode` | `string` | No |  | `null` |
+| `scope` | `string` | No |  | `null` |
+| `default` | `boolean` | No |  | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_corpus_delete`
+
+Delete a corpus's settings row. Cascade=True also deletes every file_node in the corpus -- DESTRUCTIVE. Without cascade, refuses when the corpus has file_nodes.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | `string` | Yes |  | `-` |
+| `cascade` | `boolean` | No |  | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_corpus_get`
+
+Fetch a single corpus's settings + counts.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | `string` | Yes |  | `-` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_corpus_list`
+
+Enumerate corpora with row counts.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_corpus_set`
+
+Update settings for an existing corpus. None args are no-ops. Creates the corpus_settings row if absent.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | `string` | Yes |  | `-` |
+| `description` | `string` | No |  | `null` |
+| `extract_mode` | `string` | No |  | `null` |
+| `scope` | `string` | No |  | `null` |
+| `default` | `boolean` | No |  | `null` |
+| `retention_days` | `integer` | No |  | `null` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_dedup`
+
+Scan leaf embeddings for near-duplicates above cosine threshold. Detection only -- pairs land in semantic_dedup_candidates for human review.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `threshold` | `number` | No |  | `0.92` |
+| `max_pairs` | `integer` | No |  | `500` |
+| `leaf_limit` | `integer` | No |  | `10000` |
+| `corpus` | `string` | No |  | `null` |
+| `include_already_detected` | `boolean` | No |  | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_dedup_list`
+
+List near-duplicate candidate pairs with text snippets and paths.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `reviewed` | `boolean` | No |  | `False` |
+| `limit` | `integer` | No |  | `100` |
+| `min_cosine` | `number` | No |  | `null` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_dedup_review`
+
+Record a review decision on a near-duplicate candidate: 'kept' | 'merged' | 'ignored'.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `candidate_uuid` | `string` | Yes |  | `-` |
+| `action` | `string` | Yes |  | `-` |
+| `note` | `string` | No |  | `` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_entity_coalesce`
+
+Detect provisional-entity coalescing candidates (quarantine noise + flag near-duplicate entities). Detection only -- never merges, never auto-applies; candidates land in entity_coalesce_candidates for review. dry_run=True estimates without writing or embedding.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `max_pairs` | `integer` | No |  | `1000` |
+| `dry_run` | `boolean` | No |  | `False` |
+| `corpus` | `string` | No |  | `null` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_entity_coalesce_apply`
+
+Apply the reversible same_as/cluster overlay. Union of explicit candidate_uuids (reviewed 'merge' or 'unapplied' tombstone) and -- if include_auto_merge -- the LATEST run's 'merge' band (or resolution_run). Members are never deleted; reverse with files_entity_coalesce_unapply. WRITES the core graph: a real apply MUST pass confirm=True; dry_run=True previews without writing.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `candidate_uuids` | `array` | No |  | `null` |
+| `include_auto_merge` | `boolean` | No |  | `False` |
+| `resolution_run` | `string` | No |  | `null` |
+| `dry_run` | `boolean` | No |  | `False` |
+| `confirm` | `boolean` | No |  | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_entity_coalesce_list`
+
+List entity-coalescing candidate pairs (name + score + band).
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `reviewed` | `boolean` | No |  | `False` |
+| `limit` | `integer` | No |  | `100` |
+| `min_cosine` | `number` | No |  | `null` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_entity_coalesce_review`
+
+Record entity-coalescing review decisions in BULK: a list of {uuid, action} where action is 'merge' | 'related' | 'reject' | 'defer'. Records intent only; materialize with files_entity_coalesce_apply.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `reviews` | `array` | Yes |  | `-` |
+| `note` | `string` | No |  | `` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_entity_coalesce_unapply`
+
+Reverse one coalescence cluster (drop edges, clear flags, strip aliases, tombstone the candidate so auto-merge won't resurrect it). Members are never deleted; re-apply via files_entity_coalesce_apply with candidate_uuids.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `cluster_id` | `string` | Yes |  | `-` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_extract_pending`
+
+Drain leaves with extraction_status='pending' through the LLM fact extractor. Used after a queue-mode ingest. Safe to call repeatedly.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `limit` | `integer` | No |  | `100` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_get`
+
+Fetch one record by UUID. Tries file_nodes then leaves.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `uuid` | `string` | Yes | UUID of the file_node or leaf. | `-` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_health`
+
+DB integrity + FTS5 sync check. Set rebuild=True to fix drift.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `rebuild` | `boolean` | No |  | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_index`
+
+Return file-level summaries for triage (wiki-index primitive). Cheap-first retrieval -- no leaf content. Use BEFORE files_search to decide which files are worth deep-reading.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `corpus` | `string` | No |  | `null` |
+| `corpora` | `array` | No |  | `null` |
+| `filetype` | `string` | No |  | `null` |
+| `directory` | `string` | No |  | `null` |
+| `filename_glob` | `string` | No |  | `null` |
+| `include_history` | `boolean` | No |  | `False` |
+| `limit` | `integer` | No |  | `500` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_ingest`
+
+Walk a directory and ingest supported files into files.db. Idempotent: same content_sha256 -> no-op; changed content -> new file_node version supersedes prior. Use extract_mode to opt into fact extraction; use original_path (or a <path>.m3meta.json sidecar) to point search results at a source-of-truth file when the ingested file is a conversion.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `path` | `string` | Yes | Directory (or single file) to ingest. | `-` |
+| `include` | `array` | No | Glob patterns; only matching files are ingested. | `null` |
+| `exclude` | `array` | No | Glob patterns; matching files are skipped. | `null` |
+| `max_depth` | `integer` | No | Max recursion depth (0 = root only). | `null` |
+| `corpus` | `string` | No | Corpus tag (default: resolved from M3_FILES_CORPUS or 'default'). | `null` |
+| `dry_run` | `boolean` | No | Walk + count without writing. | `False` |
+| `force_size` | `boolean` | No | Bypass the per-file size cap. | `False` |
+| `record_noops` | `boolean` | No | Write 'unchanged_skipped' rows for audit. | `False` |
+| `extract_mode` | `string` | No | Fact-extraction mode. | `null` |
+| `original_path` | `string` | No | Pointer to source artifact when single-file ingest is a conversion. | `null` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_link_rename`
+
+Re-point an existing file_node at a new path (rename / move). NOT a supersession -- content stays identical. Use this only when staleness review surfaces a rename candidate.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `missing_file_node_uuid` | `string` | Yes |  | `-` |
+| `new_path` | `string` | Yes |  | `-` |
+| `expect_sha256` | `string` | No |  | `null` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_promotable`
+
+List top promotion candidates by usage-weighted heuristic score. Suggestion-only; use files_promote to actually ascend any.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `limit` | `integer` | No |  | `20` |
+| `min_score` | `number` | No |  | `0.3` |
+| `corpus` | `string` | No |  | `null` |
+| `include_already_promoted` | `boolean` | No |  | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_promote`
+
+Promote (ascend) a fact / leaf / file_summary from files.db to memory.db. Source stays untouched; copy lands in memory.db with a metadata back-pointer. Idempotent.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `source_uuid` | `string` | Yes |  | `-` |
+| `reason` | `string` | No |  | `` |
+| `mapped_type` | `string` | No | Override memory.db type (fact\|knowledge\|reference\|...). | `null` |
+| `scope` | `string` | No |  | `null` |
+| `importance` | `number` | No |  | `0.6` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_promotion_list`
+
+List existing promotions. source_superseded=True surfaces promotions whose source file has since been superseded -- candidates for review.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `source_file_node` | `string` | No |  | `null` |
+| `source_superseded` | `boolean` | No |  | `null` |
+| `limit` | `integer` | No |  | `100` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_search`
+
+Hybrid FTS5 + vector search over file-ingestion leaves. Default: current versions only. Set include_history=True for time-travel queries. Use `corpora` for fan-out across multiple corpora.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `query` | `string` | Yes | Free-text query. | `-` |
+| `limit` | `integer` | No | Max hits returned. | `10` |
+| `corpus` | `string` | No | Single-corpus scope filter. | `null` |
+| `corpora` | `array` | No | Fan-out across these corpora; overrides corpus. | `null` |
+| `filetype` | `string` | No | Filter to one filetype ('markdown', 'pdf', ...). | `null` |
+| `include_history` | `boolean` | No | Include superseded leaves and file_nodes. | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_staleness_review`
+
+Compare filesystem against files.db. Surfaces stale, touched-only, missing, new, failed-extraction, drifted-promotion files, and rename candidates. Report-only.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `directory` | `string` | No |  | `null` |
+| `corpus` | `string` | No |  | `null` |
+| `rehash` | `boolean` | No |  | `True` |
+| `limit` | `integer` | No |  | `200` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_stats`
+
+Corpus-level counters: file_nodes, leaves, embed coverage, by-filetype.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `corpus` | `string` | No |  | `null` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `files_watch_once`
+
+Single-pass staleness check + notification dispatch. Suitable for cron / scheduled runners. Notifications are emitted via the memory.db notifications inbox; cooldown suppresses duplicates within the window.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `directory` | `string` | No |  | `null` |
+| `corpus` | `string` | No |  | `null` |
+| `agent_id` | `string` | No |  | `files_memory.watch` |
+| `cooldown_seconds` | `number` | No |  | `3600.0` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+---
+
+## Diagnostics
+
+### `memory_doctor`
+
+Self-service diagnostic for the m3-memory embedding cascade. Probes tier-1 (in-proc GGUF), tier-2 (m3-embed-server :8082), DB integrity, and end-to-end embed roundtrip — all concurrently with bounded 2s per-probe timeouts. Returns a structured dict with status ('healthy' | 'degraded' | 'broken'), per-tier details, issues, and actionable recommendations. Use this when memory_search hangs, embeddings look wrong, or you're standing up a new deployment.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `memory_doctor_fix`
+
+Run the m3-memory self-repair mode (m3 doctor --fix). Attempts to auto-fix the most common deployment issues in order: (1) apply pending SQLite migrations, (2) rebuild the FTS5 full-text index, (3) embed-backfill items that are missing vector embeddings (capped at 500/run), (4) rebuild the m3_system_cohesion table if absent. Set dry_run=True to see what *would* be done without making any changes. Returns a structured dict with per-action outcomes and a summary status ('ok' | 'partial' | 'nothing_to_do' | 'failed').
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `dry_run` | `boolean` | No | If true, report what would be done without writing anything. Default: false. | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
 ---
 
 ## Operational Protocol
@@ -1340,6 +1955,66 @@ Execution flow analysis - reads source, finds callers, identifies failure points
 
 ## Lifecycle & Maintenance
 
+### `extract_entities`
+
+Accepts raw text, extracts entities and relationship predicates based on the configured pluggable entity-extraction backend, and returns them as structured JSON without modifying the database. Use this to preview what entities and relationships would be extracted from raw content.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `text` | `string` | Yes | Raw text content to extract entities and links from. | `-` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `m3_call`
+
+Invoke ANY m3 catalog tool by name without loading its domain — the low-token path to the full tool surface. Single call: pass `tool` (e.g. 'files_stats') and `args` (an object). Batch: pass `batch`, a list of {tool, args} (each isolated — one failure won't abort the rest; capped at 100). Set `dry_run` to validate args + check the destructive gate WITHOUT executing. Returns JSON. Call `m3_index` first if you don't know a tool's args. Destructive tools require MCP_PROXY_ALLOW_DESTRUCTIVE=1.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `tool` | `string` | No | Catalog tool name (see m3_index). | `` |
+| `args` | `object` | No | Arguments object for the target tool. | `{}` |
+| `batch` | `array` | No | List of {tool, args} for one-round-trip batch dispatch. | `null` |
+| `dry_run` | `boolean` | No | Validate + gate-check only; do not execute. | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `m3_help_capabilities`
+
+Discover m3-memory tool capabilities, parameters, and availability. Allows filtering by a logical domain (memory, chatlog, files, entity, agent, tasks, conversations, admin, diagnostics) or searching by keywords.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `domain` | `string` | No | Optional domain to filter capabilities (e.g., 'memory', 'files'). | `-` |
+| `query` | `string` | No | Optional keyword search term to filter tools. | `-` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `m3_index`
+
+List m3 catalog tools (optionally one domain) as structured rows: name, domain, one-line summary, destructive flag, and arg specs (name/type/required). Use this to discover the exact args for any tool before calling it via m3_call — cheaper than a failed call. Read-only catalog metadata; never returns tool output. Domains: memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `domain` | `string` | No | Filter to one domain (empty = whole catalog). | `` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
 ### `memory_consolidate`
 
 Consolidate old memories of the same type into summaries using the local LLM. Reduces clutter while preserving knowledge.
@@ -1402,6 +2077,33 @@ Set or update per-agent memory retention policy. Controls max memory count, TTL 
 | `max_memories` | `integer` | No | Max items to retain. | `1000` |
 | `ttl_days` | `integer` | No | Time-to-live in days (0 = no limit). | `0` |
 | `auto_archive` | `integer` | No | Auto-archive threshold. | `1` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `tools_list_domains`
+
+List m3 tool domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin) and their tool counts. Call `tools_load_domain` to expose a domain's full tool surface.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `tools_load_domain`
+
+Register a tool domain's full surface for the current MCP session. Use when you need tools beyond the essentials (memory_search, memory_write, memory_get, chatlog_search, chatlog_write, files_search). Valid domains: memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `domain` | `string` | Yes | Domain to expose. See `tools_list_domains`. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 

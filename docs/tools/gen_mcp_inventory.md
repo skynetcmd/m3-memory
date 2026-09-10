@@ -1,8 +1,8 @@
 ---
 tool: bin/gen_mcp_inventory.py
-sha1: 857445f3c1b1
-mtime_utc: 2026-09-10T03:35:01.506792+00:00
-generated_utc: 2026-09-10T03:35:25.735930+00:00
+sha1: 76c8772a2753
+mtime_utc: 2026-09-10T19:11:17.574528+00:00
+generated_utc: 2026-09-10T19:11:22.566019+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and m
 
 ## Entry points
 
-- `def main()` (line 240)
+- `def main()` (line 275)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -36,6 +36,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `mcp_tool_catalog`
+- `tool_domains`
 
 ---
 

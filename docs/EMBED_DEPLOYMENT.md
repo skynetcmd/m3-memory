@@ -28,13 +28,30 @@ see `docs/EMBED_INPUT_RECIPE.md`.
 
 ## The dual-path architecture
 
+> ⚠ **This diagram used to be inverted**, labelling in-process as `PRIMARY` and
+> the shared server as a `FALLBACK`. That is backwards: `bin/memory/embed.py`
+> routes to the **shared server by default** and treats in-process as opt-in.
+> The safe-by-default gate was added deliberately, to stop a misresolved config
+> root from spinning up a per-process GPU context.
+
 ```
    +------------------------------------------------+
    |  m3-memory (Python)  bin/memory_core.py        |
    |     _embed() / _embed_many()                   |
    +------------------------------------------------+
               |
-              | 1. PRIMARY: in-process via pyo3
+              | 1. DEFAULT: shared server over loopback HTTP
+              |    (one model in RAM for every m3 process)
+              v
+   +------------------------------------------------+
+   |  m3-embed-server (127.0.0.1:8082)              |
+   |  from the m3-core-rs wheel; always-on          |
+   |  scheduled task / service                      |
+   +------------------------------------------------+
+              |
+              | 2. OPT-IN INSTEAD: in-process via pyo3, when
+              |    M3_EMBED_INPROC=1 or .embed_config.json
+              |    permits it (see the gate below)
               v
    +------------------------------------------------+
    |  m3_core_rs.EmbeddedEmbedder                   |
@@ -44,28 +61,28 @@ see `docs/EMBED_INPUT_RECIPE.md`.
    |  cpu-inprocess                                 |
    +------------------------------------------------+
               |
-              | 2. FALLBACK on construction or call failure
+              | 3. EXTERNAL PROVIDER: M3_EMBED_URL /
+              |    M3_EMBED_FALLBACK_URL, when set
               v
    +------------------------------------------------+
-   |  m3-embed-server (CPU HTTP, port 8082)         |
-   |  Windows Service; always-on CPU embedder       |
-   |  backend label: cpu-http-fallback              |
-   +------------------------------------------------+
-              |
-              | 3. LEGACY when both above unavailable
-              v
-   +------------------------------------------------+
-   |  M3_EMBED_URL (LM Studio, llama-server bench)  |
-   |  backend label: http-primary                   |
+   |  Any OpenAI-compatible /v1/embeddings endpoint  |
+   |  (Ollama, LM Studio, vLLM, another host's m3)  |
    +------------------------------------------------+
 ```
 
 Decision points (implemented in `bin/memory_core.py` around line 2018):
 
-- **In-process** is attempted whenever `M3_EMBED_GGUF` is set AND the
-  `m3_core_rs` wheel was built with one of the `embedded[-cuda|-vulkan|-metal]`
-  features. The dimension is validated against `EMBED_DIM` at construction
-  time; a mismatch demotes the backend to HTTP before any real call runs.
+- **In-process** requires BOTH a usable GGUF (`M3_EMBED_GGUF`, or an
+  autodetected bge-m3) with an `embedded[-cuda|-vulkan|-metal]` wheel, **AND**
+  explicit permission: either `M3_EMBED_INPROC=1`, or an `.embed_config.json`
+  at the config root that does not set `disable_inproc_embedder`. A GGUF path
+  alone is **not** sufficient — with no config file present and
+  `M3_EMBED_INPROC` unset, m3 logs a warning and routes to the shared server.
+  That gate is deliberate (`bin/memory/embed.py:322-345`): a missing config
+  means "defer to shared", never "load my own embedder", because the old
+  behaviour let a misresolved config root spin up an unbounded per-process CUDA
+  context. The dimension is validated against `EMBED_DIM` at construction time;
+  a mismatch demotes the backend to HTTP before any real call runs.
 - **CPU HTTP fallback** kicks in when the in-process embedder cannot be
   constructed (GGUF missing, CUDA OOM during init, wheel built without an
   `embedded` feature) or raises mid-call. The fallback target is
@@ -436,10 +453,29 @@ env var > config file > default, so a one-off `M3_EMBED_GGUF` still overrides.
 
 ### Revert
 
+⚠ **Removing the config does NOT switch processes to in-process embedding.** With
+no `.embed_config.json` present, `bin/memory/embed.py` falls back to
+`M3_EMBED_INPROC`, which defaults to `0` — so every process routes to the shared
+server instead. Running `m3 embedder unshared` and then stopping the shared
+server leaves you with **no embedder at all**: writes still succeed, but
+embedding is deferred and new rows are FTS-only until an embedder returns.
+(Verified 2026-09-10; the CLI's own success message claimed the opposite and has
+been corrected.)
+
+To actually run per-process in-process embedders:
+
 ```bash
 m3 embedder unshared               # removes .embed_config.json
-# then restart the MCP server + loop → each loads its own in-process embedder
+# Then set M3_EMBED_INPROC=1 in the environment of EACH m3 process. A headless
+# daemon does not inherit your shell, so this means the MCP server registration
+# and each hook command -- the same split-brain rule as the engine/config roots:
+#   claude mcp add ... --env M3_EMBED_INPROC=1
+# Keep the shared server running until every process is switched over.
+m3 embedder status                 # confirm which backend each process reports
 ```
+
+To simply go back to the default (shared) topology, run `m3 embedder shared` —
+that writes the config and prints the three steps to bring the server up.
 
 ## Draining an embed backlog
 
@@ -495,8 +531,10 @@ docstring in `bin/embed_server_inproc.py`.
 `bin/memory_core.py`'s `_embed()` (single) and `_embed_many()` (batch)
 implement the dual-path chain:
 
-1. **In-process via `m3_core_rs.EmbeddedEmbedder`.** Triggered when
-   `M3_EMBED_GGUF` is set AND the wheel was built with `embedded[-cuda|...]`.
+1. **In-process via `m3_core_rs.EmbeddedEmbedder`.** Requires a GGUF AND the
+   wheel built with `embedded[-cuda|...]` AND explicit permission
+   (`M3_EMBED_INPROC=1`, or an `.embed_config.json` that does not disable it) —
+   a GGUF path alone routes to the shared server instead.
    Backend labels recorded: `cuda-inprocess` / `vulkan-inprocess` /
    `metal-inprocess` / `cpu-inprocess`.
 

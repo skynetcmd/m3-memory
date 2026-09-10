@@ -70,8 +70,8 @@ Default endpoint: `http://localhost:1234/v1`. Override with `LLM_ENDPOINTS_CSV` 
 
 | Table | Purpose |
 |-------|---------|
-| `sync_conflicts` | Conflict log for bi-directional sync resolution |
 | `sync_state` / `sync_watermarks` | Watermark tracking for delta sync |
+| `sync_locks` | Single-writer sync lock, value `<ts>\|<pid>@<host>` so a foreign host's PID is never judged stale |
 | `agent_retention_policies` | Per-agent: `max_memories`, `ttl_days`, `auto_archive` |
 | `gdpr_requests` | GDPR request audit: `subject_id`, `request_type`, `status`, `items_affected` |
 | `synchronized_secrets` | Encrypted credential vault: `service_name`, `encrypted_value`, `version`, `origin_device` |
@@ -125,7 +125,7 @@ Migrations v013+ ship both `.up.sql` and `.down.sql` files.
 
 **Version tracking.** The `schema_versions` table records `(version, filename, applied_at)` for every applied migration. Current version = `MAX(version)`. The runner applies each SQL script inside a transaction, then inserts the version row in the same transaction — a failure rolls back both. A legacy idempotency fallback is preserved: if an `up` fails with a `duplicate column name` / `already exists` error, the migration is marked applied anyway (so existing DBs that predate the migration runner catch up cleanly).
 
-**File-level backups.** Before every `up` or `down`, the runner copies `memory/agent_memory.db` (plus any `-wal` / `-shm` sidecars) to a timestamped file like `agent_memory.v014.pre-up.20260412T145131Z.db`. The destination directory is chosen once via an interactive prompt on first run (default: `~/.m3-memory/backups/`, recommended out-of-repo even though `*.db` is gitignored) and persisted to `memory/.migrate_config.json`. In-DB transactions provide instant rollback on a failure mid-migration; the filesystem backup is the escape hatch for "I applied the wrong migration and want to undo it after the fact."
+**File-level backups.** Before every `up` or `down`, the runner copies `memory/agent_memory.db` (plus any `-wal` / `-shm` sidecars) to a timestamped file like `agent_memory.v014.pre-up.20260412T145131Z.db`. The destination directory is chosen once via an interactive prompt on first run (default: `$M3_ENGINE_ROOT/backups`, i.e. `~/.m3/engine/backups`) and persisted to `memory/.migrate_config.json`. In-DB transactions provide instant rollback on a failure mid-migration; the filesystem backup is the escape hatch for "I applied the wrong migration and want to undo it after the fact."
 
 **User confirmation.** Interactive runs print the list of pending migrations (noting which have down files), ask for the backup directory, then require a final `y/N` before writing. The `-y` / `--yes` flag skips both prompts for CI and scripted use. `up` with no arguments also requires confirmation — the old zero-argument invocation still works, just interactively.
 
@@ -163,7 +163,7 @@ Migrations v013+ ship both `.up.sql` and `.down.sql` files.
 
 ### Embedding System
 
-- **Model:** BGE-M3 by default (`text-embedding-bge-m3`), served in-process from the bundled GGUF — no external embedding service required. Configurable via `EMBED_MODEL`. **Never mix vectors from different models or quants in one database:** Qwen3-Embedding in particular occupies a different vector space and is bench-only. See [Embed Input Recipe](EMBED_INPUT_RECIPE.md) for the model/tag matrix.
+- **Model:** BGE-M3 by default (`text-embedding-bge-m3`), served by the shared local embed server on `127.0.0.1:8082` from the bundled GGUF — no external embedding service required, and one model in RAM for every m3 process. In-process embedding is opt-in (`M3_EMBED_INPROC=1`). Configurable via `EMBED_MODEL`. **Never mix vectors from different models or quants in one database:** Qwen3-Embedding in particular occupies a different vector space and is bench-only. See [Embed Input Recipe](EMBED_INPUT_RECIPE.md) for the model/tag matrix.
 - **Dimension:** All models across all devices must produce the same dimension (default 1024, configurable via `EMBED_DIM`). Mismatched dimensions break cosine similarity.
 - **Auto-detection:** `embedding_utils.py` + `llm_failover.get_best_embed()` probe the local LLM server's `/v1/models` endpoint for loaded models, preferring names containing `embed`, `nomic`, or `jina`
 - **Dimension validation:** First embedding call validates actual vs expected dimensions; logs warning on mismatch
@@ -317,7 +317,7 @@ Early design considered soft-deleting old memories on refresh and inserting new 
 
 ### Delta Sync Protocol
 
-1. **Acquire lock** — global sync lock via `sync_state` table (stale after 1 hour)
+1. **Acquire lock** — global sync lock via the `sync_locks` table (stale after 1 hour). On a shared PostgreSQL store the lock value carries `@host`, so a live PID belonging to another machine is treated as unevaluable rather than dead.
 2. **Push local → remote** — SELECT changed rows since last `pg_push` watermark, UPSERT into PG
 3. **Ensure tier tables** — auto-create `agent_retention_policies` and `gdpr_requests` in PG if missing
 4. **Push relationships** — delta sync `memory_relationships` via `rel_push` watermark
@@ -343,8 +343,8 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 | `DEDUP_LIMIT` | 1000 | Max items scanned during deduplication |
 | `DEDUP_THRESHOLD` | 0.92 | Cosine threshold for duplicate detection |
 | `CONTRADICTION_THRESHOLD` | 0.92 | Cosine floor for contradiction detection. Deliberately high — only near-restatements supersede; related-but-different facts are both kept |
-| `SEARCH_ROW_CAP` | 500 | Max rows for cosine computation per search |
-| `EMBED_MODEL` | text-embedding-bge-m3 | Embedding model name. Default is served in-process from the bundled GGUF; only needs to be loaded in a local LLM server when routing out via `EMBED_BASE_URL` |
+| `SEARCH_ROW_CAP` | 5000 | Max rows for cosine computation per search |
+| `EMBED_MODEL` | text-embedding-bge-m3 | Embedding model name. Served by default from the bundled GGUF via the shared local embed server; only needs to be loaded in a separate LLM server when routing out via `M3_EMBED_URL` |
 | `EMBED_DIM` | 1024 | Expected embedding dimensions |
 | `DB_POOL_SIZE` | 5 | SQLite connection pool size |
 | `DB_POOL_TIMEOUT` | 30 | Pool acquisition timeout (seconds) |
@@ -380,7 +380,7 @@ Always-on: when `metadata.temporal_anchors` is supplied, resolved ISO dates are 
 
 ### Test Suite (`tests/`)
 
-2,501 tests (192 files) across all feature categories — memory CRUD, search, contradictions, GDPR, sync, maintenance, orchestration, refresh lifecycle, multi-agent handoffs, tasks, and notifications. The suite runs with `filterwarnings=error`, so a new warning fails the build. Representative categories:
+4,048 collected tests from 2,785 test functions across 306 files (parametrised cases expand the total) across all feature categories — memory CRUD, search, contradictions, GDPR, sync, maintenance, orchestration, refresh lifecycle, multi-agent handoffs, tasks, and notifications. The suite runs with `filterwarnings=error`, so a new warning fails the build. Representative categories:
 
 | Category | Tests | What's Verified |
 |----------|-------|----------------|
@@ -422,7 +422,6 @@ Seeds 20 diverse test memories, runs 10 labeled queries, cleans up after. Gracef
 | `bin/generate_configs.py` | Auto-sync MCP bridge paths in `claude-settings.json` and `gemini-settings.json` |
 | `bin/install_schedules.py` | Platform-agnostic scheduler: cron (macOS/Linux), Task Scheduler (Windows) |
 | `bin/pg_sync.py` | Bi-directional PostgreSQL delta sync |
-| `bin/mcp_check.sh` | MCP bridge connectivity health check |
 | `bin/benchmark_memory.py` | Retrieval quality benchmarks |
 | `bin/test_memory_bridge.py` | 41 end-to-end tests |
 

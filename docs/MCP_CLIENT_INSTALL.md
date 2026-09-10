@@ -220,8 +220,8 @@ aider --openai-api-base http://localhost:9000/v1 \
 ```
 
 Tool catalog parity with native MCP clients (CHANGELOG_2026 records
-the early-version 15/44 gap; current builds expose the full 55+
-catalog via the proxy).
+the early-version 15/44 gap; current builds expose the full
+catalog via the proxy — see [MCP_TOOLS.md](MCP_TOOLS.md) for the live count).
 
 ---
 

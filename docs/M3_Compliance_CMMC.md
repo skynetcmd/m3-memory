@@ -18,7 +18,9 @@ CMMC 2.0 Level 2 maps directly to NIST SP 800-171. The assessment table below sh
 
 M3's local-first architecture removes the cloud-shared-responsibility model that drives most CMMC assessment cost and complexity. Practical implications:
 
-- **Reduced attack surface.** No network listeners by default, no telemetry, no third-party dependencies in the data path.
+- **Reduced attack surface.** Loopback-only listeners by default (never LAN or
+  external), no telemetry, and no external *services* in the data path — memory,
+  search and embedding all execute locally.
 - **Smaller assessment boundary.** CUI processed by M3 stays on user-controlled hardware — no shared cloud tenancy to evaluate.
 - **Audit-ready by design.** Bitemporal logging captures who-wrote-what-when natively; no separate audit pipeline required.
 
@@ -35,7 +37,7 @@ M3 does not eliminate the contractor's compliance work — physical security, pe
 
 | CMMC / NIST 800-171 Area | Key Requirements | How M3 Memory Supports It | Assessment |
 |---|---|---|---|
-| **Access Control** | Limit access to authorized users; enforce least privilege | Inherits host OS authentication and filesystem ACLs. No remote network listener by default — no remote access surface to harden. | **Superior** |
+| **Access Control** | Limit access to authorized users; enforce least privilege | Inherits host OS authentication and filesystem ACLs. No REMOTE network listener by default — local listeners bind `127.0.0.1` only, so there is no remote access surface to harden. | **Superior** |
 | **Audit & Accountability** | Generate, protect, and review audit records | Bitemporal logging captures every write with valid-time and transaction-time. Native undo + supersedes relationships preserve full historical context. Optional Merkle-style integrity available. | **Superior** |
 | **Configuration Management** | Establish and maintain baseline configurations; manage change | Minimal, auditable codebase — Native Python + SQLite. No containers, no external services to baseline. Configuration is a single YAML file per profile. | **Strong** |
 | **Identification & Authentication** | Identify and authenticate users and processes | Delegates to host OS authentication and local permissions. Pairs cleanly with smart card / PIV / Yubikey-backed OS login. | **Meets / Equivalent** |
