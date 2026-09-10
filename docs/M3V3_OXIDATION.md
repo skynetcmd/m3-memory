@@ -215,7 +215,7 @@ the existing `memory_write_bulk_impl` / `memory_write_batch_impl` batch their
 commits (~50× faster than per-row under contention in the benchmark). So the
 genuinely useful path for bulk ingest is **the bulk-write APIs**, not a queue.
 Full benchmark table and analysis:
-[`../v3/m3_v3_phase_c_rust_oxidation_plan.md`](../v3/m3_v3_phase_c_rust_oxidation_plan.md).
+the Phase-C oxidation plan (internal planning document, not published in this repo). The numbers quoted above are the reproducible ones; the plan adds the decision history behind them.
 
 ---
 

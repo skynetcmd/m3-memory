@@ -169,7 +169,7 @@ contention, and that m3's existing `busy_timeout=30000` already removes the
 The in-process `WriteQueueDaemon` prototype could not reach this multi-process
 case and only added latency to the already-fast intra-process case, so it was
 reverted in favor of the existing bulk-write APIs + `busy_timeout`. Full analysis:
-[`../v3/m3_v3_phase_c_rust_oxidation_plan.md`](../v3/m3_v3_phase_c_rust_oxidation_plan.md).
+the Phase-C oxidation plan (internal planning document, not published in this repo). The numbers quoted above are the reproducible ones; the plan adds the decision history behind them.
 
 ## Wheel-staleness note (resolved 2026-06-22)
 

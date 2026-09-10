@@ -5,8 +5,10 @@ machine and a central PostgreSQL warehouse. This lets you switch machines
 (desktop ↔ laptop, work ↔ home) without losing context.
 
 This page covers the **default sync** — a SQLite local store (`agent_memory.db`)
-to a PostgreSQL warehouse. If you also run benchmarks (most users don't), see
-[BENCH_SYNC.md](BENCH_SYNC.md).
+to a PostgreSQL warehouse. Bench result databases are **not** synced and are not
+auto-detected; if you run benchmarks (most users don't) and want their DBs
+included, add them to `M3_SYNC_DBS` and supply your own warehouse schema — see
+[What does NOT sync by default](#what-does-not-sync-by-default) below.
 
 > **If your local store is PostgreSQL**, this page's row-by-row bridge does not
 > apply to you — it opens the local side as SQLite. Use

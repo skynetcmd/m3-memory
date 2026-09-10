@@ -162,6 +162,6 @@ was built without the `embedded` feature — rebuild with the feature enabled
 
 ## See also
 
-- [`docs/EMBEDDER_ARCHITECTURE.md`](EMBEDDER_ARCHITECTURE.md) — the full embed cascade and tiers.
+- [`docs/EMBED_DEPLOYMENT.md`](EMBED_DEPLOYMENT.md) — the full embed cascade, the shared-server default, and the per-process opt-in.
 - [`docs/MCP_CLIENT_INSTALL.md`](MCP_CLIENT_INSTALL.md) — configuring the tier-1 GGUF.
 - [`docs/DESIGN_PHILOSOPHIES.md`](DESIGN_PHILOSOPHIES.md) — why the cascade is structured this way.

@@ -3973,7 +3973,7 @@ are part of this release; their detail is preserved below.
   028–030); `--resume` / `--budget-usd` / `--sample` knobs;
   size-bounded resume via `--min-size-k` / `--max-size-k`;
   `--source-conv-list` for opt-in conversation slicing.
-  See [`docs/M3_ENRICH_GUIDE.md`](M3_ENRICH_GUIDE.md).
+  See [`docs/M3_ENRICH_GUIDE.md`](docs/M3_ENRICH_GUIDE.md).
 - **Cloud SLM profiles** — `enrich_anthropic_haiku.yaml`,
   `enrich_google_gemini.yaml` (Gemini 2.5 Flash with
   `reasoning_effort=none` for ~3× latency reduction) plus preview
@@ -3995,25 +3995,25 @@ are part of this release; their detail is preserved below.
   `bin/pg_sync.py` refactored for multi-DB. Postgres warehouse
   migrations included for fleet deployments.
 - **Documentation pass:**
-  - [`docs/COMPARISON.md`](COMPARISON.md) — new "Where the cognition
+  - [`docs/COMPARISON.md`](docs/COMPARISON.md) — new "Where the cognition
     lives" framing section; honest table additions for
     multi-agent concurrent writes and cognition placement.
-  - [`docs/M3_Comparison_Table.md`](M3_Comparison_Table.md) —
+  - [`docs/M3_Comparison_Table.md`](docs/M3_Comparison_Table.md) —
     rebranded sovereign-substrates comparison table; honest
     reordering, accurate MCP expansion, candor block on the LME-S
     accuracy gap.
-  - [`docs/COMPLIANCE.md`](COMPLIANCE.md) +
-    [`docs/M3_Compliance_FISMA.md`](M3_Compliance_FISMA.md) +
-    [`docs/M3_Compliance_CMMC.md`](M3_Compliance_CMMC.md) —
+  - [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) +
+    [`docs/M3_Compliance_FISMA.md`](docs/M3_Compliance_FISMA.md) +
+    [`docs/M3_Compliance_CMMC.md`](docs/M3_Compliance_CMMC.md) —
     framework alignment notes (FISMA / NIST 800-53, CMMC 2.0 /
     NIST 800-171).
-  - [`docs/HOMELAB_PATTERNS.md`](HOMELAB_PATTERNS.md) — three
+  - [`docs/HOMELAB_PATTERNS.md`](docs/HOMELAB_PATTERNS.md) — three
     deployment patterns + hardware sizing + multi-agent guidance.
-  - [`docs/MYTHS_AND_FACTS.md`](MYTHS_AND_FACTS.md) — Anti-FAQ that
+  - [`docs/MYTHS_AND_FACTS.md`](docs/MYTHS_AND_FACTS.md) — Anti-FAQ that
     answers AI-hallucinated claims about M3 with the truth, anchored
     to source code.
   - [`docs/audits/`](audits/) — dated security-scan reports;
-    [`security-scan-2026-05-01.md`](audits/security-scan-2026-05-01.md)
+    [`security-scan-2026-05-01.md`](docs/audits/security-scan-2026-05-01.md)
     is the first.
 
 ### Changed
@@ -4066,7 +4066,7 @@ are part of this release; their detail is preserved below.
   secrets in tree; 14 CVEs flagged by pip-audit, all in
   bench/dev-only transitive deps (none in shipped library
   dependencies). Full report:
-  [`docs/audits/security-scan-2026-05-01.md`](audits/security-scan-2026-05-01.md).
+  [`docs/audits/security-scan-2026-05-01.md`](docs/audits/security-scan-2026-05-01.md).
 
 ### Honest acknowledgment
 
@@ -4077,7 +4077,7 @@ covered by the test suite. The newer enrichment + reflector pipeline
 is production-ready for personal, homelab, and multi-agent developer
 workflows; for regulated workloads, do your own evaluation against
 your specific use case. See
-[`docs/MYTHS_AND_FACTS.md`](MYTHS_AND_FACTS.md) for what we *don't*
+[`docs/MYTHS_AND_FACTS.md`](docs/MYTHS_AND_FACTS.md) for what we *don't*
 claim.
 
 ---
@@ -4462,7 +4462,7 @@ The other 51 MCP tools remain callable directly via tool calls.
 - All new kwargs default to pre-release behavior. `memory_write`, `memory_search`, and every MCP tool schema are byte-identical to `2026.4.22.x`. The dual-embed and Anthropic-backend paths are opt-in; callers who don't touch them see no change.
 
 ### Added
-- **Dual-embedding ingest + max-kind retrieval fusion.** See the [DUAL_EMBED.md](DUAL_EMBED.md) walkthrough for a worked example. Migration **v022** adds a `vector_kind` column to `memory_embeddings` so a single `memory_id` can carry multiple embedding vectors distinguished by kind (`NOT NULL DEFAULT 'default'` — existing rows migrate in place).
+- **Dual-embedding ingest + max-kind retrieval fusion.** See the [DUAL_EMBED.md](docs/DUAL_EMBED.md) walkthrough for a worked example. Migration **v022** adds a `vector_kind` column to `memory_embeddings` so a single `memory_id` can carry multiple embedding vectors distinguished by kind (`NOT NULL DEFAULT 'default'` — existing rows migrate in place).
   - `memory_write_bulk_impl` gains `dual_embed: bool = False`. When `True` **and** an `embed_key_enricher` transforms `embed_text`, Phase 2 emits two rows per item: `vector_kind='default'` from the raw pre-enrichment text and `vector_kind='enriched'` from the SLM output. Pass-through enrichment and `dual_embed=False` emit a single `'default'` row — existing callers unaffected.
   - `memory_search_scored_impl` gains `vector_kind_strategy: "default" | "max"`. `"default"` (the new default) pins the SQL join to `vector_kind='default'`, a strict superset of pre-v022 behavior. `"max"` lets all kinds through and dedupes by `memory_id` keeping the row with the highest query-vector cosine. `bm25` is per-item, so the drop only discards vector-similarity signal — no FTS information is lost.
   - Tests: `tests/test_embed_key_enricher.py` (dual-embed cases), `tests/test_vector_kind_strategy.py`.

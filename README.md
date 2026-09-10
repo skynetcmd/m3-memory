@@ -362,6 +362,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 | 📁 [Files Memory](docs/FILES_MEMORY.md) | 💬 [Chat Log Subsystem](docs/CHATLOG.md) | ✨ [Enrichment Guide](docs/M3_ENRICH_GUIDE.md) |
 | ⬆️ [Upgrade Guide](docs/HOW-TO-UPGRADE.md) | 🩺 [Health FAQ](docs/M3_HEALTH_FAQ.md) | 🧬 [Dual Embedding](docs/DUAL_EMBED.md) |
 | 📜 [Changelog](CHANGELOG.md) | 🤝 [Code of Conduct](docs/CODE_OF_CONDUCT.md) | 🏗️ [Build Wheels](docs/BUILD_WHEELS.md) |
+| 📊 [Web Dashboard](docs/DASHBOARD.md) | 🧰 [Underlying Tools](docs/UNDERLYING_TOOLS.md) | 🐘 [PostgreSQL Sync](docs/SYNC_PG_TO_PG.md) |
 
 ---
 

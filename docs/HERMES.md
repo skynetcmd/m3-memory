@@ -84,4 +84,4 @@ From the TUI monitor, you can:
 For more details on M3's capabilities, check out our primary documentation:
 * [Main Documentation Gateway](../README.md)
 * [MCP Tools Catalog](MCP_TOOLS.md)
-* [Curation Guide](curate-memory.md)
+* [Curation Guide](../agents/curate-memory.md)

@@ -318,7 +318,10 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 
 For **power users and benchmark operators**: `memory_search_routed` supports automatic parameter selection via `auto_route=True`. When enabled, the system examines query text and score curves to choose optimal retrieval parameters—higher `k` for multi-session queries, temporal-aware settings for "when" questions, and sharp filtering for high-confidence matches.
 
-See [RETRIEVAL_ROUTING.md](./RETRIEVAL_ROUTING.md) for full detail: signal-fusion logic, branch definitions, override precedence, tuning parameters, and when to use fixed knobs instead. The 14 `auto_*` parameters are all optional and overridable; default behavior is unchanged when `auto_route=False` (the standard).
+The 14 `auto_*` parameters are all optional and overridable, and every one is
+listed with its type and default in
+[MCP_TOOLS.md](MCP_TOOLS.md) under `memory_search_routed`. Default behavior is
+unchanged when `auto_route=False` (the standard).
 
 Recommended as a safer alternative to manual `adaptive_k` tuning.
 
