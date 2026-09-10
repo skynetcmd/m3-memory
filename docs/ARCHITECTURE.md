@@ -56,16 +56,36 @@ See [MEMORY_CORE_MODULARIZATION.md](MEMORY_CORE_MODULARIZATION.md) for the per-c
 Two layers, only the first is required.
 
 ```mermaid
-graph TD
-    subgraph "L1: Local Store (required)"
-        SQ[(SQLite)]
-    end
-    subgraph "L2: Sync Warehouse (optional)"
-        PG[(PostgreSQL)]
+%%{init: {'theme':'base','themeVariables':{
+  'primaryColor':'#eef2ff','primaryTextColor':'#1e1b4b','primaryBorderColor':'#6366f1',
+  'lineColor':'#64748b','fontSize':'14px','fontFamily':'ui-sans-serif,system-ui,sans-serif'}}}%%
+flowchart LR
+    subgraph L1 ["L1 · Local primary — required"]
+        direction TB
+        SQ[("<b>SQLite</b><br/><i>default</i>")]
+        PGL[("<b>PostgreSQL</b><br/><i>M3_DB_BACKEND=postgres</i>")]
     end
 
-    SQ <-->|Bi-directional Delta Sync| PG
+    subgraph L2 ["L2 · Warehouse — optional"]
+        PG[("<b>PostgreSQL</b><br/><i>shared across machines</i>")]
+    end
+
+    SQ <-->|"row-level delta<br/>(generic bridge)"| PG
+    PGL <-->|"set-based upserts<br/>(postgres_fdw fast path)"| PG
+
+    classDef local fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b
+    classDef wh fill:#ecfdf5,stroke:#10b981,stroke-width:1.5px,color:#064e3b
+    class SQ,PGL local
+    class PG wh
+    style L1 fill:#f8fafc,stroke:#cbd5e1,stroke-dasharray:4 3,color:#475569
+    style L2 fill:#f8fafc,stroke:#cbd5e1,stroke-dasharray:4 3,color:#475569
 ```
+
+Either backend can be the local primary, and both sync to a PostgreSQL
+warehouse — but by different routes. A **SQLite** primary uses the generic
+row-level bridge; a **PostgreSQL** primary uses the `postgres_fdw` fast path,
+which is not optional there but the *only* supported path (see
+[SYNC_PG_TO_PG.md](SYNC_PG_TO_PG.md)).
 
 **L1 — Primary store** *(pluggable)*. SQLite by default: all reads and writes hit local SQLite first, WAL mode enables concurrent access, no external dependencies — the recommended default for single-user/local. The primary backend can instead be **PostgreSQL** via `M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL` (opt-in, chosen at install or with `mcp-memory install-m3 --db-backend postgres`), for a shared/server-hosted live store. Note: on the PostgreSQL primary, vector search is currently brute-force Rust cosine; pgvector/HNSW ANN is a future accelerator, not yet implemented.
 
@@ -100,23 +120,113 @@ PydanticAI (deps-injected tools + a recall history-processor, plus a formal
 
 ## 🔍 Search Pipeline
 
-Three-stage hybrid retrieval. Scored and explainable.
+Hybrid retrieval: lexical and semantic scored in parallel, fused, then re-ranked.
+Every stage is scored and explainable (`explain=True` returns the per-stage
+contribution).
+
+### The common path
 
 ```mermaid
-graph TD
-    Q[Query] --> EMB[Generate Embedding]
-    Q --> FTS[FTS5 Keyword Match]
-    FTS --> BM25[BM25 Score]
-    EMB --> VEC[Vector Cosine Similarity]
-    BM25 --> COMB["Combined: 0.7 × vector + 0.3 × BM25"]
-    VEC --> COMB
-    COMB --> MMR[MMR Diversity Re-ranking]
-    MMR --> R[Final Results]
+%%{init: {'theme':'base','themeVariables':{
+  'primaryColor':'#eef2ff','primaryTextColor':'#1e1b4b','primaryBorderColor':'#6366f1',
+  'lineColor':'#64748b','fontSize':'14px','fontFamily':'ui-sans-serif,system-ui,sans-serif'}}}%%
+flowchart LR
+    Q(["🔎 Query"])
+
+    subgraph RETRIEVE ["① Retrieve — both run, always"]
+        direction TB
+        FTS["<b>FTS5 + BM25</b><br/><i>lexical</i>"]
+        VEC["<b>Cosine similarity</b><br/><i>semantic</i>"]
+    end
+
+    FUSE["<b>② Fuse</b><br/>w·vector + (1−w)·BM25"]
+    RANK["<b>③ Re-rank</b><br/>MMR diversity"]
+    R(["📄 Results"])
+
+    Q --> FTS & VEC
+    FTS & VEC --> FUSE --> RANK --> R
+
+    classDef q fill:#1e1b4b,stroke:#1e1b4b,color:#fff,rx:14,ry:14
+    classDef stage fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b,rx:6,ry:6
+    classDef fuse fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f,rx:6,ry:6
+    class Q,R q
+    class FTS,VEC,RANK stage
+    class FUSE fuse
+    style RETRIEVE fill:#f8fafc,stroke:#cbd5e1,stroke-dasharray:4 3,color:#475569
 ```
 
-1. **FTS5 keyword matching** — BM25-ranked full-text search with query sanitization. Falls back to pure semantic search when no keyword matches are found.
-2. **Vector similarity** — cosine similarity against locally-generated embeddings (any OpenAI-compatible embedding server).
-3. **MMR diversity re-ranking** — prevents near-duplicate results. Balances relevance (70%) against diversity (30%).
+1. **FTS5 keyword matching** — BM25-ranked full-text search with query
+   sanitization. Falls back to pure semantic search when no keyword matches.
+2. **Vector similarity** — cosine against locally-generated embeddings.
+3. **MMR diversity re-ranking** — suppresses near-duplicates, balancing
+   relevance against diversity.
+
+### Every stage, including the conditional ones
+
+The diagram above is what usually happens. Two stages it leaves out are easy to
+miss and change results materially — **`w` is not a constant**, and there is an
+optional cross-encoder after MMR.
+
+```mermaid
+%%{init: {'theme':'base','themeVariables':{
+  'primaryColor':'#eef2ff','primaryTextColor':'#1e1b4b','primaryBorderColor':'#6366f1',
+  'lineColor':'#64748b','fontSize':'13px','fontFamily':'ui-sans-serif,system-ui,sans-serif'}}}%%
+flowchart TB
+    Q(["🔎 Query"])
+    ROUTE{{"<b>Query router</b><br/>temporal / proper-noun shape?"}}
+    W07["w = 0.7<br/><i>semantic-leaning</i>"]
+    W03["w = 0.3<br/><i>lexical-leaning</i>"]
+
+    FTS["<b>FTS5</b> · BM25 score"]
+    VEC["<b>Vector</b> · cosine"]
+
+    FUSE["<b>Fuse</b><br/>w·vector + (1−w)·BM25"]
+
+    subgraph POST ["Rank &amp; trim"]
+        direction LR
+        REC["Recency<br/>bonus"] --> TMP["Temporal boost<br/><i>dates in query</i>"] --> MMR["MMR<br/>diversity"] --> ELB["Elbow trim<br/><i>drop-off cut</i>"]
+    end
+
+    RERANK["<b>Cross-encoder rerank</b><br/><i>opt-in: rerank=True</i>"]
+    R(["📄 Results"])
+
+    Q --> ROUTE
+    Q --> FTS & VEC
+    ROUTE -->|default| W07
+    ROUTE -->|"when routing fires"| W03
+    W07 & W03 -.->|"sets w"| FUSE
+    FTS & VEC --> FUSE --> POST
+    POST --> RERANK -.->|"lazy-loads the model"| R
+    POST --> R
+
+    classDef q fill:#1e1b4b,stroke:#1e1b4b,color:#fff,rx:14,ry:14
+    classDef stage fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b,rx:6,ry:6
+    classDef fuse fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f,rx:6,ry:6
+    classDef opt fill:#f5f3ff,stroke:#8b5cf6,stroke-width:1.5px,stroke-dasharray:5 3,color:#4c1d95,rx:6,ry:6
+    classDef decide fill:#ecfdf5,stroke:#10b981,stroke-width:1.5px,color:#064e3b
+    class Q,R q
+    class FTS,VEC,REC,TMP,MMR,ELB,W07,W03 stage
+    class FUSE fuse
+    class RERANK opt
+    class ROUTE decide
+    style POST fill:#f8fafc,stroke:#cbd5e1,stroke-dasharray:4 3,color:#475569
+```
+
+**The query router** (`memory/search_routing.py:_maybe_route_query`) inspects the
+query's *shape* before scoring. A "when did X happen"-style query, or one whose
+intent is `temporal-reasoning` / `multi-session`, flips `w` from **0.7 to 0.3** —
+weighting BM25 over embeddings, so proper-noun signal is not diluted by semantic
+similarity. Gated by `M3_QUERY_TYPE_ROUTING`, **on by default**.
+
+**The cross-encoder reranker** is opt-in (`rerank=True`). It scores each
+query/result *pair* with a distilled ms-marco model rather than comparing
+pre-computed vectors, which is more accurate and far more expensive
+(~50 ms/pair on GPU, ~200 ms on CPU). The model is lazy-loaded — importing the
+search module does **not** import `sentence_transformers`, so callers that never
+rerank pay nothing at cold start.
+
+> Dashed borders mark stages that do not always run. Everything else is on
+> every query.
 
 ### Routed Retrieval (optional)
 
@@ -146,22 +256,38 @@ See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md#entity-relation-graph) f
 Every `memory_write` call runs through this sequence:
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{
+  'primaryColor':'#eef2ff','primaryTextColor':'#1e1b4b','primaryBorderColor':'#6366f1',
+  'lineColor':'#64748b','fontSize':'13px','fontFamily':'ui-sans-serif,system-ui,sans-serif',
+  'actorBkg':'#1e1b4b','actorTextColor':'#ffffff','actorBorder':'#1e1b4b',
+  'noteBkgColor':'#fef3c7','noteBorderColor':'#d97706','noteTextColor':'#78350f',
+  'labelBoxBkgColor':'#6366f1','labelBoxBorderColor':'#6366f1','labelTextColor':'#ffffff',
+  'altBackground':'#f8fafc'}}}%%
 sequenceDiagram
-    participant A as Agent
+    autonumber
+    participant A as 🤖 Agent
     participant M as Memory Bridge
-    participant L as Local LLM
-    participant S as SQLite
+    participant E as Embedder
+    participant S as Store
 
     A->>M: memory_write(content)
     M->>M: Input safety check
-    M->>L: Generate embedding
-    L-->>M: Vector
-    M->>M: Contradiction detection
-    M->>M: Auto-link related memories
+
+    alt fast embedder available - the normal case
+        Note over M,E: NORMAL PATH - a fast embedder is reachable
+        M->>E: Embed
+        E-->>M: Vector
+        M->>M: Contradiction detection
+        M->>M: Auto-link related memories
+    else no fast embedder reachable
+        Note over M,E: ZERO-LAG PATH - no fast embedder<br/>Persist verbatim now and defer the vector to the<br/>cognitive loop. The row is FTS-searchable immediately,<br/>and vector search picks it up once the embed pass has run.
+    end
+
     M->>M: SHA-256 content hash
     M->>S: Store
     S-->>M: OK
     M-->>A: Created: uuid
+    Note over M,S: Enrichment, entity extraction and any<br/>deferred embedding happen AFTER this return.
 ```
 
 - **Safety check** — rejects XSS, SQL injection, code injection, prompt injection
@@ -188,20 +314,43 @@ That split is the reason a write is fast. Nothing in the loop is on the caller's
 latency path, so embedding, entity extraction and enrichment can be as expensive
 as they need to be without a tool call ever waiting on them.
 
-```
-memory_write ──▶ validate ─▶ store ─▶ return                 (fast, synchronous)
-                                │
-                                └─▶ queues                    (rows to process)
-                                       │
-       cognitive loop (own process, default --interval 300s)  (deferred)
-                                       │
-   ┌───────────────────────────────────┴───────────────────────────────────┐
-   │  queue-driven passes             │  time-driven passes                │
-   │  entities   files_extract        │  sync        (≥ 1h)                │
-   │  enrich     embed                │  maintenance (≥ 1h)                │
-   │  classify   consolidate          │  audit       (≥ 7d)                │
-   │  distill    prune                │                                    │
-   └───────────────────────────────────────────────────────────────────────┘
+```mermaid
+%%{init: {'theme':'base','themeVariables':{
+  'primaryColor':'#eef2ff','primaryTextColor':'#1e1b4b','primaryBorderColor':'#6366f1',
+  'lineColor':'#64748b','fontSize':'13px','fontFamily':'ui-sans-serif,system-ui,sans-serif'}}}%%
+flowchart TB
+    W(["memory_write"]) --> V["validate"] --> ST["store"] --> RET(["return ✓"])
+    Q[("queues<br/><i>rows awaiting work</i>")]
+    ST -.->|enqueue| Q
+
+    subgraph LOOP ["Cognitive loop — separate process, --interval 300s"]
+        direction TB
+        subgraph QD ["queue-driven — run when their queue is non-empty"]
+            direction TB
+            P1["entities"] ~~~ P2["enrich<br/><i>+ Reflector</i>"] ~~~ P3["classify"] ~~~ P4["embed"]
+            P5["files_extract"] ~~~ P6["consolidate"] ~~~ P7["distill"] ~~~ P8["prune"]
+        end
+        subgraph TD ["time-driven — run when due"]
+            direction LR
+            T1["sync · ≥1h"] ~~~ T2["maintenance · ≥1h"] ~~~ T3["audit · ≥7d"]
+        end
+    end
+
+    Q --> QD
+
+    linkStyle default stroke:#64748b
+
+    classDef fast fill:#ecfdf5,stroke:#10b981,stroke-width:1.5px,color:#064e3b,rx:6,ry:6
+    classDef pass fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b,rx:6,ry:6
+    classDef time fill:#f5f3ff,stroke:#8b5cf6,stroke-width:1.5px,color:#4c1d95,rx:6,ry:6
+    classDef queue fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+    class W,V,ST,RET fast
+    class P1,P2,P3,P4,P5,P6,P7,P8 pass
+    class T1,T2,T3 time
+    class Q queue
+    style LOOP fill:#f8fafc,stroke:#cbd5e1,stroke-dasharray:4 3,color:#475569
+    style QD fill:#ffffff,stroke:#e2e8f0,color:#475569
+    style TD fill:#ffffff,stroke:#e2e8f0,color:#475569
 ```
 
 ### The passes
@@ -279,13 +428,31 @@ Curation — dedupe, supersede, prune, promote — is the third contradiction pa
 and the one under an operator's direct control. The important architectural point
 is **where the LLM sits**: it plans, it does not act.
 
+```mermaid
+%%{init: {'theme':'base','themeVariables':{
+  'primaryColor':'#eef2ff','primaryTextColor':'#1e1b4b','primaryBorderColor':'#6366f1',
+  'lineColor':'#64748b','fontSize':'13px','fontFamily':'ui-sans-serif,system-ui,sans-serif'}}}%%
+flowchart LR
+    AG(["🤖 curate-memory /<br/>curate-chatlog subagent"])
+    PLAN["<b>PLAN</b><br/><i>structured JSON</i>"]
+    APPLY["<b>curator_apply.py</b><br/><i>deterministic — no LLM</i>"]
+    REP["<b>report</b><br/><i>per-section outcome</i>"]
+
+    AG -->|"decides WHAT"| PLAN
+    PLAN --> APPLY
+    APPLY -->|"does it, once"| REP
+    REP -.->|"agent reads"| AG
+
+    classDef llm fill:#f5f3ff,stroke:#8b5cf6,stroke-width:1.5px,color:#4c1d95,rx:14,ry:14
+    classDef det fill:#ecfdf5,stroke:#10b981,stroke-width:2px,color:#064e3b,rx:6,ry:6
+    classDef data fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f,rx:6,ry:6
+    class AG llm
+    class APPLY,REP det
+    class PLAN data
 ```
-curate-memory / curate-chatlog subagent   ──▶  emits a PLAN (structured JSON)
-                                                       │
-                          bin/curator_apply.py  ──▶  applies it deterministically
-                                                       │
-                                                  structured report
-```
+
+> The boundary is the point: **purple is the only place a model runs.** Green is
+> a plain function, so there is no procedure left for an agent to improvise on.
 
 `curator_apply.py` is **one entry point with no LLM in the loop**. The agent's job
 is "emit a plan, call apply, read the report" — a single MCP round-trip instead of
