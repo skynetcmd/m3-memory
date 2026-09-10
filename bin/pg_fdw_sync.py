@@ -53,6 +53,9 @@ _MEMORY_ITEMS_COLS = [
 # drives the delta watermark AND the last-writer-wins guard; None => full-scan
 # id-keyed upsert (correct for tables whose shared columns lack updated_at:
 # embeddings cascade-delete via memory_items, relationships are immutable).
+# Optional 5th element: an explicit conflict guard, for tables whose merge is not
+# timestamp last-writer-wins. `{target}` is substituted with the schema-qualified
+# target table.
 _TABLE_SPECS = [
     ("memory_items", _MEMORY_ITEMS_COLS, "id", "updated_at"),
     ("memory_embeddings",
@@ -62,6 +65,29 @@ _TABLE_SPECS = [
     ("memory_relationships",
      ["id", "from_id", "to_id", "relationship_type", "created_at"],
      "id", None),
+    # ── Added to close a SILENT coverage gap ──────────────────────────────────
+    # These two were absent while the generic bridge synced them, so a PostgreSQL
+    # deployment with the fast path WORKING still lost its tasks and its secrets
+    # vault — no error, just tables that never moved. The fast path must never
+    # sync less than the slow path; test_fdw_covers_what_the_generic_path_does
+    # now fails if the two lists diverge again.
+    #
+    # Columns are the PRIMARY ∩ WAREHOUSE intersection, verified against both
+    # live schemas rather than guessed (they are identical for both tables).
+    ("tasks",
+     ["id", "title", "description", "state", "owner_agent", "created_by",
+      "parent_task_id", "result_memory_id", "metadata_json", "created_at",
+      "updated_at", "completed_at", "deleted_at"],
+     "id", "updated_at"),
+    # ⚠ VERSION precedence, not LWW. ts_col stays None so no timestamp delta
+    # filter is applied — a secret whose version was bumped without its
+    # updated_at moving must still propagate — and the guard is explicit.
+    ("synchronized_secrets",
+     ["service_name", "encrypted_value", "version", "origin_device", "updated_at"],
+     "service_name", None,
+     "WHERE EXCLUDED.version > {target}.version "
+     "OR (EXCLUDED.version = {target}.version "
+     "AND EXCLUDED.updated_at > {target}.updated_at)"),
 ]
 
 
@@ -123,9 +149,18 @@ def _ensure_fdw_wired(pg_cur, warehouse_dsn: str) -> None:
 
 
 def _upsert(pg_cur, target_qual: str, source_qual: str, cols: list[str], pk: str,
-            ts_col: Optional[str], watermark: Optional[str]) -> int:
+            ts_col: Optional[str], watermark: Optional[str],
+            guard: Optional[str] = None) -> int:
     """One set-based delta upsert. target/source are schema-qualified table names.
-    Returns rows affected. Last-writer-wins on ts_col (when present)."""
+    Returns rows affected. Last-writer-wins on ts_col unless `guard` overrides it.
+
+    `guard` exists because not every table resolves conflicts by timestamp.
+    `synchronized_secrets` uses VERSION precedence — the version number is
+    authoritative and the timestamp only breaks ties within one version — so
+    driving it with the default ts_col guard would silently mis-merge the
+    highest-value rows in the store. A caller supplies the real predicate with
+    `{target}` as a placeholder for the schema-qualified target name.
+    """
     collist = ", ".join(cols)
     non_pk = [c for c in cols if c != pk]
     set_clause = ", ".join(f"{c}=EXCLUDED.{c}" for c in non_pk)
@@ -134,9 +169,12 @@ def _upsert(pg_cur, target_qual: str, source_qual: str, cols: list[str], pk: str
     if ts_col and watermark:
         where_delta = f" WHERE {ts_col} > %s"
         params.append(watermark)
-    # Last-writer-wins guard only when we have a timestamp to compare.
-    conflict_guard = (f" WHERE {target_qual}.{ts_col} < EXCLUDED.{ts_col}"
-                      if ts_col else "")
+    if guard:
+        conflict_guard = " " + guard.format(target=target_qual)
+    else:
+        # Last-writer-wins guard only when we have a timestamp to compare.
+        conflict_guard = (f" WHERE {target_qual}.{ts_col} < EXCLUDED.{ts_col}"
+                          if ts_col else "")
     sql = (
         f"INSERT INTO {target_qual} ({collist}) "
         f"SELECT {collist} FROM {source_qual}{where_delta} "
@@ -163,14 +201,20 @@ def sync_pg_to_pg(primary_conn, warehouse_dsn: str, get_wm, set_wm,
             primary_conn.rollback()
             return {"dry_run": True, "tables": [t[0] for t in _TABLE_SPECS]}
         now = datetime.now(timezone.utc).isoformat()
-        for table, cols, pk, ts_col in _TABLE_SPECS:
+        for spec in _TABLE_SPECS:
+            # 4- or 5-tuple: the optional 5th element is an explicit conflict
+            # guard for tables that do not merge by timestamp.
+            table, cols, pk, ts_col = spec[:4]
+            guard = spec[4] if len(spec) > 4 else None
             local = f"public.{table}"
             foreign = f"{FDW_SCHEMA}.{table}"
             push_key, pull_key = f"fdw_{table}_push", f"fdw_{table}_pull"
             # PUSH: primary -> warehouse (write the foreign table)
-            n_push = _upsert(cur, foreign, local, cols, pk, ts_col, get_wm(push_key))
+            n_push = _upsert(cur, foreign, local, cols, pk, ts_col,
+                             get_wm(push_key), guard)
             # PULL: warehouse -> primary (read the foreign table)
-            n_pull = _upsert(cur, local, foreign, cols, pk, ts_col, get_wm(pull_key))
+            n_pull = _upsert(cur, local, foreign, cols, pk, ts_col,
+                             get_wm(pull_key), guard)
             set_wm(push_key, now)
             set_wm(pull_key, now)
             results[table] = {"push": n_push, "pull": n_pull}

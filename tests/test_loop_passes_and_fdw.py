@@ -66,7 +66,12 @@ class TestDueGate:
 class TestFdwContract:
     def test_table_specs_use_verified_columns(self):
         import pg_fdw_sync as F
-        specs = {t: (cols, pk, ts) for t, cols, pk, ts in F._TABLE_SPECS}
+
+        # spec[:4] rather than a fixed 4-tuple unpack: a spec may carry an
+        # optional 5th element — an explicit conflict guard for tables that do
+        # not merge by timestamp (synchronized_secrets uses VERSION precedence).
+        # Every assertion below is unchanged; only the unpacking tolerates it.
+        specs = {s[0]: (s[1], s[2], s[3]) for s in F._TABLE_SPECS}
         # memory_relationships uses the REAL column names (from_id/to_id), not the
         # guessed source_id/target_id that broke the first prototype.
         rel_cols = specs["memory_relationships"][0]
