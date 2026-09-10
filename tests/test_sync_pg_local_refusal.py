@@ -256,25 +256,43 @@ class TestNeverCreateTheLocalStore:
     def test_absent_target_is_skipped_not_created(self, tmp_path):
         """Per-TARGET paths were never existence-checked.
 
-        main() gates the primary db_path, but migrate_memory.targets("all")
-        yields others (agent_chatlog.db) that went straight to sqlite3.connect.
+        main() gated the primary db_path, but migrate_memory.targets("all")
+        yielded others (agent_chatlog.db) that went straight to sqlite3.connect —
+        which CREATES a missing file, after which the sync reads zero rows and
+        reports success.
+
+        Asserts the BEHAVIOUR, not the shape of the source. The first version of
+        this test searched for an inline `os.path.exists(target.db_path)` inside
+        main()'s loop; the Phase 3 port moved that guard into `_open_local_store`
+        and the test broke while the protection was entirely intact. A test that
+        fails on a refactor it should not care about is a test that gets
+        "fixed" by deleting it.
         """
         import pg_sync
 
-        src = (_BIN / "pg_sync.py").read_text(encoding="utf-8")
-        start = src.index("for target in targets:")
-        end = src.index("sl_conn.row_factory", start)
-        block = src[start:end]
-        assert "os.path.exists(target.db_path)" in block, (
-            "per-target paths must be existence-checked before sqlite3.connect"
-        )
-        assert "continue" in block
-
-        # And the guard's premise: connect() really does create the file.
-        import sqlite3
-
         ghost = tmp_path / "not_there.db"
         assert not ghost.exists()
+
+        target = pg_sync.SyncTarget("chatlog", str(ghost), {})
+        with pg_sync._open_local_store(target) as (conn, cur):
+            assert conn is None, "an absent store must yield no connection"
+            assert cur is None
+
+        assert not ghost.exists(), (
+            "probing an absent store must not CREATE it — that is the silent "
+            "empty-sync this guard exists to prevent"
+        )
+
+    def test_the_premise_holds_sqlite_connect_creates_files(self, tmp_path):
+        """Why the guard above is needed at all.
+
+        Pinned separately so the reason survives even if the guard moves again:
+        if sqlite3 ever stopped creating missing files, the guard would be
+        belt-and-braces rather than load-bearing, and that is worth knowing.
+        """
+        import sqlite3
+
+        ghost = tmp_path / "made_by_connect.db"
+        assert not ghost.exists()
         sqlite3.connect(str(ghost)).close()
-        assert ghost.exists(), "premise check: sqlite3.connect creates a missing file"
-        assert pg_sync is not None
+        assert ghost.exists()

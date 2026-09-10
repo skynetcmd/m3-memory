@@ -73,10 +73,10 @@ import json
 import logging
 import pathlib
 import sqlite3
+from contextlib import contextmanager as _contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-import migrate_memory
 import yaml
 from m3_sdk import M3Context, resolve_db_path
 
@@ -1545,6 +1545,47 @@ def resolve_sync_targets(main_uri: "str | None" = None) -> "list[SyncTarget]":
     return out
 
 
+@_contextmanager
+def _open_local_store(target: "SyncTarget"):
+    """Open the LOCAL store for a target, through the seam. Yields (conn, cursor).
+
+    Replaces `sqlite3.connect(path)`. Two behaviours are preserved verbatim
+    because sync depends on both:
+
+    * **Never CREATE the store.** sqlite3.connect happily creates a missing file,
+      after which the sync reads zero rows, writes zero rows, and reports
+      success — a silent no-op on a replication path. A path target that does not
+      exist yields None so the caller skips it.
+    * **Row access by NAME.** The sync_* functions index rows positionally AND by
+      column name; SQLite needs `row_factory = sqlite3.Row` for the latter, and
+      the PG compat cursor already provides it.
+
+    On a non-file backend there is nothing to check for existence — the store is
+    a DSN the backend either reaches or fails on, loudly.
+    """
+    backend = _local_backend()
+    if backend.name == "sqlite":
+        if target.uri and not os.path.exists(target.uri):
+            logger.warning(
+                f"[{target.name}] local store not present at {target.uri} — "
+                "skipping (refusing to create it)."
+            )
+            yield None, None
+            return
+        from memory.backends.selector import backend_for
+
+        store = backend_for(target.uri) if target.uri else backend
+    else:
+        store = backend
+
+    with store.connection() as conn:
+        try:
+            conn.row_factory = sqlite3.Row  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 — PG's compat cursor already names rows
+            pass
+        yield conn, conn.cursor()
+
+
 # ── main() ────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1609,12 +1650,16 @@ def main():
     try:
         if is_agent_memory:
             # Legacy path: mirrors original main() with migrate_memory.targets("all")
-            targets = migrate_memory.targets("all")
+            # Resolved from the BACKEND, not the filesystem: SQLite yields two
+            # store FILES using core table names, PostgreSQL yields ONE store
+            # carrying core + chat_log_* families. Iterating files here would
+            # sync the wrong table set on PG — silently.
+            targets = resolve_sync_targets(db_path)
             logger.info(f"Starting synchronization for {len(targets)} targets: {[t.name for t in targets]}")
 
             if args.dry_run:
                 for target in targets:
-                    logger.info(f"[DRY-RUN] Would sync target {target.name} ({target.db_path})")
+                    logger.info(f"[DRY-RUN] Would sync target {target.name} ({target.uri})")
                     logger.info("[DRY-RUN] Tables: memory_items, memory_embeddings, "
                                 "memory_relationships, tasks, synchronized_secrets")
                 return
@@ -1624,53 +1669,35 @@ def main():
                 _set_warehouse_search_path(pg_conn)
 
                 for target in targets:
-                    logger.info(f"--- Synchronizing target: {target.name} ({target.db_path}) ---")
-                    # NEVER let sqlite3.connect CREATE the local store. It happily
-                    # creates a missing file, and the sync then reads zero rows,
-                    # writes zero rows, and reports success — a silent no-op on a
-                    # replication path. main() gates the primary db_path at :1359,
-                    # but these per-TARGET paths (e.g. agent_chatlog.db) were never
-                    # checked, so an absent chatlog store was manufactured empty
-                    # and "synced".
-                    if not os.path.exists(target.db_path):
-                        logger.warning(
-                            f"[{target.name}] local store not present at "
-                            f"{target.db_path} — skipping (refusing to create it)."
-                        )
-                        continue
+                    logger.info(f"--- Synchronizing target: {target.name} ({target.uri}) ---")
                     try:
-                        sl_conn = sqlite3.connect(target.db_path, timeout=30)
-                        sl_conn.row_factory = sqlite3.Row
-                    except Exception as e:
-                        logger.error(f"Failed to connect to local DB {target.db_path}: {e}")
-                        continue
+                        with _open_local_store(target) as (sl_conn, sl_cur):
+                            if sl_conn is None:
+                                continue  # store absent; _open_local_store said why
+                            _ensure_watermark_table(sl_cur)
 
-                    try:
-                        sl_cur = sl_conn.cursor()
-                        _ensure_watermark_table(sl_cur)
+                            if target.name == "main":
+                                if not _acquire_sync_lock(sl_cur):
+                                    logger.warning(
+                                        "Another sync is already in progress "
+                                        "(main lock found). Skipping."
+                                    )
+                                    return
+                                sl_conn.commit()
 
-                        if target.name == "main":
-                            if not _acquire_sync_lock(sl_cur):
-                                logger.warning("Another sync is already in progress (main lock found). Skipping.")
-                                sl_conn.close()
-                                return
+                            with pg_conn.cursor() as pg_cur:
+                                _sync_agent_memory_db(sl_cur, pg_cur, sl_conn,
+                                                      target.name, dry_run=False)
+
+                            pg_conn.commit()
                             sl_conn.commit()
+                            logger.info(f"Target '{target.name}' synchronization completed.")
 
-                        with pg_conn.cursor() as pg_cur:
-                            _sync_agent_memory_db(sl_cur, pg_cur, sl_conn, target.name, dry_run=False)
-
-                        pg_conn.commit()
-                        sl_conn.commit()
-                        logger.info(f"Target '{target.name}' synchronization completed.")
-
-                        if target.name == "main":
-                            _release_sync_lock(sl_cur)
-                            sl_conn.commit()
-
+                            if target.name == "main":
+                                _release_sync_lock(sl_cur)
+                                sl_conn.commit()
                     except Exception as e:
                         logger.error(f"Failed during sync of target {target.name}: {e}")
-                    finally:
-                        sl_conn.close()
 
         else:
             # Generic manifest-driven path for bench DBs and future additions
@@ -1685,32 +1712,35 @@ def main():
                 logger.info(f"[DRY-RUN] Would sync tables: {active}")
                 if skipped:
                     logger.info(f"[DRY-RUN] Would skip tables: {skipped}")
-                # Open SQLite to show row counts
+                # Open the local store to show row counts.
                 try:
-                    sl_conn = sqlite3.connect(db_path, timeout=30)
-                    sl_conn.row_factory = sqlite3.Row
-                    sl_cur = sl_conn.cursor()
-                    for tname in active:
-                        if _table_exists(sl_cur, tname):
-                            sl_cur.execute(f"SELECT COUNT(*) FROM {tname}")
-                            cnt = sl_cur.fetchone()[0]
-                            logger.info(f"[DRY-RUN] [{tname}] {cnt} rows in SQLite")
-                        else:
-                            logger.info(f"[DRY-RUN] [{tname}] not present in SQLite DB")
-                    sl_conn.close()
+                    _t = SyncTarget(db_stem, db_path, {})
+                    with _open_local_store(_t) as (_c, sl_cur):
+                        if sl_cur is None:
+                            return
+                        for tname in active:
+                            if _table_exists(sl_cur, tname):
+                                sl_cur.execute(f"SELECT COUNT(*) FROM {tname}")
+                                cnt = sl_cur.fetchone()[0]
+                                logger.info(f"[DRY-RUN] [{tname}] {cnt} rows locally")
+                            else:
+                                logger.info(f"[DRY-RUN] [{tname}] not present locally")
                 except Exception as e:
                     logger.warning(f"[DRY-RUN] Could not open {db_path} for row counts: {e}")
                 return
 
+            _generic_target = SyncTarget(db_stem, db_path, {})
             try:
-                sl_conn = sqlite3.connect(db_path, timeout=30)
-                sl_conn.row_factory = sqlite3.Row
+                _store_cm = _open_local_store(_generic_target)
+                sl_conn, sl_cur = _store_cm.__enter__()
+                if sl_conn is None:
+                    logger.error(f"Local store not available: {db_path}")
+                    sys.exit(1)
             except Exception as e:
                 logger.error(f"Failed to connect to local DB {db_path}: {e}")
                 sys.exit(1)
 
             try:
-                sl_cur = sl_conn.cursor()
                 _ensure_watermark_table(sl_cur)
                 with ctx.pg_connection() as pg_conn:
                     pg_conn.autocommit = False
@@ -1724,7 +1754,11 @@ def main():
                 logger.error(f"Sync failed for {db_stem}: {type(e).__name__}: {e}")
                 sys.exit(1)
             finally:
-                sl_conn.close()
+                # Exit the store context manager rather than close() the
+                # connection: it is POOLED now, and closing a pooled connection
+                # directly returns a dead handle to the pool for the next
+                # borrower. The context manager knows how to release it.
+                _store_cm.__exit__(None, None, None)
 
         logger.info("pg_sync completed successfully.")
 

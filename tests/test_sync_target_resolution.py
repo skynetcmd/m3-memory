@@ -188,3 +188,60 @@ def test_unmapped_role_falls_back_to_its_own_name():
     t = pg_sync.SyncTarget("x", None, {"items": "memory_items"})
     assert t.table("items") == "memory_items"
     assert t.table("tasks") == "tasks"
+
+
+class TestTheResolverIsActuallyWired:
+    """A correct resolver that nothing calls is dead code.
+
+    It was, for one commit: `resolve_sync_targets` was defined, tested and never
+    reached, so PG-local sync still could not work. These pin the wiring itself.
+    """
+
+    def test_main_uses_the_resolver_not_the_file_loop(self):
+        import ast
+        import inspect
+        import textwrap
+
+        tree = ast.parse(textwrap.dedent(inspect.getsource(pg_sync.main)))
+        called = {
+            n.func.id for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        } | {
+            n.func.attr for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        assert "resolve_sync_targets" in called
+        assert "targets" not in called, (
+            "migrate_memory.targets() yields FILE paths; using it here is the "
+            "file-shaped port that syncs the wrong table set on PostgreSQL"
+        )
+
+    def test_no_raw_sqlite_connect_remains(self):
+        """The local half opens through the seam.
+
+        Asserted on the AST: the module's own comments discuss sqlite3.connect
+        by name when explaining what replaced it, so a substring check fails on
+        the explanation.
+        """
+        import ast
+
+        src = (_BIN / "pg_sync.py").read_text(encoding="utf-8")
+        connects = [
+            n for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "connect"
+            and isinstance(n.func.value, ast.Name) and n.func.value.id == "sqlite3"
+        ]
+        assert not connects, f"{len(connects)} raw sqlite3.connect call(s) remain"
+
+    def test_drift_exemption_was_removed(self):
+        """The exemption and the last raw connect must go in the SAME commit.
+
+        test_exempt_entries_actually_contain_the_idiom fails on an exemption for
+        a file with no raw connect, so leaving it would break the suite; removing
+        it early would have left the gate red while the port was in flight.
+        """
+        src = (
+            _BIN.parent / "tests" / "test_raw_connection_drift.py"
+        ).read_text(encoding="utf-8")
+        assert '"bin/pg_sync.py"' not in src

@@ -93,10 +93,6 @@ _EXEMPT = {
         "One-way ETL from an EXTERNAL SQLite DB (OpenClaw), opened "
         "?mode=ro&immutable=1. A foreign file, not m3's store.",
 
-    # --- Cross-backend by nature. ---
-    "bin/pg_sync.py":
-        "Syncs SQLite -> PostgreSQL; holding both handles is the point.",
-
     # --- Self-test harnesses that must NOT share the app's pool. ---
     "bin/test_memory_bridge.py":
         "Bridge self-test: deliberately isolates from the live pool.",
