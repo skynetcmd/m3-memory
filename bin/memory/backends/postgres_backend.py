@@ -45,6 +45,13 @@ if TYPE_CHECKING:  # avoid importing the driver at module load
 _DEFAULT_MINCONN = 1
 _DEFAULT_MAXCONN = 16
 
+# Rows per multi-row INSERT in bulk_upsert. execute_values loops across pages
+# internally, so this bounds the size of ONE statement rather than the batch:
+# large enough that per-round-trip latency stops dominating, small enough that a
+# single statement stays comfortably parseable and a failure rolls back a
+# bounded amount of work. Overridable for tuning against a slow link.
+_UPSERT_PAGE_SIZE = int(os.environ.get("M3_PG_UPSERT_PAGE_SIZE", "500"))
+
 
 def _make_compat_cursor_factory():
     """A psycopg2 cursor whose rows behave like ``sqlite3.Row``: subscriptable by
@@ -700,6 +707,44 @@ class PostgresBackend:
             "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'"
         )
         return {r[0] for r in cur.fetchall()}
+
+    def bulk_upsert(
+        self,
+        conn: object,
+        table: str,
+        columns: "list[str]",
+        rows: "list[tuple]",
+        *,
+        conflict_target: str,
+        update_columns: "list[str]",
+        guard_sql: str = "",
+    ) -> int:
+        """`execute_values`: ONE multi-row statement per page, not one per row.
+
+        ⚠ Deliberately NOT `cursor.executemany`. psycopg2's executemany runs the
+        statement once per row (see _SqliteCompatConnection.executemany's own
+        docstring), so on a remote cluster a 10k-row batch becomes 10k round
+        trips. execute_values expands the single ``VALUES %s`` marker into a
+        multi-row VALUES list, which is why this primitive exists at all.
+
+        page_size is bounded so one statement cannot grow past what the server
+        will parse comfortably; execute_values loops internally across pages.
+        """
+        if not rows:
+            return 0
+        from psycopg2.extras import execute_values
+
+        col_list = ", ".join(columns)
+        set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_columns)
+        sql = (
+            f"INSERT INTO {table} ({col_list}) VALUES %s "
+            f"ON CONFLICT {conflict_target} DO UPDATE SET {set_clause}"
+        )
+        if guard_sql:
+            sql += f" {guard_sql}"
+        cur = conn.cursor()  # type: ignore[attr-defined]
+        execute_values(cur, sql, rows, page_size=_UPSERT_PAGE_SIZE)
+        return len(rows)
 
     def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
         """No-op: PostgreSQL manages its own WAL (checkpointer + bgwriter).

@@ -124,6 +124,74 @@ def require_sqlite_backend(tool: str) -> None:
         )
 
 
+def backend_for(uri: str) -> StorageBackend:
+    """A backend addressing ONE SPECIFIC store, chosen by the shape of `uri`.
+
+    Distinct from `active_backend()`, which is deliberately singular: the backend
+    KIND is fixed per process and its instance is memoized. Some callers legitimately
+    need a SECOND store at the same time — sync holds a local store and a remote
+    warehouse open together — and neither `active_backend()` nor
+    `open_readonly(path)` can express that (the latter discards the path on
+    PostgreSQL and is read-only by contract).
+
+    Dispatch is on the URI shape, which is the only thing a caller reliably has:
+
+      ``postgresql://…`` / ``postgres://``  -> PostgresBackend(dsn=uri)
+      anything else                          -> a filesystem path -> SQLite
+
+    Keyed on an explicit scheme allowlist rather than "not a file" so a THIRD
+    backend registers by adding its scheme here — one place that knows the
+    mapping, in the same spirit as `chatlog_table_for`'s explicit
+    ``backend == "sqlite"`` predicate rather than an else-means-postgres accident.
+
+    ⚠ NOT memoized, unlike `active_backend()`. Each call builds a backend that
+    owns a connection pool, so the CALLER owns its lifetime and must `close()` it
+    — typically in a `finally`. Caching instead would keep pools alive for stores
+    a short-lived process touched once, which is precisely wrong for an hourly
+    cron.
+
+    ⚠ Constructing a PostgresBackend with an explicit dsn BYPASSES `_resolve_dsn`,
+    and with it the `_reject_same_as_warehouse` / `_reject_forbidden_host` guards
+    that run there. A caller pointing this at a primary store must invoke those
+    guards itself; this function deliberately does not, because it has no way to
+    know which ROLE (primary vs warehouse) the caller means the URI to play.
+
+    ⚠⚠ SQLITE PATHS ARE NOT YET ADDRESSABLE, AND THIS REFUSES RATHER THAN LYING.
+    `SqliteBackend` has no per-instance path: its `connection()` delegates to
+    `memory.db._db()`, the process-wide CONFIGURED store, so a SqliteBackend
+    built "for" /some/other.db would silently read and write the default
+    database instead. Returning one here would produce exactly the failure this
+    whole effort exists to remove — a caller believing it addressed store A
+    while touching store B, with no error.
+
+    Until SqliteBackend accepts a path, a SQLite URI raises. Callers that need a
+    specific SQLite FILE today have two honest options: `open_readonly(path)`
+    for reads, or the existing `active_database(path)` context manager, which
+    scopes the resolver process-wide. Both are explicit about what they do.
+    """
+    if not uri:
+        raise ValueError("backend_for() needs a store URI; got an empty value.")
+    scheme = uri.split("://", 1)[0].lower() if "://" in uri else ""
+    if scheme in ("postgresql", "postgres"):
+        from .postgres_backend import PostgresBackend
+
+        return PostgresBackend(dsn=uri)
+    if scheme:
+        raise ValueError(
+            f"Unrecognized store URI scheme {scheme!r} in {uri!r}. Supported: a "
+            "postgresql:// DSN. Refusing rather than guessing a backend for an "
+            "unknown scheme."
+        )
+    raise NotImplementedError(
+        f"backend_for() cannot address a specific SQLite file yet ({uri!r}). "
+        "SqliteBackend has no per-instance path — its connection() resolves the "
+        "process-wide configured store — so returning one here would silently "
+        "operate on a DIFFERENT database than the caller asked for. Use "
+        "open_readonly(path) for reads, or active_database(path) to scope the "
+        "resolver, until SqliteBackend takes a path."
+    )
+
+
 def _reset_for_tests() -> None:
     """Clear the backend + resolved-name caches. Test-only — lets a test flip the
     env (M3_DB_BACKEND) and re-resolve on the next call."""

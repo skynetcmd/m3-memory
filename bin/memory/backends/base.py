@@ -358,6 +358,61 @@ class StorageBackend(Protocol):
         """
         ...
 
+    def bulk_upsert(
+        self,
+        conn: object,
+        table: str,
+        columns: "list[str]",
+        rows: "list[tuple]",
+        *,
+        conflict_target: str,
+        update_columns: "list[str]",
+        guard_sql: str = "",
+    ) -> int:
+        """Insert-or-update many rows in as few round trips as the engine allows.
+
+        Returns the number of rows SENT (not the number the guard accepted —
+        engines disagree on what rowcount means for a conflicting upsert, and a
+        caller that needs the accepted count must query for it).
+
+        WHY THIS IS A SEAM PRIMITIVE AND NOT A HELPER
+        ---------------------------------------------
+        Batching is where the backends differ MOST in cost, not just in syntax:
+
+          SQLite   — ``executemany`` with ``VALUES (?, ?, …)``. In-process, so
+                     per-statement overhead is small.
+          Postgres — ``execute_values`` with a single ``VALUES %s`` marker that
+                     it expands into one multi-row statement. psycopg2's own
+                     ``executemany`` runs the statement ONCE PER ROW (its
+                     docstring says so), which over a network is one round trip
+                     per row — the difference between a working sync and a hung
+                     one.
+          MySQL/MariaDB — multi-row ``VALUES`` with ``ON DUPLICATE KEY UPDATE``
+                     and no ``excluded`` pseudo-table at all; a third backend
+                     will need real translation here.
+
+        A caller that hand-writes the statement therefore has to know not only
+        each dialect's placeholder style but its batching API and its
+        performance cliff. That is exactly the knowledge the seam exists to hold.
+
+        ``guard_sql`` is appended verbatim after the ``DO UPDATE SET`` clause —
+        typically a last-write-wins predicate like
+        ``WHERE t.updated_at IS NULL OR excluded.updated_at > t.updated_at``.
+        It is passed through rather than modelled because the two current
+        backends accept identical text (``excluded``/``EXCLUDED`` are both valid
+        in either case), and because callers use it for shapes beyond LWW —
+        version-number precedence, for one. A backend whose conflict syntax
+        cannot express the fragment must translate or reject it loudly rather
+        than silently dropping it: a dropped guard turns a conditional merge into
+        an unconditional overwrite, which loses data quietly.
+
+        ``table`` is used UNQUALIFIED in the guard by every current caller
+        (``WHERE {table}.{col} …``), so an implementation must not silently
+        schema-qualify it — the guard would stop matching and, again, overwrite
+        unconditionally.
+        """
+        ...
+
     def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
         """Bound the write-ahead log during a long-running write. Backend-blind.
 

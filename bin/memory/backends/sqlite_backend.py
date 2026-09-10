@@ -315,6 +315,38 @@ class SqliteBackend:
         )
         return {r[0] for r in cur.fetchall()}
 
+    def bulk_upsert(
+        self,
+        conn: object,
+        table: str,
+        columns: "list[str]",
+        rows: "list[tuple]",
+        *,
+        conflict_target: str,
+        update_columns: "list[str]",
+        guard_sql: str = "",
+    ) -> int:
+        """`executemany` with an explicit placeholder tuple.
+
+        SQLite has no multi-row-expanding helper like psycopg2's execute_values,
+        but it does not need one: the engine is in-process, so per-statement
+        overhead is microseconds rather than a network round trip.
+        """
+        if not rows:
+            return 0
+        placeholders = self.dialect().placeholder(len(columns))
+        col_list = ", ".join(columns)
+        set_clause = ", ".join(f"{c} = excluded.{c}" for c in update_columns)
+        sql = (
+            f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) "
+            f"ON CONFLICT {conflict_target} DO UPDATE SET {set_clause}"
+        )
+        if guard_sql:
+            sql += f" {guard_sql}"
+        cur = conn.cursor()  # type: ignore[attr-defined]
+        cur.executemany(sql, rows)
+        return len(rows)
+
     def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
         """WAL checkpoint: PASSIVE mid-batch, TRUNCATE at clean exit (§10).
 
