@@ -138,11 +138,20 @@ m3 chatlog init --apply-gemini
 
 ---
 
-## Embedder (Tier-2 service — optional but recommended)
+## Embedder (the shared embed server — install this)
 
-The **Tier-1 in-process GGUF embedder** is active from the moment m3 starts —
-no extra steps. The **Tier-2 embed server** (port 8082, Windows Service)
-improves cold-start performance but is optional. M3 works fully without it.
+The **shared embed server** (“Tier-2”) on `127.0.0.1:8082` is the **default**
+embedder: every m3 process sends embed requests to it, so one model sits in
+RAM for the whole machine. Install it — it is not an optional extra.
+
+The **in-process embedder** (“Tier-1”, llama.cpp linked into the calling
+process) is **opt-in**, not automatic: it requires `M3_EMBED_INPROC=1` or an
+`.embed_config.json` that permits it. A GGUF on disk alone does **not** enable
+it — m3 deliberately routes to the shared server instead, so a stray model file
+cannot spin up a per-process GPU context. It is worth enabling only for
+high-volume bursts such as bulk file ingestion, and costs one model copy per
+process. See [EMBED_DEPLOYMENT.md](EMBED_DEPLOYMENT.md#naming-one-topology-several-vocabularies)
+for the full naming map.
 
 ### Install the binary first
 

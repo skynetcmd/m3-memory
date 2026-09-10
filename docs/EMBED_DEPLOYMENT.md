@@ -15,16 +15,43 @@ see `docs/EMBED_INPUT_RECIPE.md`.
 
 ## Table of contents
 
-1. [The dual-path architecture](#the-dual-path-architecture)
-2. [Build matrix](#build-matrix)
-3. [Build steps per backend](#build-steps-per-backend)
-4. [CPU HTTP fallback (port 8082)](#cpu-http-fallback-port-8082)
-5. [m3-memory integration](#m3-memory-integration)
-6. [Environment variables](#environment-variables)
-7. [Troubleshooting](#troubleshooting)
-8. [Cross-references](#cross-references)
+1. [Naming: one topology, several vocabularies](#naming-one-topology-several-vocabularies)
+2. [The dual-path architecture](#the-dual-path-architecture)
+3. [Build matrix](#build-matrix)
+4. [Build steps per backend](#build-steps-per-backend)
+5. [The shared embed server (port 8082)](#sovereign-http-fallback-port-8082)
+6. [m3-memory integration](#m3-memory-integration)
+7. [Environment variables](#environment-variables)
+8. [Troubleshooting](#troubleshooting)
+9. [Cross-references](#cross-references)
 
 ---
+
+## Naming: one topology, several vocabularies
+
+There are **two** ways to run the embedder, but the docs (and the code, and the
+benchmark reports) accumulated several names for each. They are synonyms — this
+table is the canonical mapping, and it exists because nothing previously stated
+it, so "Tier 2" and "the shared server" read as different subsystems.
+
+| Canonical term | Also written as | What it is |
+|---|---|---|
+| **Shared embed server** *(the default)* | Tier 2, tier-2, sovereign HTTP server, `cpu-http-fallback`, "the embed server", port 8082 | One `m3-embed-server` process on `127.0.0.1:8082`. **Every** m3 process sends embed requests to it, so one model sits in host RAM (and one GPU context, on a GPU wheel) for the whole machine. |
+| **In-process embedder** *(opt-in)* | Tier 1, tier-1, inproc, `EmbeddedEmbedder`, `*-inprocess` backend labels | llama.cpp linked into the calling process via pyo3. No IPC, but **not shareable** — each process that uses it loads its own copy of the model. |
+
+Two clarifications the old naming actively obscured:
+
+- **"Fallback" is a misnomer for the shared server.** The label
+  `cpu-http-fallback` and the section title "CPU HTTP fallback" date from a
+  design where in-process came first. It is now the **default path**, and
+  in-process is the opt-in. The backend label is kept for compatibility with
+  existing metrics; read it as "shared server", not "degraded mode".
+- **"Tier" numbers do not imply preference or quality.** Tier 1 is not "better"
+  than Tier 2 — it trades shareability for the loss of one loopback round trip
+  (~33 ms vs ~28 ms P50 for a single small embed on the reference host). Both
+  produce the same vectors from the same GGUF.
+
+Where a page below says "tier-1" or "fallback", map it through this table.
 
 ## The dual-path architecture
 

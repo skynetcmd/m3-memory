@@ -114,9 +114,20 @@ bash bin/start_mcp_proxy.sh --background
 
 ---
 
-## 3. Embedder (Tier-2 service — optional but recommended)
+## 3. Embedder (the shared embed server — install this)
 
-The **Tier-1 in-process GGUF embedder** is active from the moment m3 starts — no extra steps. The **Tier-2 embed server** (port 8082) improves cold-start performance but is optional. M3 works fully without it.
+The **shared embed server** (“Tier-2”) on `127.0.0.1:8082` is the **default**
+embedder: every m3 process sends embed requests to it, so one model sits in
+RAM for the whole machine. Install it — it is not an optional extra.
+
+The **in-process embedder** (“Tier-1”, llama.cpp linked into the calling
+process) is **opt-in**, not automatic: it requires `M3_EMBED_INPROC=1` or an
+`.embed_config.json` that permits it. A GGUF on disk alone does **not** enable
+it — m3 deliberately routes to the shared server instead, so a stray model file
+cannot spin up a per-process GPU context. It is worth enabling only for
+high-volume bursts such as bulk file ingestion, and costs one model copy per
+process. See [EMBED_DEPLOYMENT.md](EMBED_DEPLOYMENT.md#naming-one-topology-several-vocabularies)
+for the full naming map.
 
 ### Install the binary first
 
@@ -143,7 +154,7 @@ m3 doctor   # shows Tier-1 / Tier-2 status and embed roundtrip latency
 Run the server directly:
 
 ```bash
-M3_EMBED_GGUF=~/.m3-memory/_assets/models/bge-m3-Q4_K_M.gguf \
+M3_EMBED_GGUF=~/.m3/models/bge-m3-Q4_K_M.gguf \
     nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &
 ```
 
@@ -159,7 +170,7 @@ To start at login via launchd manually, create `~/Library/LaunchAgents/ai.m3.emb
   <key>ProgramArguments</key>
   <array>
     <string>/bin/sh</string><string>-c</string>
-    <string>M3_EMBED_GGUF=$HOME/.m3-memory/_assets/models/bge-m3-Q4_K_M.gguf exec m3-embed-server</string>
+    <string>M3_EMBED_GGUF=$HOME/.m3/models/bge-m3-Q4_K_M.gguf exec m3-embed-server</string>
   </array>
   <key>RunAtLoad</key>         <true/>
   <key>KeepAlive</key>         <true/>

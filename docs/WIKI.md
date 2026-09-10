@@ -160,7 +160,7 @@ it if any of these clears its floor:
 |---|---|---|
 | `backbone_ratio` | share of real (non-co-mention) edges — the primary discriminator | 0.6 |
 | `provenance` | share of edges that are authored lineage (supersedes / extends / …) | 0.5 |
-| `kas` | overall structural [Knowledge Anchor Score](#) | 0.5 |
+| `kas` | overall structural Knowledge Anchor Score | 0.5 |
 
 Two properties are guaranteed by design:
 

@@ -283,3 +283,56 @@ def test_docs_do_not_call_pypi_the_official_wheel_channel() -> None:
         "doc(s) present PyPI as the primary wheel channel:\n  "
         + "\n  ".join(problems)
     )
+
+
+# ------------------------------------------------------------ embedder topology
+
+
+def test_docs_do_not_invert_the_embedder_default() -> None:
+    """The shared server is the DEFAULT; in-process is opt-in.
+
+    This was stated backwards on ~10 surfaces at once -- the EMBED_DEPLOYMENT
+    diagram labelled in-process "PRIMARY", and all four install pages said
+    "Tier-1 ... is active from the moment m3 starts" while calling the shared
+    server "optional but recommended". Both are false per the gate in
+    bin/memory/embed.py: with no .embed_config.json, `_INPROC_ALLOWED` falls back
+    to M3_EMBED_INPROC, which defaults to "0".
+
+    Wrong here is worse than wrong elsewhere: a reader who believes in-process is
+    automatic will skip installing the shared server and end up with no embedder,
+    and one who runs `m3 embedder unshared` on that belief actively breaks a
+    working setup.
+    """
+    banned = (
+        "is active from the moment m3 starts",
+        "Tier-2 service — optional but recommended",
+        "1. PRIMARY: in-process",
+        "In-process** is attempted whenever `M3_EMBED_GGUF` is set AND",
+        "each loads its own in-process embedder",
+    )
+    problems = []
+    for path in [REPO / "README.md", *sorted((REPO / "docs").rglob("*.md"))]:
+        if path.name == "CHANGELOG.md":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for phrase in banned:
+            if phrase in text:
+                problems.append(f"{path.name}: {phrase!r}")
+    assert not problems, (
+        "doc(s) present in-process embedding as the default/automatic path:\n  "
+        + "\n  ".join(problems)
+    )
+
+
+def test_inproc_opt_in_default_is_off() -> None:
+    """Pin the gate the docs above now describe.
+
+    If M3_EMBED_INPROC ever defaults to "1", every claim added by that commit
+    becomes wrong at once -- so fail here rather than let the prose rot silently.
+    """
+    src = (REPO / "bin" / "memory" / "embed.py").read_text(encoding="utf-8")
+    assert 'os.environ.get("M3_EMBED_INPROC", "0") == "1"' in src, (
+        "the M3_EMBED_INPROC gate changed shape -- re-verify the embedder "
+        "topology claims in EMBED_DEPLOYMENT.md, the QUICKSTART pages, "
+        "install_windows.md and README.md before updating this test"
+    )

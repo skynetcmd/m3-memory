@@ -51,7 +51,7 @@ agy plugin install https://github.com/skynetcmd/m3-memory
 
 That installs all 15 `/m3:*` slash commands as native agent Skills and auto-wires the chatlog hooks. See [the plugin reference](./antigravity_plugin.md).
 
-**Windows or manual install:** see the [README](../README.md#-install), [INSTALL.md](../INSTALL.md), or the per-OS quickstarts ([Linux](./QUICKSTART_LINUX.md) / [macOS](./QUICKSTART_MACOS.md) / [Windows](./QUICKSTART_WINDOWS.md)).
+**Windows or manual install:** see the [README](../README.md#-installation), [INSTALL.md](../INSTALL.md), or the per-OS quickstarts ([Linux](./QUICKSTART_LINUX.md) / [macOS](./QUICKSTART_MACOS.md) / [Windows](./QUICKSTART_WINDOWS.md)).
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,

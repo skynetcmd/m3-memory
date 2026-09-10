@@ -1,7 +1,7 @@
 # <a href="README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> INSTALL
 
 Manual install path for `m3-memory`. Most users should just run the
-[one-line installer from the README](README.md#-install) — this file
+[one-line installer from the README](README.md#-installation) — this file
 exists for users who want to know what the script does, audit it before
 running it, or run the steps by hand.
 

@@ -177,6 +177,146 @@ Items with a non-NULL `variant` (typically benchmark rows) are **skipped by defa
 
 ---
 
+## 🔄 The Cognitive Loop
+
+Everything above describes the **write path** — what happens before `memory_write`
+returns. The write path is deliberately thin: it validates, stores, hashes, and
+returns. The expensive work happens **afterwards**, in a separate long-running
+process (`bin/m3_cognitive_loop.py`) that wakes on an interval and drains queues.
+
+That split is the reason a write is fast. Nothing in the loop is on the caller's
+latency path, so embedding, entity extraction and enrichment can be as expensive
+as they need to be without a tool call ever waiting on them.
+
+```
+memory_write ──▶ validate ─▶ store ─▶ return                 (fast, synchronous)
+                                │
+                                └─▶ queues                    (rows to process)
+                                       │
+       cognitive loop (own process, default --interval 300s)  (deferred)
+                                       │
+   ┌───────────────────────────────────┴───────────────────────────────────┐
+   │  queue-driven passes             │  time-driven passes                │
+   │  entities   files_extract        │  sync        (≥ 1h)                │
+   │  enrich     embed                │  maintenance (≥ 1h)                │
+   │  classify   consolidate          │  audit       (≥ 7d)                │
+   │  distill    prune                │                                    │
+   └───────────────────────────────────────────────────────────────────────┘
+```
+
+### The passes
+
+Eleven passes, each independently skippable (`--skip-<name>`):
+
+| Pass | What it does |
+|---|---|
+| `entities` | Extract entities and relationships; build the entity graph |
+| `enrich` | Distill atomic facts from stored memories via a local SLM — **and run the Reflector** (below) |
+| `classify` | Resolve `type="auto"` writes into a concrete memory type |
+| `embed` | Generate embeddings for rows written without one |
+| `files_extract` | Drain queued fact-extraction for ingested files |
+| `consolidate` | Merge groups of old same-type memories into summaries |
+| `distill` | Compress long threads into key points |
+| `prune` | Decay and prune abandoned chat-log conversations |
+| `sync` | Push/pull against the PostgreSQL warehouse (≥ 1h apart) |
+| `maintenance` | Housekeeping — indexes, integrity, retention (≥ 1h apart) |
+| `audit` | Integrity audit over the hash chain (≥ 7d apart) |
+
+### The Reflector — contradiction detection's second path
+
+The write path catches contradictions **deterministically**: cosine similarity
+against a threshold, no model involved (see [Write Pipeline](#-write-pipeline)).
+That only catches near-restatements of a single memory.
+
+The loop's **Reflector pass** (inside `enrich`; `bin/m3_enrich.py:_run_reflector_pass`)
+is the second path. It reviews enriched facts for conflicts the write-time check
+could not see — because the contradicting memories were written far apart, or
+because the conflict is semantic rather than lexical — and writes `supersedes`
+edges when it finds one. It runs **by default** (`--no-reflect` opts out).
+
+So contradiction handling is not one mechanism but three, at different points and
+costs: deterministic at write time, model-assisted in the loop, and explicit via a
+[curation plan](#-deterministic-curation).
+
+### Fairness and back-pressure
+
+The loop shares a machine with the user's editor and the local model, so pass
+selection is not a simple round-robin (`_select_pass_order`, a pure function so
+the policy is testable on its own):
+
+- **Queue-aware** — a pass whose queue is empty is dropped from the cycle. Under
+  throttle only *one* pass runs, and without this filter that single slot could
+  go to an empty queue while a backlog of thousands waits another full cycle.
+- **Round-robin** — the eligible list rotates by cycle number, so an
+  always-backlogged upstream pass can't permanently hold the GPU ahead of
+  downstream ones.
+- **Idle-aware intensity** — when the governor reports load (a proxy for "the
+  user is busy"), only the rotated leader runs. When idle, every eligible pass
+  runs to drain the backlog.
+
+Time-driven passes have no queryable queue, so they are never filtered out — their
+own `--*-min-interval-s` gate decides. Absence from the work map means
+"eligibility unknown, let the pass decide", never "no work".
+
+### What this means operationally
+
+- **A fresh write is searchable immediately by FTS, and by vector search once
+  `embed` has run.** If the loop is not running, writes still succeed and stay
+  FTS-searchable — they are simply not enriched or embedded. `m3 doctor` reports
+  a stalled loop.
+- **The loop is a separate process, not a thread.** It has its own lifecycle
+  (`AgentOS_LoopWatchdog` restarts it on a schedule), so a watchdog-terminated
+  loop never runs `atexit` — stale PID entries under the engine root are routine,
+  not evidence of a crash.
+- **Draining a backlog** is a matter of raising `--limit-per-pass` (default 4) or
+  running the pass directly; see [EMBED_DEPLOYMENT.md](EMBED_DEPLOYMENT.md#draining-an-embed-backlog).
+
+---
+
+## 🧹 Deterministic Curation
+
+Curation — dedupe, supersede, prune, promote — is the third contradiction path,
+and the one under an operator's direct control. The important architectural point
+is **where the LLM sits**: it plans, it does not act.
+
+```
+curate-memory / curate-chatlog subagent   ──▶  emits a PLAN (structured JSON)
+                                                       │
+                          bin/curator_apply.py  ──▶  applies it deterministically
+                                                       │
+                                                  structured report
+```
+
+`curator_apply.py` is **one entry point with no LLM in the loop**. The agent's job
+is "emit a plan, call apply, read the report" — a single MCP round-trip instead of
+N tool calls.
+
+That shape is a **structural fix for two real failures** (2026-05-17), both from an
+era when a second LLM agent interpreted the plan and called tools one at a time:
+
+1. It looped single-id `memory_delete` across ~486 IDs and burned a ~16-minute budget.
+2. After the prompt was rewritten to mandate `memory_delete_bulk`, the replacement
+   agent invented a "write the IDs to a file with Bash" strategy and ran past its
+   budget reasoning about Windows path mapping.
+
+Neither is a prompt bug — both are the predictable result of leaving a procedure
+to an agent's discretion. Rather than write a stricter prompt, m3 made the wrong
+path *impossible*: the apply step is a deterministic function, so there is no
+procedure left to get creative about.
+
+Both stores share one plan schema (an absent key is a no-op):
+
+| Store | Sections |
+|---|---|
+| memory | `delete` (soft), `delete_hard` (cascade), `link`, `update` |
+| chatlog | `decay`, `dedup` (keep/drop), `promote`, `prune` |
+
+Errors never cross the boundary as exceptions — each section reports its own
+outcome, so a partial failure is visible rather than aborting the batch. Reached
+via the `curate_memory_apply` / `curate_chatlog_apply` MCP tools.
+
+---
+
 ## 🧠 Intelligence Features
 
 M3 uses a local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works.

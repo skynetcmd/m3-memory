@@ -132,11 +132,21 @@ m3 chatlog init --apply-gemini
 
 ---
 
-## Embedder (Tier-2 service — optional but recommended)
+## Embedder (the shared embed server — install this)
 
-The **Tier-1 in-process GGUF embedder** is active from the moment m3 starts —
-no extra steps. The **Tier-2 embed server** (port 8082, launchd user agent)
-improves cold-start performance but is optional. M3 works fully without it.
+The **shared embed server** (“Tier-2”) on `127.0.0.1:8082`, run as a launchd
+user agent, is the **default** embedder: every m3 process sends embed requests
+to it, so one model sits in RAM for the whole machine. Install it — it is not an
+optional extra.
+
+The **in-process embedder** (“Tier-1”, llama.cpp linked into the calling
+process) is **opt-in**, not automatic: it requires `M3_EMBED_INPROC=1` or an
+`.embed_config.json` that permits it. A GGUF on disk alone does **not** enable
+it — m3 deliberately routes to the shared server instead, so a stray model file
+cannot spin up a per-process GPU context. It is worth enabling only for
+high-volume bursts such as bulk file ingestion, and costs one model copy per
+process. See [EMBED_DEPLOYMENT.md](EMBED_DEPLOYMENT.md#naming-one-topology-several-vocabularies)
+for the full naming map.
 
 ### Install the binary first
 
@@ -163,12 +173,12 @@ m3 doctor   # shows Tier-1 / Tier-2 status and embed roundtrip latency
 Run the server directly for the current session:
 
 ```bash
-M3_EMBED_GGUF=~/.m3-memory/_assets/models/bge-m3-Q4_K_M.gguf \
+M3_EMBED_GGUF=~/.m3/models/bge-m3-Q4_K_M.gguf \
     nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &
 ```
 
 Or create the launchd plist manually — see
-[QUICKSTART_MACOS.md § Embedder](QUICKSTART_MACOS.md#3-embedder-tier-2-service--optional-but-recommended)
+[QUICKSTART_MACOS.md § Embedder](QUICKSTART_MACOS.md#3-embedder-the-shared-embed-server--install-this)
 for the ready-to-use XML template.
 
 ---
@@ -194,7 +204,7 @@ for the ready-to-use XML template.
 
 - **`m3 embedder install` fails with a launchd error** — run the server
   directly with `nohup` (see the Embedder section above) or use the manual
-  plist in [QUICKSTART_MACOS.md](QUICKSTART_MACOS.md#3-embedder-tier-2-service--optional-but-recommended).
+  plist in [QUICKSTART_MACOS.md](QUICKSTART_MACOS.md#3-embedder-the-shared-embed-server--install-this).
 
 - **`m3 embedder install` says GGUF is an LFS pointer** — the bundled bge-m3
   model file is tracked via Git LFS. If you cloned m3-memory directly without

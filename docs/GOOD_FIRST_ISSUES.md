@@ -2,7 +2,7 @@
 
 New to M3 Memory? These are great starting points. Each issue is self-contained, well-scoped, and comes with existing scripts or tests to guide you.
 
-Open an issue using the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or [feature request](.github/ISSUE_TEMPLATE/documentation.yml) template and mention which item below you'd like to work on.
+Open an issue using the [bug report](../.github/ISSUE_TEMPLATE/bug_report.yml), [feature request](../.github/ISSUE_TEMPLATE/feature_request.yml) or [documentation](../.github/ISSUE_TEMPLATE/documentation.yml) template and mention which item below you'd like to work on.
 
 ---
 

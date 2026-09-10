@@ -98,7 +98,12 @@ See [FIPS_MODULE_BOUNDARY.md](FIPS_MODULE_BOUNDARY.md) for the full model.
 - Restart the agent completely (not just a new session).
 
 ### Agent can't find previous memories
-- Memories are stored in `~/.m3-memory/memory/agent_memory.db` by default
-  (override with `M3_MEMORY_ROOT`).
-- The bridge resolves the DB from `M3_MEMORY_ROOT` regardless of the
-  directory `m3` was launched from.
+- Memories live under the **engine root**: `~/.m3/engine/agent_memory.db` by
+  default. Resolution is `M3_ENGINE_ROOT` > `M3_MEMORY_ROOT/engine` >
+  `~/.m3/engine`. Ask m3 rather than guessing: `m3 chatlog status --json`
+  reports the resolved backend and roots.
+- ⚠ `~/.m3-memory/` is the **retired** unified root. If it still exists it
+  holds only backups and stale config — a DB found there is not your live
+  store. `bin/homecoming.py` migrates a legacy layout to the split roots.
+- The bridge resolves the DB from those roots regardless of the directory
+  `m3` was launched from.

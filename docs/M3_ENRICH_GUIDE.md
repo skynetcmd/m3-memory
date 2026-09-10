@@ -181,8 +181,12 @@ your own observations).
 1. **Profile smoke** — sends a trivial empty-input prompt to the SLM to
    verify the endpoint is reachable + auth works. Aborts with a clear
    error if not.
-2. **DB backup** — copies each target DB to `~/.m3-memory/backups/` with
-   a timestamp suffix.
+2. **DB backup** — copies each target DB to `<M3_MEMORY_ROOT>/backups/`
+   with a timestamp suffix (`~/.m3-memory/backups/` by default). Note this
+   is the *memory root*, which is separate from the engine root holding the
+   live DBs (`~/.m3/engine`) — see
+   [Homecoming Architecture](../CLAUDE.md). Backups deliberately do not sit
+   beside the databases they protect.
 3. **Migration 025** — applies the observation_queue / reflector_queue
    migration if missing (auto-runs the SQL directly; no migrate-script
    dependency).
