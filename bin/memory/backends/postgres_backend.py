@@ -684,6 +684,23 @@ class PostgresBackend:
         """Positional binds for psycopg: ``placeholder(3) -> "%s, %s, %s"``."""
         return POSTGRES.placeholder(n)
 
+    def list_tables(self, conn: object) -> "set[str]":
+        """User tables in the ACTIVE schema (current_schema(), not a hardcoded
+        'public').
+
+        Deployments that put m3 in a named schema — or set a search_path so a
+        warehouse and a primary can share a cluster — would otherwise get the
+        wrong answer, silently, since 'public' still exists and would just look
+        empty. information_schema already excludes pg_catalog and
+        information_schema themselves.
+        """
+        cur = conn.cursor()  # type: ignore[attr-defined]
+        cur.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'"
+        )
+        return {r[0] for r in cur.fetchall()}
+
     def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
         """No-op: PostgreSQL manages its own WAL (checkpointer + bgwriter).
 

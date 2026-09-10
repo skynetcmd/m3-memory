@@ -15,29 +15,23 @@ auth_utils.get_api_key's vault read for the original incident).
 Skips cleanly without a reachable cluster. DSN from M3_PRIMARY_PG_URL/M3_PG_URL
 (never PG_URL -- that's the warehouse var).
 
-⚠ FINDING (2026-09-09, verified on WSL PG 16 m3_test at schema_version 48):
-`synchronized_secrets` DOES NOT EXIST in the PostgreSQL PRIMARY schema. It is
-defined for SQLite (migrations 003_encrypted_secrets.sql,
-007_synchronized_secrets.sql) and for the WAREHOUSE
-(pg_warehouse_chatlog_v1.sql, as `m3_warehouse.synchronized_secrets`), but
-`pg_primary_v1.sql` contains ZERO references and no numbered pg_NNN migration
-adds it.
+FIXED HERE (pg_051): `synchronized_secrets` was missing from the PostgreSQL
+PRIMARY schema. It existed on SQLite (003_encrypted_secrets.sql,
+007_synchronized_secrets.sql) and in the WAREHOUSE
+(m3_warehouse.synchronized_secrets), but pg_primary_v1.sql had zero references
+and no numbered pg_NNN migration added it.
 
-Consequences, measured rather than inferred:
-  * On a PG primary the vault tier of auth_utils.get_api_key is structurally
-    dead -- the query raises UndefinedTable, which that function swallows, so
-    every vault-stored secret silently resolves to None. Only env/keyring work.
-  * `_vault_row_exists` therefore always returns False there, so
-    PRESENT_UNDECRYPTABLE can never fire on PG. It degrades to MISSING, which is
-    the safe direction (the operator is told to generate a token, and on PG
-    there is genuinely no vault row to clobber) -- but the diagnosis is weaker
-    than on SQLite.
+The consequence was silent and total: auth_utils.get_api_key's vault tier
+queries that table unconditionally (deliberately, with no os.path.exists gate,
+because on PG the vault has no FILE). With the table absent the query raised
+UndefinedTable, get_api_key swallowed it, and EVERY vault-stored secret resolved
+to None on a PostgreSQL primary -- no error, just a credential that read as "not
+configured". Same class as pg_049/pg_050: something SQLite gets from the shared
+migration chain that the PG schema must be told about explicitly.
 
-So these tests SKIP on a stock PG primary, and that skip is correct rather than
-a gap in this file. Closing it means adding the table to the PG primary schema,
-which is an m3 schema-parity change well outside auth's scope; it is recorded
-here so the next reader does not re-derive it. These tests become live the
-moment that parity lands.
+Verified after pg_051 on live PG 16: set_api_key -> get_api_key round-trips, and
+these tests run instead of skipping. A deployment still at v50 will skip them,
+which is correct -- the fixture probes for the table rather than assuming it.
 """
 from __future__ import annotations
 

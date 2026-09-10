@@ -74,6 +74,13 @@ _SHARED_CORE_TABLES = {
     "memory_archive",
     "entity_coalesce_candidates",
     "entity_coalesce_embeddings",
+    # Added after pg_051: the encrypted secrets vault existed on SQLite and in the
+    # warehouse schema but NOT on the PG primary, and this allowlist never named
+    # it -- so the parity gate could not see it. See
+    # test_every_sqlite_core_table_exists_on_pg below, which starts from the
+    # SQLite schema instead of this list precisely so the next such table is
+    # caught without anyone remembering to add it here.
+    "synchronized_secrets",
 }
 
 
@@ -95,6 +102,36 @@ def _sqlite_columns() -> dict:
         out[t] = {r[1] for r in rows}  # r[1] = column name
     conn.close()
     return out
+
+
+def _sqlite_all_tables() -> "set[str]":
+    """Every real table in a freshly migrated SQLite schema.
+
+    Unlike `_sqlite_columns`, this does NOT filter to `_SHARED_CORE_TABLES` --
+    the completeness gate has to enumerate the source of truth, or it can only
+    ever re-check tables somebody already listed.
+    """
+    import migrate_memory as m
+
+    d = tempfile.mkdtemp()
+    db = os.path.join(d, "parity_all.db")
+    conn = sqlite3.connect(db)
+    m.init_migrations_table(conn)
+    migs = m.discover_migrations(str(_MIGRATIONS))
+    for v in sorted(migs):
+        m.apply_migration(conn, v, migs[v]["name"], migs[v]["up"])
+    from memory.backends.sqlite_backend import SqliteBackend
+
+    try:
+        return SqliteBackend().list_tables(conn)
+    finally:
+        conn.close()
+
+
+def _pg_all_tables(backend) -> "set[str]":
+    """Every table in the live PG store's active schema, via the seam."""
+    with backend.connection() as c:
+        return backend.list_tables(c)
 
 
 def _pg_columns(backend) -> dict:
@@ -156,6 +193,54 @@ _ALLOWED_BACKEND_ONLY = {
     "memory_items": {"only_pg": {"search_vector", "stage1_kg_done"}},
     "memory_relationships": {"only_pg": {"weight"}},
 }
+
+
+# SQLite tables that are deliberately absent from the PG primary, with the reason.
+# Anything NOT listed here and NOT on PG is drift — see the completeness test.
+_SQLITE_ONLY_TABLES = {
+    # FTS5 virtual table + its shadow tables; PG uses a tsvector column on
+    # memory_items instead. No PG analogue by design.
+    "memory_items_fts",
+    "memory_items_fts_data",
+    "memory_items_fts_idx",
+    "memory_items_fts_content",
+    "memory_items_fts_docsize",
+    "memory_items_fts_config",
+    # SQLite migration bookkeeping; PG tracks versions in schema_versions.
+    "schema_migrations",
+    # SQLite-side sync bookkeeping, BY DESIGN. bin/pg_sync.py documents it as
+    # "SQLite side, per direction+target", only touches it through `sl_cur`, and
+    # creates it itself (:146-155). It records how far THIS local store has synced
+    # to a remote; a copy on the PG side would be a second, divergent bookkeeping
+    # row for the same relationship. Verified by reading the call sites, not
+    # assumed from the name.
+    "sync_watermarks",
+}
+
+
+def test_every_sqlite_core_table_exists_on_pg(pg):
+    """Completeness gate: start from the SQLite SCHEMA, not from a curated list.
+
+    `_SHARED_CORE_TABLES` is hand-maintained, so it can only catch drift in tables
+    somebody remembered to add to it. A table that exists on SQLite and was never
+    mirrored to PG is INVISIBLE to a check that iterates that list -- which is
+    exactly how `synchronized_secrets` (the encrypted secrets vault) shipped
+    missing from the PG primary schema until pg_051, silently disabling the vault
+    tier of auth_utils.get_api_key on every PostgreSQL deployment.
+
+    Same shape as the `test_every_cli_tool_has_a_page` fix: a gate that iterates
+    EXISTING artifacts is a freshness check, not a completeness check. This one
+    enumerates the source of truth and requires each entry to be either present
+    on PG or explicitly listed as SQLite-only with a reason.
+    """
+    sqlite_tables = set(_sqlite_all_tables())
+    pg_tables = _pg_all_tables(pg)
+    missing = sorted(sqlite_tables - pg_tables - _SQLITE_ONLY_TABLES)
+    assert not missing, (
+        "tables exist on SQLite but not on the PostgreSQL primary schema — add a "
+        "pg_NNN migration mirroring them, or list them in _SQLITE_ONLY_TABLES "
+        f"with the reason they are backend-specific:\n{missing}"
+    )
 
 
 def test_column_parity_sqlite_vs_pg(pg):

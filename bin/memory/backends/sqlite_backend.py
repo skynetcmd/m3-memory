@@ -300,6 +300,21 @@ class SqliteBackend:
             raise ValueError(f"placeholder count must be >= 1, got {n}")
         return ", ".join(["?"] * n)
 
+    def list_tables(self, conn: object) -> "set[str]":
+        """User tables from sqlite_master, minus SQLite's own internal names.
+
+        `sqlite_%` covers sqlite_sequence, sqlite_stat*, and the autoindex
+        entries. FTS5 shadow tables (``*_fts_data`` etc.) are NOT filtered here:
+        they are real tables in this store, and whether they count as drift is
+        the caller's decision, not the backend's.
+        """
+        cur = conn.cursor()  # type: ignore[attr-defined]
+        cur.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+        return {r[0] for r in cur.fetchall()}
+
     def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
         """WAL checkpoint: PASSIVE mid-batch, TRUNCATE at clean exit (§10).
 

@@ -333,6 +333,31 @@ class StorageBackend(Protocol):
         """
         ...
 
+    def list_tables(self, conn: object) -> "set[str]":
+        """Every user table in this store's active schema. Backend-blind.
+
+        How you enumerate tables is one of the least portable things in SQL:
+
+          SQLite   — ``sqlite_master WHERE type='table'``, plus the internal
+                     ``sqlite_%`` names to filter out.
+          Postgres — ``information_schema.tables WHERE table_schema =
+                      current_schema()``.
+          MySQL/MariaDB — ``information_schema.tables`` too, but keyed on
+                     ``table_schema = DATABASE()`` rather than a search path.
+
+        Exists so schema-parity checks, doctors and migration tooling can ask
+        "what is actually here?" without embedding one backend's catalog query —
+        the same drift `placeholder()` exists to prevent for binds. A caller that
+        hardcodes `sqlite_master` silently returns nothing on every other engine
+        rather than failing, which is the worst shape for a completeness check.
+
+        Returns bare table NAMES with no schema qualifier, so results compare
+        directly across backends. Excludes each engine's internal catalog tables;
+        includes everything else, since deciding what is "core" is the caller's
+        job, not the backend's.
+        """
+        ...
+
     def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
         """Bound the write-ahead log during a long-running write. Backend-blind.
 
