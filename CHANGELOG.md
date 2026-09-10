@@ -19,6 +19,12 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+---
+
+## [2026.9.10.0] — 2026-09-10 — the sync that reported success while moving nothing
+
 ### ⚠ Breaking
 
 - **A PostgreSQL primary now REFUSES to sync rather than silently syncing
