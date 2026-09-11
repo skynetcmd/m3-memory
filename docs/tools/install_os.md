@@ -1,8 +1,8 @@
 ---
 tool: install_os.py
-sha1: 0ef6da92e737
-mtime_utc: 2026-08-07T23:53:52.832239+00:00
-generated_utc: 2026-08-08T14:40:50.168034+00:00
+sha1: 053db4a0a641
+mtime_utc: 2026-09-11T11:57:11.489302+00:00
+generated_utc: 2026-09-11T13:11:51.333275+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 278)
+- `def main()` (line 299)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -45,13 +45,13 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['fnm', '--version']`` (line 170)
-- `subprocess.run()  → `['node', '--version']`` (line 145)
-- `subprocess.run()  → `['nvm', 'version']`` (line 136)
-- `subprocess.run()  → `['winget', '--version']`` (line 155)
-- `subprocess.run()  → `[python_exe, pg_sync_script]`` (line 342)
-- `subprocess.run()  → `cmd`` (line 57)
-- `subprocess.run()` (line 156)
+- `subprocess.run()  → `['fnm', '--version']`` (line 191)
+- `subprocess.run()  → `['node', '--version']`` (line 166)
+- `subprocess.run()  → `['nvm', 'version']`` (line 157)
+- `subprocess.run()  → `['winget', '--version']`` (line 176)
+- `subprocess.run()  → `[python_exe, pg_sync_script]`` (line 373)
+- `subprocess.run()  → `cmd`` (line 70)
+- `subprocess.run()` (line 177)
 
 
 ---

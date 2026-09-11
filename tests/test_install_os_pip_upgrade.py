@@ -26,7 +26,13 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "m3_memory" / "install_os.py"
+# The REPO-ROOT file is the source of truth. m3_memory/install_os.py is a BUILD
+# ARTIFACT that setup.py stages from it (_stage_root_file) and .gitignore:231
+# excludes -- editing that copy changes nothing that ships, and a test pointed
+# at it would validate a file no commit contains. That is not hypothetical:
+# the first version of this fix edited the staged copy, `git status` showed
+# nothing, and the commit carried only this test.
+SRC = Path(__file__).resolve().parents[1] / "install_os.py"
 
 
 @pytest.fixture(scope="module")

@@ -52,12 +52,33 @@ DB_DIR = os.path.join(M3_ROOT, "memory")
 LOGS_DIR = os.path.join(M3_ROOT, "logs")
 REQ_FILE = os.path.join(BASE_DIR, "requirements.txt")
 
-def run_cmd(cmd, env=None):
+def run_cmd(cmd, env=None, *, optional=False, label=None):
+    """Run a command. Aborts the install on failure unless ``optional``.
+
+    ``optional=True`` is for steps whose failure does not break the install:
+    they print ONE quiet line instead of a red multi-line dump plus sys.exit.
+    The bar is strict -- a step qualifies only when m3 works correctly without
+    it. This is not a way to silence a real failure, and the default stays
+    fatal.
+
+    Why it exists: the pip self-upgrade below is cosmetic, but a fatal run_cmd
+    turned it into "OS setup failed (code 1)" on a routine Windows upgrade. A
+    scary error for a step that changes nothing teaches users to ignore the
+    next one, which might be real.
+    """
     print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, env=env)
+    result = subprocess.run(
+        cmd, env=env,
+        **({"capture_output": True, "text": True} if optional else {}),
+    )
     if result.returncode != 0:
+        if optional:
+            print(f"  -> skipped: {label or ' '.join(cmd)} "
+                  f"(non-critical, exit {result.returncode})")
+            return False
         print(f"\n[ERROR] Command failed: {' '.join(cmd)}", file=sys.stderr)
         sys.exit(result.returncode)
+    return True
 
 def setup_master_key(python_exe):
     """Prompts the user to configure the AGENT_OS_MASTER_KEY using the python keyring."""
@@ -308,7 +329,17 @@ def main():
 
     # 3. Install dependencies
     print("\n[3/6] Installing cross-platform dependencies...")
-    run_cmd([pip_exe, "install", "--upgrade", "pip"])
+    # `python -m pip`, never `pip.exe`: on Windows pip REFUSES to replace its own
+    # running executable and exits non-zero with
+    #   "ERROR: To modify pip, please run: <python> -m pip install --upgrade pip"
+    # That is pip working as designed, not an m3 failure -- but run_cmd's default
+    # is fatal, so it aborted the whole OS-setup step behind a red multi-line
+    # dump during an upgrade. Users reasonably read that as severe.
+    #
+    # Optional either way: a current pip is a convenience, not a requirement.
+    # Every dependency install below works on the pip the venv shipped with.
+    run_cmd([python_exe, "-m", "pip", "install", "--upgrade", "pip"],
+            optional=True, label="pip self-upgrade")
     if os.path.exists(REQ_FILE):
         run_cmd([pip_exe, "install", "-r", REQ_FILE])
     else:
