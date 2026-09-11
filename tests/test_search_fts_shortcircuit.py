@@ -510,3 +510,42 @@ def test_k_is_filled_when_exact_matches_are_fewer_than_k(tmp_path, monkeypatch):
     ids_big = asyncio.run(_ids(mc, "core tenets", search_mode="hybrid", k=50))
     assert len(ids_big) == 5, f"store has 5 rows; got {len(ids_big)}"
     assert set(ids_big[:4]) == exact
+
+
+def test_fill_never_fails_when_the_store_has_fewer_than_k(tmp_path, monkeypatch):
+    """Asking for more than exists returns everything, not an error.
+
+    The fill-to-k change must not turn "k is bigger than my store" into a
+    failure, a hang, or padding with junk. A 5-row store asked for k=1000
+    returns 5.
+
+    Three independent safeguards make this structural rather than lucky:
+    the fill slice is ``_new[: max(0, k - len(ranked))]`` (a short list just
+    yields fewer), the top-up is wrapped in ``except Exception`` so a failed
+    fill leaves the original results intact, and a ``None`` from the semantic
+    pass is coerced with ``or []``.
+    """
+    import asyncio
+
+    mc = _build(tmp_path, monkeypatch, embed_ok=True)
+
+    # The fixture store holds 5 rows. Ask for progressively more.
+    for k in (1, 5, 10, 100, 1000):
+        ids = asyncio.run(_ids(mc, "core tenets", search_mode="hybrid", k=k))
+        assert len(ids) == min(k, 5), (
+            f"k={k} against a 5-row store returned {len(ids)}; expected "
+            f"{min(k, 5)} -- fill must cap at what exists"
+        )
+        assert len(ids) == len(set(ids)), f"k={k} returned duplicate ids"
+
+    # Degenerate k must not RAISE. What it returns is not pinned here: k<=0 is
+    # not a documented input, and the two paths disagree (the mmr=False fixture
+    # returns rows where a default call returns none). The contract this test
+    # exists for is "no crash", so that is what it asserts -- asserting [] would
+    # be pinning undefined behaviour.
+    for k in (0, -1):
+        asyncio.run(_ids(mc, "core tenets", search_mode="hybrid", k=k))
+
+    # A query matching nothing lexically still must not error.
+    none_ids = asyncio.run(_ids(mc, "zzzznonexistentphrase", search_mode="hybrid", k=10))
+    assert len(none_ids) <= 5
