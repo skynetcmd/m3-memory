@@ -16,6 +16,14 @@ The fix fetches the top-N bm25 matches and returns EVERY row whose content or
 title contains the exact query phrase. These tests pin both properties, and the
 embedder-down case (§1 offline-capable, §3 fail-safe).
 
+UPDATED 2026-09-11: the short-circuit no longer early-returns when it finds
+FEWER exact matches than k. It used to, which meant a k=10 query with 7 exact
+hits returned 7 rows while the store held hundreds of relevant ones -- and,
+perversely, a query matching NOTHING did better, because zero FTS hits falls
+through to a semantic pass that fills k. Exact matches still lead; the shortfall
+is filled from the ranked/semantic path. These tests now pin "exact matches are
+present AND on top" rather than "nothing else is present".
+
 Pattern mirrors test_agent_isolation.py: drive the real impl against a
 full-schema temp DB with the query embedder stubbed for determinism.
 """
@@ -101,8 +109,8 @@ def _patch(monkeypatch, db_path, *, embed_ok=True):
     return memory_core
 
 
-async def _ids(mc, query, **kw):
-    res = await mc.memory_search_scored_impl(query=query, k=20, mmr=False, **kw)
+async def _ids(mc, query, *, k=20, **kw):
+    res = await mc.memory_search_scored_impl(query=query, k=k, mmr=False, **kw)
     return [r[1]["id"] for r in (res or [])]
 
 
@@ -136,14 +144,24 @@ def test_shortcircuit_returns_all_exact_matches(tmp_path, monkeypatch):
     ids = asyncio.run(_ids(mc, "core tenets", search_mode="hybrid"))
 
     # All four rows containing the exact phrase (three in content, one in title)
-    # must be present; the decoy (FTS-matches "tenets" only) must not.
-    assert "aaaaaaaa-0000-0000-0000-000000000001" in ids
-    assert "bbbbbbbb-0000-0000-0000-000000000002" in ids
-    assert "cccccccc-0000-0000-0000-000000000003" in ids
-    assert "dddddddd-0000-0000-0000-000000000004" in ids
-    assert "eeeeeeee-0000-0000-0000-000000000005" not in ids
+    # must be present -- that is what this file exists to pin.
+    exact = ["aaaaaaaa-0000-0000-0000-000000000001",
+             "bbbbbbbb-0000-0000-0000-000000000002",
+             "cccccccc-0000-0000-0000-000000000003",
+             "dddddddd-0000-0000-0000-000000000004"]
+    for _id in exact:
+        assert _id in ids
     # Regression guard: the old code returned exactly 1.
     assert len([i for i in ids if i.startswith(("aaaa", "bbbb", "cccc", "dddd"))]) >= 4
+
+    # The exact matches must LEAD. The decoy (FTS-matches "tenets" only) may now
+    # appear BELOW them: this query asks for k=20 against a 5-row store, and a
+    # caller who asks for 20 gets the best 20 available rather than silently
+    # fewer. What must never happen is a decoy outranking a literal match.
+    assert ids[:4] == [i for i in ids if i in exact], (
+        "exact-substring matches must occupy the top positions"
+    )
+    assert set(exact).issubset(ids)
 
 
 def test_shortcircuit_works_when_embedder_down(tmp_path, monkeypatch):
@@ -455,3 +473,40 @@ async def test_fallback_filters_compose(tmp_path, monkeypatch):
         "no fixture row is both procedure AND agent-b; a non-empty result means "
         f"the predicates did not compose on the degrade path: {hits}"
     )
+
+
+def test_k_is_filled_when_exact_matches_are_fewer_than_k(tmp_path, monkeypatch):
+    """A caller asking for k gets k, not "however many matched lexically".
+
+    The hybrid candidate SQL requires an FTS MATCH, so its pool could never
+    exceed the lexical match count -- a query matching 7 rows returned 7 for
+    k=10 while the store held hundreds of relevant ones. Worse, the behaviour
+    was non-monotonic: a query matching NOTHING returned a full k, because zero
+    FTS hits falls through to a semantic pass that fills. Matching *a little*
+    was penalised against matching *nothing*.
+
+    Exact matches must still LEAD -- the fill goes underneath, never displacing
+    a literal match.
+    """
+    import asyncio
+
+    mc = _build(tmp_path, monkeypatch, embed_ok=True)
+    exact = {
+        "aaaaaaaa-0000-0000-0000-000000000001",
+        "bbbbbbbb-0000-0000-0000-000000000002",
+        "cccccccc-0000-0000-0000-000000000003",
+        "dddddddd-0000-0000-0000-000000000004",
+    }
+
+    # 4 exact matches in a 5-row store; ask for 5.
+    ids = asyncio.run(_ids(mc, "core tenets", search_mode="hybrid", k=5))
+    assert len(ids) == 5, (
+        f"asked for k=5 with 5 rows available, got {len(ids)} -- the search is "
+        "capping at the lexical match count instead of filling k"
+    )
+    assert set(ids[:4]) == exact, "exact matches must occupy the top positions"
+
+    # Asking for MORE than the store holds returns everything, not an error.
+    ids_big = asyncio.run(_ids(mc, "core tenets", search_mode="hybrid", k=50))
+    assert len(ids_big) == 5, f"store has 5 rows; got {len(ids_big)}"
+    assert set(ids_big[:4]) == exact

@@ -647,6 +647,8 @@ async def memory_search_scored_impl(
     from memory.backends import active_backend as _active_backend_sc
 
     _sc_backend = _active_backend_sc()
+    # Exact-substring hits found below but fewer than k; merged at the return.
+    _sc_exact: "list | None" = None
     if len(query.strip()) > 3 and not intent_hint and search_mode in ("hybrid", "fts5"):
         try:
             # Gating: Reject generic conversational queries from short-circuiting
@@ -712,7 +714,7 @@ async def memory_search_scored_impl(
                     # Direct specific hit: exact query phrase in content or title.
                     if query_lower in content_lower or query_lower in title_lower:
                         exact_hits.append((1.0, hit))
-                if exact_hits:
+                if len(exact_hits) >= k:
                     logger.info(
                         "FTS Short-Circuit early exit for query %r: %d exact match(es)",
                         query, len(exact_hits),
@@ -720,6 +722,25 @@ async def memory_search_scored_impl(
                     # bm25 order preserved (rows came back ORDER BY _bm25 ASC);
                     # all share score 1.0 as exact-substring hits. Cap at k.
                     return exact_hits[:k]
+                if exact_hits:
+                    # FEWER exact hits than the caller asked for. Returning just
+                    # these answered k=10 with 7 rows while the store held
+                    # hundreds of relevant ones -- and, perversely, a query
+                    # matching NOTHING did better, because zero FTS hits falls
+                    # through to a semantic pass that fills k.
+                    #
+                    # So don't early-exit. Stage the exact hits, run the normal
+                    # path, and merge at the end: exact hits first (they are
+                    # exact), semantic neighbours filling the remainder. The
+                    # optimisation this short-circuit exists for -- skipping an
+                    # EMBED -- is preserved for the >= k case above, which is
+                    # the only case where it could ever have answered in full.
+                    _sc_exact = exact_hits
+                    logger.info(
+                        "FTS Short-Circuit found %d exact match(es) for %r, "
+                        "fewer than k=%d: filling from the ranked path",
+                        len(exact_hits), query, k,
+                    )
         except Exception as exc:
             logger.debug("FTS Short-circuit check failed (non-fatal): %s", exc)
 
@@ -1053,9 +1074,19 @@ async def memory_search_scored_impl(
 
     rows, has_vec = await asyncio.to_thread(_fetch_candidates)
     if rows is _RECURSE:
-        return await _recurse_semantic()
+        _sem = await _recurse_semantic()
+        if _sc_exact:
+            _seen = {it.get("id") for _, it in _sc_exact if isinstance(it, dict)}
+            return (_sc_exact + [
+                (sc, it) for sc, it in (_sem or [])
+                if isinstance(it, dict) and it.get("id") not in _seen
+            ])[:k]
+        return _sem
     if rows is _EMPTY:
-        return []
+        # Staging the exact hits must never LOSE them: a dim-mismatched embedder
+        # makes the candidate fetch yield nothing, and returning [] here turned
+        # a good exact match into an empty result.
+        return _sc_exact[:k] if _sc_exact else []
 
     scored: list[tuple[float, dict]] = []
     # Under max-kind, trim AFTER dedup so SEARCH_ROW_CAP counts unique items,
@@ -1333,6 +1364,48 @@ async def memory_search_scored_impl(
 
     if ranked and _two_stage_observations_gate():
         ranked = await _apply_two_stage_expansion(ranked, k, user_id=user_id, scope=scope)
+
+    if _sc_exact:
+        # Exact-substring hits lead: nothing semantic should outrank a literal
+        # match. The ranked remainder fills to k, minus anything already there.
+        _seen = {it.get("id") for _, it in _sc_exact if isinstance(it, dict)}
+        _fill = [
+            (sc, it) for sc, it in (ranked or [])
+            if isinstance(it, dict) and it.get("id") not in _seen
+        ]
+        ranked = _sc_exact + _fill
+
+    # TOP UP TO k FROM SEMANTIC. The hybrid candidate SQL requires an FTS MATCH,
+    # so its pool can never exceed the LEXICAL match count: a query matching 7
+    # rows returned 7 for k=10 even with hundreds of relevant rows in the store.
+    # A query matching ZERO already falls through to a semantic pass and fills k,
+    # so the old behaviour rewarded matching nothing over matching a little.
+    #
+    # If the caller asked for k, give them the best k available: every lexical
+    # hit keeps its earned position, then semantic neighbours fill the shortfall.
+    # Depth-gated so the semantic pass cannot recurse into another top-up.
+    if (
+        _depth == 0
+        and search_mode == "hybrid"
+        and ranked
+        and len(ranked) < k
+    ):
+        _have = {it.get("id") for _, it in ranked if isinstance(it, dict)}
+        try:
+            _sem = await _recurse_semantic()
+        except Exception as exc:  # a top-up must never break a working search
+            logger.debug("semantic top-up failed (non-fatal): %s", exc)
+            _sem = []
+        # Sort the fill by score before appending: the semantic pass returns its
+        # own ranking, but appending in arrival order left the tail unsorted
+        # (0.6548, 0.6363, 0.6487). Lexical hits keep their positions ahead of
+        # it regardless -- only the filled tail is ordered here.
+        _new = [
+            (_sc, _it) for _sc, _it in (_sem or [])
+            if isinstance(_it, dict) and _it.get("id") not in _have
+        ]
+        _new.sort(key=lambda t: t[0], reverse=True)
+        ranked.extend(_new[: max(0, k - len(ranked))])
 
     return ranked
 

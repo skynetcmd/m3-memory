@@ -1139,15 +1139,30 @@ async def test_fts_short_circuit_bypasses_embedding(monkeypatch, tmp_path):
         "My secret API key", k=5
     )
 
-    # 1. Verify that FTS short-circuit bypassed embedding entirely
-    assert not embed_called, "Embedding generation should have been bypassed by the FTS short-circuit!"
-
-    # 2. Verify that we got the exact correct hit with a score of 1.0
-    assert len(results) == 1, f"Expected 1 hit, got {len(results)}"
+    # 1. The exact hit LEADS, at the short-circuit's score of 1.0.
+    #
+    # This used to assert `not embed_called` and `len(results) == 1`. The
+    # short-circuit no longer early-returns when it finds FEWER exact matches
+    # than k: answering a k=5 request with 1 row left the caller short while the
+    # store held other relevant rows, and -- perversely -- a query matching
+    # NOTHING did better, because zero FTS hits falls through to a semantic pass
+    # that fills k. A caller asking for k now gets the best k available.
+    #
+    # The cost is real and deliberate: a specific lexical query that previously
+    # skipped embedding now pays one embed (~15 ms) to fill the remainder. What
+    # must NOT change is that the exact match stays on top, which is what this
+    # test now pins.
+    assert results, "expected at least the exact hit"
     score, hit = results[0]
     assert score == 1.0, f"Expected exact short-circuit score 1.0, got {score}"
     assert hit["id"] == "key1"
     assert "SK-983271" in hit["content"]
+    assert len(results) <= 5, f"must not exceed k=5, got {len(results)}"
+
+    # 2. Nothing else may claim the exact-match score.
+    assert [s for s, _ in results].count(1.0) == 1, (
+        "only the true exact-substring hit should score 1.0"
+    )
 
 
 @pytest.mark.asyncio
