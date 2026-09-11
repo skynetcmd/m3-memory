@@ -23,6 +23,72 @@ _Nothing yet._
 
 ---
 
+## [2026.9.11.0] — 2026-09-11 — the installer builds one environment, not two
+
+One install fix and the CI hygiene needed to prove it. No search, API, or
+behaviour change.
+
+### Fixed
+
+- **The installer built a second virtualenv *inside* the installed payload, then
+  ran every later step with it.** `bin/setup_memory.py` derived its interpreter
+  from `__file__/../../.venv` unconditionally. On an installed wheel that
+  resolves to `<site-packages>/m3_memory`, so the installer created a nested
+  environment there and drove the rest of the install with a Python that has no
+  `m3_memory` importable. The visible symptoms were a failed
+  `from m3_memory.embedder_admin import seed_shared_config` ("No module named
+  'm3_memory'") and a spurious "requirements.txt not found"; the invisible ones
+  were ~170 MB of duplicated dependencies nothing used, and agent configs
+  pointing at a stray interpreter until `m3 doctor --fix` repointed them.
+
+  `generate_configs.py` already carried the correct guard for exactly this case
+  (`_is_installed_layout`, whose docstring names the footgun). `setup_memory.py`
+  now **imports that predicate** rather than keeping a copy of it — one owner, so
+  the two cannot drift about which interpreter is canonical. An installed layout
+  reuses the interpreter that launched it and creates nothing; a source checkout
+  keeps building its own venv as before.
+
+  Existing installs keep the stray `<site-packages>/m3_memory/.venv` until it is
+  deleted by hand — it is inert, and nothing recreates it after this release.
+
+### Changed
+
+- **Lint and type checking now pass on `main`, which unblocked the test matrix.**
+  Ruff (4 findings) and Mypy (16) were failing repo-wide, and both gate the test
+  jobs — so `Test on ubuntu-latest` and `E2E install + upgrade` had been
+  reporting *skipped*, not passing, on every pull request. Clearing them is what
+  lets the real gates run. Notable: one annotation on a deliberately
+  heterogeneous table spec cleared nine errors at once; a `status, _ = "DIFF",
+  problems.append(...)` in `search_differential.py` was hiding a side effect
+  inside tuple unpacking; and the POSIX-only `resource` block in the cognitive
+  loop was already correctly guarded — only the type checker's Windows view was
+  wrong, so the attribute lookups are ignored rather than the working
+  cross-platform code restructured.
+
+- **Two false-positive Bandit B104 findings annotated.** Both compare
+  `resolved_host` to `"0.0.0.0"` to decide what to *print*; neither binds a
+  socket (the real bind passes a variable, which B104 does not flag). They failed
+  the security job before `pip-audit` could run, so no pull request could pass it.
+  Annotated with the idiom already used elsewhere in the same file.
+
+### Added
+
+- **`docs/MCP_DISCONNECTS.md`** — why an agent sometimes reports m3 as
+  unreachable mid-session, and why memory is not at risk when it does. Chatlog
+  capture writes to the database directly and does not travel over the MCP
+  connection; the page shows the measurements rather than asserting it, explains
+  that the client owns the stdio pipe so only the client can restore it, and
+  records why the HTTP transport remains opt-in rather than the default. Linked
+  from the FAQ and TROUBLESHOOTING.
+
+- **`tests/test_setup_memory_interpreter.py`** — eleven tests pinning interpreter
+  resolution under both layouts. They drive the module as a *script*, because the
+  defect lived in module-level control flow that importing a helper would never
+  reach, and they assert the exit code first: an "assert no nested venv" check
+  passes on a crash, which fooled an earlier draft of this fix.
+
+---
+
 ## [2026.9.10.2] — 2026-09-11 — the install papercuts
 
 Three install/config fixes, all found by running a real upgrade rather than a
