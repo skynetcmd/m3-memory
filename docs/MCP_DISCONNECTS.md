@@ -1,9 +1,10 @@
 # Why your agent says "m3 is unreachable" — and why your memory is fine
 
 **Short version:** the memory server did not crash and your data is not lost. The
-*client* (Claude Code, and potentially other MCP hosts) dropped the pipe it holds
-to the server process. This is a known, documented limitation in MCP client
-lifecycle management — not an m3 failure — and one command fixes it:
+*client* dropped the pipe it holds to the server process. This is a known,
+documented limitation in MCP client lifecycle management — not an m3 failure —
+and it can affect **any agent that reaches m3 over stdio**, which is all of them
+by default. One command fixes it, in about a second, with nothing at risk:
 
 ```
 /mcp
@@ -101,19 +102,24 @@ handshook perfectly in 677 ms.
 
 ## Does this affect other agents (Antigravity, Gemini CLI, OpenCode)?
 
-**Structurally exposed: yes. Observed: only in Claude Code so far.** We would
-rather state that precisely than guess in either direction.
+**Assume every stdio agent is at risk.** We have measured the drop in Claude
+Code; we have *not* yet verified the others, and absence of a report is not
+evidence of immunity. Every host we wire registers m3 over **stdio**, which means
+every one of them hands its server's lifetime to the client — the client owns the
+pipe, so only the client can restore it. Any of them could exhibit this.
 
-Every host we wire registers m3 over **stdio**, so all of them share the property
-that makes this possible — the client owns the pipe, so only the client can
-restore it:
+| Host | m3 transport | At risk? | Verified by us |
+|---|---|---|---|
+| Claude Code | stdio | **yes** | **confirmed** — measured repeatedly, two concurrent sessions |
+| Antigravity CLI | stdio | **yes — same exposure** | not yet verified |
+| Gemini CLI | stdio | **yes — same exposure** | not yet verified (has separate stdio defects upstream) |
+| OpenCode | stdio | **yes — same exposure** | not yet verified |
 
-| Host | m3 transport | Drop observed by us |
-|---|---|---|
-| Claude Code | stdio | **yes** — measured repeatedly, two concurrent sessions |
-| Antigravity CLI | stdio | not observed; not ruled out |
-| Gemini CLI | stdio | not observed; has its own separate stdio defects upstream |
-| OpenCode | stdio | not observed |
+Read the right-hand column as "what we have tested," not as a risk rating. The
+left column is the one that matters for planning: **if your agent talks to m3
+over stdio, plan for the possibility that its tools can vanish mid-session.** The
+remedy and the data-safety guarantee are identical everywhere, so there is
+nothing extra to prepare — reconnect and carry on.
 
 The disconnect is a *client lifecycle* behaviour, so sharing the transport does
 not guarantee sharing the bug — each client decides when to tear a server down.
@@ -130,6 +136,41 @@ radius, not the one described on this page.
 and version plus `m3 doctor` output. The recovery is whatever that host's
 reconnect action is (Antigravity: reload the server from the MCP manager), and
 the data-safety story is identical: capture never went through MCP.
+
+## Reconnecting is a low-risk, routine action
+
+Worth stating plainly, because "restart the memory server" *sounds* consequential
+and is not. **Reconnecting costs about a second and cannot lose data.**
+
+| | |
+|---|---|
+| Cost | **~0.9 s** — measured, cold start *and* MCP handshake included (3 runs: 897 / 889 / 825 ms) |
+| Data at risk | **none** — see below |
+| Blast radius | the one session you run it in |
+| Safe to repeat | yes — idempotent; run it as often as you like |
+| Needs elevation / restart / config edit | no |
+
+**Why it cannot lose anything: the bridge is stateless.** Every memory, every
+captured turn, every embedding lives in the database under your engine root. The
+server process is a thin protocol adapter in front of that store — it holds no
+memory of its own. A freshly spawned bridge opens the same database and sees the
+identical contents; there is no in-process buffer to drain, no session state to
+preserve, no handoff to get wrong.
+
+That is also why reconnecting is *not* comparable to restarting a stateful
+service. You are replacing a protocol adapter, not bouncing a database.
+
+Concretely, the reconnect action per host:
+
+| Host | Action |
+|---|---|
+| Claude Code | `/mcp` |
+| Antigravity CLI | reload the server from the MCP manager |
+| Gemini CLI / OpenCode | the host's MCP reload/reconnect action |
+
+If you are ever unsure whether m3 itself is healthy — as opposed to the client's
+view of it — probe the server directly with the command in the section above. It
+answers in under a second and is independent of any client.
 
 ## What to do
 
