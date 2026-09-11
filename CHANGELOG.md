@@ -19,6 +19,60 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+---
+
+## [2026.9.10.1] — 2026-09-11 — the search that answered with fewer rows than you asked for
+
+### ⚠ Behaviour change
+
+- **`k` is now a target, not a ceiling: a search returns the best `k` available.**
+  The hybrid candidate query requires a full-text match, so its pool could never
+  exceed the lexical match count — a query matching 7 rows returned 7 for
+  `k=10` while the store held hundreds of relevant ones. The behaviour was also
+  non-monotonic, which was the tell: a query matching **nothing** returned a
+  full `k` (zero matches falls through to a semantic pass), while one matching
+  *a little* returned a little. Exact lexical matches still rank first; semantic
+  neighbours fill the remainder. **Callers will see more rows for the same
+  query** — results only ever gain, never lose. You get fewer than `k` only when
+  the store genuinely holds fewer rows. The cost is one embed call on a
+  highly-specific lexical query that previously skipped it; a query with `k` or
+  more exact matches still answers with no embedding at all.
+
+### Performance
+
+- **Search no longer slows down as the store grows.** `bm25()` must rank every
+  full-text match before `LIMIT` applies, and all four call sites ranked it
+  *inside a join*, so SQLite carried the joins across the entire match set.
+  Ranking on the FTS table alone in a CTE and joining only the survivors cut the
+  internal FTS index lookups for a single search from **1,080,000 to 36**.
+  Measured on a corpus of real prose: **104.5 → 1.3 ms** at 2,500 rows,
+  **251.0 → 1.6 ms** at 5,000, **484.9 → 2.0 ms** at 7,500. Hybrid search
+  overall is **45.7 → 30.3 ms p50**. Cost tracked *how many rows your query
+  matched*, not store size — a common word simply matches proportionally more
+  rows as the store grows, which is why it looked like a scaling problem.
+  PostgreSQL is unaffected (it ranks with `ts_rank` through its own seam
+  implementation).
+
+### Fixed
+
+- **A search asking for N rows could silently receive fewer.** The bm25 CTE
+  ranks over the FTS table, which cannot see `is_deleted` or the tenancy
+  predicates, so applying the caller's `LIMIT` inside the CTE let filtered-out
+  rows consume slots. Against a live store, a 20-row request returned 8 — and
+  the missing tail contained an exact-substring match the search short-circuit
+  depends on. The CTE now over-fetches and the outer query trims after
+  filtering. No isolation leak: the filter always applied and rows were only
+  ever dropped, never exposed.
+
+### Added
+
+- `bin/search_differential.py` — compares this tree's search results against a
+  known-good m3 build (pipx install, git rev, or an explicit path) and reports
+  rows lost, gained, or reordered. The unit suite can be entirely green while
+  search returns different rows; this catches that.
+
 ### Fixed
 
 - **The dashboard no longer breaks when pointed at the chatlog database.**
