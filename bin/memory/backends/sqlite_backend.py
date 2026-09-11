@@ -490,14 +490,21 @@ class SqliteBackend:
             return []
         rows = conn.execute(  # type: ignore[attr-defined]
             f"""
-            SELECT mi.id AS id, bm25(memory_items_fts) AS _bm25
-            FROM memory_items_fts fts
-            JOIN memory_items mi ON fts.rowid = mi.rowid
-            WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0{tenancy_sql}
+            WITH ranked AS (
+                SELECT rowid AS _rid, bm25(memory_items_fts) AS _b
+                FROM memory_items_fts
+                WHERE memory_items_fts MATCH ?
+                ORDER BY _b ASC
+                LIMIT ?
+            )
+            SELECT mi.id AS id, ranked._b AS _bm25
+            FROM ranked
+            JOIN memory_items mi ON mi.rowid = ranked._rid
+            WHERE mi.is_deleted = 0{tenancy_sql}
             ORDER BY _bm25 ASC
-            LIMIT ?
             """,
-            (fts_query, *tenancy_params, limit),
+            # CTE order: MATCH and LIMIT bind first, tenancy after.
+            (fts_query, limit, *tenancy_params),
         ).fetchall()
         # rows may be sqlite3.Row or tuple; index by position to be safe.
         return [KeywordHit(memory_id=r[0], score=float(r[1])) for r in rows]
@@ -536,15 +543,22 @@ class SqliteBackend:
         extra_sql = "".join(f", mi.{c}" for c in extra_columns)
         rows = conn.execute(  # type: ignore[attr-defined]
             f"""
+            WITH ranked AS (
+                SELECT rowid AS _rid, bm25(memory_items_fts) AS _b
+                FROM memory_items_fts
+                WHERE memory_items_fts MATCH ?
+                ORDER BY _b ASC
+                LIMIT ?
+            )
             SELECT mi.id, mi.content, mi.title, mi.type, mi.importance{extra_sql},
-                   bm25(memory_items_fts) AS _bm25
-            FROM memory_items_fts fts
-            JOIN memory_items mi ON fts.rowid = mi.rowid
-            WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0{tenancy_sql}
+                   ranked._b AS _bm25
+            FROM ranked
+            JOIN memory_items mi ON mi.rowid = ranked._rid
+            WHERE mi.is_deleted = 0{tenancy_sql}
             ORDER BY _bm25 ASC
-            LIMIT ?
             """,
-            (fts_query, *tenancy_params, limit),
+            # CTE order: MATCH and LIMIT bind first, tenancy after.
+            (fts_query, limit, *tenancy_params),
         ).fetchall()
         out = []
         for r in rows:
