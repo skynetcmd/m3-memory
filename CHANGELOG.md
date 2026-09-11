@@ -23,6 +23,45 @@ _Nothing yet._
 
 ---
 
+## [2026.9.10.2] — 2026-09-11 — the install papercuts
+
+Three install/config fixes, all found by running a real upgrade rather than a
+test. No search, API, or behaviour change.
+
+### Fixed
+
+- **A non-interactive install could hang forever.** `install_m3(interactive=
+  False)` ran `install_os.py` as a subprocess with **inherited stdin and no
+  timeout**. That script prompts (Node manager, master key), and a child holding
+  an inherited-but-unattended stdin does not raise `EOFError` — it blocks
+  indefinitely, with no output explaining why. Scripted and CI installs could
+  wedge. Now `stdin=DEVNULL` when non-interactive (the child's prompts already
+  handle `EOFError` by skipping), plus a 180 s backstop
+  (`M3_OS_INSTALL_TIMEOUT_S`) for anything else that blocks. Note the existing
+  `isatty()` guard elsewhere is **not sufficient** for this: an inherited
+  console reports `isatty() == True` with nobody typing into it.
+
+- **`m3 update` printed a red multi-line error that looked like a failed
+  install.** The pip self-upgrade ran `pip.exe install --upgrade pip`; on
+  Windows pip refuses to replace its own running executable and exits non-zero,
+  so the run ended with `[ERROR] Command failed` and `OS setup failed (code 1)`
+  — while everything downstream had actually completed. Now uses `python -m
+  pip` (the form pip's own error message names) and treats the step as
+  non-critical: one quiet line instead of a dump. **The default for every other
+  command stays fatal.**
+
+- **`m3 doctor --fix` and `--fix-hooks` disagreed about Claude's
+  `settings.json`.** `--fix` wrote an `mcpServers` entry there and
+  `--fix-hooks` removed it. Claude Code does not read that key (only
+  `~/.claude.json`, `.mcp.json` and plugins are honored), so the entry was
+  inert — but a user who ran only the first was left with a dead block that
+  reads like a live registration. The healer now skips Claude and *reports* an
+  entry a prior version left, naming the command that prunes it. Every other
+  host is untouched: Gemini, OpenCode, Cursor and Cline do read that key.
+
+
+---
+
 ## [2026.9.10.1] — 2026-09-11 — the search that answered with fewer rows than you asked for
 
 ### ⚠ Behaviour change
