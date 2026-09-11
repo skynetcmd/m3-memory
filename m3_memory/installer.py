@@ -1336,7 +1336,13 @@ def _write_user_registry_env(pairs: dict[str, str]) -> list[str]:
     return msgs
 
 
-def _run_os_install(bridge: Path) -> Optional[str]:
+# Backstop for a non-interactive OS-setup subprocess. Kept well under a CI or
+# test budget so a block surfaces AS a timeout message rather than as an
+# unexplained hang -- a 15-minute backstop is indistinguishable from wedged.
+_OS_INSTALL_TIMEOUT_S = int(os.environ.get("M3_OS_INSTALL_TIMEOUT_S", "180"))
+
+
+def _run_os_install(bridge: Path, interactive: bool = True) -> Optional[str]:
     """Execute the OS-specific installer (install_os.py) in the payload root."""
     # Resolve install_os.py via bin_dir() if available, else fall back to bridge-relative path.
     bin_d = bin_dir()
@@ -1347,10 +1353,31 @@ def _run_os_install(bridge: Path) -> Optional[str]:
     if not install_script.is_file():
         return None
 
-    # Run using the same python we're currently in
+    # Run using the same python we're currently in.
+    #
+    # NEVER inherit stdin on a non-interactive install. install_os.py prompts
+    # (Node manager, master key), and a child with an inherited-but-unattended
+    # stdin does not raise EOFError -- it BLOCKS FOREVER. That is the same shape
+    # migrate_memory._confirm documents and guards against; this call site was
+    # missing the guard, so `install_m3(interactive=False)` could hang with no
+    # output explaining why. DEVNULL makes the child's input() raise EOFError,
+    # which its own prompts already handle by skipping.
+    #
+    # The timeout is a backstop for anything else that blocks (a network fetch,
+    # a pip resolver). OS setup is not load-bearing -- the caller already treats
+    # its failure as a message, not an abort -- so a hang must degrade to that
+    # same message rather than wedge the install.
     try:
-        subprocess.run([_python_exe(), str(install_script)], check=True)
+        subprocess.run(
+            [_python_exe(), str(install_script)],
+            check=True,
+            stdin=None if interactive else subprocess.DEVNULL,
+            timeout=None if interactive else _OS_INSTALL_TIMEOUT_S,
+        )
         return "OS-specific environment setup complete."
+    except subprocess.TimeoutExpired:
+        return (f"OS setup timed out after 15 min and was skipped. Run it "
+                f"manually from {install_script}.")
     except subprocess.CalledProcessError as e:
         return f"OS setup failed (code {e.returncode}). Run it manually from {install_script}."
 
@@ -1378,7 +1405,7 @@ def _post_install(
 
     messages = [
         m for m in (
-            _run_os_install(bridge),
+            _run_os_install(bridge, interactive),
             _run_main_migrations(bridge, _primary_backend),
             _register_gemini_mcp(),
             _register_antigravity_mcp(),
