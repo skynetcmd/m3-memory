@@ -78,33 +78,46 @@ and still passed every correctness test.
 | hybrid k=10 — FTS5+BM25, vector, fuse, MMR, ranking | 45.67 ms | 48.56 ms |
 | cross-encoder rerank (opt-in), added to the above | 3.71 ms | 4.61 ms |
 
-⚠ **That is a ~200-row store, and search cost grows with store size.** We
-measured the curve rather than leaving it as a caveat:
+⚠ **That is a ~200-row store, and search cost grows with store size.** Measured
+against a corpus of real prose (not synthetic filler, which behaves worse — see
+the note below):
 
 | Rows | p50 | p95 |
 |---|---|---|
-| 200 | 40.8 ms | 63.9 ms |
-| 1,000 | 129.3 ms | 172.5 ms |
-| 2,500 | 252.0 ms | 353.4 ms |
-| 5,000 | 548.4 ms | 1,074.1 ms |
-| 7,500 | **1,212.0 ms** | 2,365.0 ms |
+| 200 | 45.9 ms | 48.0 ms |
+| 1,000 | 79.4 ms | 98.2 ms |
+| 2,500 | 104.5 ms | 150.9 ms |
+| 5,000 | 251.0 ms | 306.5 ms |
+| 7,500 | **484.9 ms** | 559.5 ms |
 
-**Roughly linear, and it does not plateau.** At 7,500 rows a query takes about
-1.2 s — 30× the headline figure. Profiling puts ~99% of that in SQLite's
-`execute` on the candidate fetch, not in vector maths: the Rust packed-cosine
-batch over the same query is ~2 ms.
+**What actually drives it is how many rows your query matches, not how many rows
+you have.** The cost is SQLite's `bm25()` ranking, which must score every FTS
+match before the `LIMIT` applies. On the same 7,500-row store:
 
-`SEARCH_ROW_CAP` (default 5,000) is not what bounds this. The default search
-path already limits candidates to 2,000 rows at the SQL level
-(`bin/memory/search.py:897`), so the cap sits above that as a backstop for a
-misconfigured limit rather than as the active bound. The growth is upstream of
-both, in the candidate fetch itself — which is why raising or lowering either
-one will not change the curve.
+| Query term | rows matched | with `bm25()` | without |
+|---|---|---|---|
+| `embedding` | 115 | 101.6 ms | 99.0 ms |
+| `postgres` | 133 | 105.6 ms | 102.4 ms |
+| `memory` | 1,561 | 229.1 ms | 149.6 ms |
+| `the` | 5,288 | **693.7 ms** | 81.4 ms |
 
-**What this means in practice.** m3 is fast on the stores most people have, and
-noticeably slower on large ones. If your store is in the thousands of rows and
-search feels sluggish, this is why — it is a known characteristic being worked
-on, not a misconfiguration on your side.
+A selective query costs essentially nothing extra. A query on a common word
+costs **8.5×**. Store size matters only because the same word matches
+proportionally more rows as the store grows.
+
+Profiling confirms where it lands: `sqlite3.execute` accounts for ~99% of a slow
+search, and a single query issued **1,080,000** internal FTS index lookups
+(`memory_items_fts_idx`) at 7,500 rows — FTS5 internals computing bm25, not m3's
+own SQL. The Rust packed-cosine batch over the same query is ~2 ms.
+
+`SEARCH_ROW_CAP` (default 5,000) does not bound this. The default path already
+limits candidates to 2,000 rows at the SQL level (`bin/memory/search.py:897`),
+and the cap sits above that as a backstop against a misconfigured limit. Neither
+helps, because the ranking happens *before* the limit applies.
+
+**In practice:** m3 stays fast on selective queries at any size measured here.
+Broad, common-word queries on a store of several thousand rows are where you
+will feel it. This is a known characteristic, not a misconfiguration.
 
 One number worth explaining: the fastest observed query was **0.80 ms**, ~50×
 faster than the median. That is the FTS short-circuit — when a query has an
