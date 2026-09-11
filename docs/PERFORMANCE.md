@@ -83,11 +83,18 @@ longer does:
 
 | Rows | before | after |
 |---|---|---|
-| 2,500 | 104.5 ms | **1.1 ms** |
-| 5,000 | 251.0 ms | **1.1 ms** |
-| 7,500 | 484.9 ms | **1.0 ms** |
+| 2,500 | 104.5 ms | **1.3 ms** |
+| 5,000 | 251.0 ms | **1.6 ms** |
+| 7,500 | 484.9 ms | **2.0 ms** |
 
-**Flat across store size**, measured on a corpus of real prose. The fix was to
+**Near-flat across store size**, measured on a corpus of real prose — a ~0.7 ms
+drift across a 3× growth in the store, against 380 ms before.
+
+⚠ Those are *selective* queries against real text. A pathological corpus where
+every row shares the same vocabulary is slower and still grows: measured on
+synthetic filler, 27.5 ms at 200 rows rising to 71.8 ms at 7,500. That is a
+17× improvement on the same corpus (it was 1,212 ms), but it is not flat, and
+a store of near-identical documents will behave more like that column. The fix was to
 stop ranking `bm25()` inside a join: it must score every FTS match before the
 `LIMIT` applies, so the joins were being carried across the whole match set.
 Ranking on the FTS table alone in a CTE, then joining only the survivors, cut
