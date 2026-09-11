@@ -1,8 +1,8 @@
 ---
 tool: bin/search_differential.py
-sha1: d52ed7216987
-mtime_utc: 2026-09-11T04:10:02.438410+00:00
-generated_utc: 2026-09-11T04:11:26.046736+00:00
+sha1: 67dafb3a9ba5
+mtime_utc: 2026-09-11T19:26:27.970011+00:00
+generated_utc: 2026-09-11T19:46:22.746079+00:00
 private: false
 ---
 
@@ -65,7 +65,7 @@ that is how the 2026-09-10 bug was found, against a 5,203-memory store.
 
 ## Entry points
 
-- `def main()` (line 266)
+- `def main()` (line 265)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -102,13 +102,13 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['git', 'worktree', 'add', '-q', '--detach', str(wt), rev]`` (line 154)
-- `subprocess.run()  → `[python, '-c', code, engine, config]`` (line 126)
-- `subprocess.run()  → `[sys.executable, '-c', _SEED, str(engine), str(config), str(items_path)]`` (line 232)
+- `subprocess.run()  → `['git', 'worktree', 'add', '-q', '--detach', str(wt), rev]`` (line 153)
+- `subprocess.run()  → `[python, '-c', code, engine, config]`` (line 125)
+- `subprocess.run()  → `[sys.executable, '-c', _SEED, str(engine), str(config), str(items_path)]`` (line 231)
 
 **sqlite**
 
-- `sqlite3.connect()  → `str(engine / 'agent_memory.db')`` (line 250)
+- `sqlite3.connect()  → `str(engine / 'agent_memory.db')`` (line 249)
 
 
 ---
