@@ -345,7 +345,10 @@ def build_auth(host: str, port: int, token: str):
     scheme = "http"
     issuer = f"{scheme}://{host}:{port}"
     auth_settings = AuthSettings(
-        issuer_url=issuer,  # inert by construction -- see comment above
+        # pydantic coerces str -> AnyHttpUrl at runtime; the field is inert
+        # by construction (see above), so match the codebase ignore idiom
+        # rather than build a URL object for a value nothing reads.
+        issuer_url=issuer,  # type: ignore[arg-type]
         resource_server_url=None,
         required_scopes=[],
     )

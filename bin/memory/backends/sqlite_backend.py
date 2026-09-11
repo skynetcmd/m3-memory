@@ -19,7 +19,6 @@ from .base import BackendName, Capabilities, KeywordHit, VectorHit
 from .dialect import Dialect, ParamStyle
 from .registry import register_backend
 
-
 # The bm25 CTE ranks BEFORE is_deleted/tenancy can apply (those columns live
 # on memory_items, not on the FTS table), so it over-fetches this multiple of
 # the caller's limit and the outer query trims back. Without it a soft-deleted
