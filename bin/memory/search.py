@@ -986,12 +986,18 @@ async def memory_search_scored_impl(
                 if os.environ.get("M3_DEBUG"):
                     _lbl = "sqlite-vec" if _has_vec else "standard"
                     print(f"DEBUG SQL (hybrid {_lbl}):\n{sql}")
+                # Parameter ORDER follows the SQL, and the hybrid SQL now
+                # opens with a `WITH ranked AS (... MATCH ?)` pre-filter, so the
+                # FTS query binds FIRST -- ahead of the vector blob and the
+                # tenancy params, which are consumed by the outer SELECT/WHERE.
+                # Getting this order wrong does not raise; it silently binds the
+                # wrong value to MATCH.
                 if _has_vec:
                     import struct
                     q_blob = struct.pack(f"{len(q_vec)}f", *q_vec)
-                    _rows = db.execute(sql, (q_blob, *params, fts_query)).fetchall()
+                    _rows = db.execute(sql, (fts_query, q_blob, *params)).fetchall()
                 else:
-                    _rows = db.execute(sql, (*params, fts_query)).fetchall()
+                    _rows = db.execute(sql, (fts_query, *params)).fetchall()
 
                 if os.environ.get("M3_DEBUG"):
                     print(f"DEBUG SQL HITS (hybrid): {len(_rows)}")

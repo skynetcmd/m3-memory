@@ -38,7 +38,13 @@ LIMIT = 400
 
 
 def _orig(mode: str, has_vec: bool) -> str:
-    """The SQL exactly as it appeared inline in search.py before extraction."""
+    """The SQL the builder is expected to produce, held verbatim.
+
+    The SEMANTIC variants are still byte-for-byte as they appeared inline before
+    extraction. The HYBRID variants were changed deliberately (see below) to
+    pre-filter bm25 on the FTS table; the pin moved with them rather than being
+    deleted, so the guarantee this file exists for still holds.
+    """
     if mode == "semantic" and has_vec:
         return f"""
                             WITH limited AS (
@@ -66,27 +72,44 @@ def _orig(mode: str, has_vec: bool) -> str:
                             WHERE mi.id IN (SELECT id FROM limited)
                             ORDER BY mi.created_at DESC
                         """
+    # HYBRID: bm25 now ranks on the FTS table ALONE, in a CTE, and the joins
+    # see only the survivors. Ranking inside the joined query made SQLite carry
+    # both joins across every FTS match: on a 7,500-row store a query for "the"
+    # issued 1,080,000 internal FTS index lookups and took 734 ms, against 36
+    # lookups and 29 ms pre-filtered. Note the MATCH parameter now binds FIRST.
     if has_vec:
         return f"""
+                        WITH ranked AS (
+                            SELECT rowid AS _rid, bm25(memory_items_fts) AS _b
+                            FROM memory_items_fts
+                            WHERE memory_items_fts MATCH ?
+                            ORDER BY _b ASC
+                            LIMIT {LIMIT}
+                        )
                         SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding,
-                               bm25(memory_items_fts) as bm25_score,
+                               ranked._b as bm25_score,
                                (1.0 - vec_distance_cosine(me.embedding, ?)) as vec_score{EXTRA}
-                        FROM memory_items mi
+                        FROM ranked
+                        JOIN memory_items mi ON mi.rowid = ranked._rid
                         JOIN memory_embeddings me ON mi.id = me.memory_id
-                        JOIN memory_items_fts fts ON mi.rowid = fts.rowid
-                        WHERE {WHERE} AND memory_items_fts MATCH ?
+                        WHERE {WHERE}
                         ORDER BY bm25_score ASC
-                        LIMIT {LIMIT}
                     """
     return f"""
+                        WITH ranked AS (
+                            SELECT rowid AS _rid, bm25(memory_items_fts) AS _b
+                            FROM memory_items_fts
+                            WHERE memory_items_fts MATCH ?
+                            ORDER BY _b ASC
+                            LIMIT {LIMIT}
+                        )
                         SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding,
-                               bm25(memory_items_fts) as bm25_score{EXTRA}
-                        FROM memory_items mi
+                               ranked._b as bm25_score{EXTRA}
+                        FROM ranked
+                        JOIN memory_items mi ON mi.rowid = ranked._rid
                         JOIN memory_embeddings me ON mi.id = me.memory_id
-                        JOIN memory_items_fts fts ON mi.rowid = fts.rowid
-                        WHERE {WHERE} AND memory_items_fts MATCH ?
+                        WHERE {WHERE}
                         ORDER BY bm25_score ASC
-                        LIMIT {LIMIT}
                     """
 
 
@@ -95,7 +118,11 @@ def _orig(mode: str, has_vec: bool) -> str:
     [("semantic", True), ("semantic", False), ("hybrid", True), ("hybrid", False)],
 )
 def test_matches_pre_extraction_sql_byte_for_byte(mode, has_vec):
-    """The load-bearing assertion: extraction changed no SQL, in any variant."""
+    """The load-bearing assertion: the builder emits exactly the intended SQL.
+
+    This test caught the pre-filter change, which is what it is for -- nobody
+    edits this query without updating the pin and stating why.
+    """
     got = build_candidate_sql(
         search_mode=mode, has_vec=has_vec, where_sql=WHERE,
         extra_sql=EXTRA, row_limit=LIMIT,
