@@ -22,6 +22,7 @@ all stdlib + the `memory.*` package + a few external libs.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import os
@@ -236,6 +237,13 @@ def _resolve_mc_callbacks() -> None:
 # CONTRACT: importing this module does NOT import sentence_transformers —
 # only the first call to _get_reranker(...) does. Keeps cold-start fast for
 # callers that don't use rerank.
+# Carries an already-computed query vector from a hybrid search into its
+# semantic fallback, so the fallback does not re-embed the same query. Holds
+# (query, vector) so a stale entry can never be mistaken for a fresh one.
+_FALLBACK_QVEC: "contextvars.ContextVar[tuple | None]" = contextvars.ContextVar(
+    "m3_fallback_qvec", default=None
+)
+
 _RERANKER_MODEL = None  # CrossEncoder | None — lazy-init
 _RERANKER_MODEL_NAME = ""
 # Guards the lazy load below. _apply_rerank now runs via asyncio.to_thread (off
@@ -725,9 +733,26 @@ async def memory_search_scored_impl(
     # override at ~L504) the predictor is meaningless, so gate=False there.
     from memory import embed as _embed_mod
     _embed_is_real = _embed is getattr(_embed_mod, "_embed", None)
-    q_vec, _ = await _embed_mod.embed_for_search(
-        query, embed_fn=_embed, gate=_embed_is_real
-    )
+    _carried = _FALLBACK_QVEC.get()
+    if _carried is not None and _carried[0] == query:
+        # Handed down by the hybrid->semantic fallback below. The query has not
+        # changed, so re-embedding buys nothing and costs the single most
+        # expensive step in the search: measured 2 embed calls per search on an
+        # FTS miss, ~15.9 ms each on this host, each its own HTTP round trip.
+        #
+        # A ContextVar rather than a parameter because memory_search_scored_impl
+        # is in the memory_core public-API snapshot: adding even an underscore
+        # parameter changes its signature and fails test_memory_core_parity.
+        # A plain module global would be wrong here -- several searches can be
+        # in flight on one event loop, and a ContextVar is per-task.
+        #
+        # The query is re-checked because the var is only cleared in a finally;
+        # a mismatch means it is not ours and we embed normally.
+        q_vec = _carried[1]
+    else:
+        q_vec, _ = await _embed_mod.embed_for_search(
+            query, embed_fn=_embed, gate=_embed_is_real
+        )
     if not q_vec:
         # No query vector (embedder degraded, skipped, or timed out). Do NOT
         # return [] — that silently DISCARDS valid keyword matches. Instead fall
@@ -871,22 +896,39 @@ async def memory_search_scored_impl(
 
     where_sql = " AND ".join(where_clauses)
 
-    def _recurse_semantic():
-        return memory_search_scored_impl(
-            query, k=k, type_filter=type_filter, agent_filter=agent_filter,
-            search_mode="semantic", user_id=user_id, scope=scope, as_of=as_of,
-            conversation_id=conversation_id, explain=explain,
-            extra_columns=extra_columns, recency_bias=recency_bias,
-            vector_weight=vector_weight, adaptive_k=adaptive_k,
-            smart_time_boost=smart_time_boost,
-            smart_neighbor_sessions=smart_neighbor_sessions,
-            variant=variant,
-            intent_hint=intent_hint,
-            vector_kind_strategy=vector_kind_strategy,
-            requesting_agent=requesting_agent,
-            _depth=_depth + 1,
-            _capture_dict=_capture_dict,
-        )
+    async def _recurse_semantic():
+        """Re-run as a semantic search, reusing the vector we already computed.
+
+        The fallback used to re-enter from the top and redo EVERY step,
+        including the embed call -- 2 embeds per search on an FTS miss, each a
+        separate HTTP round trip (~15.9 ms on the reference host).
+
+        The vector rides a ContextVar rather than a parameter because
+        memory_search_scored_impl is in the memory_core public-API snapshot:
+        adding even an underscore-prefixed parameter changes its signature and
+        fails test_memory_core_parity. A ContextVar is also per-task, so
+        concurrent searches on one event loop cannot see each other's vector --
+        a module global would be a real bug here.
+        """
+        _tok = _FALLBACK_QVEC.set((query, q_vec))
+        try:
+            return await memory_search_scored_impl(
+                query, k=k, type_filter=type_filter, agent_filter=agent_filter,
+                search_mode="semantic", user_id=user_id, scope=scope, as_of=as_of,
+                conversation_id=conversation_id, explain=explain,
+                extra_columns=extra_columns, recency_bias=recency_bias,
+                vector_weight=vector_weight, adaptive_k=adaptive_k,
+                smart_time_boost=smart_time_boost,
+                smart_neighbor_sessions=smart_neighbor_sessions,
+                variant=variant,
+                intent_hint=intent_hint,
+                vector_kind_strategy=vector_kind_strategy,
+                requesting_agent=requesting_agent,
+                _depth=_depth + 1,
+                _capture_dict=_capture_dict,
+            )
+        finally:
+            _FALLBACK_QVEC.reset(_tok)
 
     # When strategy="max" the memory_embeddings join returns one row per
     # (memory_id, vector_kind) pair, so a straight LIMIT 1000 would see
