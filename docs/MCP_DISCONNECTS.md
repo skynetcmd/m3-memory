@@ -89,6 +89,23 @@ day, an HTTP-transport MCP server sat idle for *hours* without dropping, while
 stdio servers dropped repeatedly. HTTP has no parent pipe to lose. This is a
 property of how the server is *reached*, not of what the server *is*.
 
+**That does not make HTTP simply "more reliable" — it trades one failure mode for
+another.** On a later day we observed the exact inverse on the same machine: four
+stdio servers stayed connected while the single HTTP server dropped. Its host
+pinged fine and its TCP port was still accepting connections, but the service
+behind it returned nothing — an endpoint-side fault that no client-side reconnect
+can repair. The honest summary:
+
+- **stdio** is idle-*vulnerable*: the client owns the process, so a client
+  lifecycle event kills it — and `/mcp` brings it straight back.
+- **HTTP** is idle-*immune* but only ever as available as the endpoint, plus the
+  network in between. When it fails, reconnecting does not help; you fix the
+  service.
+
+Neither is strictly better. That trade is a large part of why m3's HTTP transport
+is an opt-in rather than the default — a remote server puts a second machine's
+uptime on your memory path.
+
 **m3 itself stays up.** Probe it by hand at any time — this is the check we use,
 and you should trust it over any client's status display:
 
