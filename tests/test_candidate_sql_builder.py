@@ -242,3 +242,62 @@ class TestSqlIsValid:
             assert "no such function" in msg, f"{mode}/has_vec={has_vec}: {msg}"
         finally:
             conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Ranked-then-filtered: the CTE must over-fetch
+# ---------------------------------------------------------------------------
+def test_keyword_search_returns_the_full_limit_despite_deleted_rows():
+    """A soft-deleted row must not consume a limit slot.
+
+    The bm25 pre-filter ranks inside a CTE over the FTS table, which cannot see
+    `is_deleted` or the tenancy predicates -- those columns live on
+    memory_items. A CTE that applied the caller's limit directly therefore let
+    filtered-out rows eat slots, and the caller silently got fewer rows than it
+    asked for. Measured against a live store: a 20-row request returned 8, and
+    the missing tail contained an exact-substring match the search
+    short-circuit depends on, which changed which results a query returned.
+    """
+    import sqlite3 as _sq
+
+    from memory.backends.sqlite_backend import _FTS_OVERFETCH
+
+    assert _FTS_OVERFETCH >= 2, "over-fetch must exceed 1x or the bug returns"
+
+    conn = _sq.connect(":memory:")
+    conn.row_factory = _sq.Row
+    conn.executescript(
+        """
+        CREATE TABLE memory_items (
+            id TEXT PRIMARY KEY, content TEXT, title TEXT, type TEXT,
+            importance REAL DEFAULT 0.5, is_deleted INTEGER DEFAULT 0
+        );
+        CREATE VIRTUAL TABLE memory_items_fts USING fts5(
+            content, title, content='memory_items', content_rowid='rowid'
+        );
+        """
+    )
+    # 10 matching rows; every OTHER one soft-deleted. A 1x CTE limit of 5 would
+    # rank 5, drop the ~2-3 deleted ones, and return 2-3 instead of 5.
+    for i in range(10):
+        conn.execute(
+            "INSERT INTO memory_items (id, content, title, type, is_deleted) "
+            "VALUES (?, ?, ?, 'note', ?)",
+            (f"id-{i}", f"widget alpha row {i}", f"widget {i}", i % 2),
+        )
+    conn.execute(
+        "INSERT INTO memory_items_fts(rowid, content, title) "
+        "SELECT rowid, content, title FROM memory_items"
+    )
+    conn.commit()
+
+    from memory.backends.sqlite_backend import SqliteBackend
+
+    rows = SqliteBackend().keyword_search_with_row_data(
+        conn, "widget", limit=5, extra_columns=[], tenancy_sql="", tenancy_params=()
+    )
+    assert len(rows) == 5, (
+        f"expected the full limit of 5 live rows, got {len(rows)} -- the CTE is "
+        "letting soft-deleted rows consume limit slots"
+    )
+    assert all(dict(r)["id"].startswith("id-") for r in rows)

@@ -20,6 +20,14 @@ from .dialect import Dialect, ParamStyle
 from .registry import register_backend
 
 
+# The bm25 CTE ranks BEFORE is_deleted/tenancy can apply (those columns live
+# on memory_items, not on the FTS table), so it over-fetches this multiple of
+# the caller's limit and the outer query trims back. Without it a soft-deleted
+# or out-of-scope row consumes a limit slot and the caller silently receives
+# fewer rows than requested.
+_FTS_OVERFETCH = 4
+
+
 # ── SQLite SQL dialect (co-located with the backend it belongs to) ───────────
 # Lives HERE, not in dialect.py, so that adding/altering a backend is one file
 # (DESIGN_PHILOSOPHIES §2). dialect.py holds only the base Dialect + validation
@@ -502,9 +510,16 @@ class SqliteBackend:
             JOIN memory_items mi ON mi.rowid = ranked._rid
             WHERE mi.is_deleted = 0{tenancy_sql}
             ORDER BY _bm25 ASC
+            LIMIT ?
             """,
-            # CTE order: MATCH and LIMIT bind first, tenancy after.
-            (fts_query, limit, *tenancy_params),
+            # The CTE ranks BEFORE is_deleted/tenancy can be applied (bm25
+            # lives on the FTS table, those columns do not), so it must
+            # OVER-FETCH: otherwise a deleted or out-of-scope row consumes a
+            # limit slot and the caller silently gets fewer rows than it asked
+            # for. That regression dropped an exact-substring match off the end
+            # of a 20-row request and changed which results a search returned.
+            # Bind order follows the SQL: MATCH, CTE limit, tenancy, final limit.
+            (fts_query, limit * _FTS_OVERFETCH, *tenancy_params, limit),
         ).fetchall()
         # rows may be sqlite3.Row or tuple; index by position to be safe.
         return [KeywordHit(memory_id=r[0], score=float(r[1])) for r in rows]
@@ -556,9 +571,16 @@ class SqliteBackend:
             JOIN memory_items mi ON mi.rowid = ranked._rid
             WHERE mi.is_deleted = 0{tenancy_sql}
             ORDER BY _bm25 ASC
+            LIMIT ?
             """,
-            # CTE order: MATCH and LIMIT bind first, tenancy after.
-            (fts_query, limit, *tenancy_params),
+            # The CTE ranks BEFORE is_deleted/tenancy can be applied (bm25
+            # lives on the FTS table, those columns do not), so it must
+            # OVER-FETCH: otherwise a deleted or out-of-scope row consumes a
+            # limit slot and the caller silently gets fewer rows than it asked
+            # for. That regression dropped an exact-substring match off the end
+            # of a 20-row request and changed which results a search returned.
+            # Bind order follows the SQL: MATCH, CTE limit, tenancy, final limit.
+            (fts_query, limit * _FTS_OVERFETCH, *tenancy_params, limit),
         ).fetchall()
         out = []
         for r in rows:
