@@ -1736,11 +1736,15 @@ def _raise_fd_limit(target: int = 4096) -> None:
         except Exception:
             pass
         return
+    # `resource` is POSIX-only and the import above is already guarded, but mypy
+    # type-checks on Windows where the stub has none of these attributes. The
+    # code is correct; only the checker's platform view is wrong -- so ignore
+    # the attribute lookups rather than restructuring working cross-platform code.
     try:
-        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-        ceiling = target if hard == resource.RLIM_INFINITY else min(target, hard)
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)  # type: ignore[attr-defined]
+        ceiling = target if hard == resource.RLIM_INFINITY else min(target, hard)  # type: ignore[attr-defined]
         if soft < ceiling:
-            resource.setrlimit(resource.RLIMIT_NOFILE, (ceiling, hard))
+            resource.setrlimit(resource.RLIMIT_NOFILE, (ceiling, hard))  # type: ignore[attr-defined]
     except (ValueError, OSError):
         pass
 

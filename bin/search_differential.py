@@ -62,7 +62,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 REPO = Path(__file__).resolve().parents[1]
 
 # Deliberately mixed: single tokens, multi-word phrases, and a phrase chosen to
@@ -334,7 +333,8 @@ def main() -> int:
                 if len({round(by_id[i], 5) for i in ci}) == 1:
                     status = "OK "          # reordered within a score tie
                 else:
-                    status, _ = "DIFF", problems.append(f"{q!r}: reordered at distinct scores")
+                    status = "DIFF"
+                    problems.append(f"{q!r}: reordered at distinct scores")
             elif set(oi).issubset(set(ci)):
                 # Pure ADDITION: every reference row is still present. That is a
                 # fill (more rows for the same k), not drift -- losing a row is
@@ -404,8 +404,8 @@ def main() -> int:
 
         print()
         if gained:
-            print(f"MATCHES the reference build, with MORE rows for the same k "
-                  f"(the reference was short):")
+            print("MATCHES the reference build, with MORE rows for the same k "
+                  "(the reference was short):")
             for g in gained:
                 print("  " + g)
             print()

@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import urllib.parse
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 
 logger = logging.getLogger("pg_fdw_sync")
 
@@ -56,7 +56,13 @@ _MEMORY_ITEMS_COLS = [
 # Optional 5th element: an explicit conflict guard, for tables whose merge is not
 # timestamp last-writer-wins. `{target}` is substituted with the schema-qualified
 # target table.
-_TABLE_SPECS = [
+# Heterogeneous by design: (name, columns, pk, [watermark], [conflict guard]).
+# Annotated so mypy sees the per-position types instead of collapsing the
+# tuple into `str | list[str]`, which made every _upsert() arg look wrong.
+_TABLE_SPECS: list[
+    Union[tuple[str, list[str], str, Optional[str]],
+          tuple[str, list[str], str, Optional[str], str]]
+] = [
     ("memory_items", _MEMORY_ITEMS_COLS, "id", "updated_at"),
     ("memory_embeddings",
      ["id", "memory_id", "embedding", "embed_model", "dim", "created_at",

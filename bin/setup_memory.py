@@ -13,9 +13,37 @@ import sys
 
 BASE   = pathlib.Path(__file__).parent.parent.resolve()
 IS_WIN = sys.platform == "win32"
-VENV   = BASE / ".venv"
-PY     = VENV / ("Scripts/python.exe" if IS_WIN else "bin/python")
-PIP    = VENV / ("Scripts/pip.exe"    if IS_WIN else "bin/pip")
+
+
+# bin/ on sys.path so this bootstrap script can reach its siblings. Done once,
+# at import, rather than inside the helper: a function that mutates sys.path on
+# every call grows it without bound the day it gains a second caller.
+_BIN = str(pathlib.Path(__file__).resolve().parent)
+if _BIN not in sys.path:
+    sys.path.insert(0, _BIN)
+
+# generate_configs is the SINGLE owner of "is this an installed layout?" and is
+# stdlib-only, so it is importable even this early in bootstrap. Import the
+# predicate rather than copying it: a local copy is a §10a drift hazard, and
+# this module's whole purpose is to agree with generate_configs about which
+# interpreter is canonical — disagreeing is the bug being fixed here.
+from generate_configs import _is_installed_layout  # noqa: E402
+
+# Interpreter resolution. A repo-local .venv is correct for a SOURCE checkout,
+# but when this script ships inside an installed wheel BASE is
+# <site-packages>/m3_memory — and building a venv THERE nests one environment
+# inside another, then runs every step below with an interpreter that has no
+# m3_memory importable. That is what produced
+# "WARN: could not seed shared embedder config: No module named 'm3_memory'"
+# and a spurious "requirements.txt not found": both are symptoms of the same
+# wrong BASE. On an installed layout the interpreter already running this code
+# IS the payload's interpreter, so use it and create nothing.
+_INSTALLED = _is_installed_layout(str(BASE))  # delegate takes a str, not a Path
+VENV   = None if _INSTALLED else BASE / ".venv"
+# (PIP was defined here and never used; dropped rather than set to None, which
+# would hand a later caller a NoneType error instead of a NameError naming it.)
+PY = (pathlib.Path(sys.executable) if _INSTALLED
+      else VENV / ("Scripts/python.exe" if IS_WIN else "bin/python"))
 # Prefer a Windows-specific requirements file if one exists, else fall back to the
 # common requirements.txt (the windows variant is optional and may be absent).
 _req_win = BASE / "requirements-windows.txt"
@@ -38,20 +66,29 @@ def log(msg): print(f"[setup] {msg}", file=sys.stderr)
 def run(*args, **kw):
     subprocess.run(args, check=True, **kw)
 
-# 1. Create venv
-if not PY.exists():
+# 1. Create venv — only for a source checkout; an installed payload reuses the
+#    interpreter that launched us (see the resolution note above).
+if _INSTALLED:
+    log(f"Installed layout detected; using the running interpreter {PY}")
+elif not PY.exists():
     log(f"Creating virtual environment at {VENV} ...")
     run(sys.executable, "-m", "venv", str(VENV))
 else:
     log(f"Venv already exists at {VENV}")
 
-# 2. Upgrade pip
-log("Upgrading pip ...")
-run(str(PY), "-m", "pip", "install", "--upgrade", "pip", "--quiet")
-
-# 3. Install dependencies
-log(f"Installing dependencies from {REQS.name} ...")
-run(str(PY), "-m", "pip", "install", "-r", str(REQS), "--quiet")
+# 2-3. Dependencies. An installed payload got its dependencies from the wheel
+#      that installed it; re-resolving them here would either no-op or fight the
+#      installing tool (pipx owns that environment). Only a source checkout,
+#      whose freshly created venv is empty, needs this.
+if _INSTALLED:
+    log("Installed layout; dependencies come from the wheel — skipping pip.")
+elif not REQS.exists():
+    log(f"WARNING: {REQS} not found; skipping dependency install.")
+else:
+    log("Upgrading pip ...")
+    run(str(PY), "-m", "pip", "install", "--upgrade", "pip", "--quiet")
+    log(f"Installing dependencies from {REQS.name} ...")
+    run(str(PY), "-m", "pip", "install", "-r", str(REQS), "--quiet")
 
 # 4. Run migrations — forward only, in numeric order.
 #    Apply .up.sql and bare NNN_*.sql; NEVER .down.sql (those are rollbacks and

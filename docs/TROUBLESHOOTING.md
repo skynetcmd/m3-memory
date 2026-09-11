@@ -92,6 +92,35 @@ See [FIPS_MODULE_BOUNDARY.md](FIPS_MODULE_BOUNDARY.md) for the full model.
   which m3  # should return a path (the older `mcp-memory` alias also works)
   ```
 
+### Memory tools vanish mid-session ("m3 is unreachable", tools disappear)
+
+The server was working and then the tools disappeared partway through a session
+— often after a long build or test run.
+
+**Run `/mcp` in that session.** The tools come back immediately. This is a
+low-risk, routine action: ~0.9 s including cold start, idempotent, and it
+cannot lose data — the bridge is a stateless adapter in front of the database,
+so a fresh one opens the same store.
+
+**Your memory is not lost.** Chatlog capture writes to the database directly and
+does not travel over the MCP connection, so a dropped connection costs you
+searching and writing for a few seconds, not captured turns. Confirm with:
+
+```bash
+m3 chatlog doctor          # capture.healthy + a recent last_write_at = nothing lost
+```
+
+This is a client-side MCP lifecycle limitation, not an m3 failure — the client
+owns the pipe to the server process, so nothing on the m3 side can reconnect it.
+**Any agent that reaches m3 over stdio is exposed to this** (Claude Code,
+Antigravity, Gemini CLI, OpenCode all are); we have confirmed it in Claude Code
+and not yet verified the others.
+**[MCP_DISCONNECTS.md](MCP_DISCONNECTS.md)** has the full explanation: the
+mechanism, the measured evidence that no data is lost, the upstream issue
+references, and why we deliberately did not switch the default transport.
+
+(Distinct from the entry below, which covers a server that never appeared at all.)
+
 ### Memory server doesn't appear in agent
 - Verify the JSON in your agent's config file is valid.
 - Make sure the key is `"mcpServers"` (case-sensitive).

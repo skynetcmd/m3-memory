@@ -15,6 +15,9 @@
 ### Q: Can multiple agents share one memory?
 **A:** Yes. Claude Code, Gemini CLI, Aider, OpenCode and any MCP agent share one brain, with optional SQL-layer isolation so each agent's private notes stay private. See [Multi-Agent](MULTI_AGENT.md).
 
+### Q: My agent says m3 is unreachable / the memory tools disappeared. Did I lose my memory?
+**A:** No. Run **`/mcp`** (or your host's reconnect action) and the tools return immediately — a low-risk, idempotent action costing ~0.9 s, cold start included, that cannot lose data (the bridge is stateless; everything lives in the database). Chatlog capture writes to the database *directly* and does not travel over the MCP connection, so a dropped connection costs you searching and writing for a few seconds — not captured turns. Verify for yourself with `m3 chatlog doctor`. This is a client-side MCP lifecycle limitation (the client owns the pipe to the server process, so only the client can restore it), not an m3 failure — and it can affect **any** agent that reaches m3 over stdio, not just Claude Code. Full mechanism, measured evidence, and upstream references: [MCP_DISCONNECTS.md](MCP_DISCONNECTS.md).
+
 ### Q: Does it remember decisions across sessions?
 **A:** Yes — that's the point. M3 is a bitemporal knowledge base: it captures facts, resolves contradictions automatically, and lets you query what your agent believed at any past date. A verbatim chatlog subsystem also records conversation turns *before* compaction, so nothing is lost to context-window truncation.
 
