@@ -2904,7 +2904,7 @@ def dashboard_show_url(host: "str | None" = None, port: "int | None" = None) -> 
     # Loopback is not reachable from another device; name the real address so the
     # printed URL is one that can actually be opened on a phone.
     display_host = resolved_host
-    if _auth.is_loopback(resolved_host) or resolved_host in ("0.0.0.0", "::", ""):
+    if _auth.is_loopback(resolved_host) or resolved_host in ("0.0.0.0", "::", ""):  # nosec B104 — comparison, not a bind
         import socket  # local: matches _port_already_serving's existing pattern
 
         try:
@@ -2914,7 +2914,7 @@ def dashboard_show_url(host: "str | None" = None, port: "int | None" = None) -> 
 
     print("Open this once on the target device (the token is exchanged for a cookie):\n")
     print(f"    http://{display_host}:{resolved_port}/?token={token}\n")
-    if resolved_host not in ("0.0.0.0", "::"):
+    if resolved_host not in ("0.0.0.0", "::"):  # nosec B104 — comparison, not a bind
         print(f"NOTE: the dashboard is bound to {resolved_host}, so another device can only\n"
               f"reach it if that address is routable from it (e.g. a VPN/tailnet address).")
     return 0
