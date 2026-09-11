@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-09-09T11:22:40.641999+00:00._
+_Generated 2026-09-11T04:11:26.164271+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -106,6 +106,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/release_orphan_claims.py](release_orphan_claims.md) | release_orphan_claims — safely release stuck in_progress enrichment_groups rows. |  |
 | [bin/run_observer.py](run_observer.md) | Phase D Mastra-style Observer drainer. |  |
 | [bin/run_reflector.py](run_reflector.md) | Phase D Mastra-style Reflector drainer. |  |
+| [bin/search_differential.py](search_differential.md) | Differential search check: does this tree still answer like a known-good m3? |  |
 | [bin/secret_rotator.py](secret_rotator.md) | (no docstring) |  |
 | [bin/session_handoff.py](session_handoff.md) | (no docstring) |  |
 | [bin/setup_hooks.py](setup_hooks.md) | Enable the repo's shared git hooks for this clone. |  |
