@@ -394,6 +394,21 @@ def _heal_agent_settings(settings_file: Path, *, force: bool = False,
         except (OSError, json.JSONDecodeError):
             return f"[!] {settings_file} is unreadable; skipping (hand-edited?)"
 
+    # CLAUDE CODE IS THE EXCEPTION: it does NOT read `mcpServers` from
+    # settings.json (only ~/.claude.json, .mcp.json and plugins are honored), so
+    # an entry written here is inert -- and worse, misleading. generate_configs
+    # actively PRUNES it ("never add them back", :480), which made the two paths
+    # disagree: `m3 doctor --fix` ADDED the block and `--fix-hooks` REMOVED it.
+    # A user who ran only the first was left with a dead entry that reads like a
+    # live registration. Claude's real registration is `claude mcp add`, which
+    # _dedupe_mcp_registration and the convergence check already own.
+    if settings_file == Path.home() / ".claude" / "settings.json":
+        if isinstance(data.get("mcpServers"), dict) and "memory" in data["mcpServers"]:
+            return (f"[!] {settings_file} has an inert m3 `mcpServers` entry "
+                    "(Claude Code ignores this key) — run "
+                    "`m3 doctor --fix --fix-hooks` to prune it")
+        return None
+
     servers = data.setdefault("mcpServers", {})
     existing = servers.get("memory")
     canonical = _canonical_memory_server()

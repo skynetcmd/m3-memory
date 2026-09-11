@@ -241,3 +241,58 @@ def test_wire_opencode_leaves_a_healthy_entry(tmp_path, monkeypatch):
     W._wire_opencode()
     assert cfg.read_text() == before  # no rewrite of a healthy entry
     assert not cfg.with_suffix(".json.m3bak").exists()
+
+
+def test_claude_settings_never_gets_an_mcpservers_entry(canonical, tmp_path, monkeypatch):
+    """`doctor --fix` and `--fix-hooks` must agree about Claude's settings.json.
+
+    Claude Code does NOT read ``mcpServers`` from settings.json -- only
+    ~/.claude.json, .mcp.json and plugins are honored -- so an entry written
+    there is inert. generate_configs actively prunes it ("never add them back"),
+    which made the two repair paths disagree in practice: `m3 doctor --fix`
+    ADDED the block and `m3 doctor --fix --fix-hooks` REMOVED it. A user who ran
+    only the first was left with a dead entry that reads like a live
+    registration.
+
+    The healer now skips Claude entirely. Every OTHER host still gets its entry,
+    because for them the key is real.
+    """
+    claude = tmp_path / ".claude" / "settings.json"
+    claude.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(I.Path, "home", staticmethod(lambda: tmp_path))
+
+    claude.write_text(json.dumps({"model": "opus"}), encoding="utf-8")
+    msg = I._heal_agent_settings(claude)
+    after = json.loads(claude.read_text(encoding="utf-8"))
+    assert "mcpServers" not in after, (
+        "wrote an inert mcpServers block into Claude's settings.json; "
+        "generate_configs prunes it, so the two repair paths would disagree"
+    )
+    assert msg is None
+
+    # An entry a PRIOR version left is reported, not silently tolerated.
+    claude.write_text(
+        json.dumps({"model": "opus", "mcpServers": {"memory": {"command": "x"}}}),
+        encoding="utf-8",
+    )
+    msg = I._heal_agent_settings(claude)
+    assert msg and "inert" in msg, f"expected an inert-entry warning, got {msg!r}"
+    assert "--fix-hooks" in msg, "the warning must name the command that prunes it"
+
+
+def test_non_claude_hosts_still_get_their_mcpservers_entry(canonical, tmp_path, monkeypatch):
+    """The Claude skip must not disarm the healer for everyone else.
+
+    Gemini, OpenCode, Cursor and Cline DO read ``mcpServers`` from their config,
+    so for them the entry is the registration.
+    """
+    monkeypatch.setattr(I.Path, "home", staticmethod(lambda: tmp_path))
+    other = tmp_path / "gemini-settings.json"
+    other.write_text(json.dumps({"contextFileName": "GEMINI.md"}), encoding="utf-8")
+
+    msg = I._heal_agent_settings(other, create_if_absent=True)
+    after = json.loads(other.read_text(encoding="utf-8"))
+    assert "memory" in after.get("mcpServers", {}), (
+        "a non-Claude host lost its mcpServers registration"
+    )
+    assert msg and msg.lstrip().startswith("[+]")
