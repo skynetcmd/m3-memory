@@ -299,7 +299,7 @@ graph LR
 | Parameter | Required | Notes |
 |-----------|----------|-------|
 | `query` | Yes | Natural language query (max 2,000 chars) |
-| `k` | No | Number of results (default 8, max 100) |
+| `k` | No | Number of results to return (default 8, max 100). m3 returns the **best k available**: exact lexical matches rank first, and if there are fewer than k, semantically related memories fill the remainder. You get fewer than k only when the store holds fewer matching rows. |
 | `type_filter` | No | Filter by type. Quote for exact match: `"fact"` |
 | `agent_filter` | No | Filter by agent_id |
 | `user_id` | No | Filter by user |

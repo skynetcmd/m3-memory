@@ -161,6 +161,22 @@ flowchart LR
 3. **MMR diversity re-ranking** — suppresses near-duplicates, balancing
    relevance against diversity.
 
+**`k` is a target, not a ceiling.** A request for `k` results returns the best
+`k` available: exact lexical matches rank first, and if the full-text side found
+fewer than `k`, semantically related memories fill the remainder. You get fewer
+than `k` only when the store genuinely holds fewer rows.
+
+This was not always true. The hybrid candidate query requires a full-text match,
+so its pool could never exceed the lexical match count — a query matching 7 rows
+returned 7 for `k=10` while the store held hundreds of relevant ones. The
+behaviour was also non-monotonic, which was the tell: a query matching *nothing*
+returned a full `k` (zero matches falls through to a semantic pass), while one
+matching *a little* returned a little.
+
+The cost is one embed call on a highly-specific lexical query that would
+otherwise have skipped it. A query with `k` or more exact matches still answers
+with no embedding at all.
+
 ### Every stage, including the conditional ones
 
 The diagram above is what usually happens. Two stages it leaves out are easy to
@@ -195,9 +211,12 @@ flowchart TB
     ROUTE -->|default| W07
     ROUTE -->|"when routing fires"| W03
     W07 & W03 -.->|"sets w"| FUSE
+    FILL["<b>Fill to k</b><br/><i>only when short</i>"]
+
     FTS & VEC --> FUSE --> POST
-    POST --> RERANK -.->|"lazy-loads the model"| R
-    POST --> R
+    POST --> FILL
+    FILL --> RERANK -.->|"lazy-loads the model"| R
+    FILL --> R
 
     classDef q fill:#1e1b4b,stroke:#1e1b4b,color:#fff,rx:14,ry:14
     classDef stage fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b,rx:6,ry:6
@@ -206,6 +225,7 @@ flowchart TB
     classDef decide fill:#ecfdf5,stroke:#10b981,stroke-width:1.5px,color:#064e3b
     class Q,R q
     class FTS,VEC,REC,TMP,MMR,ELB,W07,W03 stage
+    class FILL opt
     class FUSE fuse
     class RERANK opt
     class ROUTE decide
