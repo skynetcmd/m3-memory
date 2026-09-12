@@ -16,22 +16,73 @@ import sys
 logger = logging.getLogger("memory.doctor.embed_server_probe")
 
 BINARY_NAME = "m3-embed-server.exe" if sys.platform == "win32" else "m3-embed-server"
+_HEALTH_PORT = 8082  # the port shared_embedder_probe also checks
 TIMEOUT_SECS = 30
+
+
+def _resolve_binary() -> "str | None":
+    """Locate the Rust embed-server binary, PATH or not.
+
+    `shutil.which` alone is the #167 defect. The binary normally lives inside
+    the m3_core_rs wheel (site-packages/m3_core_rs/m3-embed-server[.exe]) and is
+    NOT on PATH, so a bare which() returns None while the service is installed
+    and serving. Measured 2026-09-12 on two hosts: which() -> None,
+    embedder_admin._server_binary() -> the real path, :8082/health -> 200.
+    """
+    exe = shutil.which(BINARY_NAME)
+    if exe:
+        return exe
+    try:
+        from m3_memory import embedder_admin
+        return embedder_admin._server_binary()
+    except Exception:  # noqa: BLE001 — a probe must never raise
+        return None
+
+
+def _port_answers(timeout: float = 2.0) -> bool:
+    """Is something serving on :8082 right now?
+
+    The distinction that matters for the verdict: a binary we cannot find but a
+    port that answers means the service IS running, however it was started.
+    Reporting "not installed" there is the false alarm §3 names -- and it is
+    exactly what happened, in the same doctor run whose embedding-cascade line
+    said "healthy -- shared tier-2 embedder online".
+    """
+    import urllib.request
+    try:
+        with urllib.request.urlopen(  # nosec B310 — fixed loopback URL
+            f"http://127.0.0.1:{_HEALTH_PORT}/health", timeout=timeout
+        ) as r:
+            return 200 <= r.status < 300
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def run(brief: bool = False) -> int:
     """Invoke `m3-embed-server doctor` and inherit its exit code.
 
-    Returns 0 when the binary isn't on PATH (not a Python-side failure).
+    Returns 0 when the binary isn't installed (not a Python-side failure).
     Returns 1 on subprocess timeout or any unhandled exception. brief=True
     captures the subprocess output and prints only a one-line verdict.
     """
-    exe = shutil.which(BINARY_NAME)
+    exe = _resolve_binary()
     if not exe:
-        if brief:
-            print("embed-server: not installed (optional)")
+        # Three states, not two. "Cannot find the binary" and "the service is
+        # absent" are different claims, and conflating them reported a live
+        # server as missing (#167).
+        if _port_answers():
+            if brief:
+                print("embed-server: serving on :8082 (binary not located)")
+            else:
+                logger.debug(
+                    f"{BINARY_NAME} not located, but :{_HEALTH_PORT} answers — "
+                    f"the service is running; skipping the Rust-side doctor"
+                )
         else:
-            logger.debug(f"{BINARY_NAME} not on PATH; skipping Rust-side doctor")
+            if brief:
+                print("embed-server: not installed (optional)")
+            else:
+                logger.debug(f"{BINARY_NAME} not located; skipping Rust-side doctor")
         return 0
     if not brief:
         print()
@@ -47,13 +98,36 @@ def run(brief: bool = False) -> int:
     try:
         # In brief mode, capture (and discard) the subprocess's own noisy output;
         # we only report pass/fail from its exit code as a single line.
-        r = subprocess.run(
-            [exe, "doctor"], capture_output=brief, text=True,
+        # `doctor` does not exist on every build of this binary. Measured
+        # 2026-09-12 against m3_core_rs 3.9.7: `m3-embed-server doctor` prints
+        # USAGE and exits 2, while `status` works and reports
+        # running/stopped/not installed. Treating that rc 2 as a health FAILURE
+        # reported a fine install as broken -- the same false alarm #167 is
+        # about, one layer down. Probe the subcommand instead of assuming it.
+        sub = "doctor"
+        probe = subprocess.run(
+            [exe, "doctor"], capture_output=True, text=True,
             timeout=TIMEOUT_SECS, env=env,
         )
+        if probe.returncode != 0 and "USAGE" in (probe.stdout or "") + (probe.stderr or ""):
+            sub = "status"
+            r = subprocess.run(
+                [exe, "status"], capture_output=brief, text=True,
+                timeout=TIMEOUT_SECS, env=env,
+            )
+        else:
+            r = probe
+            if not brief:
+                # The probe already consumed the output; re-emit it.
+                print(r.stdout or "", end="")
+
         if brief:
-            glyph = "✅" if r.returncode == 0 else "❌"
-            print(f"{glyph} embed-server: {'ok' if r.returncode == 0 else 'FAILED'}")
+            if r.returncode == 0:
+                state = (r.stdout or "").strip().splitlines()[-1:] or [""]
+                detail = f" ({state[0]})" if sub == "status" and state[0] else ""
+                print(f"✅ embed-server: ok{detail}")
+            else:
+                print(f"❌ embed-server: FAILED ({sub})")
         return r.returncode
     except subprocess.TimeoutExpired:
         print("embed-server: ❌ timed out" if brief
