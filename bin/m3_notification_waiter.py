@@ -184,6 +184,207 @@ def unread_ids(agent_id: str) -> set:
     return set(re.findall(r"\[(\d+)\]", out.stdout))
 
 
+
+def pg_child_loop(args) -> int:
+    import json
+    import threading
+    import psycopg2
+    import traceback
+    
+    shutdown_flag = threading.Event()
+    
+    def stdin_watcher():
+        try:
+            for line in sys.stdin:
+                if line.strip() == "stop":
+                    shutdown_flag.set()
+                    break
+        except Exception:
+            pass
+        shutdown_flag.set() # EOF seen
+        
+    t = threading.Thread(target=stdin_watcher, daemon=True)
+    t.start()
+    
+    url = os.environ.get("M3_PRIMARY_PG_URL") or os.environ.get("M3_PG_URL")
+    if not url:
+        _warn("M3_PRIMARY_PG_URL not set for postgres backend")
+        return 1
+        
+    # Pre-calculate what is currently unread
+    baselines = {}
+    try:
+        from memory.orchestration import notifications_poll_impl
+    except ImportError as e:
+        _warn(f"ImportError in child: {e}")
+        return 1
+        
+    for a in args.agent_ids:
+        try:
+            from memory.orchestration import notifications_mark_received_impl
+            notifications_mark_received_impl(a)
+        except Exception:
+            pass
+        baselines[a] = set(re.findall(r"\[(\d+)\]", notifications_poll_impl(a, unread_only=True)))
+
+    try:
+        # short statement timeout (2.0s) so we can exit cleanly
+        conn = psycopg2.connect(url, connect_timeout=5, options="-c statement_timeout=2000")
+        conn.autocommit = True
+    except Exception as e:
+        _warn(f"PG connect failed: {e}")
+        return 1
+
+    deadline = time.time() + args.timeout
+    
+    while time.time() < deadline:
+        if shutdown_flag.is_set():
+            try:
+                conn.close()
+            except:
+                pass
+            print(json.dumps({"t":"bye","closed":True}), flush=True)
+            return 0
+            
+        # Emit heartbeat
+        print(json.dumps({"t":"hb","n":0}), flush=True)
+        
+        # Check PG
+        try:
+            # We just use notifications_poll_impl for simplicity, but wait, it uses the global context pool!
+            # Since we just want to poll, we can execute a quick query directly?
+            # Or just use the global pool. But we connected manually above to set the statement timeout!
+            # Actually, notifications_poll_impl uses the m3 framework. 
+            # Let us just query the unread IDs directly via the manual connection to bypass the pool and ensure the timeout applies.
+            hits = {}
+            with conn.cursor() as cur:
+                for a in args.agent_ids:
+                    # Very simple poll
+                    cur.execute("SELECT id FROM notifications WHERE agent_id = %s AND read_at IS NULL ORDER BY id ASC", (a,))
+                    now = {str(row[0]) for row in cur.fetchall()}
+                    gained = now - baselines[a]
+                    if gained:
+                        hits[a] = sorted(list(gained))
+                        # mark received
+                        cur.execute("UPDATE notifications SET received_at = now() WHERE agent_id = %s AND received_at IS NULL", (a,))
+                    baselines[a] = now
+                    
+            if hits:
+                acked = {}
+                if args.ack:
+                    with conn.cursor() as cur:
+                        for a in hits:
+                            cur.execute("UPDATE notifications SET read_at = now() WHERE agent_id = %s", (a,))
+                            acked[a] = hits[a]
+                print(json.dumps({"t":"hit", "new_notifications": hits, "received": hits, "acked": acked}), flush=True)
+                return 0
+        except Exception as e:
+            _warn(f"PG poll error: {e}")
+            return 1
+            
+        # Sleep short
+        time.sleep(args.interval)
+        
+    print(json.dumps({"t":"timeout"}), flush=True)
+    return 2
+
+
+def _supervise_postgres(args) -> int:
+    import queue
+    import threading
+    
+    # Backoff variables
+    backoff = 1.0
+    
+    deadline = time.time() + args.timeout
+    
+    while time.time() < deadline:
+        # Spawn child with -u (Point 1)
+        cmd = [sys.executable, "-u", __file__, "--child"]
+        for a in args.agent_ids:
+            cmd.extend(["--agent-id", a])
+        if args.ack:
+            cmd.append("--ack")
+        cmd.extend(["--interval", str(args.interval), "--timeout", str(args.timeout)])
+        
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE, text=True, **_no_window())
+        
+        q = queue.Queue()
+        def reader():
+            try:
+                for line in p.stdout:
+                    q.put(line)
+            except Exception:
+                pass
+            q.put(None) # EOF
+            
+        t = threading.Thread(target=reader, daemon=True)
+        t.start()
+        
+        child_failed = False
+        last_hb = time.time()
+        
+        while True:
+            try:
+                line = q.get(timeout=0.1)
+                if line is None:
+                    # EOF
+                    child_failed = True
+                    break
+                    
+                line = line.strip()
+                if not line: continue
+                
+                try:
+                    msg = json.loads(line)
+                except Exception:
+                    continue
+                    
+                if msg.get("t") == "hb":
+                    last_hb = time.time()
+                    backoff = 1.0 # reset backoff on healthy heartbeat
+                elif msg.get("t") == "hit":
+                    # delivered! Return 0 so caller loop re-arms if supervised
+                    # But wait, the child exits 0 on hit!
+                    # We should wait for child to exit
+                    p.wait(timeout=2.0)
+                    return 0
+                elif msg.get("t") == "timeout":
+                    p.wait(timeout=2.0)
+                    return 2
+                elif msg.get("t") == "bye":
+                    break
+            except queue.Empty:
+                # check timeout
+                if time.time() - last_hb > (args.interval * 3):
+                    # Wedged!
+                    _warn(f"PG child wedged (no hb for {args.interval*3}s). Restarting.")
+                    child_failed = True
+                    break
+        
+        if child_failed:
+            # Graceful shutdown via stdin (Point 3)
+            try:
+                p.stdin.write("stop\n")
+                p.stdin.flush()
+            except Exception:
+                pass
+            
+            # Wait for up to 5 seconds
+            try:
+                p.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+                
+            # Exponential backoff (Point 6)
+            _warn(f"Child restarted. Backing off for {backoff}s")
+            time.sleep(backoff)
+            backoff = min(60.0, backoff * 2.0)
+            
+    return 2
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--agent-id", required=True,
@@ -210,11 +411,24 @@ def main() -> int:
                          "state machine tracks it' is false for ~97 percent of real traffic. Enable this "
                          "only where every watched kind is backed by a task whose own state "
                          "survives the ack.")
+    ap.add_argument("--child", action="store_true")
     args = ap.parse_args()
 
     # Supervise mode loops the single-shot body instead of duplicating it, so
     # there is exactly one implementation of detect-confirm-ack and the two
     # modes cannot drift.
+    
+    if args.child:
+        return pg_child_loop(args)
+
+    if os.environ.get("M3_DB_BACKEND", "sqlite").lower() == "postgres":
+        if args.supervise:
+            while True:
+                rc = _supervise_postgres(args)
+                if rc not in (0, 2):
+                    return rc
+        return _supervise_postgres(args)
+
     if args.supervise:
         while True:
             rc = _wait_once(args)
@@ -303,3 +517,4 @@ def _wait_once(args) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

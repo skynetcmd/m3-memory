@@ -944,6 +944,7 @@ _ROLE_TO_TASK = {
     "embed_server": "AgentOS_EmbedServer",
     "cognitive-loop": "AgentOS_CognitiveLoop",
     "cognitive_loop": "AgentOS_CognitiveLoop",
+    "waiter": "AgentOS_NotificationWaiter",
 }
 
 
