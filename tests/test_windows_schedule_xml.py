@@ -30,6 +30,15 @@ import install_schedules as isch  # noqa: E402
 _NS = {"t": isch._TASK_NS}
 
 
+# _render_task_xml grew a required m3_memory_root when <WorkingDirectory>
+# was added: the task must run FROM the payload, because an interpreter that
+# resolves `m3_memory` only via cwd is blind anywhere else -- the 2026-09-12
+# waiter outage, where the task ran from C:/Windows/system32 and detected
+# nothing for an hour while reporting Running. A fixed fixture path keeps
+# these tests about XML shape rather than about this machine.
+_ROOT = r"C:\payload\m3_memory"
+
+
 def _spec(name, schedule, modifier="", time="00:00", args=None, desc="d"):
     return {
         "name": name,
@@ -43,7 +52,7 @@ def _spec(name, schedule, modifier="", time="00:00", args=None, desc="d"):
 
 def _render(spec):
     """Render + parse; returns the root Element (asserts well-formedness)."""
-    doc = isch._render_task_xml(spec, r"C:\venv\pythonw.exe", "DOMAIN\\user")
+    doc = isch._render_task_xml(spec, r"C:\venv\pythonw.exe", "DOMAIN\\user", _ROOT)
     return ET.fromstring(doc)
 
 
@@ -114,7 +123,7 @@ def test_onstart_has_both_boot_and_logon_triggers():
 
 def test_unsupported_schedule_raises():
     with pytest.raises(ValueError):
-        isch._render_task_xml(_spec("AgentOS_X", "YEARLY"), "py", "u")
+        isch._render_task_xml(_spec("AgentOS_X", "YEARLY"), "py", "u", _ROOT)
 
 
 # ── Self-heal repetition is scoped to the cognitive loop only ─────────────────
@@ -397,7 +406,7 @@ def test_generated_xml_has_no_duration_for_self_heal_tasks():
     for task in specs:
         if task["name"] not in isch._SELF_HEAL_TASKS:
             continue
-        xml_doc = isch._render_task_xml(task, r"C:\python.exe", r"DOMAIN\user")
+        xml_doc = isch._render_task_xml(task, r"C:\python.exe", r"DOMAIN\user", _ROOT)
         root = ET.fromstring(xml_doc)
         for rep in root.iter():
             if rep.tag.endswith("Repetition"):
@@ -408,3 +417,41 @@ def test_generated_xml_has_no_duration_for_self_heal_tasks():
                 )
                 checked += 1
     assert checked, "no self-heal task rendered — the guard tested nothing"
+
+
+# ── WorkingDirectory: the fix for the 2026-09-12 blind-waiter outage ──────────
+
+def test_task_xml_sets_working_directory_to_the_payload():
+    """A task with no <WorkingDirectory> runs from C:/Windows/system32.
+
+    That is not cosmetic. An interpreter whose only route to `m3_memory` is the
+    implicit cwd entry on sys.path can import it from the checkout and NOWHERE
+    else -- so the scheduled waiter spent an hour detecting nothing, through
+    three probes, while Task Scheduler reported Running and every health check
+    reported OK. Every manual test passed because humans run commands from the
+    checkout; the failure reproduced only where nobody types.
+
+    Pinning the element itself, not just the signature: the signature change was
+    what the 21 broken tests noticed, and a signature can be satisfied while the
+    XML omits the element entirely.
+    """
+    doc = isch._render_task_xml(
+        _spec("AgentOS_T", "MINUTE", modifier="5"),
+        r"C:\venv\pythonw.exe", "DOMAIN\\user", _ROOT,
+    )
+    root = ET.fromstring(doc)
+    found = [e.text for e in root.iter() if e.tag.endswith("WorkingDirectory")]
+    assert found, "no <WorkingDirectory> — the task will run from system32"
+    assert found[0] == _ROOT, f"WorkingDirectory is {found[0]!r}, expected {_ROOT!r}"
+
+
+def test_every_real_spec_gets_a_working_directory():
+    """Not just the one spec above. A task registered without it is the exact
+    silent failure this element exists to prevent, so no spec may be missed."""
+    missing = []
+    for task in isch.get_schedule_specs(os.path.dirname(_BIN)):
+        doc = isch._render_task_xml(task, r"C:\venv\pythonw.exe", "DOMAIN\\user", _ROOT)
+        root = ET.fromstring(doc)
+        if not [e for e in root.iter() if e.tag.endswith("WorkingDirectory")]:
+            missing.append(task["name"])
+    assert not missing, f"specs with no WorkingDirectory: {missing}"
