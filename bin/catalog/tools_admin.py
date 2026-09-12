@@ -276,6 +276,28 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=True,
     ),
     ToolSpec(
+        name="notifications_mark_received",
+        description=(
+            "Stamp transport receipt on an agent's undelivered notifications. "
+            "Sets received_at and never touches read_at, so the unread flag "
+            "survives -- this is delivery confirmation, NOT consumption. Use it "
+            "to satisfy a receipt SLA without marking messages read that no "
+            "agent has read. Returns the count stamped."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string", "description": "Agent id."},
+            },
+            "required": ["agent_id"],
+        },
+        impl=memory_core.notifications_mark_received_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=True,
+    ),
+    ToolSpec(
         name="extract_entities",
         description=(
             "Accepts raw text, extracts entities and relationship predicates "

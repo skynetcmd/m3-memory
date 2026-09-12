@@ -113,31 +113,44 @@ def _wait_once(args) -> int:
                 hits[a] = sorted(gained)
             baselines[a] = now
         if hits:
-            # RECEIPT vs READING -- the distinction this whole flag turns on.
+            # RECEIPT vs READING -- the distinction this whole waiter turns on.
             #
-            # Acking from here would satisfy a "<30s acknowledge receipt" SLA
-            # without needing an agent turn (measured: 426ms from a subprocess).
-            # But `notifications` has ONE timestamp, `read_at`. Acking on
-            # DETECTION therefore marks a message read that no agent has read,
-            # and the unread flag was the only record that work was pending.
+            # The SLA is "acknowledge RECEIPT within 30 seconds", and receipt
+            # does not need an agent turn: a plain subprocess round-trips in
+            # ~430ms. So stamping it here makes receipt deterministic and
+            # independent of whether any agent is free -- a busy agent delays
+            # the WORK, never the RECEIPT.
             #
-            # Measured before changing this default: 29 of 30 recent
-            # notifications carried no task_id, so the task state machine does
-            # NOT cover the gap for the traffic that actually flows.
+            # This used to be impossible to do safely. `notifications` carried
+            # ONE timestamp, `read_at`, so the only way to record receipt was to
+            # ack -- which marks a message read that no agent has read, and the
+            # unread flag was the only record that work was still pending. The
+            # usual reassurance ("the task state machine covers it") was
+            # measured and is false for real traffic: 29 of 30 recent
+            # notifications carried no task_id.
             #
-            # So: detect and DELIVER by default, ack only under --ack. Losing a
-            # message silently is worse than reporting receipt a turn later.
+            # Migration 045 / pg_054 split the two, so the safe option now
+            # exists: `received_at` is written here, `read_at` is left for an
+            # agent that has actually read the message. --unread_only still
+            # filters on `read_at`, so the inbox remains the record of
+            # UNPROCESSED work. Receipt is therefore the DEFAULT.
             #
-            # The SLA is "acknowledge receipt within 30s", and ack does not need
-            # an agent turn -- measured at 426ms from a plain subprocess. Acking
-            # here makes receipt deterministic and independent of whether any
-            # agent is free: a busy agent delays the WORK, never the RECEIPT.
-            #
-            # --no-ack leaves the inbox untouched for callers who would rather
-            # the agent ack after actually reading. Note what auto-ack costs:
-            # the inbox stops being the record of UNPROCESSED work, so the work
-            # must carry its own state (the task's pending/in_progress/completed)
-            # or a dropped task looks handled.
+            # --ack additionally marks messages READ from here. That is still
+            # opt-in and still lossy in the same way it always was: use it only
+            # where every watched kind is backed by a task whose own state
+            # survives the ack.
+            received = {}
+            for a in hits:
+                try:
+                    r = subprocess.run(  # nosec B603 - argv list, no shell
+                        ["m3", "admin", "notifications_mark_received",
+                         "--agent_id", a, "--yes"],
+                        capture_output=True, text=True, timeout=90,
+                    )
+                    received[a] = (r.returncode == 0)
+                except (OSError, subprocess.TimeoutExpired):
+                    received[a] = False
+
             acked = {}
             if args.ack:
                 for a in hits:
@@ -150,7 +163,8 @@ def _wait_once(args) -> int:
                         acked[a] = (r.returncode == 0)
                     except (OSError, subprocess.TimeoutExpired):
                         acked[a] = False
-            print(json.dumps({"new_notifications": hits, "acked": acked}))
+            print(json.dumps({"new_notifications": hits,
+                              "received": received, "acked": acked}))
             return 0                      # exit == your runtime's wake signal
 
     print(json.dumps({"timeout": True, "agent_ids": args.agent_ids}), file=sys.stderr)

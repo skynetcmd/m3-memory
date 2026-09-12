@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_notification_waiter.py
-sha1: c27dd4636d0c
-mtime_utc: 2026-09-12T14:02:26.232543+00:00
-generated_utc: 2026-09-12T14:02:32.165614+00:00
+sha1: d45330df5ee6
+mtime_utc: 2026-09-12T14:37:37.745367+00:00
+generated_utc: 2026-09-12T14:37:59.736682+00:00
 private: false
 ---
 
@@ -65,7 +65,8 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['m3', 'admin', 'notifications_ack_all', '--agent_id', a, '--yes']`` (line 145)
+- `subprocess.run()  → `['m3', 'admin', 'notifications_ack_all', '--agent_id', a, '--yes']`` (line 158)
+- `subprocess.run()  → `['m3', 'admin', 'notifications_mark_received', '--agent_id', a, '--yes']`` (line 145)
 - `subprocess.run()  → `['m3', 'admin', 'notifications_poll', '--agent_id', agent_id, '--limit', '50']`` (line 45)
 
 

@@ -2,7 +2,7 @@
 
 > **Generated** by `bin/gen_capability_matrix.py` from `docs/tools/MCP_CATALOG.json` — do not edit by hand; re-run after any tool-catalog change. This is the single scannable index of *what M3 can do* and *which tool does it*, for humans, search engines, and AI agents.
 
-**110 tools across 9 capability groups.** The **Consent** column reflects the dispatch gate: a ⚠️ tool will not run until it is explicitly allowed (it deletes, exports, or runs a bulk/long operation), while a default-allowed tool runs without extra opt-in. It is **not** a read/write distinction — `memory_write` is default-allowed, and read-only `memory_export` is not.
+**111 tools across 9 capability groups.** The **Consent** column reflects the dispatch gate: a ⚠️ tool will not run until it is explicitly allowed (it deletes, exports, or runs a bulk/long operation), while a default-allowed tool runs without extra opt-in. It is **not** a read/write distinction — `memory_write` is default-allowed, and read-only `memory_export` is not.
 
 > **Beyond MCP tools:** M3 also ships a **storage backend** choice (SQLite default; PostgreSQL as a first-class primary via `M3_DB_BACKEND=postgres`) and native **framework adapters** — LangChain/LangGraph, CrewAI, and PydanticAI. These are deployment/framework facts, not MCP tools, so they don't appear in the table below. See [CORE_FEATURES](CORE_FEATURES.md) and [COMPARISON](COMPARISON.md).
 
@@ -16,7 +16,7 @@
 - [👥 Agents](#agents) — Register agents, hand off tasks, and route multi-agent work. (6 tools)
 - [✅ Tasks](#tasks) — Track and coordinate agent tasks and their state. (8 tools)
 - [🩺 Diagnostics](#diagnostics) — Health, cost, and integrity checks for the memory store. (3 tools)
-- [⚙️ Admin & Sync](#admin--sync) — Maintenance, cross-store sync, import/export, and lifecycle ops. (14 tools)
+- [⚙️ Admin & Sync](#admin--sync) — Maintenance, cross-store sync, import/export, and lifecycle ops. (15 tools)
 
 ## 🧠 Memory
 
@@ -186,6 +186,7 @@ _Maintenance, cross-store sync, import/export, and lifecycle ops._
 | `m3_index` | List m3 catalog tools (optionally one domain) as structured rows: name, domain, one-line summary, d… | default-allowed |
 | `notifications_ack` | Mark one notification as read. | default-allowed |
 | `notifications_ack_all` | Bulk-ack all unread notifications for an agent. | default-allowed |
+| `notifications_mark_received` | Stamp transport receipt on an agent's undelivered notifications. | default-allowed |
 | `notifications_poll` | List notifications addressed to agent_id, newest first. | default-allowed |
 | `notify` | Send a notification to an agent. | default-allowed |
 | `tools_list_domains` | List m3 tool domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, adm… | default-allowed |

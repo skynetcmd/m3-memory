@@ -252,6 +252,39 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
 
     return "\n".join(lines)
 
+def notifications_mark_received_impl(agent_id: str) -> str:
+    """Stamps transport receipt on an agent's undelivered notifications.
+
+    This is what a transport waiter calls to satisfy the "acknowledge receipt
+    within 30 seconds" SLA. It is deliberately NOT an ack: it writes
+    ``received_at`` and never touches ``read_at``, so the unread flag -- the only
+    record that the work is still pending -- survives. ``--unread_only`` keeps
+    filtering on ``read_at`` and behaves identically before and after this call.
+
+    Acking on detection was the tempting shortcut and it is wrong: it marks a
+    message read that no agent has read. The usual counter-argument, that the
+    task state machine covers the gap, was measured rather than assumed and is
+    false for real traffic -- 29 of 30 recent notifications carried no task_id,
+    so nothing else recorded the message as outstanding.
+
+    Only rows that have not already been stamped are touched, so a waiter that
+    fires repeatedly on the same WAL change records the FIRST receipt rather than
+    the most recent poll -- which is the number a receipt SLA is measured
+    against.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+
+    with _db() as db:
+        p = dialect().param()
+        cur = db.execute(
+            f"UPDATE notifications SET received_at = {p} "
+            f"WHERE agent_id = {p} AND received_at IS NULL",
+            (now, agent_id)
+        )
+        rowcount = cur.rowcount
+
+    return f"Marked {rowcount} notifications received for {agent_id}"
+
 def notifications_ack_impl(notification_id: int) -> str:
     """Marks a notification as read."""
     now = datetime.now(timezone.utc).isoformat()

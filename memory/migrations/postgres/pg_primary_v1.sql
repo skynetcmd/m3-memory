@@ -392,7 +392,10 @@ CREATE TABLE IF NOT EXISTS notifications (
     kind           TEXT NOT NULL,
     payload_json   JSONB DEFAULT '{}',
     created_at     TIMESTAMPTZ DEFAULT NOW(),
-    read_at        TIMESTAMPTZ DEFAULT NULL
+    read_at        TIMESTAMPTZ DEFAULT NULL,
+    -- Transport receipt, distinct from agent consumption (read_at). See
+    -- pg_054_notification_received_at.up.sql for why the two are separate.
+    received_at    TIMESTAMPTZ DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_notif_agent_unread
     ON notifications(agent_id, read_at, created_at);
