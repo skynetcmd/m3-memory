@@ -195,7 +195,21 @@ _EXEMPT = {
         "when the seam is not yet importable (installer bootstrap).",
     "bin/hooks/chatlog/session_start_capture_check.py":
         "Session-start hook: a seam import error must not break session start.",
+
+    # --- Test harnesses that BUILD a throwaway store, like tests/ itself. ---
+    "bin/search_differential.py":
+        "Differential harness: seeds and soft-deletes rows in a throwaway "
+        "fixture store to diff two search builds. Same category as the tests/ "
+        "skip -- it is constructing the fixture, not reading product data. "
+        "Surfaced 2026-09-12 when _code_lines stopped dropping whole lines "
+        "containing a string literal; it had been invisible, not absent.",
 }
+
+
+# Built at runtime, not written literally: a source file containing an
+# f-string that mentions the idiom would be scanned by this very guard.
+PROSE_FSTRING = 'x = f"Do not use ' + "sqlite3.connect" + ' here {var}"\n'
+REAL_FSTRING = 'conn = ' + "sqlite3.connect" + '(f"{root}/a.db")\n'
 
 
 def _iter_py():
@@ -224,22 +238,66 @@ def _code_lines(src: str):
     import io as _io
     import tokenize
 
+    lines = src.splitlines()
+
     try:
         toks = list(tokenize.generate_tokens(_io.StringIO(src).readline))
     except (tokenize.TokenError, SyntaxError, IndentationError):
-        for i, line in enumerate(src.splitlines(), 1):
+        for i, line in enumerate(lines, 1):
             if not line.strip().startswith("#"):
                 yield i, line
         return
 
-    prose = set()
+    # Blank out the SPAN each comment/string occupies, rather than discarding
+    # every line it touches.
+    #
+    # The earlier version added each such line to a `prose` set and skipped it
+    # whole. That made the guard blind to its own majority case, because almost
+    # every real raw connect passes a STRING path:
+    #
+    #     sqlite3.connect("/tmp/x.db")   -> line dropped, INVISIBLE
+    #     sqlite3.connect(PATH)          -> line kept, correctly caught
+    #
+    # So the budget read 0 while uncounted violations sat in the tree
+    # (query.py at the repo root, 2026-09-12). A guard that reports clean
+    # because it cannot see is worse than no guard: it reads as coverage.
+    # DESIGN_PHILOSOPHIES 12c -- plant a violation and watch it trip.
+    #
+    # Blanking the span preserves the rest of the line, so the call survives
+    # while the literal's CONTENTS (which may legitimately mention the idiom in
+    # prose) do not.
+    # FSTRING_MIDDLE matters as much as STRING. Python 3.12 changed f-string
+    # tokenization: `f"...{x}"` is no longer one STRING token but
+    # FSTRING_START / FSTRING_MIDDLE / FSTRING_END, and the PROSE lives in
+    # FSTRING_MIDDLE. Checking only STRING therefore leaves f-string text
+    # unscrubbed, so a mention inside an f-string reads as a real call -- the
+    # over-count this scrubbing exists to prevent, reappearing through a
+    # tokenizer change. Resolved via getattr so the 3.11 floor (where these
+    # token types do not exist) still runs.
+    _fstring_mid = getattr(tokenize, "FSTRING_MIDDLE", None)
+    _prose_types = {tokenize.COMMENT, tokenize.STRING}
+    if _fstring_mid is not None:
+        _prose_types.add(_fstring_mid)
+
+    scrubbed = {}
     for tok in toks:
-        if tok.type in (tokenize.COMMENT, tokenize.STRING):
-            for ln in range(tok.start[0], tok.end[0] + 1):
-                prose.add(ln)
-    for i, line in enumerate(src.splitlines(), 1):
-        if i not in prose:
-            yield i, line
+        if tok.type not in _prose_types:
+            continue
+        (srow, scol), (erow, ecol) = tok.start, tok.end
+        for ln in range(srow, erow + 1):
+            if ln - 1 >= len(lines):
+                continue
+            text = scrubbed.get(ln, lines[ln - 1])
+            a = scol if ln == srow else 0
+            b = ecol if ln == erow else len(text)
+            scrubbed[ln] = text[:a] + " " * max(0, min(b, len(text)) - a) + text[b:]
+
+    for i, line in enumerate(lines, 1):
+        out = scrubbed.get(i, line)
+        if out.strip():
+            yield i, out
+
+
 
 
 def _raw_sites():
@@ -334,13 +392,85 @@ class TestRawConnectionDrift(unittest.TestCase):
 
     def test_the_guard_can_actually_fail(self):
         """§12c: a guard that cannot demonstrate a catch is indistinguishable
-        from one that is blind. Plant a violation and watch it trip."""
-        planted = "conn = sqlite3.connect(str(path))"
-        self.assertIn("sqlite3.connect", planted)
-        # And confirm the detector skips comments, so a comment about the idiom
-        # is not miscounted as a use of it.
-        commented = "# never call sqlite3.connect here"
-        self.assertTrue(commented.strip().startswith("#"))
+        from one that is blind. Plant a violation and watch it trip.
+
+        This test used to be a TAUTOLOGY. It asserted
+        ``self.assertIn("sqlite3.connect", planted)`` against a string it had
+        just written -- checking Python's ``in`` operator, never once calling
+        ``_code_lines``. So it could not fail, and it did not: the detector
+        spent that whole time blind to every connect whose path was a STRING
+        literal, because ``_code_lines`` dropped any line a string token
+        touched. The budget read 0 while real violations sat in the tree
+        (query.py at the repo root; bin/search_differential.py in shipping code,
+        now exempted with a reason).
+
+        The fix is to run the DETECTOR over planted source, both forms, plus the
+        prose cases it must NOT flag. A self-test that does not invoke the thing
+        it certifies is decoration.
+        """
+        def seen(src):
+            return [t for _, t in _code_lines(src)]
+
+        # 1. The case that was invisible: a STRING path.
+        hits = seen('conn = sqlite3.connect("/tmp/x.db")\n')
+        self.assertTrue(
+            any("sqlite3.connect" in h for h in hits),
+            "a connect with a string-literal path is invisible to the detector "
+            "-- this is the exact blindness that let the budget read 0",
+        )
+
+        # 2. The case that always worked: a VARIABLE path.
+        hits = seen("conn = sqlite3.connect(path)\n")
+        self.assertTrue(any("sqlite3.connect" in h for h in hits))
+
+        # 3. Multi-line call with the literal on its own line.
+        hits = seen('conn = sqlite3.connect(\n    "/tmp/x.db"\n)\n')
+        self.assertTrue(any("sqlite3.connect" in h for h in hits))
+
+        # 4. A COMMENT about the idiom must NOT count.
+        hits = seen("# never call sqlite3.connect here\n")
+        self.assertFalse(
+            any("sqlite3.connect" in h for h in hits),
+            "prose in a comment was counted as a use",
+        )
+
+        # 5. A DOCSTRING about the idiom must NOT count -- the false positive
+        #    the string-stripping was introduced to fix. Both directions matter:
+        #    fixing the blindness must not resurrect the over-count.
+        hits = seen('"""We no longer call sqlite3.connect here."""\n')
+        self.assertFalse(
+            any("sqlite3.connect" in h for h in hits),
+            "prose in a docstring was counted as a use",
+        )
+
+        # 6. F-STRING PROSE must not count. Python 3.12 split f-strings into
+        #    FSTRING_START/MIDDLE/END, so scrubbing only STRING leaves the
+        #    prose visible and the guard over-counts. Found in review by the
+        #    other agent, on a fix that was otherwise correct -- a tokenizer
+        #    change quietly reopening a closed hole is exactly why a
+        #    self-test has to exercise the real detector.
+        hits = seen(PROSE_FSTRING)
+        self.assertFalse(
+            any("sqlite3.connect" in h for h in hits),
+            "prose inside an f-string was counted as a use (FSTRING_MIDDLE)",
+        )
+
+        # 7. ...but an f-string used as a REAL path must still be caught.
+        #    Scrubbing f-strings must not become a new blind spot.
+        hits = seen(REAL_FSTRING)
+        self.assertTrue(
+            any("sqlite3.connect" in h for h in hits),
+            "a real connect with an f-string path went invisible",
+        )
+
+        # 8. A string MENTIONING the idiom on a line that also has real code.
+        hits = seen('LOG = "do not sqlite3.connect"\nconn = sqlite3.connect(p)\n')
+        self.assertEqual(
+            sum("sqlite3.connect" in h for h in hits), 1,
+            "must count the real call exactly once and ignore the mention",
+        )
+
+
 
 
 if __name__ == "__main__":

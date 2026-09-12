@@ -191,6 +191,169 @@ def test_no_literal_percent_in_argparse_help():
     assert checked, "no argparse help= strings found; the scan matched nothing"
 
 
+def test_subprocess_failures_are_reported_not_swallowed():
+    """The defect that caused the 2026-09-12 outage.
+
+    ``unread_ids`` returned a bare ``set()`` on any non-zero exit. An empty set
+    is INDISTINGUISHABLE from an empty inbox, so the waiter ran for an hour
+    detecting nothing, through three probes from another agent, while Task
+    Scheduler reported Running and every health check reported OK.
+
+    The underlying cause was trivial once visible -- the task launched an
+    interpreter that could not ``import m3_memory`` unless the working directory
+    happened to be the source checkout, and the task sets no WorkingDirectory.
+    One line of stderr would have found it in seconds.
+    """
+    src = _SRC.read_text(encoding="utf-8")
+    assert "def _warn(" in src, "no single owner for failure reporting"
+    # Every failure path must route through _warn, not a bare return.
+    assert src.count("_warn(") >= 4, (
+        "each subprocess failure branch (poll: exception + rc, admin: exception "
+        "+ rc) must report; found too few _warn call sites"
+    )
+    assert "detection is BLIND" in src, (
+        "the poll failure must say what it COSTS, not just that a command failed"
+    )
+
+
+def test_failure_message_names_the_interpreter():
+    """The error text alone ("No module named 'm3_memory'") does not say WHICH
+    python said it, and the bug WAS the interpreter. Naming it is what turns a
+    confusing message into a diagnosis."""
+    src = _SRC.read_text(encoding="utf-8")
+    assert "def _warn(" in src, "no failure-reporting helper to inspect"
+    warn_calls = src[src.index("def _warn("):]
+    assert "sys.executable!r" in warn_calls, (
+        "failure reports must name the interpreter that failed"
+    )
+
+
+def test_no_bare_m3_and_no_hardcoded_interpreter_paths():
+    """Three ways to launch the CLI, two of them broken.
+
+    * bare ``m3`` resolves on PATH but, without M3_ENGINE_ROOT in the
+      environment, targets a DIFFERENT store and begins migrating it from v000
+      while returning rc 0 -- so an rc-only check records success.
+    * a hardcoded absolute path bakes one machine's home directory into a
+      shipped file: wrong on every other machine, and a real home path in a
+      public repo.
+
+    Only ``sys.executable`` is correct.
+    """
+    src = _SRC.read_text(encoding="utf-8")
+    assert '"m3", "admin"' not in src, "bare `m3` on PATH ignores M3_ENGINE_ROOT"
+    assert "pipx" not in src, "hardcoded interpreter path"
+    assert "Users" not in src.replace("Users of", ""), "a real home path leaked in"
+    assert src.count("sys.executable, \"-m\", \"m3_memory.cli\"") >= 2, (
+        "every CLI invocation must go through sys.executable"
+    )
+
+
+def test_window_hiding_has_one_owner_and_uses_sw_hide():
+    """SW_HIDE, never CREATE_NO_WINDOW.
+
+    Measured 2026-09-12 in a real console: CREATE_NO_WINDOW suppresses the
+    child's INHERITED stdout as well as the window, so a failing subprocess
+    reports nothing -- which would defeat the fail-loud work above. SW_HIDE
+    hides the window and keeps the pipes.
+    """
+    src = _SRC.read_text(encoding="utf-8")
+    assert "def _no_window(" in src, "no single owner for the hide logic"
+    assert "SW_HIDE" in src
+    # Parsed, not grepped. The source DISCUSSES CREATE_NO_WINDOW in a comment
+    # explaining why it is not used, and a substring check cannot tell a mention
+    # from a use -- the same false positive that made an earlier regex-based
+    # test pass against the very bug it was written for.
+    import ast
+
+    tree = ast.parse(src)
+    used = {
+        n.attr for n in ast.walk(tree)
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+        and n.value.id == "subprocess"
+    }
+    assert "CREATE_NO_WINDOW" not in used, (
+        "CREATE_NO_WINDOW would swallow the stderr the fail-loud path depends on"
+    )
+    assert "STARTUPINFO" in used, "SW_HIDE must be applied via STARTUPINFO"
+    starts = sum(
+        1 for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "STARTUPINFO"
+    )
+    assert starts == 1, (
+        f"the hide logic must not be duplicated per call site -- copies drift "
+        f"(found {starts} STARTUPINFO() constructions)"
+    )
+
+
+def test_startup_sweep_runs_before_the_baseline():
+    """Ordering is the whole point.
+
+    The baseline is "what is unread right now", and the loop only reports ids
+    appearing AFTER it. Anything already waiting -- arrived during a restart, a
+    reboot, a --timeout expiry, or the hour this waiter spent blind -- is
+    baselined away as pre-existing and never stamped. Sweeping AFTER the
+    baseline would be useless; sweeping before it makes restart windows
+    self-healing.
+    """
+    src = _SRC.read_text(encoding="utf-8")
+    marker = '_m3_admin("notifications_mark_received", _a)'
+    assert marker in src, "no startup sweep call in the waiter"
+    sweep = src.index(marker)
+    baseline = src.index("baselines = {a: unread_ids(a)")
+    assert sweep < baseline, (
+        "the startup sweep must run BEFORE the baseline is taken, or the "
+        "stranded notifications it exists to catch are already discarded"
+    )
+
+
+def test_startup_sweep_records_receipt_never_consumes_read():
+    """A sweep that acked would be worse than no sweep: it would mark messages
+    read that no agent has read, destroying the only record that the work is
+    pending. notifications_mark_received targets received_at IS NULL only."""
+    src = _SRC.read_text(encoding="utf-8")
+    # Assert presence before slicing: str.index raises ValueError, which fails
+    # the test with a traceback instead of the reason.
+    assert "STARTUP SWEEP" in src, "no startup sweep in the waiter"
+    sweep_region = src[src.index("STARTUP SWEEP"):src.index("baselines = {a:")]
+    assert "notifications_mark_received" in sweep_region
+    assert "ack" not in sweep_region.lower().replace("baselined", ""), (
+        "the startup sweep must not ack -- receipt is not consumption"
+    )
+
+def test_warn_also_writes_to_a_file_not_only_stderr():
+    """stderr alone is fail-SILENT for the process that matters.
+
+    The scheduled task runs under ``pythonw.exe``, which has no console: its
+    stderr goes to a handle nobody reads. That is exactly how the 2026-09-12
+    outage stayed invisible for an hour -- the failure was being "reported" the
+    whole time, into the void. A durable file is the half a human (or a later
+    session) can actually read.
+
+    Verified by execution while writing this: running the waiter under a broken
+    interpreter wrote timestamped diagnoses to ~/.m3/logs/notification_waiter.log,
+    and a healthy run wrote NOTHING -- loud on failure, silent otherwise.
+    """
+    src = _SRC.read_text(encoding="utf-8")
+    assert "def _log_path(" in src, "no log-file resolution helper"
+    warn = src[src.index("def _warn("):src.index("def _m3_admin(")]
+    assert "_log_path()" in warn, "_warn must write to the log file, not only stderr"
+    assert "file=sys.stderr" in warn, "_warn must ALSO keep stderr for interactive runs"
+
+
+def test_logging_never_takes_down_the_waiter():
+    """Best-effort by construction: a full disk, a locked file or an unwritable
+    root must not kill the detector. Losing the log is strictly better than
+    losing the thing being logged."""
+    src = _SRC.read_text(encoding="utf-8")
+    warn = src[src.index("def _log_path("):src.index("def _m3_admin(")]
+    assert warn.count("except Exception") >= 2, (
+        "_log_path and the write must each swallow their own failure"
+    )
+    assert "return None" in warn, "_log_path must degrade to None, not raise"
+
+
 # --- the installer spec ------------------------------------------------------
 
 _SCHED = _BIN / "install_schedules.py"

@@ -574,6 +574,7 @@ from memory.orchestration import (  # noqa: F401,E402
     agent_set_trust_impl,
     notifications_ack_all_impl,
     notifications_ack_impl,
+    notifications_mark_received_impl,
     notifications_poll_impl,
     notify_impl,
     task_assign_impl,

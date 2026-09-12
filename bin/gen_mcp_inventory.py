@@ -93,6 +93,7 @@ def get_category_map():
         "notifications_poll": "Agent Registry & Notifications",
         "notifications_ack": "Agent Registry & Notifications",
         "notifications_ack_all": "Agent Registry & Notifications",
+        "notifications_mark_received": "Agent Registry & Notifications",
 
         # Multi-Agent Coordination
         "memory_handoff": "Multi-Agent Coordination",
@@ -312,7 +313,7 @@ def main():
     # number when adding/removing tools as part of the regular tool-inventory
     # workflow. Per memory `feedback_tool_inventory`: every flag needs a default;
     # similarly every tool needs a category.
-    EXPECTED_TOOL_COUNT = 121
+    EXPECTED_TOOL_COUNT = 122
     if len(all_tools) != EXPECTED_TOOL_COUNT:
         print(f"Warning: Expected {EXPECTED_TOOL_COUNT} tools, found {len(all_tools)} — update EXPECTED_TOOL_COUNT in gen_mcp_inventory.py if a tool was added/removed.")
 

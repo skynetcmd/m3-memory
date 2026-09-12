@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_notification_waiter.py
-sha1: c27dd4636d0c
-mtime_utc: 2026-09-12T14:02:26.232543+00:00
-generated_utc: 2026-09-12T14:02:32.165614+00:00
+sha1: 8775ca5b921e
+mtime_utc: 2026-09-12T19:05:32.081933+00:00
+generated_utc: 2026-09-12T19:14:48.360168+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ is the whole point: on-change delivery to the agent, without a turn per tick.
 
 ## Entry points
 
-- `def main()` (line 57)
+- `def main()` (line 187)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -65,8 +65,8 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['m3', 'admin', 'notifications_ack_all', '--agent_id', a, '--yes']`` (line 145)
-- `subprocess.run()  → `['m3', 'admin', 'notifications_poll', '--agent_id', agent_id, '--limit', '50']`` (line 45)
+- `subprocess.run()` (line 139)
+- `subprocess.run()` (line 165)
 
 
 ---

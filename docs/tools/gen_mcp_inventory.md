@@ -1,8 +1,8 @@
 ---
 tool: bin/gen_mcp_inventory.py
-sha1: 76c8772a2753
-mtime_utc: 2026-09-10T19:11:17.574528+00:00
-generated_utc: 2026-09-10T19:11:22.566019+00:00
+sha1: 47e54335e01b
+mtime_utc: 2026-09-12T14:35:18.259551+00:00
+generated_utc: 2026-09-12T14:35:32.763263+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and m
 
 ## Entry points
 
-- `def main()` (line 275)
+- `def main()` (line 276)
 - `if __name__ == "__main__"` guard
 
 ---

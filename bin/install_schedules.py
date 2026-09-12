@@ -407,7 +407,7 @@ def _interpreter_has_deps(candidate: str) -> bool:
             probe = sibling
     try:
         return subprocess.run(
-            [probe, "-c", "import httpx"],
+            [probe, "-c", "import m3_memory"],
             capture_output=True, timeout=10,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
             if os.name == "nt" else 0,
@@ -832,7 +832,7 @@ def _render_trigger_xml(task: dict) -> str:
     raise ValueError(f"Unsupported schedule for XML rendering: {sched!r}")
 
 
-def _render_task_xml(task: dict, python_exe: str, user_id: str) -> str:
+def _render_task_xml(task: dict, python_exe: str, user_id: str, m3_memory_root: str) -> str:
     """Render one spec to a complete Task Scheduler XML document string."""
     # <Arguments> is one space-joined string; each path is quoted so paths with
     # spaces survive, mirroring the previous /TR construction.
@@ -884,6 +884,7 @@ def _render_task_xml(task: dict, python_exe: str, user_id: str) -> str:
         "<Exec>"
         f"<Command>{esc(python_exe)}</Command>"
         f"<Arguments>{esc(arguments)}</Arguments>"
+        f"<WorkingDirectory>{esc(m3_memory_root)}</WorkingDirectory>"
         "</Exec>"
         "</Actions>"
         "</Task>"
@@ -1084,7 +1085,7 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard
         # step (and its dependency) is gone. schtasks /Create /XML requires the
         # file to be UTF-16; Python's "utf-16" codec writes the BOM it needs.
         try:
-            xml_doc = _render_task_xml(task, python_exe, user_id)
+            xml_doc = _render_task_xml(task, python_exe, user_id, m3_memory_root)
         except ValueError as e:
             # An unsupported schedule is a contract violation, not an edge case
             # (§3 fail-loud): surface it, skip the task, keep going for the rest.
