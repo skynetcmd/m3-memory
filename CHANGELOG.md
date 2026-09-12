@@ -23,6 +23,85 @@ _Nothing yet._
 
 ---
 
+## [2026.9.11.1] — 2026-09-12 — upgrading, and the handoffs that were silently dropping
+
+One new tool, three silent-failure fixes, and the docs correction that
+prompted all of it. No search or memory-behaviour change.
+
+### Added
+
+- **`python bin/m3_upgrade.py` — one command that upgrades m3 correctly for
+  how it was actually installed.** There is no `m3 upgrade` subcommand, and the
+  real sequence is four steps in order: `m3 stop`, the package upgrade, `m3
+  setup`, `m3 doctor`. Getting it wrong is quiet — `pipx upgrade` against a pip
+  install exits 0 having upgraded **nothing**, which reads as success.
+
+  Detection is the feature. The docs mention `pip install m3-memory` far more
+  often than `pipx`, so a tool that assumed pipx would be wrong for most
+  users. It detects `pipx` (metadata file at the venv root), `pip`, `pip
+  --user`, and host **plugin** installs — and for a plugin install it
+  **refuses**, pointing at the host's own flow, because running pip there
+  fights whatever manages the plugin. An install it cannot classify also
+  refuses rather than guessing. `--dry-run` prints the plan and changes
+  nothing; without a TTY it declines to act unattended.
+
+  Standalone rather than a subcommand because the upgrade replaces the very
+  package a subcommand would be running from — on Windows that is a
+  file-locking failure, not a theoretical one.
+
+### Fixed
+
+- **Agent-to-agent handoffs could not be read.** `notifications_poll` and
+  `notifications_ack_all` returned `Notifications for : (empty)` while the rows
+  plainly existed. The dispatcher forces an authenticated caller's identity into
+  `agent_id` so a model cannot read another agent's rows — correct — but every
+  in-process caller passes an empty identity, so for these two tools, where
+  `agent_id` names the *recipient* rather than the caller, it overwrote the
+  value you asked for. Multi-agent coordination silently required a human to
+  relay messages.
+
+  The obvious one-line fix (keep the argument whenever the caller identity is
+  empty) is **not** safe: the model-facing dispatcher also passes empty, so it
+  would hand any model the ability to poll anyone's inbox. The decision now
+  belongs to the entry point — trusted, non-model surfaces opt in explicitly and
+  everything else keeps the forced-empty behaviour, which is the safe default
+  for a caller that has not considered the question.
+
+- **`--json` silently discarded keys that were not real parameters.**
+  `task_create --json '{"owner": "..."}'` returned ok and created a task with
+  **no owner** — the parameter is `owner_agent` — so a handoff looked complete
+  while nothing had been assigned. The flag path has always validated against
+  the tool's schema; `--json` passed the object straight through. It now
+  rejects unknown keys and names the likely intended one.
+
+- **A task could complete carrying nothing.** Reaching `completed` with no
+  `result_memory_id` meant the work looked finished and its findings were
+  nowhere. Now warned in the update result and flagged in `task_get`. A warning,
+  not a block: `failed` and `cancelled` legitimately have no result, and so does
+  an honest "nothing was needed".
+
+- **The pre-push leak scan blocked on anonymized test fixtures.** Placeholder
+  paths match the shape of a real home directory, so correct work tripped the
+  gate — and a gate that fires on correct work teaches people to bypass it,
+  which is exactly when a real leak walks through. Narrow whitelist of
+  placeholder identities, anchored to whole path segments, so a real username
+  still blocks. The forbidden-pattern list itself now lives outside the public
+  repo, because enumerating what you consider sensitive is its own disclosure;
+  a missing list falls back to credential/PII patterns and says so loudly.
+
+### Changed
+
+- **`INSTALL.md` no longer claims upgrades are a one-liner.** It described
+  `pipx upgrade m3-memory` as the whole story, which is wrong for pip installs
+  and for plugin-managed ones. Replaced with an **Upgrading M3** section, plus a
+  troubleshooting entry for "I ran `pipx upgrade` and nothing changed".
+
+- Lint and type checking pass repo-wide again, which matters more than it
+  sounds: both gate the test jobs, so the test matrix had been reporting
+  *skipped* rather than passing on every pull request.
+
+---
+
 ## [2026.9.11.0] — 2026-09-11 — the installer builds one environment, not two
 
 One install fix and the CI hygiene needed to prove it. No search, API, or
