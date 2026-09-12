@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_notification_waiter.py
-sha1: 8775ca5b921e
-mtime_utc: 2026-09-12T19:05:32.081933+00:00
-generated_utc: 2026-09-12T19:14:48.360168+00:00
+sha1: f0d3a5e297fb
+mtime_utc: 2026-09-12T22:31:14.144676+00:00
+generated_utc: 2026-09-12T22:34:09.079429+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ is the whole point: on-change delivery to the agent, without a turn per tick.
 
 ## Entry points
 
-- `def main()` (line 187)
+- `def main()` (line 350)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -46,11 +46,13 @@ is the whole point: on-change delivery to the agent, without a turn per tick.
 | `--timeout` | Give up after N seconds so a forgotten waiter cannot leak. | `3600.0` |  | float |  |
 | `--supervise` | Never exit: after each detection, re-arm and keep waiting. For an ONSTART scheduled task, which needs a long-lived process. Without it the waiter is single-shot, which is what a runtime wants when the process EXIT is the wake signal. | `False` |  | store_true |  |
 | `--ack` | Ack on detection. OFF BY DEFAULT, deliberately: the notifications table has only `read_at` -- no separate 'received' column -- so acking here destroys the only record that a message was unread. Measured on this machine: 29 of 30 recent notifications carried NO task_id, so 'the task state machine tracks it' is false for ~97 percent of real traffic. Enable this only where every watched kind is backed by a task whose own state survives the ack. | `False` |  | store_true |  |
+| `--child` |  | `False` |  | store_true |  |
 
 ---
 
 ## Environment variables read
 
+- `M3_DB_BACKEND`
 - `M3_ENGINE_ROOT`
 
 ---
@@ -65,15 +67,17 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()` (line 139)
-- `subprocess.run()` (line 165)
+- `subprocess.Popen()  → `cmd`` (line 277)
+- `subprocess.run()` (line 138)
 
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `memory (db)`
+- `memory.orchestration (notifications_mark_received_impl)`
+- `memory.orchestration (notifications_unread_ids_impl)`
 
 ---
 

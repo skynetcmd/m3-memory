@@ -539,6 +539,11 @@ class PostgresDialect(Dialect):
         return "VACUUM skipped: not applicable on PostgreSQL (autovacuum handles this)"
 
 
+
+    def set_statement_timeout(self, conn: object, ms: int) -> None:
+        with conn.cursor() as cur:
+            cur.execute(f"SET statement_timeout = {int(ms)}")
+
 # The one shared frozen singleton for PostgreSQL.
 POSTGRES = PostgresDialect()
 

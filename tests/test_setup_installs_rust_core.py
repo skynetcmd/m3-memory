@@ -120,7 +120,6 @@ def test_core_step_is_unconditional():
     """It must NOT sit behind `if plan.install_gpu_embedder:` -- that flag is
     the tier-1 in-process choice, not a choice about having the core at all."""
     import inspect
-    import re
 
     src = inspect.getsource(w)
     call = src.index("_step_rust_core(plan)")

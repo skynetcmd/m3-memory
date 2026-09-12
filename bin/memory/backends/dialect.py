@@ -950,6 +950,17 @@ class Dialect:
         conn.execute("BEGIN")  # type: ignore[attr-defined]
 
 
+
+    def set_statement_timeout(self, conn: object, ms: int) -> None:
+        """
+        Sets the backend's query timeout, with per-backend semantics.
+
+        WARNING: Best-effort parity. PG's statement_timeout bounds total query EXECUTION time.
+        SQLite's PRAGMA busy_timeout bounds only the LOCK WAIT time, and does not kill
+        long-running queries.
+        """
+        raise NotImplementedError
+
 # ── Concrete per-backend dialects live in their backend modules ──────────────
 # `SqliteDialect`/`SQLITE` are in `sqlite_backend.py`; `PostgresDialect`/`POSTGRES`
 # in `postgres_backend.py` — co-located so adding a backend is ONE file

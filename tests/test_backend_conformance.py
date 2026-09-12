@@ -332,7 +332,6 @@ def test_doctor_probes_do_not_bypass_the_storage_seam():
     ``active_backend().connection()``; the backend decides what db_path means.
     """
     import pathlib
-    import re
 
     doctor_dir = (pathlib.Path(__file__).resolve().parent.parent
                   / "bin" / "doctor")

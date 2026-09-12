@@ -23,9 +23,8 @@ import unittest
 _BIN = pathlib.Path(__file__).resolve().parents[1] / "bin"
 sys.path.insert(0, str(_BIN))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
 import embed_server_inproc as S  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 from memory.embed import ContextLengthExceeded, _parse_context_overflow  # noqa: E402
 
 _OVERFLOW_MSG = "embed failed: backend error: input too long: 16875 tokens > n_ctx 8192"

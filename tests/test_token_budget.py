@@ -179,7 +179,10 @@ class TestAgainstRealTokenizer(unittest.TestCase):
             raise unittest.SkipTest(f"bge-m3 tokenizer unavailable: {exc}")
 
     def _samples(self):
-        import base64 as b64, json, random, uuid
+        import base64 as b64
+        import json
+        import random
+        import uuid
         random.seed(7)
         zh = ["数据库", "连接", "失败", "重试", "记录", "详细", "错误", "信息"]
         s = {

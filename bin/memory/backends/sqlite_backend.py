@@ -189,6 +189,10 @@ class SqliteDialect(Dialect):
             return f"VACUUM skipped: {e}"
 
 
+
+    def set_statement_timeout(self, conn: object, ms: int) -> None:
+        conn.execute(f"PRAGMA busy_timeout = {int(ms)}")
+
 # The one shared frozen singleton for SQLite. Obtain via dialect_for / dialect(),
 # not by constructing per call site.
 SQLITE = SqliteDialect()

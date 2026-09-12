@@ -25,8 +25,6 @@ import re
 import subprocess
 import sys
 
-import pytest
-
 # conftest.py already puts bin/ on sys.path. Belt-and-suspenders so this
 # file is also importable in isolation:
 _HERE = os.path.dirname(__file__)
@@ -265,7 +263,6 @@ def test_every_doc_quoting_a_tool_count_is_gated():
     second copy of the predicate would drift from the first, which is the defect
     independent of whether either copy is correct.
     """
-    import subprocess
 
     try:
         tracked = subprocess.run(
@@ -319,7 +316,7 @@ def test_every_doc_quoting_a_tool_count_is_gated():
         "these docs quote a number close enough to the catalog total to be a "
         "stale copy of it, and are NOT gated by _DOC_FILES — rephrase as "
         "'100+ tools', or add the file to _DOC_FILES so it is checked "
-        f"exactly:\n" + "\n".join(ungated)
+        "exactly:\n" + "\n".join(ungated)
     )
 
 
@@ -362,7 +359,6 @@ def test_all_manifests_synced_to_pyproject_version():
 
     This subsumes test_registry_manifests_match_pyproject_version (kept for its
     targeted message) — both must stay green."""
-    import subprocess
     script = os.path.join(_ROOT, "bin", "sync_manifest_versions.py")
     r = subprocess.run([sys.executable, script, "--check"],
                        capture_output=True, text=True)
