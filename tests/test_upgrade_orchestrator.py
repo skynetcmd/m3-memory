@@ -130,3 +130,50 @@ def test_parses_at_the_declared_floor():
     src = (_BIN / "m3_upgrade.py").read_text(encoding="utf-8")
     for ver in ((3, 11), (3, 12), (3, 13)):
         ast.parse(src, feature_version=ver)
+
+
+# --- findings from antigravity-agent's macOS review of PR #143 --------------
+
+
+def test_user_site_detection_survives_a_symlinked_home(tmp_path, monkeypatch):
+    """A --user install must still be detected when the user-site path reaches
+    the package through a SYMLINK.
+
+    macOS routinely does this (/Users/... vs /System/Volumes/Data/Users/...).
+    `pkg_dir` arrives resolved; if `site.getusersitepackages()` is compared
+    unresolved, `startswith` fails and a --user install is misdetected as a
+    plain pip install -- which would then run the wrong upgrade command.
+    """
+    real = tmp_path / "real" / "site-packages"
+    real.mkdir(parents=True)
+    pkg = real / "m3_memory"
+    pkg.mkdir()
+
+    link = tmp_path / "linked-site-packages"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not permitted in this environment")
+
+    import site as _site
+
+    monkeypatch.setattr(_site, "getusersitepackages", lambda: str(link))
+    method, _ = m3u.detect_install_method(pkg)
+    assert method == m3u.PIP_USER, "symlinked user-site must still detect as --user"
+
+
+def test_setup_step_forces_quiesce():
+    """Step 1's `m3 stop` is best-effort, so step 3 must not block forever on a
+    writer that did not exit."""
+    src = (_BIN / "m3_upgrade.py").read_text(encoding="utf-8")
+    assert '"--force-quiesce"' in src, (
+        "`m3 setup --non-interactive` needs --force-quiesce or an unattended "
+        "upgrade can hang waiting on a stuck DB writer"
+    )
+
+
+def test_package_dir_is_resolved_before_comparison():
+    """Both sides of every path comparison must be resolved."""
+    src = (_BIN / "m3_upgrade.py").read_text(encoding="utf-8")
+    assert "pkg_dir = pkg_dir.resolve()" in src
+    assert "pathlib.Path(user_site).resolve()" in src

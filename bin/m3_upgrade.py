@@ -112,6 +112,13 @@ def detect_install_method(pkg_dir: pathlib.Path | None) -> tuple[str, str]:
     if pkg_dir is None:
         return UNKNOWN, "could not locate an installed m3_memory package"
 
+    # Resolve BOTH sides of every path comparison below. A resolved path
+    # compared against an unresolved one silently fails to match wherever
+    # symlinks are in play (notably macOS home directories).
+    try:
+        pkg_dir = pkg_dir.resolve()
+    except (OSError, RuntimeError):
+        pass
     normalized = str(pkg_dir).replace("\\", "/")
 
     # Plugin caches are managed by the HOST (Claude Code / Antigravity). Running
@@ -127,12 +134,25 @@ def detect_install_method(pkg_dir: pathlib.Path | None) -> tuple[str, str]:
             return PIPX, f"pipx_metadata.json found at {parent}"
 
     # A --user install lands under the per-user site directory.
+    #
+    # RESOLVE both sides before comparing. `pkg_dir` arrives already resolved,
+    # but `site.getusersitepackages()` does not -- and on macOS the user's home
+    # is routinely reached through a symlink (/Users/... via /System/Volumes/
+    # Data/Users/...), so an unresolved prefix fails `startswith` against a
+    # resolved path and a --user install is misdetected as a plain pip install.
+    # Reported by antigravity-agent reviewing from macOS, the platform this was
+    # never tested on.
     try:
         import site
 
         user_site = site.getusersitepackages()
-        if user_site and normalized.startswith(str(user_site).replace("\\", "/")):
-            return PIP_USER, f"package is under the user site directory: {user_site}"
+        if user_site:
+            try:
+                resolved_user_site = str(pathlib.Path(user_site).resolve())
+            except (OSError, RuntimeError):
+                resolved_user_site = str(user_site)
+            if normalized.startswith(resolved_user_site.replace("\\", "/")):
+                return PIP_USER, f"package is under the user site directory: {user_site}"
     except Exception:  # noqa: BLE001 - detection must never crash the upgrade
         pass
 
@@ -256,8 +276,12 @@ def main(argv: list[str] | None = None) -> int:
     # Re-resolve: step 2 may have replaced the executable we started with.
     m3 = shutil.which("m3") or shutil.which("mcp-memory") or m3
 
+    # --force-quiesce: step 1's `m3 stop` is best-effort and non-fatal, so a
+    # writer that did not exit would leave `setup --non-interactive` waiting on
+    # a quiesce that never completes -- an unattended upgrade that hangs instead
+    # of finishing. Reported by antigravity-agent in review of this script.
     print("\n[3/4] finalizing (agent configs, migrations, services) ...")
-    rc = run([m3, "setup", "--non-interactive"], dry=dry)
+    rc = run([m3, "setup", "--non-interactive", "--force-quiesce"], dry=dry)
     if rc != 0:
         print(
             f"\n`m3 setup` failed (exit {rc}). The package IS upgraded; re-run\n"
