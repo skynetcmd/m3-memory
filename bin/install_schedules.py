@@ -591,6 +591,49 @@ def get_schedule_specs(m3_memory_root, dashboard_port: int = 8088):
             "description": "Shared in-process GPU embedder server (one CUDA context, localhost HTTP)"
         },
         {
+            "name": "AgentOS_NotificationWaiter",
+            # Agent-to-agent receipt SLA. Watches agent_memory.db-wal for a
+            # change, confirms via notifications_poll, ACKS FROM THIS SUBPROCESS
+            # and keeps waiting (--supervise).
+            #
+            # Why the ack happens HERE and not in an agent turn: the SLA is
+            # "acknowledge receipt", and ack needs no agent. Measured on Windows:
+            # detect+ack round trip 1192/1182/1203 ms, ~4% of a 30s budget. A
+            # busy agent then delays the WORK, never the RECEIPT -- the two are
+            # different guarantees and belong on different layers.
+            #
+            # Why an OS task rather than either agent arming it: a non-elevated
+            # agent session CANNOT register one. Both Claude Code and Antigravity
+            # measured `Register-ScheduledTask` -> "Access is denied"
+            # (0x80070005) at runtime. Installer-time registration, with a human
+            # who can elevate, is the only reproducible path.
+            #
+            # -u is REQUIRED, not cosmetic: without it Python buffers stdout and
+            # a live supervisor emits nothing for minutes, which is
+            # indistinguishable from a dead one. Cost us a false "supervise is
+            # broken" diagnosis while building this.
+            #
+            # --interval 5 deliberately, not 1: 5s is 17% of the 30s budget at a
+            # fifth of the stat() calls (720/hr vs 3,600/hr). Detection was never
+            # the scarce resource; agent turns are.
+            # ONE waiter serves EVERY registered inbox, not one task per agent.
+            # The WAL trigger is shared -- a single file change covers all of
+            # them -- so N agents cost N cheap confirm-polls AFTER a change, not
+            # N watchers. At 5 registered agents that is 1 process and 720
+            # stat()/hr instead of 5 and 3,600. It also sidesteps the stale-agent
+            # problem: 3 of the 5 agents registered on this machine were last
+            # seen in April/May, and a per-agent design would keep live tasks
+            # running for agents that are gone.
+            "args": ["-u", _script("m3_notification_waiter.py"),
+                     *_waiter_agent_args(),
+                     "--interval", "5", "--supervise",
+                     "--timeout", "3600"],
+            "schedule": "ONSTART",
+            "modifier": "",
+            "time": "00:00",
+            "description": "Agent-to-agent notification receipt SLA (<30s ack, WAL-triggered)"
+        },
+        {
             "name": "AgentOS_Dashboard",
             # Local web dashboard (bin/dashboard_server.py). --foreground runs the
             # uvicorn server IN the task process (the task IS the long-lived
@@ -974,6 +1017,33 @@ def _start_longlived_tasks(tasks: list) -> None:
             _safe_print(f"{WARN} Registered {name} but could not start it: {err}")
             _safe_print(f"        start it with: schtasks /Run /TN {name}")
 
+
+
+def _waiter_agent_args() -> list:
+    """`--agent-id X` per registered agent, for the notification waiter.
+
+    Falls back to the local agent id when the registry cannot be read, so a
+    fresh install still gets a working waiter rather than none. Never returns an
+    empty list: a waiter watching no inboxes is a process that looks healthy and
+    does nothing, which is the silent-failure shape this whole feature exists to
+    remove.
+    """
+    ids = []
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        import re as _re
+
+        from memory.orchestration import agent_list_impl  # type: ignore
+        ids = _re.findall(r"\[([A-Za-z0-9_.-]+)\]", agent_list_impl("", "") or "")
+    except Exception:  # noqa: BLE001 - registry is best-effort at install time
+        ids = []
+    if not ids:
+        ids = ["claude-code"]
+    out = []
+    for a in ids:
+        out += ["--agent-id", a]
+    return out
 
 def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard_port: int = 8088):
     # pythonw.exe (GUI subsystem) — avoids the console window python.exe
