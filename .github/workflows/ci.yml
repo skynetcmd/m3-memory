@@ -164,6 +164,80 @@ jobs:
       run: |
         pytest tests/ -m "not integration and not slow"
 
+  # ── PostgreSQL lane ─────────────────────────────────────────────────────────
+  # m3 ships SQLite + PostgreSQL by contract, but until now CI provisioned no
+  # PG, so every `requires_pg` test SELF-SKIPPED and the suite reported green
+  # having exercised one of the two backends. A PG migration could be merged and
+  # released having never been executed — only read.
+  #
+  # That is not hypothetical. 2026-09-12: `pg_054_notification_received_at`
+  # shipped on static review alone, and a sibling defect in the same feature
+  # (`now()` hand-written into a shared code path) would have failed at runtime
+  # on SQLite. Neither was caught by a green suite.
+  #
+  # ADVISORY TO START (`continue-on-error: true`). This lane has never run in
+  # CI; making it required on its first outing would block every PR on failures
+  # nobody has triaged yet. Flip it to required once it has been green across a
+  # few PRs — tracked in #160.
+  postgres:
+    name: PostgreSQL lane (requires_pg)
+    needs: [lint, typecheck]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: m3dev
+          POSTGRES_PASSWORD: m3devpass
+          POSTGRES_DB: m3_citest
+        # Without the health gate the job races the server's first-boot
+        # initialisation and the reachability probe caches a false negative for
+        # the WHOLE session — which would silently skip every test here and
+        # report the lane green. The failure mode this lane exists to remove.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]" psycopg2-binary
+    - name: Confirm the cluster is actually reachable
+      # Fail LOUD here rather than let pytest skip its way to a green lane. A
+      # requires_pg run that skips everything is indistinguishable from a pass,
+      # and that ambiguity is the whole reason #160 was filed.
+      env:
+        M3_PRIMARY_PG_URL: postgresql://m3dev:m3devpass@localhost:5432/m3_citest
+      run: |
+        python - <<'PY'
+        import os, sys, psycopg2
+        dsn = os.environ["M3_PRIMARY_PG_URL"]
+        with psycopg2.connect(dsn, connect_timeout=10) as c:
+            v = c.cursor(); v.execute("SELECT version()")
+            print(v.fetchone()[0])
+        PY
+    - name: Run the requires_pg lane
+      env:
+        M3_PRIMARY_PG_URL: postgresql://m3dev:m3devpass@localhost:5432/m3_citest
+      # -m requires_pg, not -m integration: the other integration markers
+      # (embedder, gguf, files_db) still have no service here and would only
+      # self-skip, re-creating the ambiguity above for a different resource.
+      run: |
+        pytest tests/ -m requires_pg -p no:cacheprovider
+
   # ── End-to-end install ──────────────────────────────────────────────────────
   # The unit lane covers the install PIECES; nothing exercised the whole path.
   # test_install_no_clobber deliberately swallows wiring failures
