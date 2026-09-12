@@ -322,6 +322,38 @@ def test_startup_sweep_records_receipt_never_consumes_read():
         "the startup sweep must not ack -- receipt is not consumption"
     )
 
+def test_warn_also_writes_to_a_file_not_only_stderr():
+    """stderr alone is fail-SILENT for the process that matters.
+
+    The scheduled task runs under ``pythonw.exe``, which has no console: its
+    stderr goes to a handle nobody reads. That is exactly how the 2026-09-12
+    outage stayed invisible for an hour -- the failure was being "reported" the
+    whole time, into the void. A durable file is the half a human (or a later
+    session) can actually read.
+
+    Verified by execution while writing this: running the waiter under a broken
+    interpreter wrote timestamped diagnoses to ~/.m3/logs/notification_waiter.log,
+    and a healthy run wrote NOTHING -- loud on failure, silent otherwise.
+    """
+    src = _SRC.read_text(encoding="utf-8")
+    assert "def _log_path(" in src, "no log-file resolution helper"
+    warn = src[src.index("def _warn("):src.index("def _m3_admin(")]
+    assert "_log_path()" in warn, "_warn must write to the log file, not only stderr"
+    assert "file=sys.stderr" in warn, "_warn must ALSO keep stderr for interactive runs"
+
+
+def test_logging_never_takes_down_the_waiter():
+    """Best-effort by construction: a full disk, a locked file or an unwritable
+    root must not kill the detector. Losing the log is strictly better than
+    losing the thing being logged."""
+    src = _SRC.read_text(encoding="utf-8")
+    warn = src[src.index("def _log_path("):src.index("def _m3_admin(")]
+    assert warn.count("except Exception") >= 2, (
+        "_log_path and the write must each swallow their own failure"
+    )
+    assert "return None" in warn, "_log_path must degrade to None, not raise"
+
+
 # --- the installer spec ------------------------------------------------------
 
 _SCHED = _BIN / "install_schedules.py"

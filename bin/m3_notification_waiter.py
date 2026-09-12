@@ -26,6 +26,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 
 
 def wal_fingerprint(wal: pathlib.Path) -> tuple:
@@ -55,8 +56,26 @@ def _no_window() -> dict:
     return {"startupinfo": si}
 
 
+def _log_path() -> pathlib.Path | None:
+    """~/.m3/logs/notification_waiter.log, honouring M3_ENGINE_ROOT's parent.
+
+    Resolution mirrors the engine-root rules rather than hardcoding ~/.m3, so a
+    machine that relocated its roots still gets its log next to the others.
+    Returns None rather than raising: logging is best-effort and must never take
+    down the thing it is observing.
+    """
+    try:
+        engine = os.environ.get("M3_ENGINE_ROOT")
+        base = pathlib.Path(engine).parent if engine else pathlib.Path.home() / ".m3"
+        d = base / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "notification_waiter.log"
+    except Exception:
+        return None
+
+
 def _warn(msg: str) -> None:
-    """One place that reports a subprocess failure.
+    """One place that reports a subprocess failure. Writes to stderr AND a file.
 
     This function is the fix for the outage of 2026-09-12. `unread_ids` used to
     swallow every failure into `return set()`, which is INDISTINGUISHABLE from
@@ -69,11 +88,31 @@ def _warn(msg: str) -> None:
     happened to be the source checkout, and the task has no WorkingDirectory.
     One line of stderr would have found it in seconds.
 
+    THE FILE IS NOT REDUNDANT WITH STDERR. The scheduled task runs under
+    pythonw.exe, which has no console: stderr is written to a handle nobody
+    reads. A "fail loud" path whose only output goes into the void is still
+    fail-silent for the exact process this feature exists to supervise -- which
+    is precisely how the outage above stayed invisible. The file is the half
+    that a human or a later session can actually read.
+
     DESIGN_PHILOSOPHIES section 3: fail loud. A detector that cannot tell you it
     is broken is worse than no detector, because it also consumes the attention
     you would have spent noticing.
     """
-    print(f"[waiter] {msg}", file=sys.stderr, flush=True)
+    line = f"[waiter] {msg}"
+    print(line, file=sys.stderr, flush=True)
+    p = _log_path()
+    if p is None:
+        return
+    try:
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with open(p, "a", encoding="utf-8") as fh:
+            fh.write(f"{stamp} {line}\n")
+    except Exception:
+        # Best-effort. A full disk or a locked file must not kill the waiter:
+        # stderr already carried the message, and losing the log is strictly
+        # better than losing the detector.
+        pass
 
 
 def _m3_admin(tool: str, agent_id: str) -> bool:
