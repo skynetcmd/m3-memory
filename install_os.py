@@ -67,9 +67,16 @@ def run_cmd(cmd, env=None, *, optional=False, label=None):
     next one, which might be real.
     """
     print(f"Running: {' '.join(cmd)}")
+    extra_kw = {}
+    if sys.platform == "win32":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        extra_kw["startupinfo"] = si
     result = subprocess.run(
         cmd, env=env,
         **({"capture_output": True, "text": True} if optional else {}),
+        **extra_kw,
     )
     if result.returncode != 0:
         if optional:
