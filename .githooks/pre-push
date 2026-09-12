@@ -138,8 +138,19 @@ CHANGED="$(changed_files)"
 # --- 1/3 tool-catalog drift gate (conditional) ------------------------------
 # Paths whose change can make the generated catalog/inventory or the hardcoded
 # "N tools" counts go stale. Mirrors check_tool_catalog_drift.py's universe.
+#
+# bin/ and scripts/ are matched WHOLESALE, not as a list of named files. The
+# earlier list named only the five catalog/generator sources, but
+# gen_tool_inventory.py emits a docs/tools/ page for EVERY script in both
+# directories, stamped with a hash of its source. So editing any other script --
+# m3_notification_waiter.py, install_schedules.py, setup_memory.py -- left the
+# page stale while this gate skipped, and nothing caught it until
+# test_generated_docs_fresh.py at the END of the ~5.5-minute full suite.
+# That trap fired five times in one session (2026-09-12). A named list is the
+# wrong shape here: it has to be extended by hand for every new script, and the
+# failure mode of forgetting is silent.
 if printf '%s\n' "$CHANGED" | grep -qE \
-  '^bin/mcp_tool_catalog\.py$|^bin/mcp_proxy\.py$|^bin/gen_tool_manifest\.py$|^bin/gen_mcp_inventory\.py$|^bin/gen_tool_inventory\.py$|^docs/tools/.*$|^docs/MCP_TOOLS\.md$|^README\.md$|^docs/COMPARISON\.md$|^docs/MYTHS_AND_FACTS\.md$|^docs/tools/files_memory\.md$|^tests/test_tool_count_drift\.py$|^tests/test_mcp_catalog_manifest_fresh\.py$'
+  '^bin/.*\.(py|sh)$|^scripts/.*\.(py|sh)$|^docs/tools/.*$|^docs/MCP_TOOLS\.md$|^README\.md$|^docs/COMPARISON\.md$|^docs/MYTHS_AND_FACTS\.md$|^docs/tools/files_memory\.md$|^tests/test_tool_count_drift\.py$|^tests/test_mcp_catalog_manifest_fresh\.py$'
 then
   echo "[pre-push] 1/3 tool-catalog drift gate (catalog/docs touched — checking)"
   if ! py_has_deps; then
