@@ -948,6 +948,93 @@ _ROLE_TO_TASK = {
 }
 
 
+# Service identifiers per role, per platform. A MAP, never a derivation.
+#
+# Deriving these from the role name was tried and is wrong. Two entries defeat
+# every naming rule you could express in str.replace:
+#
+#   * embed-server is `com.skynetcmd.m3-embed-server` on macOS -- a DIFFERENT
+#     product prefix, and it KEEPS its hyphens -- while on Linux it has no
+#     systemd unit at all (the Rust binary manages its own service).
+#   * a derivation scored 3 of 5 against the real launchd labels, and the two
+#     it got wrong included embed-server, which is the service most likely to
+#     be reaped during an install because it holds :8082.
+#
+# The failure mode of a wrong name is QUIET: `launchctl start` on a label that
+# does not exist returns non-zero, we print a warning, and the service stays
+# down -- the same outcome as the bug this function exists to prevent.
+#
+# SOURCES, all measured rather than assumed:
+#   win    -- _ROLE_TO_TASK above (the task names this installer registers)
+#   darwin -- `launchctl list` on a live macOS host, 2026-09-12
+#   linux  -- the .service names this installer itself writes; m3-dashboard
+#             .service confirmed installed under systemd --user on WSL Ubuntu
+#             24.04, 2026-09-12
+#
+# A role with no entry for the current platform is NOT an error to paper over:
+# it means that platform genuinely has no such service, and we must say so
+# rather than construct a plausible name and fail silently (DESIGN_PHILOSOPHIES
+# section 3).
+_ROLE_TO_SERVICE = {
+    "dashboard": {
+        "win": "AgentOS_Dashboard",
+        "darwin": "com.m3memory.dashboard",
+        "linux": "m3-dashboard.service",
+    },
+    "cognitive-loop": {
+        "win": "AgentOS_CognitiveLoop",
+        "darwin": "com.m3memory.cognitiveloop",
+        "linux": "m3-cognitive-loop.service",
+    },
+    "cognitive_loop": {
+        "win": "AgentOS_CognitiveLoop",
+        "darwin": "com.m3memory.cognitiveloop",
+        "linux": "m3-cognitive-loop.service",
+    },
+    "loop-watchdog": {
+        "win": "AgentOS_LoopWatchdog",
+        "darwin": "com.m3memory.loopwatchdog",
+        "linux": "m3-loop-watchdog.service",
+    },
+    "embed-server": {
+        "win": "AgentOS_EmbedServer",
+        "darwin": "com.skynetcmd.m3-embed-server",
+        # No systemd unit: the Rust m3-embed-server manages its own service.
+        "linux": None,
+    },
+    "embed_server": {
+        "win": "AgentOS_EmbedServer",
+        "darwin": "com.skynetcmd.m3-embed-server",
+        "linux": None,
+    },
+    "waiter": {
+        "win": "AgentOS_NotificationWaiter",
+        # Not yet registered on these platforms; the waiter currently ships as
+        # a Windows scheduled task only. Explicit None, not a guessed name.
+        "darwin": None,
+        "linux": None,
+    },
+}
+
+
+def _platform_key() -> str:
+    """'win' | 'darwin' | 'linux' for _ROLE_TO_SERVICE lookups."""
+    if sys.platform == "win32":
+        return "win"
+    if sys.platform == "darwin":
+        return "darwin"
+    return "linux"
+
+
+def _restart_command(name: str) -> list:
+    """The per-platform command that starts an already-registered service."""
+    key = _platform_key()
+    if key == "win":
+        return ["schtasks", "/Run", "/TN", name]
+    if key == "darwin":
+        return ["launchctl", "start", name]
+    return ["systemctl", "--user", "start", name]
+
 def restart_reaped_services(covered: set) -> None:
     """Restart daemons the reap stopped that the task selector did not cover.
 
@@ -955,20 +1042,69 @@ def restart_reaped_services(covered: set) -> None:
     it is selector-scoped, and that asymmetry silently left services down.
     """
     for role in sorted(_reaped_roles):
-        name = _ROLE_TO_TASK.get(role)
-        if not name or name in covered:
-            continue  # unknown role, or already handled by the task loop
+        entry = _ROLE_TO_SERVICE.get(role)
+        if entry is None:
+            # A role we stopped but cannot name on ANY platform. Loud, because
+            # "whatever we stop, we start" is the contract and we just broke it.
+            _safe_print(
+                f"{WARN} Stopped {role} but it has no entry in _ROLE_TO_SERVICE — "
+                f"it will stay DOWN. Add it there."
+            )
+            continue
+
+        name = entry.get(_platform_key())
+        if name is None:
+            # The platform genuinely has no such service (e.g. embed-server on
+            # Linux manages itself). Not an error, but say so rather than
+            # silently skipping a service we stopped.
+            _safe_print(
+                f"{WARN} Stopped {role}, which has no managed service on "
+                f"{sys.platform} — restart it by hand if it was running."
+            )
+            continue
+        if name in covered:
+            continue  # already handled by the task loop
+
+        # systemd returns EXIT 0 for `start` on a unit that does not exist.
+        # Measured on WSL Ubuntu 24.04, 2026-09-12:
+        #     systemctl --user start m3-nonexistent.service -> exit 0
+        # So the returncode check below cannot detect a wrong name on Linux, and
+        # a typo would read as a successful restart. LoadState is the clean
+        # discriminator: `loaded` vs `not-found`.
+        if _platform_key() == "linux":
+            probe = subprocess.run(
+                ["systemctl", "--user", "show", "-p", "LoadState", "--value", name],
+                capture_output=True, text=True,
+            )
+            if probe.stdout.strip() == "not-found":
+                _safe_print(
+                    f"{FAIL} Stopped {role} but unit {name!r} does not exist — it "
+                    f"will stay DOWN. _ROLE_TO_SERVICE has the wrong Linux name."
+                )
+                continue
+
+        cmd = _restart_command(name)
         try:
-            res = subprocess.run(["schtasks", "/Run", "/TN", name],
-                                 capture_output=True, text=True)
+            res = subprocess.run(cmd, capture_output=True, text=True)
+        except FileNotFoundError:
+            # The service manager itself is missing — a platform-level fault,
+            # not a per-service one. Report it once, in full.
+            _safe_print(
+                f"{FAIL} {cmd[0]!r} not found on {sys.platform}: cannot restart "
+                f"{name} (or any other reaped service). Services stopped by this "
+                f"run will stay DOWN."
+            )
+            return
         except Exception as e:  # noqa: BLE001 — restart is best-effort
             _safe_print(f"{WARN} Could not restart {name}: {type(e).__name__}: {e}")
             continue
+
         if res.returncode != 0:
             err = (res.stderr or res.stdout).strip()
             _safe_print(f"{WARN} Stopped {role} but could not restart {name}: {err}")
-            _safe_print(f"        start it with: schtasks /Run /TN {name}")
+            _safe_print(f"        start it with: {' '.join(cmd)}")
             continue
+
         detail = _confirm_service_live(name, deadline_s=25.0)
         if detail is True:
             _safe_print(f"{OK} Restarted {name} (serving)")
