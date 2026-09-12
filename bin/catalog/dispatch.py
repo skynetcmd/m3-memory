@@ -138,7 +138,8 @@ async def execute_tool(spec: ToolSpec, args: dict, agent_id: str) -> str:
 
 
 async def execute_tool_structured(
-    spec: ToolSpec, args: dict, agent_id: str, *, dry_run: bool = False
+    spec: ToolSpec, args: dict, agent_id: str, *, dry_run: bool = False,
+    allow_caller_agent_id: bool = False,
 ) -> Any:
     """Like execute_tool, but returns the impl's NATIVE return value (dict/list/
     etc.) instead of str()-coercing it, and raises on error instead of returning
@@ -157,7 +158,25 @@ async def execute_tool_structured(
     args = {k: v for k, v in args.items() if k in allowed_keys}
     database = _pop_database(args)
     if spec.inject_agent_id and "agent_id" in allowed_keys:
-        args["agent_id"] = agent_id
+        # Anti-spoofing: an authenticated caller's identity is forced in
+        # non-bypassably, so an LLM cannot read or ack another agent's rows.
+        #
+        # But a caller may legitimately have NO identity: the human CLI and the
+        # m3_call dispatcher both pass agent_id="". Overwriting unconditionally
+        # then set agent_id to "" and broke the tool for them --
+        # `notifications_poll --agent_id X` returned "Notifications for :
+        # (empty)" while the rows plainly existed.
+        #
+        # Preserving an explicit arg whenever agent_id is falsy is NOT safe: the
+        # m3_call path (LLM-facing) also passes "", so that would let an LLM
+        # poll anyone's notifications -- the exact spoof this guard prevents.
+        # So the decision is made by the CALLER, via allow_caller_agent_id:
+        # trusted, non-LLM entry points opt in; m3_call never does.
+        if agent_id:
+            args["agent_id"] = agent_id
+        elif not allow_caller_agent_id:
+            args["agent_id"] = ""
+        # else: leave the caller-supplied agent_id in place.
     args, err = validate_args(spec, args)
     if err:
         # validate_args signals failure with an "Error: …" string; surface it

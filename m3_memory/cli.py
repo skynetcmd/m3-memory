@@ -1432,8 +1432,13 @@ def _cmd_tool_dispatch(args: argparse.Namespace) -> int:
         tool_args["database"] = db
 
     async def _run():
+        # allow_caller_agent_id: this is a human at a terminal, not an LLM, so an
+        # explicit `--agent_id` is the user's own choice and must survive. The
+        # m3_call dispatcher deliberately does NOT opt in — see the anti-spoofing
+        # note in execute_tool_structured.
         return await _cat.execute_tool_structured(
-            spec, tool_args, agent_id="", dry_run=dry_run)
+            spec, tool_args, agent_id="", dry_run=dry_run,
+            allow_caller_agent_id=True)
 
     try:
         result = asyncio.run(_run())
