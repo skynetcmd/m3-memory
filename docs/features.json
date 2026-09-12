@@ -160,9 +160,9 @@
     "wiki_docs": "docs/WIKI.md"
   },
   "tools": {
-    "total": 110,
+    "total": 111,
     "by_domain": {
-      "admin": 14,
+      "admin": 15,
       "agent": 6,
       "chatlog": 10,
       "conversations": 4,
