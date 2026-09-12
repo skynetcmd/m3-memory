@@ -118,7 +118,7 @@ Short version: M3 is the **local-first, MCP-native** option that stays *yours* a
 
 <p align="center">
   <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/pypi-version.svg"></a>
-  <a href="https://www.python.org"><img alt="Python 3.11+" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/python.svg"></a>
+  <a href="https://www.python.org"><img alt="Python 3.12+" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/python.svg"></a>
   <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/license.svg"></a>
   <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/mcp.svg"></a>
 </p>
@@ -562,7 +562,7 @@ See [NOTICE](NOTICE) for the full third-party attribution list.
 
 <br>
 <p align="center"><sub>PyPI downloads are the pepy.tech total. Badges are regenerated on a schedule by <a href="https://github.com/skynetcmd/m3-memory/blob/main/.github/workflows/star-history.yml">star-history.yml</a>.</sub></p>
-<p align="center"><sub><b>Python:</b> m3 core runs on 3.11+ (including 3.14). The optional framework extras follow their own caps — <b>PydanticAI</b> is 3.14-native (plain <code>pip install</code>); <b>CrewAI</b> requires 3.10–3.13 (a 3.14 escape hatch is <a href="https://github.com/skynetcmd/m3-memory/blob/main/m3_memory/integrations/crewai/README.md">documented</a>).</sub></p>
+<p align="center"><sub><b>Python:</b> m3 core runs on 3.12+ (including 3.14 and 3.15). The optional framework extras follow their own caps — <b>PydanticAI</b> is 3.14-native (plain <code>pip install</code>); <b>CrewAI</b> requires 3.10–3.13 (a 3.14 escape hatch is <a href="https://github.com/skynetcmd/m3-memory/blob/main/m3_memory/integrations/crewai/README.md">documented</a>).</sub></p>
 </br><p></p>
 ---
 

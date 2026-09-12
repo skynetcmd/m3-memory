@@ -253,7 +253,15 @@ class TestBulkInsertIgnore:
         ) == 0
 
     def test_is_on_the_protocol(self):
-        """A future backend that omits it fails conformance automatically."""
+        """A future backend that omits it fails conformance automatically.
+
+        `__protocol_attrs__` is a CPython 3.12 addition. It was a real defect
+        while requires-python was ">=3.11" -- the assertion raised
+        AttributeError on the DECLARED FLOOR and failed the 3.11 lane on three
+        consecutive main pushes, invisible because PRs ran only 3.12. The floor
+        is now 3.12, so this is legitimate; tests/test_python_floor_compat.py
+        keeps the two in step if the floor moves again.
+        """
         from memory.backends.base import StorageBackend
 
         assert "bulk_insert_ignore" in StorageBackend.__protocol_attrs__
