@@ -8,6 +8,10 @@ Not a CLI — imported by MCP server, bench drivers, and import scripts.
 
 `memory_write_impl(...)` — single-item insert with full enrichment chain.
 Exposed as the `memory_write` MCP tool; accepts `variant` and `embed_text`.
+Also takes `check_contradictions` (default `True`) to skip the contradiction
+check for one call. The default deliberately differs from the bulk path
+below, where it is OFF: a singleton write is interactive, so correctness
+outranks the latency of one check; a bulk import is throughput-bound.
 
 `memory_write_bulk_impl(items, *, enrich=None, check_contradictions=None,
 emit_conversation=None, variant=None)` — batch insert for benchmarks / imports.

@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 61348d8459e7
-mtime_utc: 2026-09-12T14:34:51.513230+00:00
-generated_utc: 2026-09-12T14:35:12.360173+00:00
+sha1: dd11d416f54d
+mtime_utc: 2026-09-12T23:34:34.658491+00:00
+generated_utc: 2026-09-12T23:34:47.921333+00:00
 private: false
 ---
 
@@ -20,6 +20,10 @@ Not a CLI — imported by MCP server, bench drivers, and import scripts.
 
 `memory_write_impl(...)` — single-item insert with full enrichment chain.
 Exposed as the `memory_write` MCP tool; accepts `variant` and `embed_text`.
+Also takes `check_contradictions` (default `True`) to skip the contradiction
+check for one call. The default deliberately differs from the bulk path
+below, where it is OFF: a singleton write is interactive, so correctness
+outranks the latency of one check; a bulk import is throughput-bound.
 
 `memory_write_bulk_impl(items, *, enrich=None, check_contradictions=None,
 emit_conversation=None, variant=None)` — batch insert for benchmarks / imports.

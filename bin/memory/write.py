@@ -198,9 +198,15 @@ def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related
     return f"Linked {from_id} --[{relationship_type}]--> {to_id}"
 
 async def memory_write_impl(
-type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason="", variant=None, embed_text=None, confidence: float = -1.0, fact_enricher: "Callable[[str], Awaitable[list[dict]]] | None" = None, fact_enricher_variant_allowlist: "set[str] | None" = None, entity_extractor: "Callable[[str], Awaitable[dict]] | None" = None, entity_extractor_variant_allowlist: "set[str] | None" = None):
+type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason="", variant=None, embed_text=None, confidence: float = -1.0, fact_enricher: "Callable[[str], Awaitable[list[dict]]] | None" = None, fact_enricher_variant_allowlist: "set[str] | None" = None, entity_extractor: "Callable[[str], Awaitable[dict]] | None" = None, entity_extractor_variant_allowlist: "set[str] | None" = None, check_contradictions: bool = True):
     _resolve_mc_callbacks()
-    """Internal implementation for memory_write. Contradiction detection is automatic.
+    """Internal implementation for memory_write.
+
+    Contradiction detection is ON by default and can be disabled per call with
+    ``check_contradictions=False``. The default deliberately differs from
+    ``memory_write_bulk_impl``, where it is OFF to protect throughput on large
+    imports -- a singleton write is interactive and correctness matters more
+    than the latency of one check. Documented in memory_core's kwarg table.
 
     `variant` tags the item with a free-form ingestion-pipeline identifier so
     multiple variants (e.g. "baseline", "heuristic_c1c4", "llm_v1") can coexist
@@ -574,7 +580,7 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
     # Honor the operator-configurable exclusion set (the bulk path already does,
     # at the p["type"] gate below) instead of a hardcoded tuple, so a configured
     # exclusion isn't silently ignored on the singleton hot path (§5).
-    if vec and type not in CONTRADICTION_TYPE_EXCLUSIONS:
+    if check_contradictions and vec and type not in CONTRADICTION_TYPE_EXCLUSIONS:
         superseded_ids, related_candidates = await _check_contradictions(
             item_id, content, title, vec, type, agent_id, variant=variant,
             user_id=user_id,
@@ -801,6 +807,7 @@ async def memory_supersede_impl(
         valid_from=valid_from,
         variant=variant,
         embed_text=embed_text,
+        check_contradictions=False,
     )
     if not write_result.startswith("Created:"):
         # memory_write_impl returns "Error: ..." on a rejected write — propagate
