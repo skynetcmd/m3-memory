@@ -34,7 +34,10 @@ def _resolve_binary() -> "str | None":
         return exe
     try:
         from m3_memory import embedder_admin
-        return embedder_admin._server_binary()
+        found = embedder_admin._server_binary()
+        # _server_binary returns a Path; subprocess and the callers here want a
+        # str. Normalising at the boundary keeps the rest of this module typed.
+        return str(found) if found else None
     except Exception:  # noqa: BLE001 — a probe must never raise
         return None
 
