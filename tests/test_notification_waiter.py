@@ -244,9 +244,25 @@ def test_no_bare_m3_and_no_hardcoded_interpreter_paths():
     assert '"m3", "admin"' not in src, "bare `m3` on PATH ignores M3_ENGINE_ROOT"
     assert "pipx" not in src, "hardcoded interpreter path"
     assert "Users" not in src.replace("Users of", ""), "a real home path leaked in"
-    assert src.count("sys.executable, \"-m\", \"m3_memory.cli\"") >= 2, (
-        "every CLI invocation must go through sys.executable"
-    )
+    # Count the SUBPROCESS invocations, do not require a minimum of them.
+    #
+    # This asserted >= 2 and went red when the Option D work moved unread_ids
+    # and mark_received IN-PROCESS, leaving one legitimate subprocess. The test
+    # was pinning the old DESIGN (how many subprocesses exist) rather than the
+    # INVARIANT (that any subprocess uses the right interpreter) -- so a correct
+    # refactor failed it. DESIGN_PHILOSOPHIES 12c: when a test fails after a
+    # fix, ask whether the TEST encodes the bug before changing the code back.
+    #
+    # The invariant restated: EVERY `-m m3_memory.cli` launch goes through
+    # sys.executable. Zero such launches is fine; a launch by any other route
+    # is not.
+    import re
+
+    launches = re.findall(r'\[([^\]]*?)"-m",\s*"m3_memory\.cli"', src, re.S)
+    for head in launches:
+        assert "sys.executable" in head, (
+            f"a CLI launch does not use sys.executable: {head.strip()[:80]!r}"
+        )
 
 
 def test_window_hiding_has_one_owner_and_uses_sw_hide():

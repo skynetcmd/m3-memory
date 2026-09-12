@@ -227,6 +227,21 @@ def notify_impl(agent_id: str, kind: str, payload: dict = None) -> str:
 
     return f"Notified {agent_id}: {kind} (id={new_id})"
 
+
+def notifications_unread_ids_impl(agent_id: str) -> list[int]:
+    """
+    Returns a list of unread notification IDs for the given agent.
+    Returns structured data rather than prose, strictly conforming to DESIGN_PHILOSOPHIES.md (3).
+    """
+    p = dialect().param()
+    with _db() as db:
+        rows = db.execute(
+            f"SELECT id FROM notifications WHERE agent_id = {p} "
+            f"AND read_at IS NULL ORDER BY id ASC",
+            (agent_id,),
+        ).fetchall()
+    return [row[0] for row in rows]
+
 def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
     """Retrieves notifications for an agent."""
     p = dialect().param()

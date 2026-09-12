@@ -108,6 +108,7 @@ class TestLeafTokenCap(unittest.TestCase):
         """The regression that started this: a config knob with no call site.
         If FILES_MAX_LEAF_TOKENS stops being read, this fails."""
         import inspect
+
         from files_memory import chunkers
         src = inspect.getsource(chunkers)
         self.assertIn("FILES_MAX_LEAF_TOKENS", src)
@@ -116,6 +117,7 @@ class TestLeafTokenCap(unittest.TestCase):
         """The cap lives at the single dispatch point, so every chunker --
         including any added later -- inherits it."""
         import inspect
+
         from files_memory import chunkers
         self.assertIn("_enforce_leaf_token_cap",
                       inspect.getsource(chunkers.chunk_file))

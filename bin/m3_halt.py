@@ -319,6 +319,7 @@ _WRITER_CMDLINE_SIGNATURES = {
     # path open; the Rust one is what `m3 embedder install` registers as a
     # service, so it is the copy actually running on most installs.
     "embed-server": ("embed_server_inproc.py", "m3-embed-server"),
+    "waiter": ("m3_notification_waiter.py",),
     # `mcp-memory` is the legacy console script, but the Claude Code plugin
     # launches the server as bare `m3` (mcp_config.json -> command: "m3"), which
     # matched NOTHING here: the MCP server — the longest-lived DB writer on a
@@ -483,7 +484,7 @@ def elevated_kill_commands(pids: "list[int]") -> "list[str]":
 # Blocking on it would be a false positive with teeth: it stalls a legitimate
 # upgrade for the full quiesce timeout and then asks the operator to kill an
 # irrelevant process — which is how people learn to reflex-dismiss the prompt.
-NON_BLOCKING_ROLES = ("embed-server",)
+NON_BLOCKING_ROLES = ("embed-server", "waiter")
 
 
 def _is_venv_launcher_stub(proc) -> bool:

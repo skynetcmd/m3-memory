@@ -75,7 +75,6 @@ def test_real_leaks_are_still_blocked(line, why):
 def test_whitelist_does_not_exclude_test_directories():
     """Excluding tests/ wholesale would be a blind spot: a real credential can
     land in a test file."""
-    src = _HOOK.read_text(encoding="utf-8")
     whitelist, _ = _patterns()
     assert "tests/" not in whitelist, (
         "the placeholder whitelist must not exempt whole directories"
