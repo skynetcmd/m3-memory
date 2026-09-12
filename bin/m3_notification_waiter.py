@@ -189,7 +189,12 @@ def pg_child_loop(args) -> int:
     t.start()
 
     try:
-        from memory.orchestration import notifications_unread_ids_impl
+        from memory.backends import dialect
+        from memory.orchestration import (
+            notifications_ack_all_impl,
+            notifications_mark_received_impl,
+            notifications_unread_ids_impl,
+        )
 
         from memory import db
     except ImportError as e:
@@ -199,11 +204,15 @@ def pg_child_loop(args) -> int:
     baselines = {}
     try:
         for a in args.agent_ids:
+            # Startup sweep: stamp receipt on anything that arrived while
+            # this child was down, BEFORE the baseline below decides what
+            # counts as "already seen". Failure here is reported, not
+            # swallowed -- a silent sweep failure leaves stranded
+            # notifications looking delivered.
             try:
-                from memory.orchestration import notifications_mark_received_impl
                 notifications_mark_received_impl(a)
-            except Exception:
-                pass
+            except Exception as exc:
+                _warn(f"startup sweep for {a!r} failed: {exc!r}")
             baselines[a] = set(str(x) for x in notifications_unread_ids_impl(a))
     except Exception as e:
         _warn(f"Failed to fetch baseline: {e}")
@@ -220,31 +229,46 @@ def pg_child_loop(args) -> int:
 
         try:
             hits = {}
+            # One statement-timeout call per poll, through the seam. `dialect`
+            # lives in memory.backends, NOT memory.db -- `db.dialect()` raises
+            # AttributeError, and wrapped in a bare `except: pass` it left the
+            # timeout silently unapplied on every backend.
             with db._db() as conn:
                 try:
-                    db.dialect().set_statement_timeout(conn, 2000)
-                except Exception:
-                    pass
+                    dialect().set_statement_timeout(conn, 2000)
+                except Exception as exc:
+                    # Report it. A swallowed failure here disables the only
+                    # bound on a hung query -- the connection-exhaustion
+                    # protection this whole child was designed around.
+                    _warn(f"set_statement_timeout failed: {exc!r}")
+
                 for a in args.agent_ids:
-                    now = set(str(x) for x in notifications_unread_ids_impl(a))
-                    gained = now - baselines[a]
+                    now_ids = set(str(x) for x in notifications_unread_ids_impl(a))
+                    gained = now_ids - baselines[a]
                     if gained:
                         hits[a] = sorted(list(gained))
-                        d = db.dialect()
-                        q = f"UPDATE notifications SET received_at = now() WHERE agent_id = {d.param()} AND received_at IS NULL"
-                        conn.execute(q, (a,))
-                    baselines[a] = now
+                    baselines[a] = now_ids
+
+            # Receipt goes through the SINGLE OWNER, not hand-written SQL.
+            #
+            # This block previously ran `UPDATE notifications SET received_at =
+            # now() WHERE agent_id = ...` inline, which was wrong three ways:
+            # it duplicated the predicate that notifications_mark_received_impl
+            # already owns (10a: "duplicated predicate logic is the defect,
+            # independent of correctness"), and `now()` is PostgreSQL-only --
+            # SQLite raises "no such function: now", so the SQLite path would
+            # have failed at runtime.
+            for a in hits:
+                notifications_mark_received_impl(a)
 
             if hits:
                 acked = {}
                 if args.ack:
-                    with db._db() as conn:
-                        d = db.dialect()
-                        for a in hits:
-                            q = f"UPDATE notifications SET read_at = now() WHERE agent_id = {d.param()}"
-                            conn.execute(q, (a,))
-                            acked[a] = hits[a]
-                print(json.dumps({"t":"hit", "new_notifications": hits, "received": hits, "acked": acked}), flush=True)
+                    for a in hits:
+                        notifications_ack_all_impl(a)
+                        acked[a] = hits[a]
+                print(json.dumps({"t": "hit", "new_notifications": hits,
+                                  "received": hits, "acked": acked}), flush=True)
                 return 0
         except Exception as e:
             _warn(f"PG poll error: {e}")
@@ -280,7 +304,7 @@ def _supervise_postgres(args) -> int:
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE, text=True, **kwargs)
         child_start_time = time.time()
 
-        q = queue.Queue()
+        q: "queue.Queue[str | None]" = queue.Queue()  # None == EOF sentinel
         def reader():
             try:
                 for line in p.stdout:

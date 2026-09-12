@@ -541,7 +541,9 @@ class PostgresDialect(Dialect):
 
 
     def set_statement_timeout(self, conn: object, ms: int) -> None:
-        with conn.cursor() as cur:
+        # See the SQLite sibling: int() coercion, and SET takes no bound
+        # parameter either.
+        with conn.cursor() as cur:  # type: ignore[attr-defined]
             cur.execute(f"SET statement_timeout = {int(ms)}")
 
 # The one shared frozen singleton for PostgreSQL.

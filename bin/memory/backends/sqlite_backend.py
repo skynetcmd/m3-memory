@@ -191,7 +191,10 @@ class SqliteDialect(Dialect):
 
 
     def set_statement_timeout(self, conn: object, ms: int) -> None:
-        conn.execute(f"PRAGMA busy_timeout = {int(ms)}")
+        # int() is a hard coercion, so the f-string carries no injection
+        # vector -- and it MUST be an f-string: PRAGMA takes no bound
+        # parameter. Do not "fix" this to a placeholder; it will break.
+        conn.execute(f"PRAGMA busy_timeout = {int(ms)}")  # type: ignore[attr-defined]
 
 # The one shared frozen singleton for SQLite. Obtain via dialect_for / dialect(),
 # not by constructing per call site.
