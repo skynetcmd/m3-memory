@@ -104,3 +104,55 @@ def test_scanner_selftest_exclusion_is_a_single_file():
     value = m.group(1)
     assert value == ":(exclude)tests/test_prepush_placeholder_whitelist.py", value
     assert not value.rstrip("/").endswith("tests"), "must not exclude the whole tests/ tree"
+
+
+# --- prohibited patterns live in the PRIVATE tree ---------------------------
+
+
+def test_prohibited_patterns_are_not_hardcoded_in_the_public_hook():
+    """The LIST of forbidden patterns is itself a disclosure.
+
+    A public hook enumerating bench tokens, internal subnets and codenames tells
+    a reader exactly what we treat as sensitive and what to grep history for. The
+    MECHANISM stays tracked here; the LIST lives in ~/.m3-private.
+    """
+    src = _HOOK.read_text(encoding="utf-8")
+    assert "PROHIBITED_FILE=" in src, "the hook must read an external pattern file"
+    for private_token in ("lme-m/v3", "smoke-142", "237,655", "2,446,993",
+                          "SCHEMA_MIGRATION_FORK"):
+        assert private_token not in src, (
+            f"bench token {private_token!r} is hardcoded in the PUBLIC hook"
+        )
+
+
+def test_missing_pattern_file_fails_closed_and_says_so():
+    """An absent policy file must not read as 'nothing is prohibited'.
+
+    That is the silent-success shape this hook exists to prevent, so the fallback
+    must both exist AND announce itself.
+    """
+    src = _HOOK.read_text(encoding="utf-8")
+    assert "LEAK_PATTERN='" in src, "a built-in fallback pattern must exist"
+    assert "NOT BEING CHECKED" in src, (
+        "falling back must be announced loudly, not silently"
+    )
+
+
+def test_fallback_still_catches_credentials_and_pii():
+    """The fallback is narrower than the private list (bench tokens are the
+    private half), but it must never be empty of the universal classes."""
+    src = _HOOK.read_text(encoding="utf-8")
+    m = re.search(r"LEAK_PATTERN='([^']+)'", src)
+    assert m, "LEAK_PATTERN fallback not found"
+    fallback = m.group(1)
+    for essential in ("sk-ant-", "PRIVATE KEY", "/Users/", "@gmail"):
+        assert essential in fallback, f"fallback lost {essential!r}"
+
+
+def test_fallback_omits_bench_tokens_on_purpose():
+    """If the fallback silently enforced bench patterns they would be back in
+    the public hook, defeating the point of moving the list out."""
+    src = _HOOK.read_text(encoding="utf-8")
+    fallback = re.search(r"LEAK_PATTERN='([^']+)'", src).group(1)
+    assert "lme" not in fallback.lower()
+    assert "smoke-142" not in fallback
