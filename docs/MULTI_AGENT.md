@@ -212,3 +212,112 @@ See [`examples/multi-agent-team/README.md`](../examples/multi-agent-team/README.
 **Scope is the access control.** Private scratch work stays in `scope="agent"`. Shared decisions go to `scope="org"`. User data goes to `scope="user"` with GDPR primitives (`gdpr_export`, `gdpr_forget`) attached.
 
 **The orchestrator is pluggable.** M3 Memory exposes primitives, not opinions about scheduling. The bundled `m3-team` is one orchestrator; you can build your own with the same tool catalog.
+
+---
+
+## 📡 Delivery: pull by design, push by adapter
+
+Notifications are stored and wait to be asked for. That is deliberate, and it
+follows from the line at the top of this document: m3 is not an agent runtime.
+It has no way to enter an agent's execution loop, so promising delivery would be
+promising something it cannot keep.
+
+What each runtime *can* do is wrap the inbox in its own adapter. The adapters are
+not equivalent, and the differences are large enough to plan around.
+
+All figures below were measured between two live agents on one Windows machine,
+2026-09-12, by firing timestamped probes.
+
+### The shared floor
+
+`notify` → durable write: **~322 ms** (min 315, max 333, n=10). Every adapter
+pays it; none can beat it.
+
+    end-to-end = notify-write (~322 ms, shared)
+               + detection    (adapter-specific — the column that matters)
+               + delivery     (runtime-specific)
+
+Quote end-to-end alone and you hide which layer you are comparing.
+
+### Detection: watch the WAL, not the table
+
+SQLite has **no cross-process blocking change notification** — update hooks are
+in-process only and fire for the connection's own writes, so a separate process
+cannot be woken by m3 inserting a row. The working trigger is the WAL file's
+`(mtime, size)`, which both change on a notify write.
+
+Compare both halves: a checkpoint can *shrink* the WAL, so size alone both misses
+growth-then-truncate and can false-fire. And a WAL change means *something* was
+written, not necessarily your notification — always confirm with one
+`notifications_poll` before acting.
+
+| Approach | Detection | Cost while idle |
+|---|---|---|
+| WAL-stat waiter (subprocess) | **~0.8 s** at 1 s poll | **zero agent turns** |
+| In-agent poll loop, 3 s | ~1.8 s | ~1,200 turns/hour |
+| Cron, 1 minute | 60 s floor | ~60 turns/hour |
+
+The scarce resource is **agent turns**, not CPU. Put the polling in a subprocess
+and the idle cost disappears; a 5 s interval costs 720 `stat()` calls an hour and
+is still a small fraction of a 30 s budget.
+
+One process can serve every inbox. The WAL trigger is shared, so N agents cost N
+cheap confirm-polls *after* a change — not N watchers. That also avoids keeping
+live watchers for agents that have been offline for months.
+
+### Receipt is not reading
+
+A subprocess can acknowledge without any agent being free —
+`notifications_ack_all` round-trips in **~426 ms**. That is tempting: it makes a
+receipt deadline independent of whether an agent is mid-turn.
+
+**Do not enable it blindly.** `notifications` carries one timestamp, `read_at`.
+Acking on *detection* marks a message read that no agent has read, and that flag
+was the only record the work was pending. Measured on a live store: **29 of 30**
+recent notifications carried no `task_id`, so "the task state machine tracks it"
+covers almost none of the real traffic.
+
+Auto-ack is therefore opt-in, and is only safe where every watched kind is backed
+by a task whose own state survives the ack. Losing a message silently is worse
+than confirming receipt one turn later.
+
+### Coverage is the hard part, not speed
+
+Detection is a few percent of any sane budget. What actually breaks delivery:
+
+- **nothing armed** — a session-scoped watcher dies with the session; a bounded
+  loop disarms after N iterations;
+- **the agent is mid-turn** — queued, not dropped, but the wait is a turn length;
+- **a silently dead watcher** — indistinguishable from a quiet inbox.
+
+A bounded in-agent loop is the trap worth naming: at 3 iterations × 5 s it gives
+about **15 seconds of coverage per arming**, roughly 0.4% of an hour. The rest of
+the time, latency is unbounded. The fix is not a faster loop — it is an armer
+that outlives the session.
+
+Which means an OS-level service (Task Scheduler, launchd, systemd), registered by
+the installer. **A non-elevated agent session cannot register one**: two
+independent agents measured `Access is denied` (0x80070005) attempting it at
+runtime. Installer-time registration, by a human who can elevate, is the only
+reproducible path.
+
+Copy the shape m3 already uses for its own background work: boot + logon
+triggers, a repetition interval so a dead process self-heals, and an
+ignore-if-running policy so a re-fire while alive is a harmless no-op rather than
+a second instance.
+
+### If you build a watcher
+
+Two failure modes that look identical to healthy from outside:
+
+- **Unbuffered output is mandatory.** A long-running Python watcher with buffered
+  stdout emits nothing for minutes. `python -u`, or you cannot tell a live
+  supervisor from a dead one.
+- **Silence must not mean success.** A filter matching only the happy path stays
+  quiet through a crash. Match the failure signatures too.
+
+### What no adapter can do
+
+None of this wakes a session that is not running. A daemon can act out of band —
+write a file, fire a webhook — but a stopped agent stays stopped until a human or
+the OS starts one. Plan for delivery on next start, not for always-on.
