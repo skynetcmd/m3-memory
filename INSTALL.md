@@ -237,7 +237,7 @@ The orchestrator executes the four required upgrade steps automatically:
 4. `m3 doctor` — Verifies system health and background daemons.
 
 ### Plugin-Managed Installs
-If M3 was installed as an agent plugin (e.g. inside host plugin caches for Claude Code or Antigravity), running `pip` or `pipx` directly will conflict with the host agent's plugin manager. Upgrade plugins using your host's native plugin flow (for example, `/plugin update` in Claude Code), then run `m3 doctor`.
+If M3 was installed as an agent plugin (e.g. inside host plugin caches for Claude Code or Antigravity), running `pip` or `pipx` directly will conflict with the host agent's plugin manager. Upgrade plugins using your host's native plugin flow (for example, `/plugin` in Claude Code, which manages install/reload for you), then run `m3 doctor`.
 
 ---
 
