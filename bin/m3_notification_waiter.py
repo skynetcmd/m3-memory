@@ -140,12 +140,21 @@ def _wait_once(args) -> int:
             # where every watched kind is backed by a task whose own state
             # survives the ack.
             received = {}
+
+            extra_kw = {}
+            if sys.platform == "win32":
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = subprocess.SW_HIDE
+                extra_kw["startupinfo"] = si
+
             for a in hits:
                 try:
                     r = subprocess.run(  # nosec B603 - argv list, no shell
                         ["m3", "admin", "notifications_mark_received",
                          "--agent_id", a, "--yes"],
                         capture_output=True, text=True, timeout=90,
+                        **extra_kw,
                     )
                     received[a] = (r.returncode == 0)
                 except (OSError, subprocess.TimeoutExpired):
@@ -159,6 +168,7 @@ def _wait_once(args) -> int:
                             ["m3", "admin", "notifications_ack_all",
                              "--agent_id", a, "--yes"],
                             capture_output=True, text=True, timeout=90,
+                            **extra_kw,
                         )
                         acked[a] = (r.returncode == 0)
                     except (OSError, subprocess.TimeoutExpired):
