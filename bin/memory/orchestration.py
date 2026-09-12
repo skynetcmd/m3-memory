@@ -346,7 +346,8 @@ def task_update_impl(task_id: str, state: str = "", description: str = "", metad
     p = dialect().param()
     with _db() as db:
         row = db.execute(
-            f"SELECT state, description, metadata_json, created_by FROM tasks WHERE id = {p} AND deleted_at IS NULL",
+            f"SELECT state, description, metadata_json, created_by, result_memory_id "
+            f"FROM tasks WHERE id = {p} AND deleted_at IS NULL",
             (task_id,)
         ).fetchone()
 
@@ -399,6 +400,21 @@ def task_update_impl(task_id: str, state: str = "", description: str = "", metad
             except Exception as e:
                 logger.warning(f"task_completed notify failed for {row['created_by']}: {e}")
 
+        # A task can complete carrying nothing to show for it. That is the same
+        # silent-success shape as a call that reports ok while dropping your
+        # input: the handoff LOOKS finished and the findings are nowhere. Seen
+        # for real -- an agent-to-agent code review reached `completed` with
+        # result_memory_id empty, so there was no link from the task to the
+        # review and the next reader had to be told the id out of band.
+        #
+        # NOT an error: `failed` and `cancelled` legitimately have no result,
+        # and 19 of 21 existing completed tasks predate this convention, so
+        # blocking would break callers and reject honest "nothing was needed"
+        # completions. Say it out loud instead, in the string the caller reads.
+        if new_state == "completed" and not (row["result_memory_id"] or ""):
+            return (f"Task {task_id} updated: state=completed "
+                    f"(WARNING: no result_memory_id — nothing links this task to "
+                    f"its findings. Call task_set_result to attach one.)")
         return f"Task {task_id} updated: state={new_state}"
     else:
         return f"Task {task_id} updated"
@@ -440,7 +456,10 @@ def task_get_impl(task_id: str, include_deleted: bool = False) -> str:
         f"  Created By: {row['created_by']}",
         f"  Owner: {row['owner_agent'] or '(unassigned)'}",
         f"  Parent Task: {row['parent_task_id'] or '(none)'}",
-        f"  Result Memory: {row['result_memory_id'] or '(none)'}",
+        # A completed task with no result is worth flagging where a reader
+        # actually looks: "(none)" alone reads as a blank field, not as
+        # "this task claims to be done and points at nothing".
+        f"  Result Memory: {row['result_memory_id'] or ('(none) ⚠ completed with no findings attached' if row['state'] == 'completed' else '(none)')}",
         f"  Created At: {row['created_at']}",
         f"  Updated At: {row['updated_at']}",
         f"  Completed At: {row['completed_at'] or '(not completed)'}",
