@@ -125,6 +125,72 @@ def test_parses_at_the_declared_floor():
         ast.parse(src, feature_version=ver)
 
 
+def test_help_renders_without_raising():
+    """``--help`` must actually print help.
+
+    argparse treats help strings as %-format templates, so a LITERAL ``%`` in a
+    help string raises ``ValueError: badly formed help string`` the moment the
+    formatter runs. Nothing catches it at import or at parse time -- only when a
+    user asks for help, which is exactly when they are least able to diagnose it.
+
+    This shipped: the --ack help text quoted "false for ~97% of real traffic" and
+    ``m3_notification_waiter.py --help`` crashed instead of printing. The rest of
+    the suite passed throughout, because no test had ever invoked --help.
+
+    Asserting on the SUBPROCESS rather than calling format_help() in-process
+    keeps this honest about the exit code a user would actually see.
+    """
+    import subprocess
+
+    proc = subprocess.run(
+        [sys.executable, str(_SRC), "--help"],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert proc.returncode == 0, f"--help exited {proc.returncode}; stderr={proc.stderr}"
+    assert "--ack" in proc.stdout, proc.stdout
+
+
+def test_no_literal_percent_in_argparse_help():
+    """The general form of the bug above, so a future edit cannot reintroduce it
+    in a different flag's help text and go unnoticed until someone runs --help.
+
+    A literal ``%`` is only legal in argparse help as ``%%``; the one meaningful
+    single-% form is the ``%(default)s`` style interpolation.
+
+    Parsed with ``ast`` rather than matched with a regex. A regex over ``help=``
+    was tried first and silently MISSED the real defect, because the offending
+    string was an implicitly-concatenated literal spanning five lines inside
+    parentheses -- so the test passed against the very code that crashed. A test
+    that goes green on the bug it was written for is worse than no test.
+    """
+    import ast
+    import re
+
+    interp = re.compile(r"%\((?:default|prog|type|choices|const|dest|metavar)\)[sdr]")
+    tree = ast.parse(_SRC.read_text(encoding="utf-8"))
+    checked = 0
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "help":
+                continue
+            # ast folds implicit concatenation, so a 5-line parenthesised
+            # literal arrives here as one complete Constant.
+            if not isinstance(kw.value, ast.Constant) or not isinstance(kw.value.value, str):
+                continue
+            checked += 1
+            stripped = interp.sub("", kw.value.value).replace("%%", "")
+            assert "%" not in stripped, (
+                "literal '%' in argparse help -- argparse raises 'badly formed "
+                "help string' when --help is rendered. Write it as 'percent' or "
+                "escape it as '%%':\n" + kw.value.value
+            )
+
+    assert checked, "no argparse help= strings found; the scan matched nothing"
+
+
 # --- the installer spec ------------------------------------------------------
 
 _SCHED = _BIN / "install_schedules.py"

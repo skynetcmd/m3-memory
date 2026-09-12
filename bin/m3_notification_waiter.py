@@ -77,7 +77,7 @@ def main() -> int:
                          "has only `read_at` -- no separate 'received' column -- so acking here "
                          "destroys the only record that a message was unread. Measured on this "
                          "machine: 29 of 30 recent notifications carried NO task_id, so 'the task "
-                         "state machine tracks it' is false for ~97% of real traffic. Enable this "
+                         "state machine tracks it' is false for ~97 percent of real traffic. Enable this "
                          "only where every watched kind is backed by a task whose own state "
                          "survives the ack.")
     args = ap.parse_args()
