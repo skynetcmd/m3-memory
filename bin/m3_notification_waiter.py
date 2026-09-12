@@ -42,9 +42,18 @@ def unread_ids(agent_id: str) -> set:
     -- a chatlog turn, an embedding -- not necessarily a notification for us, so
     every wake must be confirmed here or the waiter fires constantly."""
     try:
+        import sys
+        extra_kw = {}
+        if sys.platform == "win32":
+            import subprocess
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = subprocess.SW_HIDE
+            extra_kw["startupinfo"] = si
         out = subprocess.run(
-            ["m3", "admin", "notifications_poll", "--agent_id", agent_id, "--limit", "50"],
+            [sys.executable, "-m", "m3_memory.cli", "admin", "notifications_poll", "--agent_id", agent_id, "--limit", "50"],
             capture_output=True, text=True, timeout=90,
+            **extra_kw
         )
     except (OSError, subprocess.TimeoutExpired):
         return set()
