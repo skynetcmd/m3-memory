@@ -206,6 +206,12 @@ _EXEMPT = {
 }
 
 
+# Built at runtime, not written literally: a source file containing an
+# f-string that mentions the idiom would be scanned by this very guard.
+PROSE_FSTRING = 'x = f"Do not use ' + "sqlite3.connect" + ' here {var}"\n'
+REAL_FSTRING = 'conn = ' + "sqlite3.connect" + '(f"{root}/a.db")\n'
+
+
 def _iter_py():
     for p in _ROOT.rglob("*.py"):
         rel = p.relative_to(_ROOT).as_posix()
@@ -260,9 +266,22 @@ def _code_lines(src: str):
     # Blanking the span preserves the rest of the line, so the call survives
     # while the literal's CONTENTS (which may legitimately mention the idiom in
     # prose) do not.
+    # FSTRING_MIDDLE matters as much as STRING. Python 3.12 changed f-string
+    # tokenization: `f"...{x}"` is no longer one STRING token but
+    # FSTRING_START / FSTRING_MIDDLE / FSTRING_END, and the PROSE lives in
+    # FSTRING_MIDDLE. Checking only STRING therefore leaves f-string text
+    # unscrubbed, so a mention inside an f-string reads as a real call -- the
+    # over-count this scrubbing exists to prevent, reappearing through a
+    # tokenizer change. Resolved via getattr so the 3.11 floor (where these
+    # token types do not exist) still runs.
+    _fstring_mid = getattr(tokenize, "FSTRING_MIDDLE", None)
+    _prose_types = {tokenize.COMMENT, tokenize.STRING}
+    if _fstring_mid is not None:
+        _prose_types.add(_fstring_mid)
+
     scrubbed = {}
     for tok in toks:
-        if tok.type not in (tokenize.COMMENT, tokenize.STRING):
+        if tok.type not in _prose_types:
             continue
         (srow, scol), (erow, ecol) = tok.start, tok.end
         for ln in range(srow, erow + 1):
@@ -424,7 +443,27 @@ class TestRawConnectionDrift(unittest.TestCase):
             "prose in a docstring was counted as a use",
         )
 
-        # 6. A string MENTIONING the idiom on a line that also has real code.
+        # 6. F-STRING PROSE must not count. Python 3.12 split f-strings into
+        #    FSTRING_START/MIDDLE/END, so scrubbing only STRING leaves the
+        #    prose visible and the guard over-counts. Found in review by the
+        #    other agent, on a fix that was otherwise correct -- a tokenizer
+        #    change quietly reopening a closed hole is exactly why a
+        #    self-test has to exercise the real detector.
+        hits = seen(PROSE_FSTRING)
+        self.assertFalse(
+            any("sqlite3.connect" in h for h in hits),
+            "prose inside an f-string was counted as a use (FSTRING_MIDDLE)",
+        )
+
+        # 7. ...but an f-string used as a REAL path must still be caught.
+        #    Scrubbing f-strings must not become a new blind spot.
+        hits = seen(REAL_FSTRING)
+        self.assertTrue(
+            any("sqlite3.connect" in h for h in hits),
+            "a real connect with an f-string path went invisible",
+        )
+
+        # 8. A string MENTIONING the idiom on a line that also has real code.
         hits = seen('LOG = "do not sqlite3.connect"\nconn = sqlite3.connect(p)\n')
         self.assertEqual(
             sum("sqlite3.connect" in h for h in hits), 1,
