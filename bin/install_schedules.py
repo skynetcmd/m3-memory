@@ -1114,6 +1114,53 @@ def restart_reaped_services(covered: set) -> None:
             _safe_print(f"{WARN} Restarted {name} but it is NOT serving: {detail}")
 
 
+def _verify_task_registered(name: str) -> "str | None":
+    """Query a task back after creating it. None on success, else the reason.
+
+    `schtasks /Create` exiting 0 is a PROXY for "the task exists"; querying it
+    back is the OUTCOME. They are not the same claim, and on 2026-09-12 this
+    repo shipped four separate defects of exactly that shape -- a check that
+    tested something adjacent to the thing that mattered:
+
+      * the waiter swallowed a failed poll into an empty set, indistinguishable
+        from an empty inbox
+      * a drift guard was blind to its own majority case while its self-test
+        asserted a tautology
+      * <WorkingDirectory> shipped with 21 tests asserting the SIGNATURE and
+        none asserting the element was emitted
+      * `systemctl --user start` returns 0 for a unit that does not exist
+
+    None is known to be failing here today: all 11 specs query back cleanly.
+    This is about the class, not a live incident -- and about the cost, which
+    is one extra schtasks call at install time only.
+
+    Verifies the WorkingDirectory too, because a task registered without one
+    runs from C:/Windows/system32, and an interpreter whose only route to
+    `m3_memory` is the implicit cwd entry on sys.path is then blind. That is
+    not hypothetical: it is how the notification waiter detected nothing for an
+    hour while Task Scheduler reported Running.
+    """
+    try:
+        q = subprocess.run(
+            ["schtasks", "/Query", "/TN", name, "/XML"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"could not query it back: {exc!r}"
+
+    if q.returncode != 0:
+        return (q.stderr or q.stdout).strip()[:200] or "query returned non-zero"
+
+    # schtasks /Query /XML emits UTF-16; the text= decode above may leave BOM
+    # and NULs. Normalise before matching rather than trusting the encoding.
+    xml = (q.stdout or "").replace("\x00", "").lstrip("\ufeff")
+    if "<WorkingDirectory>" not in xml:
+        return (
+            "registered WITHOUT a WorkingDirectory — it will run from "
+            "C:/Windows/system32, where the payload may not be importable"
+        )
+    return None
+
 def _start_longlived_tasks(tasks: list) -> None:
     """Kick the ONSTART services so they run now, not at next boot/logon.
 
@@ -1248,6 +1295,15 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard
                     pass
 
         if result.returncode == 0:
+            # rc 0 is not proof the task exists. Query it back (#161).
+            problem = _verify_task_registered(task["name"])
+            if problem:
+                _safe_print(
+                    f"{FAIL} schtasks reported success for {task['name']} but "
+                    f"verification failed: {problem}"
+                )
+                success = False
+                continue
             note = " (+30-min self-heal repetition)" if task["name"] in _SELF_HEAL_TASKS else ""
             _safe_print(f"{OK} Created Windows Task: {task['name']}{note}")
         else:
