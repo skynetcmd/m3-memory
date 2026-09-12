@@ -1,18 +1,17 @@
-import os
 import subprocess
 import sys
 import time
 from unittest.mock import patch
 
 
-def test_supervisor_detects_wedge():
+def test_supervisor_detects_wedge(tmp_path):
     script = """
 import sys, time
 print('{"t":"hb"}', flush=True)
 time.sleep(10)
 """
-    with open("wedged_child.py", "w") as f:
-        f.write(script)
+    script_path = tmp_path / "wedged_child.py"
+    script_path.write_text(script)
 
     import bin.m3_notification_waiter as waiter
     original_popen = subprocess.Popen
@@ -26,15 +25,14 @@ time.sleep(10)
 
     with patch("subprocess.Popen") as mock_popen:
         def popen_override(cmd, *a, **kw):
-            return original_popen([sys.executable, "wedged_child.py"], *a, **kw)
+            return original_popen([sys.executable, str(script_path)], *a, **kw)
         mock_popen.side_effect = popen_override
         start = time.time()
         rc = waiter._supervise_postgres(args)
         duration = time.time() - start
         assert rc == 2
-        assert duration < 10.0
+        assert duration < 8.0
 
-    os.remove("wedged_child.py")
 
 
 def test_child_eof_self_terminates():
