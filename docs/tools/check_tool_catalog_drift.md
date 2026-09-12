@@ -1,8 +1,8 @@
 ---
 tool: bin/check_tool_catalog_drift.py
-sha1: 6f5fa0c718d2
-mtime_utc: 2026-05-31T16:08:17.340434+00:00
-generated_utc: 2026-05-31T18:42:52.653159+00:00
+sha1: e6a4d6d6b0c4
+mtime_utc: 2026-09-12T12:18:56.130967+00:00
+generated_utc: 2026-09-12T12:19:02.527818+00:00
 private: false
 ---
 
@@ -46,7 +46,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 89)
+- `def main()` (line 91)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -75,9 +75,9 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['git', 'diff', '--name-only', '--', *_GENERATED_PATHS]`` (line 82)
-- `subprocess.run()  → `[_PY, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', *_DRIFT_TESTS]`` (line 117)
-- `subprocess.run()  → `cmd`` (line 66)
+- `subprocess.run()  → `['git', 'diff', '--name-only', '--', *_GENERATED_PATHS]`` (line 84)
+- `subprocess.run()  → `[_PY, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', *_DRIFT_TESTS]`` (line 119)
+- `subprocess.run()  → `cmd`` (line 68)
 
 
 ---
