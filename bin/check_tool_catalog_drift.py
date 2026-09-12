@@ -46,6 +46,7 @@ _PY = sys.executable
 _GENERATORS = [
     ["bin/gen_tool_manifest.py"],
     ["bin/gen_mcp_inventory.py"],
+    ["bin/gen_tool_inventory.py"],
 ]
 
 # Paths the generators (and hand-maintained count claims) touch. Drift is
@@ -53,6 +54,7 @@ _GENERATORS = [
 _GENERATED_PATHS = [
     "docs/tools/MCP_CATALOG.json",
     "docs/MCP_TOOLS.md",
+    "docs/tools/",
 ]
 
 # Drift tests that gate the count claims + manifest freshness.

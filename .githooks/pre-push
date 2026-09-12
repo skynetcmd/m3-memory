@@ -139,7 +139,7 @@ CHANGED="$(changed_files)"
 # Paths whose change can make the generated catalog/inventory or the hardcoded
 # "N tools" counts go stale. Mirrors check_tool_catalog_drift.py's universe.
 if printf '%s\n' "$CHANGED" | grep -qE \
-  '^bin/mcp_tool_catalog\.py$|^bin/mcp_proxy\.py$|^bin/gen_tool_manifest\.py$|^bin/gen_mcp_inventory\.py$|^docs/tools/MCP_CATALOG\.json$|^docs/MCP_TOOLS\.md$|^README\.md$|^docs/COMPARISON\.md$|^docs/MYTHS_AND_FACTS\.md$|^docs/tools/files_memory\.md$|^tests/test_tool_count_drift\.py$|^tests/test_mcp_catalog_manifest_fresh\.py$'
+  '^bin/mcp_tool_catalog\.py$|^bin/mcp_proxy\.py$|^bin/gen_tool_manifest\.py$|^bin/gen_mcp_inventory\.py$|^bin/gen_tool_inventory\.py$|^docs/tools/.*$|^docs/MCP_TOOLS\.md$|^README\.md$|^docs/COMPARISON\.md$|^docs/MYTHS_AND_FACTS\.md$|^docs/tools/files_memory\.md$|^tests/test_tool_count_drift\.py$|^tests/test_mcp_catalog_manifest_fresh\.py$'
 then
   echo "[pre-push] 1/3 tool-catalog drift gate (catalog/docs touched — checking)"
   if ! py_has_deps; then
