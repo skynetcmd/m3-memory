@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-09-11T04:11:26.164271+00:00._
+_Generated 2026-09-11T23:24:53.590812+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -81,6 +81,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/m3_lifecycle_summary.py](m3_lifecycle_summary.md) | CLI wrapper for the memory lifecycle/contradiction observability summary. |  |
 | [bin/m3_loop_watchdog.py](m3_loop_watchdog.md) | m3 cognitive-loop watchdog — progress-based self-heal for all three OSes. |  |
 | [bin/m3_sdk.py](m3_sdk.md) | m3_sdk — facade. Real implementations live in bin/m3_core/*. |  |
+| [bin/m3_upgrade.py](m3_upgrade.md) | Upgrade m3-memory end to end, using the right command for how it was installed. |  |
 | bin/macbook_status_server.py | MacBook network & LM Studio status server for Homepage dashboard. | yes |
 | [bin/mcp_proxy.py](mcp_proxy.md) | MCP Tool Execution Proxy  v2.0 |  |
 | [bin/mcp_tool_catalog.py](mcp_tool_catalog.md) | mcp_tool_catalog.py — single source of truth for the m3-memory MCP tool catalog. |  |

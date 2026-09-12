@@ -152,9 +152,18 @@ def test_complex_arg_tool_rejects_invalid_json():
 
 def test_complex_arg_tool_accepts_valid_json_dry_run():
     """A valid --json object on a complex-arg tool validates cleanly under
-    --dry-run (no mutation): exit 0, dry_run True."""
+    --dry-run (no mutation): exit 0, dry_run True.
+
+    The payload must use REAL parameters. This used to pass ``{"subject": "x"}``
+    -- not a task_create parameter at all -- and succeeded only because --json
+    accepted any key and silently dropped it. That is the defect
+    tests/test_cli_json_unknown_keys.py now pins, so the fixture is corrected
+    here rather than the guard being loosened to keep a bad payload green.
+    """
     proc = _run_cli(
-        "tasks", "task_create", "--json", json.dumps({"subject": "x"}), "--dry-run"
+        "tasks", "task_create",
+        "--json", json.dumps({"title": "x", "created_by": "t"}),
+        "--dry-run",
     )
     assert proc.returncode == 0, f"stderr={proc.stderr}\nstdout={proc.stdout}"
     data = json.loads(proc.stdout)

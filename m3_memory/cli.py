@@ -1395,6 +1395,28 @@ def _cmd_tool_dispatch(args: argparse.Namespace) -> int:
             if not isinstance(tool_args, dict):
                 print("Error: --json must be a JSON object.", file=sys.stderr)
                 return 2
+            # Reject unknown keys instead of dropping them. The flag path only
+            # ever builds args from declared `properties`, so a typo there is a
+            # loud argparse error; --json used to pass the object straight
+            # through, so a near-miss key (`owner` for `owner_agent`) was
+            # silently discarded and the call still reported ok. That produced a
+            # task that looked assigned and was not. §3: fail loud, never
+            # silent. `database`/`timeout` are CLI-level extras the impls accept.
+            _declared = set((spec.parameters.get("properties") or {}).keys())
+            _declared |= {"database", "timeout"}
+            _unknown = sorted(set(tool_args) - _declared)
+            if _unknown:
+                import difflib as _difflib
+
+                lines = [f"Error: --json has unknown key(s) for {tool}: "
+                         + ", ".join(repr(k) for k in _unknown)]
+                for key in _unknown:
+                    near = _difflib.get_close_matches(key, sorted(_declared), n=1, cutoff=0.6)
+                    if near:
+                        lines.append(f"  did you mean {near[0]!r} instead of {key!r}?")
+                lines.append("  accepted: " + ", ".join(sorted(_declared)))
+                print("\n".join(lines), file=sys.stderr)
+                return 2
     else:
         props = spec.parameters.get("properties", {}) or {}
         tool_args = {}
@@ -1410,8 +1432,13 @@ def _cmd_tool_dispatch(args: argparse.Namespace) -> int:
         tool_args["database"] = db
 
     async def _run():
+        # allow_caller_agent_id: this is a human at a terminal, not an LLM, so an
+        # explicit `--agent_id` is the user's own choice and must survive. The
+        # m3_call dispatcher deliberately does NOT opt in — see the anti-spoofing
+        # note in execute_tool_structured.
         return await _cat.execute_tool_structured(
-            spec, tool_args, agent_id="", dry_run=dry_run)
+            spec, tool_args, agent_id="", dry_run=dry_run,
+            allow_caller_agent_id=True)
 
     try:
         result = asyncio.run(_run())
