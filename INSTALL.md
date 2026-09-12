@@ -207,11 +207,37 @@ error: externally-managed-environment
 ```
 
 `pipx` isolates the install into a per-command venv and adds the script
-shim to `~/.local/bin`. That keeps system Python untouched and makes
-upgrades (`pipx upgrade m3-memory`) a one-liner.
+shim to `~/.local/bin`. That keeps system Python untouched while allowing isolated package updates.
 
 On macOS the Homebrew Python is also PEP 668-managed, so `pipx` is the
 clean path there too. System Python on macOS is even older; don't use it.
+
+---
+
+## Upgrading M3
+
+M3 includes an automated upgrade orchestrator (`python bin/m3_upgrade.py`) that detects how M3 was installed on your system (`pip`, `pipx`, `pip --user`, or host plugin) and executes the correct upgrade sequence.
+
+### Upgrading via Auto-Detection (Recommended)
+
+To inspect the upgrade plan without modifying your system:
+```bash
+python bin/m3_upgrade.py --dry-run
+```
+
+To run the upgrade:
+```bash
+python bin/m3_upgrade.py
+```
+
+The orchestrator executes the four required upgrade steps automatically:
+1. `m3 stop` — Releases database file locks.
+2. Upgrades the package using your environment's native tool (`pipx upgrade m3-memory`, `pip install --upgrade m3-memory`, or `pip install --upgrade --user m3-memory`).
+3. `m3 setup --non-interactive --force-quiesce` — Runs database migrations and rewires agent MCP settings.
+4. `m3 doctor` — Verifies system health and background daemons.
+
+### Plugin-Managed Installs
+If M3 was installed as an agent plugin (e.g. inside host plugin caches for Claude Code or Antigravity), running `pip` or `pipx` directly will conflict with the host agent's plugin manager. Upgrade plugins using your host's native plugin flow (for example, `/plugin update` in Claude Code), then run `m3 doctor`.
 
 ---
 

@@ -1,5 +1,13 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory: Troubleshooting
 
+## Installation & Upgrade Issues
+
+### "I ran `pipx upgrade m3-memory` and nothing changed"
+- **Cause**: M3 was installed via standard `pip`, `pip --user`, or virtualenv rather than `pipx`. `pipx upgrade` exits with status 0 without modifying environments it does not manage.
+- **Solution**: Run `python bin/m3_upgrade.py` (or `python bin/m3_upgrade.py --dry-run` to inspect). The orchestrator automatically detects the active installation method (`pip`, `pipx`, `pip --user`, or plugin) and executes the correct upgrade steps.
+
+---
+
 ## Database Issues
 
 ### "database is locked" (SQLite)
