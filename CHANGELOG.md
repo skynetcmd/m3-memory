@@ -23,6 +23,72 @@ _Nothing yet._
 
 ---
 
+## [2026.9.13.1] — 2026-09-13 — no more console flashes on Windows
+
+### Fixed
+
+- **Windows console windows no longer flash when the agent client starts m3**
+  (#153). Every process the client spawns — the MCP bridges, the chatlog capture
+  hooks, the statusline — was registered against `python.exe`, a
+  console-subsystem binary, so Windows allocated a console for each one and the
+  user saw a window appear and vanish. They now resolve to `pythonw.exe`, which
+  the OS never gives a console.
+
+  None of these is ever launched by a human at a prompt, so the console bought
+  nothing and cost a flash every time.
+
+  **This issue was previously closed as won't-fix, on reasoning that was wrong.**
+  The argument was that the MCP bridges speak their protocol over stdout and
+  `pythonw.exe` has no stdout. That is true only when **no pipe is attached** —
+  and a client always attaches pipes. Measured, same scripts, same venv:
+
+  ```
+  python.exe   grok_bridge.py                 -> MCP handshake replied: True
+  pythonw.exe  grok_bridge.py                 -> MCP handshake replied: True
+
+  python.exe   session_start_capture_check.py -> rc=0, 97B stdout
+  pythonw.exe  session_start_capture_check.py -> rc=0, 97B stdout (identical)
+  ```
+
+  Under `pythonw.exe` with a pipe attached, `sys.stdout` is an ordinary
+  `TextIOWrapper`, not `None`.
+
+  The change lives in the single resolver that every client-spawned registration
+  already flowed through, so there is one owner rather than a per-consumer fix.
+  It is idempotent, and when the `pythonw.exe` sibling is missing it returns the
+  interpreter unchanged rather than inventing a path that may not exist.
+
+  **Takes effect on the next `m3 setup`** (which `m3 upgrade` runs for you) —
+  existing registrations keep whatever interpreter they were written with.
+
+  Not changed: the installer and setup-wizard helpers keep `python.exe`. Their
+  child processes run in the **foreground** with output the user is reading, and
+  there `pythonw.exe` genuinely has no stdout. Two different situations; only one
+  of them wanted this.
+
+### Verified
+
+Across the supported matrix by execution, not inference:
+
+```
+Windows  py3.14              generator emits pythonw.exe; MCP handshake rc=0
+Linux    py3.13.5            Debian 13 — POSIX no-op holds, tests pass
+macOS    py3.12 / 3.13 / 3.14  macOS 27.0 arm64 — no-op holds on all three
+```
+
+The database axis does not apply: the resolver is pure path manipulation and
+never touches the storage seam.
+
+Two guards had encoded the old behaviour and were rewritten to assert the
+invariant instead — "Windows uses the `Scripts/*.exe` form, not POSIX
+`bin/python`", which both interpreters satisfy. One of them was a guard added
+in 2026.9.13.0 asserting the *disproved* claim (that no MCP server may use
+`pythonw.exe`); it now checks the property that actually matters — whatever
+interpreter is registered must be able to write to a captured pipe. Both were
+mutation-tested against a real regression.
+
+---
+
 ## [2026.9.13.0] — 2026-09-13 — the checks that reported health without looking
 
 Ten issues, one theme: **a check that tests something adjacent to the thing that
