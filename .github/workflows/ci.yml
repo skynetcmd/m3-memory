@@ -258,14 +258,51 @@ jobs:
             v = c.cursor(); v.execute("SELECT version()")
             print(v.fetchone()[0])
         PY
-    - name: Run the requires_pg lane
+    - name: Assert the SEAM resolves to postgres, not just that PG is reachable
+      # The reachability probe above answers a question ADJACENT to the one that
+      # matters. Measured 2026-09-13: this lane set M3_PRIMARY_PG_URL but NOT
+      # M3_DB_BACKEND, so `resolve_backend_name()` returned 'sqlite' -- a job
+      # named "PostgreSQL lane" that ran SQLite and reported green. A declared
+      # guarantee with no enforcement site is a lie the tests cannot see (§3).
       env:
+        M3_DB_BACKEND: postgres
         M3_PRIMARY_PG_URL: postgresql://m3dev:m3devpass@localhost:5432/m3_citest
-      # -m requires_pg, not -m integration: the other integration markers
-      # (embedder, gguf, files_db) still have no service here and would only
-      # self-skip, re-creating the ambiguity above for a different resource.
       run: |
-        pytest tests/ -m requires_pg -p no:cacheprovider
+        python - <<'PY'
+        import sys
+        sys.path.insert(0, "bin")
+        from memory.backends.selector import resolve_backend_name
+        from memory.backends import dialect
+        name = resolve_backend_name()
+        param = dialect().param()
+        print(f"observed: backend={name!r} param={param!r}")
+        if name != "postgres" or param != "%s":
+            sys.exit(
+                f"the seam resolved to {name!r} (param {param!r}) -- this lane "
+                f"would have tested SQLite while calling itself the PostgreSQL "
+                f"lane. Refusing to report a result for a backend it never ran."
+            )
+        print("confirmed: the suite below runs against PostgreSQL")
+        PY
+
+    - name: Run the FULL suite against PostgreSQL
+      env:
+        M3_DB_BACKEND: postgres
+        M3_PRIMARY_PG_URL: postgresql://m3dev:m3devpass@localhost:5432/m3_citest
+      # The whole suite, not `-m requires_pg`. Measured 2026-09-13: the marker
+      # selected 102 of 4,307 tests (2.4%). The other 4,205 are not
+      # SQLite-specific -- they exercise the storage seam against WHATEVER
+      # backend is configured, and had never run against PostgreSQL in CI.
+      #
+      # That gap is not hypothetical: the first honest full run surfaced 16 real
+      # failures (#171, pg_sync rendering %s onto a SQLite cursor), none of
+      # which the 102-test marker lane could reach.
+      #
+      # -m "not integration" excludes suites whose SERVICE is absent here
+      # (embedder, gguf, files_db); those would only self-skip and re-create the
+      # ambiguity this lane exists to remove.
+      run: |
+        pytest tests/ -m "not integration" -p no:cacheprovider -q
 
   # ── End-to-end install ──────────────────────────────────────────────────────
   # The unit lane covers the install PIECES; nothing exercised the whole path.

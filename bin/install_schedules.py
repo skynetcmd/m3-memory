@@ -1294,12 +1294,16 @@ def _agent_is_live(agent_id: str, max_age_days: int = 30) -> bool:
 
         with _db() as db:
             ph = dialect().param()
-            rows = db.execute(
+            # fetchone, not fetchall: agent_id is the primary key, so this can
+            # match at most one row. Materialising a list to read [0] is the
+            # Python-side post-processing §4 exists to prevent -- small here,
+            # but the habit is what scales badly.
+            row = db.execute(
                 f"SELECT last_seen FROM agents WHERE agent_id = {ph}", (agent_id,)
-            ).fetchall()
-        if not rows or not rows[0]["last_seen"]:
+            ).fetchone()
+        if row is None or not row["last_seen"]:
             return True
-        seen = datetime.fromisoformat(str(rows[0]["last_seen"]).replace("Z", "+00:00"))
+        seen = datetime.fromisoformat(str(row["last_seen"]).replace("Z", "+00:00"))
         if seen.tzinfo is None:
             seen = seen.replace(tzinfo=timezone.utc)
         return (datetime.now(timezone.utc) - seen) <= timedelta(days=max_age_days)
