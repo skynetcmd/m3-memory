@@ -37,6 +37,12 @@ def _all_commands(settings):
     return cmds
 
 
+def _scripts_prefix() -> str:
+    """The forward-slash `<repo>/.venv/Scripts/` prefix a Windows venv uses."""
+    return (os.path.join(g._m3_repo_root(), ".venv", "Scripts", "")
+            .replace("\\", "/"))
+
+
 def _build_settings(monkeypatch, os_name):
     """Run the generator with os.name forced and the matching venv 'present',
     and return the resulting claude settings dict (no files written)."""
@@ -54,7 +60,13 @@ def _build_settings(monkeypatch, os_name):
         # auto-detect path) does not, to keep output deterministic. Coerce to str
         # first — pytest's own internals call os.path.exists with Path objects.
         s = str(p)
-        if s.replace("\\", "/") == venv_py_fwd:
+        sf = s.replace("\\", "/")
+        if sf == venv_py_fwd:
+            return True
+        # A real Windows venv also has pythonw.exe beside python.exe, and
+        # _windowless() looks for it (#153). Without this the fixture models a
+        # venv that cannot exist, and the generator silently falls back.
+        if sf == venv_py_fwd.replace("/python.exe", "/pythonw.exe"):
             return True
         if s.endswith(".gguf"):
             return False
@@ -86,13 +98,26 @@ def _build_settings(monkeypatch, os_name):
 
 # ── interpreter layout per OS ────────────────────────────────────────────────
 
-def test_windows_interpreter_uses_scripts_python_exe(monkeypatch):
+def test_windows_interpreter_uses_the_scripts_exe_form(monkeypatch):
+    """Windows must use the venv's `Scripts/*.exe` interpreter.
+
+    Asserts the FORM, not the filename: client-spawned processes now resolve to
+    `pythonw.exe` so they do not flash a console (#153), and both are correct
+    here. Pinning "python.exe" pinned the old behaviour, not the invariant.
+    """
     settings, venv_py = _build_settings(monkeypatch, "nt")
-    assert venv_py.endswith("/.venv/Scripts/python.exe")
+    assert venv_py.startswith(_scripts_prefix()), venv_py
+    assert venv_py.endswith(".exe"), venv_py
     session = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-    # Hooks now carry an inline M3_ENGINE_ROOT/M3_CONFIG_ROOT prefix, so the
+    # Hooks carry an inline M3_ENGINE_ROOT/M3_CONFIG_ROOT prefix, so the
     # interpreter follows the pins rather than starting the command.
-    assert f"{venv_py} " in session
+    #
+    # `venv_py` is the fixture's INPUT; the generator may legitimately return
+    # the pythonw.exe sibling (#153), so assert the command carries a
+    # Scripts/*.exe interpreter from this venv -- not that it is byte-identical
+    # to what we fed in.
+    assert _scripts_prefix() in session, session
+    assert ".exe " in session, session
 
 
 def test_posix_interpreter_uses_bin_python_no_exe(monkeypatch):
@@ -319,9 +344,11 @@ def test_posix_has_no_windows_interpreter_leak(monkeypatch):
 
 def test_windows_has_no_posix_only_interpreter(monkeypatch):
     # On Windows the venv python must be the Scripts/.exe form, not bin/python.
+    # Either python.exe or pythonw.exe satisfies that (#153); the POSIX form
+    # never does.
     settings, _ = _build_settings(monkeypatch, "nt")
     session = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-    assert "/.venv/Scripts/python.exe" in session
+    assert "/.venv/Scripts/python" in session and ".exe" in session, session
     assert "/.venv/bin/python " not in session
 
 

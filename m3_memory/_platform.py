@@ -68,8 +68,11 @@ def python_exe(windowless: bool = False) -> str:
     installer/wizard step whose output the user is reading. Defaulting to it
     would swallow install diagnostics silently -- worse than the flash.
 
-    It does NOT apply to stdio MCP servers: those speak the protocol over
-    stdout, so pythonw.exe would kill the transport outright (#153).
+    Not needed for stdio MCP servers -- `generate_configs._windowless` already
+    resolves those (and the capture hooks and statusline) to pythonw.exe at
+    registration time. NB the earlier claim here, that pythonw.exe would kill a
+    stdio transport, was WRONG: it has no stdout only when no pipe is attached.
+    Measured 2026-09-13 -- with pipes it serves MCP identically (#153).
     """
     exe = sys.executable or ""
     stem = os.path.splitext(os.path.basename(exe))[0].lower()
