@@ -291,6 +291,16 @@
           "type": "object"
         },
         {
+          "name": "from_agent",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "from_session",
+          "required": false,
+          "type": "string"
+        },
+        {
           "name": "timeout",
           "required": false,
           "type": "number"
@@ -2198,6 +2208,11 @@
         },
         {
           "name": "task_id",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "from_session",
           "required": false,
           "type": "string"
         },

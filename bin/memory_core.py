@@ -1407,8 +1407,14 @@ def _memory_link_inner(from_id: str, to_id: str, relationship_type: str, db) -> 
 
 def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
                         context_ids: list, note: str = "",
-                        task_id: str = "") -> str:
-    """Creates a handoff memory for inter-agent task transfer."""
+                        task_id: str = "", from_session: str = "") -> str:
+    """Creates a handoff memory for inter-agent task transfer.
+
+    ``from_session`` is optional and identifies WHICH session of ``from_agent``
+    sent this, so the recipient can reply to that sister rather than to the
+    agent name (which N concurrent sessions share — see notify_impl). Omitted,
+    behaviour is exactly as before.
+    """
     # 0. Validate agents are registered
     if not _agent_exists(to_agent):
         return f"Error: to_agent '{to_agent}' is not registered. Call agent_register first."
@@ -1426,6 +1432,11 @@ def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
         meta = {"from_agent": from_agent, "note": note}
         if task_id:
             meta["task_id"] = task_id
+        if from_session:
+            # Durable copy of the return address: a notification can be acked
+            # or pruned, but the handoff memory outlives it, so a late reader
+            # can still tell which sister session to answer.
+            meta["from_session"] = from_session
         metadata_json = json.dumps(meta)
         db.execute(
             f"INSERT INTO memory_items (id, type, title, content, agent_id, scope, metadata_json, created_at, updated_at, is_deleted) "
@@ -1450,7 +1461,7 @@ def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
             "from_agent": from_agent,
             "task": (task or "")[:200],
             "task_id": task_id or None,
-        })
+        }, from_agent=from_agent, from_session=from_session)
     except Exception as e:
         logger.warning(f"handoff notify failed for {to_agent}: {e}")
 

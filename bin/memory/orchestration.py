@@ -314,10 +314,47 @@ def _addressing_predicate(agent_id: str, param: str) -> "tuple[str, tuple]":
     )
     return f"(agent_id = {param} OR {frag})", (agent_id, bound)
 
-def notify_impl(agent_id: str, kind: str, payload: dict = None) -> str:
-    """Sends a notification to an agent."""
+def notify_impl(agent_id: str, kind: str, payload: dict = None,
+                from_agent: str = "", from_session: str = "") -> str:
+    """Sends a notification to an agent.
+
+    ``from_agent`` / ``from_session`` are the RETURN ADDRESS. They are stamped
+    into the payload as ``_from`` so the recipient can reply to the specific
+    sender rather than guessing.
+
+    Why a session matters and an agent name is not enough: ``agent_id`` is the
+    PRIMARY KEY of the agents table, so N concurrent sessions of the SAME agent
+    type collapse into ONE row. Measured 2026-09-13 on a live box: 5 live
+    ``mcp.*`` bridges registered, but ``agent_list`` showed a single
+    ``claude-code`` entry whose ``last_seen`` was just whoever wrote most
+    recently. Addressing ``claude-code`` reaches whichever sister polls first;
+    the others never see it. Cross-TYPE targeting (agy vs claude-code vs
+    gemini-cli) was never ambiguous — sisters are.
+
+    Both fields are optional and free-form: identity here is SELF-ASSERTED by
+    design (see bin/mcp_proxy.py's module docstring). ``_from`` is a
+    disambiguator so a reply can be routed, NOT a credential, and nothing
+    downstream should treat it as proof of origin.
+    """
     now = datetime.now(timezone.utc).isoformat()
-    payload_json = json.dumps(payload or {})
+    if from_agent or from_session:
+        _addr = {k: v for k, v in (("agent", from_agent),
+                                   ("session", from_session)) if v}
+        if isinstance(payload, dict):
+            # Copy, never mutate: stamping into the caller's own dict would leak
+            # `_from` back into their object. Namespaced so it cannot collide
+            # with their keys.
+            payload = {**payload, "_from": _addr}
+        elif payload is None:
+            payload = {"_from": _addr}
+        else:
+            # Callers legitimately pass a bare string/list as the payload
+            # (bin/files_memory/watch.py, and the addressing tests pass "for s1").
+            # Wrapping preserves the original verbatim under `value` rather than
+            # discarding it or crashing on dict(); found by the existing suite,
+            # which is exactly what it is for.
+            payload = {"value": payload, "_from": _addr}
+    payload_json = json.dumps(payload if payload is not None else {})
 
     with _db() as db:
         _d = dialect()

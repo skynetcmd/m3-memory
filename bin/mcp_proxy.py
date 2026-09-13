@@ -25,7 +25,30 @@ Set MCP_PROXY_ALLOW_DESTRUCTIVE=1 to expose them.
 
 Agent identity is taken from the X-Agent-Id request header (default
 "mcp-proxy-client"). Catalog tools marked inject_agent_id receive this value
-non-bypassably; the LLM cannot spoof another agent.
+non-bypassably: the LLM cannot substitute a DIFFERENT agent_id in its tool
+arguments than the one the transport presented.
+
+⚠ That is a CONSISTENCY guarantee, not authentication. Agent identity in m3 is
+SELF-ASSERTED BY DESIGN — m3 is a collaborative local-first substrate, and
+nothing issues or verifies a per-agent credential:
+
+  * `_check_auth` validates ONE shared master token (MCP_PROXY_KEY). It answers
+    "may you use this proxy", never "are you who you say you are". Unset, it
+    logs a warning and allows everything.
+  * X-Agent-Id is whatever the client writes. Anyone holding the one token can
+    set it to any value.
+  * `agent_register` stores a name and issues no secret.
+
+So inject_agent_id defends against ACCIDENT — a confused-deputy slip, an LLM
+inventing an id mid-call, one agent reading another's inbox by mistake. It does
+not defend against INTENT, and this docstring previously claimed it did ("the
+LLM cannot spoof another agent"), which overstated the security model. A false
+assurance in a security note is worse than no note (§3: a warning that is not
+true trains readers to trust the wrong thing).
+
+Treat the trust boundary as the machine and the proxy token, not the agent name.
+If you need per-agent authentication, it does not exist yet — do not infer it
+from inject_agent_id.
 
 Routing
 -------

@@ -216,6 +216,19 @@ TOOLS: list[ToolSpec] = [
                 "agent_id": {"type": "string", "description": "Recipient agent id."},
                 "kind":     {"type": "string", "description": "Notification kind/type."},
                 "payload":  {"type": "object", "description": "Free-form notification data.", "default": {}},
+                "from_agent": {
+                    "type": "string", "default": "",
+                    "description": "Return address: which agent sent this. Stamped "
+                                   "into the payload as `_from.agent`.",
+                },
+                "from_session": {
+                    "type": "string", "default": "",
+                    "description": "Return address: WHICH SESSION of from_agent sent "
+                                   "this. N concurrent sessions of one agent type share "
+                                   "a single agent_id, so without this a reply reaches "
+                                   "whichever sister polls first. Stamped as "
+                                   "`_from.session`. A disambiguator, not a credential.",
+                },
             },
             "required": ["agent_id", "kind"],
         },

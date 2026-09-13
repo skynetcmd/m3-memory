@@ -843,6 +843,15 @@ TOOLS: list[ToolSpec] = [
                 "context_ids": {"type": "array", "items": {"type": "string"}, "description": "Memory ids to link via 'handoff' edges.", "default": []},
                 "note":        {"type": "string", "description": "Optional free-text note.", "default": ""},
                 "task_id":     {"type": "string", "description": "Optional tracked task id.", "default": ""},
+                "from_session": {
+                    "type": "string", "default": "",
+                    "description": "Optional: WHICH SESSION of from_agent is handing "
+                                   "off. N concurrent sessions of one agent type share "
+                                   "a single agent_id, so a reply addressed to the name "
+                                   "alone reaches whichever sister polls first. Recorded "
+                                   "in the handoff metadata and in the notification's "
+                                   "`_from.session`. A disambiguator, not a credential.",
+                },
             },
             "required": ["from_agent", "to_agent", "task"],
         },

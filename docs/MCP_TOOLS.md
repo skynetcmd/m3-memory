@@ -1102,6 +1102,8 @@ Send a notification to an agent. Lightweight wake signal — agents poll notific
 | `agent_id` | `string` | Yes | Recipient agent id. | `-` |
 | `kind` | `string` | Yes | Notification kind/type. | `-` |
 | `payload` | `object` | No | Free-form notification data. | `{}` |
+| `from_agent` | `string` | No | Return address: which agent sent this. Stamped into the payload as `_from.agent`. | `` |
+| `from_session` | `string` | No | Return address: WHICH SESSION of from_agent sent this. N concurrent sessions of one agent type share a single agent_id, so without this a reply reaches whichever sister polls first. Stamped as `_from.session`. A disambiguator, not a credential. | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -1125,6 +1127,7 @@ Hand off a task from one agent to another. Writes a new handoff-type memory owne
 | `context_ids` | `array` | No | Memory ids to link via 'handoff' edges. | `[]` |
 | `note` | `string` | No | Optional free-text note. | `` |
 | `task_id` | `string` | No | Optional tracked task id. | `` |
+| `from_session` | `string` | No | Optional: WHICH SESSION of from_agent is handing off. N concurrent sessions of one agent type share a single agent_id, so a reply addressed to the name alone reaches whichever sister polls first. Recorded in the handoff metadata and in the notification's `_from.session`. A disambiguator, not a credential. | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
