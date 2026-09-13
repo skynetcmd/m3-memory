@@ -68,7 +68,30 @@ jobs:
     - name: Install Bandit
       run: pip install "bandit[toml]"
     - name: Run Bandit
-      run: bandit -c pyproject.toml -r bin/ m3_memory/
+      # Bandit SILENTLY SKIPS a file it cannot parse and still exits 0.
+      # Measured 2026-09-12: a directory containing one syntax-error file
+      # reported "No issues identified." with exit 0 while that file was never
+      # scanned -- a security gate reporting clean over code it never read.
+      # So the JSON is the verdict, not the exit code: fail on any skipped file.
+      run: |
+        bandit -c pyproject.toml -r bin/ m3_memory/ -f json -o bandit.json || true
+        python - <<'PY'
+        import json, sys
+        d = json.load(open("bandit.json"))
+        errs = d.get("errors") or []
+        res = d.get("results") or []
+        for e in errs:
+            print(f"::error file={e.get('filename')}::bandit could not scan this file: {e.get('reason')}")
+        for r in res:
+            print(f"::error file={r['filename']},line={r['line_number']}::"
+                  f"{r['test_id']} {r['issue_severity']}: {r['issue_text']}")
+        if errs:
+            sys.exit(f"Bandit SKIPPED {len(errs)} file(s) it could not parse. "
+                     f"An unscanned file is not a clean file.")
+        if res:
+            sys.exit(f"Bandit found {len(res)} issue(s).")
+        print(f"Bandit clean: {d['metrics']['_totals']['loc']} lines scanned, 0 skipped.")
+        PY
 
     # pip-audit: scoped to CORE deps only (no [dev] / no opt-in rerank
     # path). Bench/dev transitive CVEs (e.g. transformers, lxml) shouldn't

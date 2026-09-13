@@ -2,4 +2,10 @@
 #   pip install "m3-memory[langchain]"
 # or, from a checkout:   pip install -e ".[langchain]"
 langmem>=0.0.20            # only for langmem_on_m3.py
+# SECURITY floors for this file's transitive tree (OSV, measured
+# 2026-09-12). langmem pulls httpx2/httpcore2; nothing here pins them, so
+# without these the scan re-reports 12 vulns against this file on every
+# run with no pin to bump.
+httpx2>=2.12.0             # OSV: 10 vulns <2.10.0
+httpcore2>=2.10.0          # OSV: 2 vulns <2.10.0
 # mem0ai is NOT required — m3 shadows mem0's API; nothing imports mem0.
