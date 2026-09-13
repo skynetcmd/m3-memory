@@ -147,10 +147,23 @@ jobs:
   # was permanently red and three real CI failures went unnoticed until someone
   # read the Actions tab by hand.
   #
-  # KEEP THIS LIST EQUAL TO pyproject's "Programming Language :: Python ::"
-  # classifiers. A red-forever lane is worse than no lane: it trains everyone
-  # to ignore the one that matters (DESIGN_PHILOSOPHIES §3 — a false alarm is
-  # a violation, not a safe default).
+  # THIS LIST IS A SUPERSET of pyproject's "Programming Language :: Python ::"
+  # classifiers, and the difference is deliberate:
+  #
+  #   classifiers = what we PROMISE works (3.12, 3.13, 3.14)
+  #   this matrix = that, PLUS the next version we are watching (3.15)
+  #
+  # Never claim a version this matrix does not run. The reverse is fine and is
+  # the point: the 3.15 cell is an early-warning probe. It currently fails at
+  # Install Dependencies because torch publishes no cp315 wheel yet — m3's own
+  # code is fine there — so 3.15 is NOT classified as supported. When that cell
+  # goes green, torch has shipped and the classifier can be restored.
+  #
+  # A red-forever lane is otherwise worse than no lane: it trains everyone to
+  # ignore the one that matters (DESIGN_PHILOSOPHIES §3 — a false alarm is a
+  # violation, not a safe default). This one is tolerated ONLY because it is
+  # blocked upstream, the cause is named here, and its going green is the
+  # signal we want.
   matrix-setup:
     name: Resolve test matrix
     runs-on: ubuntu-latest
@@ -369,6 +382,13 @@ jobs:
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
         python-version: ${{ matrix.python-version }}
+        # Same reason as the test job above: this job consumes the SAME matrix,
+        # so it gets the 3.15 cell too and a bare "3.15" resolves to nothing
+        # while 3.15 is rc-only. Both setup-python steps that take a matrix
+        # version need this flag — fixing only one left these three E2E lanes
+        # failing at "Set up Python 3.15" while the test lanes had moved on to
+        # the real (torch) blocker.
+        allow-prereleases: true
         cache: 'pip'
 
     - name: Install m3-memory from source (as a user would)

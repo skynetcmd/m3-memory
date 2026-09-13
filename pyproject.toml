@@ -81,7 +81,14 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "Programming Language :: Python :: 3.15",
+    # 3.15 is NOT claimed: torch (requirements.txt:74, `torch>=2.11.0,<3`)
+    # publishes cp310-cp314 and no cp315 as of 2026-09-13, so `pip install`
+    # cannot succeed on 3.15 however green m3's own code is. Verified on CI:
+    # setup-python resolves the rc fine, then Install Dependencies dies with
+    # "No matching distribution found for torch<3,>=2.11.0".
+    # Claiming a version the dependency tree cannot install is a promise with
+    # nothing behind it. Restore this line when torch ships a cp315 wheel —
+    # the CI matrix still runs a 3.15 cell precisely so that becomes visible.
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Operating System :: OS Independent",
