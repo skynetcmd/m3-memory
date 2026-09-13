@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from m3_memory._platform import os_name as _os_name
+from m3_memory._platform import hidden_window_kwargs as _hidden_window_kwargs
 from m3_memory._platform import python_exe as _python_exe
 from m3_memory.install.fs import (  # noqa: F401  (re-exported facade surface — see cli.py / test_installer.py importers)
     _drain_wal,
@@ -72,6 +73,20 @@ def config_file() -> Path:
 
 def default_repo_path() -> Path:
     return config_dir() / "repo"
+
+
+def _is_installed_payload(root: Path) -> bool:
+    """True when ``root`` is an INSTALLED package dir (…/site-packages/… or
+    …/dist-packages/…) rather than a source checkout.
+
+    Same predicate as ``bin/generate_configs.py::_is_installed_layout`` and the
+    inlined copy in ``install_os.py`` — see issue #174. Those two cannot import
+    this one (both run stdlib-only before m3 is importable), so
+    ``tests/test_install_m3_no_redundant_clone.py`` asserts all three agree
+    rather than letting the copies drift (§10a).
+    """
+    r = str(root).replace("\\", "/")
+    return "/site-packages/" in r or "/dist-packages/" in r
 
 
 def load_config() -> dict:
@@ -173,8 +188,7 @@ def _git_clone(tag: str, dest: Path) -> bool:
             ["git", "clone", "--depth", "1", "--branch", tag, REPO_URL, str(dest)],
             check=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+            stderr=subprocess.PIPE, **_hidden_window_kwargs())
         return True
     except FileNotFoundError:
         return False
@@ -709,7 +723,8 @@ def _register_cognitive_loop_task() -> bool:
         if not script:
             return False
         proc = subprocess.run([_python_exe(), str(script), "--add", "cognitive-loop"],
-                              check=False, capture_output=True, text=True)
+                              check=False, capture_output=True, text=True,
+                              **_hidden_window_kwargs())
         return proc.returncode == 0
     except Exception:  # noqa: BLE001 — never fail install on the task step
         return False
@@ -811,8 +826,7 @@ def _prompt_and_install_dashboard(interactive: bool) -> None:
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "pip", "install", "m3-memory[dashboard]"],
-            check=False, capture_output=True, text=True,
-        )
+            check=False, capture_output=True, text=True, **_hidden_window_kwargs())
         if proc.returncode == 0:
             print("    [OK] web dashboard installed.")
             _register_dashboard_task(non_interactive=not interactive)
@@ -853,15 +867,15 @@ def _register_dashboard_task(skip_if_exists: bool = False,
             # A 0 exit from schtasks /Query means the task exists → leave it.
             q = subprocess.run(
                 ["schtasks", "/Query", "/TN", "AgentOS_Dashboard"],
-                check=False, capture_output=True, text=True,
-            )
+                check=False, capture_output=True, text=True, **_hidden_window_kwargs())
             if q.returncode == 0:
                 return
         script = _install_schedules_script()
         if not script:
             return
         proc = subprocess.run([_python_exe(), str(script), "--add", "dashboard"],
-                              check=False, capture_output=True, text=True)
+                              check=False, capture_output=True, text=True,
+                              **_hidden_window_kwargs())
         if proc.returncode == 0:
             return
         # Surface the child's own diagnostics — swallowing them is what made this
@@ -980,6 +994,7 @@ def _chatlog_init_supports(chatlog_init: Path, flag: str) -> bool:
         result = subprocess.run(
             [_python_exe(), str(chatlog_init), "--help"],
             capture_output=True, text=True, timeout=10,
+            **_hidden_window_kwargs(),
         )
         return flag in (result.stdout or "")
     except (subprocess.SubprocessError, OSError):
@@ -1025,7 +1040,8 @@ def _run_chatlog_init(bridge: Path, capture_mode: str) -> Optional[str]:
         cmd.append("--apply-gemini")
 
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        result = subprocess.run(cmd, check=True, capture_output=True,
+                                text=True, **_hidden_window_kwargs())
     except subprocess.CalledProcessError as e:
         stderr = (e.stderr or "").strip()
         last = stderr.splitlines()[-1] if stderr else str(e)
@@ -1075,7 +1091,8 @@ def _run_main_migrations(bridge: Path, db_backend: str = "sqlite") -> Optional[s
 
     cmd = [_python_exe(), str(migrate_script), "up", "--yes", "--target", "main"]
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True,
+                       **_hidden_window_kwargs())
         return "[+] main memory DB initialized (migrations applied)"
     except subprocess.CalledProcessError as e:
         stderr = (e.stderr or "").strip()
@@ -1217,8 +1234,7 @@ def _run_pg_migrations(bridge: Path, dsn: str) -> Optional[str]:
     env["M3_PRIMARY_PG_URL"] = dsn
     try:
         subprocess.run(
-            [sys.executable, "-c", child], check=True, capture_output=True, text=True, env=env
-        )
+            [sys.executable, "-c", child], check=True, capture_output=True, text=True, env=env, **_hidden_window_kwargs())
         return "[+] PostgreSQL primary schema initialized (base + migrations applied)"
     except subprocess.CalledProcessError as e:
         stderr = (e.stderr or "").strip()
@@ -1324,7 +1340,7 @@ def _write_user_registry_env(pairs: dict[str, str]) -> list[str]:
             continue
         try:
             # setx writes HKCU\Environment (User scope); no elevation needed.
-            subprocess.run(["setx", name, value], check=True, capture_output=True, text=True)
+            subprocess.run(["setx", name, value], check=True, capture_output=True, text=True, **_hidden_window_kwargs())
             shown = _mask_dsn(value) if "PG_URL" in name else value
             msgs.append(f"[+] set {name}={shown} (User env; open a new shell to pick it up)")
         except (subprocess.CalledProcessError, OSError) as e:
@@ -1367,12 +1383,33 @@ def _run_os_install(bridge: Path, interactive: bool = True) -> Optional[str]:
     # a pip resolver). OS setup is not load-bearing -- the caller already treats
     # its failure as a message, not an abort -- so a hang must degrade to that
     # same message rather than wedge the install.
+    # WINDOW FLASH: without this the child gets its OWN console on Windows, and
+    # it steals focus mid-keystroke on every install and upgrade. Five ORPHANED
+    # install_os.py consoles were found on this box 2026-09-13 (16h old, 0.1s
+    # CPU, all parents exited), each parked on a prompt behind a window the user
+    # never asked for.
+    #
+    # STARTUPINFO + SW_HIDE, NOT CREATE_NO_WINDOW. The flag suppresses the
+    # child's INHERITED stdout/stderr as well as the window, and this call
+    # deliberately does not capture output — the user is watching an installer.
+    # With CREATE_NO_WINDOW a failing `pip install` would print
+    # "OS setup failed (code 1)" with the reason gone, which is the §3 silent
+    # failure PR #154 nearly shipped. See bin/_task_runtime.py::no_window_kwargs,
+    # which documents the measurement and says to use STARTUPINFO for exactly
+    # this case. install_os.py's own run_cmd already hides its grandchildren the
+    # same way; this covers the top-level spawn it cannot reach.
     try:
         subprocess.run(
+            # NOT windowless=True: _platform.python_exe documents that
+            # pythonw.exe has no stdout, and this is a FOREGROUND installer step
+            # whose output the user is reading. STARTUPINFO below hides the
+            # window while keeping the pipes — the flash goes, the diagnostics
+            # stay.
             [_python_exe(), str(install_script)],
             check=True,
             stdin=None if interactive else subprocess.DEVNULL,
             timeout=None if interactive else _OS_INSTALL_TIMEOUT_S,
+            **_hidden_window_kwargs(),
         )
         return "OS-specific environment setup complete."
     except subprocess.TimeoutExpired:
@@ -1638,6 +1675,7 @@ def install_m3(
         repo_path = default_repo_path()
     repo_path = repo_path.expanduser().resolve()
 
+
     if tag is None:
         tag = f"v{__version__}"
 
@@ -1655,6 +1693,43 @@ def install_m3(
     # Enable the autonomous cognitive loop (default yes). Was a placeholder that
     # discarded the choice, so the enrichment engine shipped OFF on every install.
     did_cognitive_loop = _prompt_and_install_cognitive_loop(interactive, forced=cognitive_loop)
+
+    # ISSUE #174 — on a wheel/pipx install the payload ALREADY exists at
+    # site-packages/m3_memory/. Cloning a second full copy into ~/.m3/repo gives
+    # two trees that drift apart (observed: clone pinned at v2026.8.19.2 while
+    # the wheel was 2026.9.13.1 — 182 commits), and whatever gets wired to the
+    # clone silently runs stale code. The old gate was `repo_path.exists()`,
+    # which asks the wrong question: it reports "already installed" naming a
+    # tree that is NOT where the running code lives, and when that tree is
+    # absent it clones a redundant one. Ask instead whether THIS payload is an
+    # installed layout — the same predicate bin/generate_configs.py and
+    # bin/setup_memory.py already use for the #142 venv guard.
+    payload_root = Path(__file__).resolve().parent
+    if _is_installed_payload(payload_root) and not force:
+        bridge = payload_root / "bin" / "memory_bridge.py"
+        if bridge.is_file():
+            print(
+                "  Installed payload detected — no clone needed.\n"
+                f"    payload: {payload_root}\n"
+                "  The wheel already carries every file `install-m3` would fetch; "
+                "a second copy under ~/.m3/repo would only drift out of sync "
+                "(issue #174).\n"
+                "  • To upgrade:                 pipx upgrade m3-memory\n"
+                "  • To re-fetch a source tree:  m3 install-m3 --force"
+            )
+            save_config({
+                "repo_path": str(payload_root),
+                "bridge_path": str(bridge),
+                "version": __version__,
+                "tag": tag,
+                "installed_at": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"),
+            })
+            print(f"[OK] using installed payload. bridge_path = {bridge}")
+            print(f"  config written to {config_file()}")
+            _post_install(bridge, interactive, endpoint_choice,
+                          capture_choice, db_backend_choice)
+            return bridge
 
     # Preserve user data across --force / update. The repo tree under
     # repo_path/memory/ holds chatlog DBs, the chatlog config, and the

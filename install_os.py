@@ -47,7 +47,31 @@ def get_m3_root() -> str:
     return os.path.join(os.path.expanduser("~"), ".m3-memory")
 
 M3_ROOT = get_m3_root()
-VENV_DIR = os.path.join(BASE_DIR, ".venv")
+
+
+def _is_installed_layout(root: str) -> bool:
+    """True when `root` is an INSTALLED package dir (…/site-packages/… or
+    …/dist-packages/…) rather than a source checkout.
+
+    Inlined, not imported: this script is stdlib-only and runs BEFORE m3 is
+    importable (see _os_name above for the same reasoning), so it cannot reach
+    `bin/generate_configs.py::_is_installed_layout`. Keep the two in sync —
+    `tests/test_install_os_no_nested_venv.py` asserts they agree.
+    """
+    r = root.replace("\\", "/")
+    return "/site-packages/" in r or "/dist-packages/" in r
+
+
+# On a wheel/pipx install BASE_DIR IS site-packages/m3_memory, so BASE_DIR/.venv
+# is a venv nested INSIDE the installed package — issue #164's artifact, built
+# with `--copies` and pinned to an exact interpreter patch version, so it breaks
+# silently on the next patch bump. #142 guarded bin/setup_memory.py the same way;
+# this script was the remaining creator (it runs from _post_install on EVERY
+# install and upgrade, not just first install). On an installed layout the
+# interpreter already running this code IS the payload's interpreter: use it and
+# create nothing.
+_INSTALLED = _is_installed_layout(BASE_DIR)
+VENV_DIR = None if _INSTALLED else os.path.join(BASE_DIR, ".venv")
 DB_DIR = os.path.join(M3_ROOT, "memory")
 LOGS_DIR = os.path.join(M3_ROOT, "logs")
 REQ_FILE = os.path.join(BASE_DIR, "requirements.txt")
@@ -320,19 +344,32 @@ def main():
 
     # 2. Create Virtual Environment
     print("\n[2/6] Setting up isolated Python environment...")
-    if not os.path.exists(VENV_DIR):
-        venv.create(VENV_DIR, with_pip=True)
-        print("  -> Created new virtual environment.")
+    if _INSTALLED:
+        # Installed layout: the running interpreter already owns the payload and
+        # its dependencies. Creating a venv here would nest one inside
+        # site-packages (#164/#173). Use `python -m pip` rather than a pip
+        # executable — a pipx venv has no `pip.exe` of its own on Windows.
+        python_exe = sys.executable
+        pip_exe = None
+        print(f"  -> Installed layout — using the running interpreter, "
+              f"creating no venv.\n     {python_exe}")
     else:
-        print("  -> Virtual environment already exists.")
+        if not os.path.exists(VENV_DIR):
+            venv.create(VENV_DIR, with_pip=True)
+            print("  -> Created new virtual environment.")
+        else:
+            print("  -> Virtual environment already exists.")
 
-    # Determine paths for pip and python inside venv based on platform
-    if sys.platform == "win32":
-        pip_exe = os.path.join(VENV_DIR, "Scripts", "pip.exe")
-        python_exe = os.path.join(VENV_DIR, "Scripts", "python.exe")
-    else:
-        pip_exe = os.path.join(VENV_DIR, "bin", "pip")
-        python_exe = os.path.join(VENV_DIR, "bin", "python")
+        # Determine paths for pip and python inside venv based on platform
+        if sys.platform == "win32":
+            pip_exe = os.path.join(VENV_DIR, "Scripts", "pip.exe")
+            python_exe = os.path.join(VENV_DIR, "Scripts", "python.exe")
+        else:
+            pip_exe = os.path.join(VENV_DIR, "bin", "pip")
+            python_exe = os.path.join(VENV_DIR, "bin", "python")
+
+    # One spelling for "install a package", valid in both layouts.
+    pip_cmd = [pip_exe] if pip_exe else [python_exe, "-m", "pip"]
 
     # 3. Install dependencies
     print("\n[3/6] Installing cross-platform dependencies...")
@@ -348,10 +385,11 @@ def main():
     run_cmd([python_exe, "-m", "pip", "install", "--upgrade", "pip"],
             optional=True, label="pip self-upgrade")
     if os.path.exists(REQ_FILE):
-        run_cmd([pip_exe, "install", "-r", REQ_FILE])
+        run_cmd(pip_cmd + ["install", "-r", REQ_FILE])
     else:
         print(f"  -> Warning: {REQ_FILE} not found. Installing defaults...")
-        run_cmd([pip_exe, "install", "fastmcp", "httpx", "numpy", "keyring", "cryptography", "psycopg2-binary"])
+        run_cmd(pip_cmd + ["install", "fastmcp", "httpx", "numpy", "keyring",
+                           "cryptography", "psycopg2-binary"])
 
     # 4. Project Oxidation (Rust Core)
     # No pip_exe arg — setup_oxidation installs into the current interpreter

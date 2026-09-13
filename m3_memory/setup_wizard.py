@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from ._platform import hidden_window_kwargs as _hidden_window_kwargs
 from ._platform import python_exe as _python_exe
 
 # ── small UI helpers ──────────────────────────────────────────────────────────
@@ -1014,8 +1015,7 @@ def _runas_kill_windows(pid: int) -> bool:
     try:
         out = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-            timeout=120, check=False,
-        )
+            timeout=120, check=False, **_hidden_window_kwargs())
         # taskkill exit 0 = killed; 128 = not found (already gone → goal met).
         return out.returncode in (0, 128)
     except Exception:  # noqa: BLE001 — UAC cancelled / powershell missing / timeout
@@ -1043,8 +1043,7 @@ def _runas_schedule_repair_windows(script: str) -> bool:
     try:
         out = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-            timeout=300, check=False,
-        )
+            timeout=300, check=False, **_hidden_window_kwargs())
         return out.returncode == 0
     except Exception:  # noqa: BLE001 — UAC cancelled / powershell missing / timeout
         return False
@@ -1070,8 +1069,7 @@ def _runas_delete_tasks_windows(task_names: list[str]) -> bool:
     try:
         out = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-            timeout=120, check=False,
-        )
+            timeout=120, check=False, **_hidden_window_kwargs())
         return out.returncode == 0
     except Exception:  # noqa: BLE001 — UAC cancelled / powershell missing / timeout
         return False
@@ -1566,8 +1564,7 @@ def _find_running_mcp_memory_processes() -> list[int]:
     try:
         out = subprocess.run(
             ["tasklist", "/fi", "imagename eq mcp-memory.exe", "/fo", "csv", "/nh"],
-            capture_output=True, text=True, timeout=10, check=False,
-        )
+            capture_output=True, text=True, timeout=10, check=False, **_hidden_window_kwargs())
         pids: list[int] = []
         for line in out.stdout.splitlines():
             # CSV: "mcp-memory.exe","PID","...","..."
@@ -1591,8 +1588,7 @@ def _kill_process_windows(pid: int) -> bool:
     try:
         out = subprocess.run(
             ["taskkill", "/PID", str(pid), "/F"],
-            capture_output=True, text=True, timeout=10, check=False,
-        )
+            capture_output=True, text=True, timeout=10, check=False, **_hidden_window_kwargs())
         if out.returncode == 0:
             return True
         # 128 = process not found (already gone → goal met). Any other non-zero
@@ -1740,8 +1736,7 @@ def _step_install_m3(plan: SetupPlan) -> bool:
         wiz_path = Path(_wiz_pkg.__file__).resolve()
         probe = subprocess.run(
             [sys.executable, "-c", "import m3_memory,sys; print(m3_memory.__file__)"],
-            capture_output=True, text=True, env=child_env, timeout=30,
-        )
+            capture_output=True, text=True, env=child_env, timeout=30, **_hidden_window_kwargs())
         child_path = Path(probe.stdout.strip()).resolve() if probe.stdout.strip() else None
         if child_path is not None and child_path != wiz_path:
             _err(
@@ -2043,6 +2038,7 @@ def _register_embed_server_task(*, non_interactive: bool = False) -> None:
         proc = subprocess.run(
             [_python_exe(), script, "--add", "embed-server"],
             check=False, capture_output=True, text=True,
+            **_hidden_window_kwargs(),
         )
         if proc.stdout:
             print(proc.stdout, end="")
@@ -2091,6 +2087,7 @@ def _verify_and_report_schedules(script: str, *, non_interactive: bool) -> None:
         proc = subprocess.run(
             [_python_exe(), script, "--verify"],
             check=False, capture_output=True, text=True,
+            **_hidden_window_kwargs(),
         )
     except Exception as e:  # noqa: BLE001 — verification must never fail setup
         print(f"    [!] could not verify scheduled tasks ({e})")
@@ -2114,6 +2111,7 @@ def _verify_and_report_schedules(script: str, *, non_interactive: bool) -> None:
             re_proc = subprocess.run(
                 [_python_exe(), script, "--verify"],
                 check=False, capture_output=True, text=True,
+                **_hidden_window_kwargs(),
             )
             if re_proc.returncode == 0:
                 print("    Scheduled tasks now match spec.")
@@ -2256,7 +2254,7 @@ def _claude_mcp_remove(name: str) -> None:
     """Best-effort `claude mcp remove --scope user <name>`; never raises."""
     try:
         subprocess.run(["claude", "mcp", "remove", "--scope", "user", name],
-                       check=False, capture_output=True, text=True)
+                       check=False, capture_output=True, text=True, **_hidden_window_kwargs())
     except Exception:  # noqa: BLE001 — cleanup is best-effort
         pass
 
@@ -2351,7 +2349,7 @@ def _wire_claude_hooks(capture_mode: str) -> bool:
     if capture_mode == "none":
         return True
     try:
-        from m3_memory._platform import python_exe
+        from m3_memory._platform import hidden_window_kwargs, python_exe
         bin_dir = _bin_dir()
         chatlog_init = Path(bin_dir) / "chatlog_init.py" if bin_dir else None
         if not chatlog_init or not chatlog_init.is_file():
@@ -2361,6 +2359,7 @@ def _wire_claude_hooks(capture_mode: str) -> bool:
             [python_exe(), str(chatlog_init), "--non-interactive",
              "--capture-mode", capture_mode, "--apply-claude"],
             check=False, capture_output=True, text=True,
+            **hidden_window_kwargs(),
         )
         if proc.returncode != 0:
             tail = (proc.stderr or proc.stdout or "").strip().splitlines()
@@ -2629,8 +2628,7 @@ def _step_install_dashboard(plan: "SetupPlan") -> bool:
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "pip", "install", "m3-memory[dashboard]"],
-            check=False, capture_output=True, text=True,
-        )
+            check=False, capture_output=True, text=True, **_hidden_window_kwargs())
         if proc.returncode == 0:
             print("    [OK] web dashboard installed.")
             _register_dashboard_task(plan.dashboard_port)
@@ -2666,6 +2664,7 @@ def _register_dashboard_task(port: int = 8088) -> None:
         proc = subprocess.run(
             [_python_exe(), script, "--add", "dashboard", "--port", str(port)],
             check=False, capture_output=True, text=True,
+            **_hidden_window_kwargs(),
         )
         if proc.stdout:
             print(proc.stdout, end="")
