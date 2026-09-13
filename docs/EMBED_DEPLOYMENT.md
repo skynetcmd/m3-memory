@@ -292,12 +292,12 @@ Wired and compiles, but not exercised in this repo.
 
    `embed_backend_label()` should return `metal`.
 
-> **Pre-compiled macOS Wheels**: If you are using the `skynetcmd/m3-core-rs` repository, check the GitHub Actions "Build macOS Wheels" workflow for pre-compiled artifacts for Python 3.11, 3.12, and 3.14.
+> **Pre-compiled macOS Wheels**: If you are using the `skynetcmd/m3-core-rs` repository, check the GitHub Actions "Build macOS Wheels" workflow for pre-compiled artifacts for Python 3.12, 3.13, and 3.14.
 
 | Variant | Build Feature | Target Python |
 | :--- | :--- | :--- |
-| **Metal GPU** | `embedded-metal` | 3.11, 3.12, 3.14 |
-| **CPU Sovereign** | `embedded` | 3.11, 3.12, 3.14 |
+| **Metal GPU** | `embedded-metal` | 3.12, 3.13, 3.14 |
+| **CPU Sovereign** | `embedded` | 3.12, 3.13, 3.14 |
 
 ---
 ## Sovereign HTTP fallback (port 8082)

@@ -275,7 +275,7 @@ m3-team = "m3_memory.team_cli:main"
 Homepage = "https://github.com/skynetcmd/m3-memory"
 Repository = "https://github.com/skynetcmd/m3-memory"
 "Bug Tracker" = "https://github.com/skynetcmd/m3-memory/issues"
-Changelog = "https://github.com/skynetcmd/m3-memory/blob/main/docs/CHANGELOG.md"
+Changelog = "https://github.com/skynetcmd/m3-memory/blob/main/CHANGELOG.md"
 Documentation = "https://github.com/skynetcmd/m3-memory/blob/main/docs/GETTING_STARTED.md"
 
 # NOTE: package discovery, package_dir and package_data are defined in setup.py,

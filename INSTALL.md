@@ -105,7 +105,7 @@ afterward runs as your normal user:
 
 | Tool | Why we need it | Install (Debian 13 example) |
 |---|---|---|
-| `python3` ≥ 3.11 | runtime | `sudo apt install python3` (usually preinstalled) |
+| `python3` ≥ 3.12 | runtime | `sudo apt install python3` (usually preinstalled) |
 | `pipx` | recommended installer for PEP 668 distros (Debian 12+, Ubuntu 24.04+, Fedora 38+, Arch) | `sudo apt install pipx` |
 | `python3-venv` | dependency of pipx on Debian/Ubuntu | `sudo apt install python3-venv` |
 | `git` | `m3 setup` clones the system payload from GitHub (falls back to tarball if missing, but git is faster) | `sudo apt install git` |
@@ -132,7 +132,7 @@ Everything below this point runs as your normal user. No more sudo needed.
 
 | Capability | Windows 11 | macOS (Apple Silicon / Intel) | Debian 12 / Ubuntu 24.04 / Fedora 38+ (PEP 668) | Older Linux (no PEP 668) |
 |---|---|---|---|---|
-| `python` ≥ 3.11 | `winget install Python.Python.3.12` | ships, or `brew install python@3.12` | `sudo apt install python3 python3-venv` | distro `python3` |
+| `python` ≥ 3.12 | `winget install Python.Python.3.12` | ships, or `brew install python@3.12` | `sudo apt install python3 python3-venv` | distro `python3` |
 | Install method | `pip install m3-memory` | `pipx install m3-memory` (brew python is PEP 668) | `pipx install m3-memory` **required** | `pip install m3-memory` ok |
 | `pipx` bootstrap | — | `brew install pipx` | `sudo apt install pipx` / `sudo dnf install pipx` | `pip install --user pipx` |
 | `sqlite3` CLI | `winget install SQLite.SQLite` or [sqlite.org/download](https://sqlite.org/download.html) | ships in `/usr/bin/sqlite3` | `sudo apt install sqlite3` / `sudo dnf install sqlite` | `sudo yum install sqlite` |

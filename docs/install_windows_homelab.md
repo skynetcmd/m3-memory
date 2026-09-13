@@ -15,7 +15,7 @@
 | Requirement | Check |
 |---|---|
 | **Windows 10/11** | `winver` |
-| **Python 3.11+** | `python --version` |
+| **Python 3.12+** | `python --version` |
 | **Git** | `git --version` |
 | **PowerShell 5.1+** (ships with Windows) | `$PSVersionTable.PSVersion` |
 
@@ -53,7 +53,7 @@ python -m venv .venv
 Verify the venv is active — your prompt should show `(.venv)` and:
 
 ```powershell
-python --version      # Should print Python 3.11+
+python --version      # Should print Python 3.12+
 pip --version         # Should point to .venv\Scripts\pip.exe
 ```
 

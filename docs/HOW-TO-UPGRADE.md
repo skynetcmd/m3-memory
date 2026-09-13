@@ -266,7 +266,7 @@ softwareupdate --install --all
 # Homebrew + formulas
 brew update
 brew upgrade
-brew upgrade python git openssl@3        # explicit bump if needed (3.11 is the FLOOR, not a pin)
+brew upgrade python git openssl@3        # explicit bump if needed (3.12 is the FLOOR, not a pin)
 brew cleanup -s
 ```
 
@@ -283,7 +283,7 @@ Get-WindowsUpdate -Install -AcceptAll
 winget upgrade --all --include-unknown
 
 # Python / Git via winget
-winget upgrade --id Python.Python.3.13   # or whichever 3.11+ you already run; 3.11 is the floor
+winget upgrade --id Python.Python.3.13   # or whichever 3.12+ you already run; 3.12 is the floor
 winget upgrade Git.Git
 ```
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/dashboard_server.py
-sha1: c4f026424d5c
-mtime_utc: 2026-09-11T22:15:26.895124+00:00
-generated_utc: 2026-09-11T22:15:36.037812+00:00
+sha1: 9c7468460642
+mtime_utc: 2026-09-13T19:59:20.250663+00:00
+generated_utc: 2026-09-13T19:59:26.383641+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ Listens on port 8088 by default.
 
 Requirements
 ------------
-Python 3.11+ and the packages pinned in repo-root ``requirements.txt``
+Python 3.12+ and the packages pinned in repo-root ``requirements.txt``
 (at minimum: ``fastapi>=0.136.1``, ``uvicorn>=0.46.0``, plus the m3 deps
 imported below: ``m3_sdk``, ``memory.db``, ``memory.search``,
 ``memory_maintenance``).

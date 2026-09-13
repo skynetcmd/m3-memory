@@ -6,7 +6,7 @@ Listens on port 8088 by default.
 
 Requirements
 ------------
-Python 3.11+ and the packages pinned in repo-root ``requirements.txt``
+Python 3.12+ and the packages pinned in repo-root ``requirements.txt``
 (at minimum: ``fastapi>=0.136.1``, ``uvicorn>=0.46.0``, plus the m3 deps
 imported below: ``m3_sdk``, ``memory.db``, ``memory.search``,
 ``memory_maintenance``).

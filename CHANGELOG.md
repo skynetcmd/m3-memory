@@ -23,6 +23,40 @@ _Nothing yet._
 
 ---
 
+## [2026.9.13.0] — 2026-09-13 — Python floor raised to 3.12
+
+### Changed — BREAKING
+
+- **m3 now requires Python 3.12 or newer** (`requires-python = ">=3.12"`).
+  `2026.9.12.0` was the last release supporting Python 3.11.
+
+  On Python 3.11, `pip install -U m3-memory` will not error loudly — it
+  resolves to the last 3.11-compatible release and silently stops upgrading.
+  Check with `python --version`; upgrade guidance is in
+  [README → Installation](README.md#-installation) and
+  [HOW-TO-UPGRADE.md](docs/HOW-TO-UPGRADE.md).
+
+  Stored memories are unaffected: the databases live outside the virtualenv
+  under `~/.m3/engine`. After a Python minor-version bump, recreate the venv
+  (`rm -rf .venv && python3 -m venv .venv`).
+
+  Why: 3.11-era pins were holding back the dependency tree (numpy and scipy
+  both dropped 3.11 at exactly m3's pinned ceiling), and the CI floor lane
+  and the code had already diverged — a 3.12-only construct
+  (`StorageBackend.__protocol_attrs__`) had been merging green and failing
+  the 3.11 lane. The floor now matches what the code and CI actually target.
+
+  Recommended: **3.13 or newer** for new installs. Python 3.12 is in
+  security-fix-only maintenance upstream (security support until 2028-10-31,
+  no further bug fixes), so a future release will raise the floor again —
+  announced at least one minor release in advance.
+
+- Docs corrected to match the shipped floor: the install guides, contributing
+  guide, upgrade guide and testing doc had continued to state "Python 3.11+"
+  after the requirement changed.
+
+---
+
 ## [2026.9.13.1] — 2026-09-13 — no more console flashes on Windows
 
 ### Fixed

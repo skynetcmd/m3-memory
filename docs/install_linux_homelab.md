@@ -18,7 +18,7 @@
 | Requirement | Check |
 |---|---|
 | **Ubuntu 22.04+ / Fedora 38+ / Debian 12+** | `cat /etc/os-release` |
-| **Python 3.11+** | `python3 --version` |
+| **Python 3.12+** | `python3 --version` |
 | **Git** | `git --version` |
 | **pip** | `pip3 --version` |
 
@@ -26,7 +26,7 @@
 > - **Ubuntu/Debian:** `sudo apt update && sudo apt install python3 python3-pip python3-venv git`
 > - **Fedora:** `sudo dnf install python3 python3-pip git`
 > - **No sudo?** Ask a sysadmin to install prerequisites, or use a distro
->   that ships Python 3.11+ by default.
+>   that ships Python 3.12+ by default.
 
 ---
 
@@ -53,7 +53,7 @@ source .venv/bin/activate
 Verify the venv is active — your prompt should show `(.venv)` and:
 
 ```bash
-python --version       # Should print Python 3.11+
+python --version       # Should print Python 3.12+
 pip --version           # Should point to .venv/bin/pip
 ```
 

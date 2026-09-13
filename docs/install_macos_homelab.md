@@ -18,7 +18,7 @@
 | Requirement | Check |
 |---|---|
 | **macOS 13+** | `sw_vers` |
-| **Python 3.11+** | `python3 --version` |
+| **Python 3.12+** | `python3 --version` |
 | **Git** | `git --version` |
 | **Homebrew** *(recommended)* | `brew --version` |
 
@@ -48,7 +48,7 @@ source .venv/bin/activate
 Verify the venv is active — your prompt should show `(.venv)` and:
 
 ```bash
-python --version      # Should print Python 3.11+
+python --version      # Should print Python 3.12+
 pip --version         # Should point to .venv/bin/pip
 ```
 

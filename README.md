@@ -193,6 +193,28 @@ M3 is a **typed, bitemporal, confidence-scored, self-maintaining knowledge base*
 
 ## 📦 Installation
 
+> ### ⚠️ Python 3.12+ required (changed in `2026.9.13.0`)
+>
+> **m3 now requires Python 3.12 or newer.** Releases up to and including
+> `2026.9.12.0` supported Python 3.11; from `2026.9.13.0` onward, `pip` will
+> refuse to install m3 on 3.11 and will silently keep you on the last 3.11-era
+> release instead of upgrading.
+>
+> **On Python 3.11?** Check with `python --version`. To upgrade:
+> * **macOS:** `brew install python@3.13 && brew link --overwrite python@3.13`
+> * **Windows:** `winget install -e --id Python.Python.3.13`
+> * **Debian/Ubuntu:** use [deadsnakes](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa) or a distro release shipping 3.12+
+>
+> After a Python minor-version bump, **recreate your virtualenv**
+> (`rm -rf .venv && python3 -m venv .venv`) — see
+> [HOW-TO-UPGRADE.md](docs/HOW-TO-UPGRADE.md). Your memories are unaffected:
+> the databases live outside the venv under `~/.m3/engine`.
+>
+> We recommend **3.13 or newer** for new installs. Python 3.12 is in
+> security-fix-only maintenance upstream (no further bug fixes; security
+> support until 2028-10-31), so a future m3 release will raise the floor
+> again — announced at least one minor release in advance.
+
 *The [Quickstart](#-quickstart) above covers the common path (`pip install m3-memory` → `m3 setup`). This section adds the alternatives: the shell installer, per-agent wiring, and manual MCP configuration.*
 
 ### The One-Liner (macOS & Linux)

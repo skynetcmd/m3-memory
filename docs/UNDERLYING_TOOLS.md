@@ -8,7 +8,7 @@ This document details the core services, frameworks, and engines that power the 
 - **Role**: Primary low-latency transactional database for local agents.
 - **Location**: `memory/agent_memory.db`
 - **Features**: WAL (Write-Ahead Logging) mode enabled for concurrency; FTS5 for full-text search.
-- **Version**: Built-in Python 3.11+ `sqlite3` (SQLite 3.35.0+ required for UPSERT/RETURNING).
+- **Version**: Built-in Python 3.12+ `sqlite3` (SQLite 3.35.0+ required for UPSERT/RETURNING).
 
 ### PostgreSQL (Data Warehouse) — Optional
 - **Role**: Long-term archival and multi-device synchronization.

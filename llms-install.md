@@ -21,9 +21,9 @@ If you cannot tell, ask the user which OS they are on before proceeding.
 
 ---
 
-## Step 1 — Ensure prerequisites (Python ≥ 3.11)
+## Step 1 — Ensure prerequisites (Python ≥ 3.12)
 
-Check `python --version` (or `python3 --version`). If it is missing or < 3.11:
+Check `python --version` (or `python3 --version`). If it is missing or < 3.12:
 
 - **Windows:** `winget install Python.Python.3.12`
 - **macOS:** `brew install python@3.12 pipx git` then `pipx ensurepath`

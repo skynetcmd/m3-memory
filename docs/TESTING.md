@@ -41,7 +41,8 @@ hypotheses, judge scores, and CSV/JSONL artifacts for offline analysis.
 
 1. **Lint (Ruff)** — `ruff check bin/ memory/`
 2. **Type check (Mypy)** — `mypy bin/ --ignore-missing-imports`
-3. **Test** — matrix of `{ubuntu, macos, windows} × {3.11, 3.12}`, each
+3. **Test** — PRs run the floor (`ubuntu × 3.12`); pushes to `main` run
+   the full matrix `{ubuntu, macos, windows} × {3.12, 3.13, 3.14, 3.15}`, each
    runs `pytest tests/`
 
 Neither the `bin/test_*.py` harnesses nor the benchmarks run in CI (they

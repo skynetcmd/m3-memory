@@ -123,7 +123,7 @@ Open an issue on GitHub with:
 
 ## Code Style
 
-- Python 3.11+
+- Python 3.12+
 - Ruff for linting (`ruff check bin/ memory/`)
 - Mypy for type checking (`mypy bin/ --ignore-missing-imports`)
 - No external cloud APIs — all features must work fully offline
