@@ -169,7 +169,7 @@ def _get_watermark(sl_cur, direction: str, target_name: str) -> str | None:
     prefixed_direction = f"{target_name}_{direction}" if target_name != "main" else direction
     try:
         sl_cur.execute(
-            f"SELECT last_synced_at FROM sync_watermarks WHERE direction = {_LOCAL_PARAM}",
+            f"SELECT last_synced_at FROM sync_watermarks WHERE direction = {_param_of(sl_cur)}",
             (prefixed_direction,))
         row = sl_cur.fetchone()
         return row[0] if row else None
@@ -191,7 +191,7 @@ def _set_watermark(sl_cur, direction: str, ts: str, target_name: str) -> None:
     try:
         sl_cur.execute(
             f"INSERT INTO sync_watermarks (direction, last_synced_at) "
-            f"VALUES ({_LOCAL_PARAM}, {_LOCAL_PARAM}) "
+            f"VALUES ({_param_of(sl_cur)}, {_param_of(sl_cur)}) "
             f"{_local_dialect().on_conflict_update('(direction)', ['last_synced_at'])}",
             (prefixed_direction, ts),
         )
@@ -304,7 +304,7 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
                    COALESCE(user_id, '') as user_id, COALESCE(scope, 'agent') as scope,
                    valid_from, valid_to, COALESCE(content_hash, '') as content_hash
             FROM memory_items
-            WHERE updated_at > {_LOCAL_PARAM} OR (updated_at IS NULL AND created_at > {_LOCAL_PARAM})
+            WHERE updated_at > {_param_of(sl_cur)} OR (updated_at IS NULL AND created_at > {_param_of(sl_cur)})
         """, (watermark, watermark))
         logger.info(f"[{target_name}] Delta push: rows changed since {watermark}")
     else:
@@ -497,7 +497,7 @@ def sync_memory_relationships(sl_cur, pg_cur, sl_conn, target_name: str):
     if watermark:
         sl_cur.execute(
             f"SELECT id, from_id, to_id, relationship_type, created_at "
-            f"FROM memory_relationships WHERE created_at > {_LOCAL_PARAM}",
+            f"FROM memory_relationships WHERE created_at > {_param_of(sl_cur)}",
             (watermark,))
     else:
         sl_cur.execute("SELECT id, from_id, to_id, relationship_type, created_at FROM memory_relationships")
@@ -663,8 +663,8 @@ def sync_tasks(sl_cur, pg_cur, sl_conn, target_name: str):
     watermark = _get_watermark(sl_cur, "tasks_push", target_name)
     if watermark:
         sl_cur.execute(
-            f"SELECT {task_cols} FROM tasks WHERE updated_at > {_LOCAL_PARAM} "
-            f"OR (updated_at IS NULL AND created_at > {_LOCAL_PARAM})",
+            f"SELECT {task_cols} FROM tasks WHERE updated_at > {_param_of(sl_cur)} "
+            f"OR (updated_at IS NULL AND created_at > {_param_of(sl_cur)})",
             (watermark, watermark),
         )
         logger.info(f"[{target_name}] Delta task push: rows changed since {watermark}")
@@ -826,7 +826,7 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target_name: str):
             FROM memory_embeddings
             WHERE memory_id IN (
                 SELECT id FROM memory_items
-                WHERE updated_at > {_LOCAL_PARAM} OR (updated_at IS NULL AND created_at > {_LOCAL_PARAM})
+                WHERE updated_at > {_param_of(sl_cur)} OR (updated_at IS NULL AND created_at > {_param_of(sl_cur)})
             )
         """, (watermark, watermark))
         logger.info(f"[{target_name}] Delta embedding push: rows changed since {watermark}")
@@ -1057,6 +1057,37 @@ def _local_param() -> str:
 _LOCAL_PARAM = _local_param()
 
 
+def _param_of(cur) -> str:
+    """The placeholder for the CONNECTION we were handed — not for a global.
+
+    `_LOCAL_PARAM` is bound ONCE at import from `_local_dialect()`, which reads
+    `M3_DB_BACKEND`. That makes the placeholder follow a process-wide env var
+    rather than the cursor it is interpolated into. sync legitimately holds TWO
+    stores at once (local SQLite + the PostgreSQL warehouse), so with
+    `M3_DB_BACKEND=postgres` the constant became `%s` and PostgreSQL syntax
+    reached the SQLite cursor::
+
+        WARNING pg_sync: Lock acquisition failed: near "%": syntax error
+
+    16 tests failed that way on a real PostgreSQL run (#171). The tests were
+    right to hand these functions a `sqlite3` cursor -- the local sync-lock and
+    watermark store IS SQLite -- and a module-level constant simply cannot
+    express "this depends on which connection you pass me".
+
+    The backend detection itself lives in the SEAM
+    (`dialect_for_connection`), not here: identifying a backend from a driver
+    object is backend knowledge, so adding MariaDB means teaching the seam
+    rather than editing every module that holds a connection (§10a). This
+    wrapper exists only to keep the f-string call sites readable and to hold
+    the bootstrap fallback.
+    """
+    try:
+        from memory.backends.dialect import dialect_for_connection
+        return dialect_for_connection(cur).param()
+    except Exception:  # noqa: BLE001 — bootstrap: seam not importable yet
+        return _LOCAL_PARAM
+
+
 def _this_host() -> str:
     """This machine's name, for lock ownership. Never raises."""
     try:
@@ -1157,7 +1188,7 @@ def _acquire_sync_lock(sl_cur) -> bool:
         return True
     try:
         sl_cur.execute(
-            f"SELECT holder FROM sync_locks WHERE lock_name = {_LOCAL_PARAM}",
+            f"SELECT holder FROM sync_locks WHERE lock_name = {_param_of(sl_cur)}",
             (_SYNC_LOCK_NAME,)
         )
         row = sl_cur.fetchone()
@@ -1170,7 +1201,7 @@ def _acquire_sync_lock(sl_cur) -> bool:
         now_iso = datetime.now(timezone.utc).isoformat()
         sl_cur.execute(
             f"INSERT INTO sync_locks (lock_name, holder, acquired_at) "
-            f"VALUES ({_LOCAL_PARAM}, {_LOCAL_PARAM}, {_LOCAL_PARAM}) "
+            f"VALUES ({_param_of(sl_cur)}, {_param_of(sl_cur)}, {_param_of(sl_cur)}) "
             f"ON CONFLICT (lock_name) DO UPDATE SET "
             f"holder = excluded.holder, acquired_at = excluded.acquired_at",
             (_SYNC_LOCK_NAME, _lock_value(now_iso), now_iso)
@@ -1185,7 +1216,7 @@ def _release_sync_lock(sl_cur):
     """Releases the global sync lock."""
     try:
         sl_cur.execute(
-            f"DELETE FROM sync_locks WHERE lock_name = {_LOCAL_PARAM}",
+            f"DELETE FROM sync_locks WHERE lock_name = {_param_of(sl_cur)}",
             (_SYNC_LOCK_NAME,)
         )
     except Exception as e:
@@ -1240,7 +1271,7 @@ def _sync_table_generic(
             # below makes a re-push idempotent, so the only cost is a little
             # redundant traffic — far better than permanent row loss.
             sl_cur.execute(
-                f"SELECT * FROM {name} WHERE {ts_col} > {_LOCAL_PARAM} "
+                f"SELECT * FROM {name} WHERE {ts_col} > {_param_of(sl_cur)} "
                 f"OR {ts_col} IS NULL",
                 (watermark,),
             )

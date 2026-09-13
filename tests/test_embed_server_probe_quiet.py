@@ -17,12 +17,20 @@ from doctor import embed_server_probe  # noqa: E402
 
 class _FakeCompleted:
     returncode = 0
+    # The probe reads stdout/stderr to detect an UNSUPPORTED subcommand (a
+    # build whose `doctor` prints USAGE and exits non-zero -- see #167). A stub
+    # without them raises AttributeError inside the probe, which its own
+    # error handler turns into rc 1: the test would fail for a reason that has
+    # nothing to do with what it is testing.
+    stdout = ""
+    stderr = ""
 
 
 def _capture_env(monkeypatch):
     """Stub which() + subprocess.run; return a dict that records the env passed."""
     captured = {}
     monkeypatch.setattr(embed_server_probe.shutil, "which", lambda _name: "/usr/bin/m3-embed-server")
+    monkeypatch.setattr(embed_server_probe, "_resolve_binary", lambda: "/usr/bin/m3-embed-server")
 
     def fake_run(argv, **kwargs):
         captured["env"] = kwargs.get("env")
@@ -51,7 +59,16 @@ def test_respects_operator_override(monkeypatch):
 
 
 def test_skips_cleanly_when_binary_absent(monkeypatch):
+    """Absent means absent EVERYWHERE, not just off PATH.
+
+    Resolution no longer stops at shutil.which: #167 added an
+    embedder_admin fallback, because the binary normally lives inside the
+    m3_core_rs wheel and which() returns None on a perfectly healthy install.
+    Stubbing only which() therefore left the real binary discoverable and this
+    test called the subprocess it asserts is never called.
+    """
     monkeypatch.setattr(embed_server_probe.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(embed_server_probe, "_resolve_binary", lambda: None)
     # Should not call subprocess.run at all; returns 0 (not a Python-side failure).
     called = {"run": False}
 

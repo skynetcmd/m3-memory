@@ -4,17 +4,74 @@ This guide covers upgrading an existing checkout in place — pulling new code, 
 
 ---
 
-## Installed via `pipx` / `m3 install-m3` (the common case)?
-
-If you installed m3 as a package (not a git clone), **the git-checkout steps below do not apply** — upgrade the package instead:
+## Installed as a package? One command, all three OSes
 
 ```bash
-pipx upgrade m3-memory      # pull the latest release from PyPI
-m3 setup                    # re-wire agents/hooks + apply DB migrations
-m3 doctor                   # verify
+m3 upgrade
 ```
 
-> ⚠️ **`m3 update` is NOT a package upgrade.** It only re-syncs the payload/bridge to your **already-installed** version — it will not pull a newer release. To upgrade the package use `pipx upgrade m3-memory`, then `m3 update` (or `m3 setup`) to reconcile the payload. (`m3 update` now prints a nudge when PyPI has a newer version than you have installed.)
+That is the whole thing on **Windows, macOS and Linux**. It detects how m3 was
+actually installed and runs the correct sequence:
+
+1. `m3 stop` — release the DB-writer file locks
+2. the package upgrade — `pipx`, `pip`, or `pip --user`, **chosen by detection**
+3. `m3 setup` — re-wire agent configs, apply DB migrations, restart services
+4. `m3 doctor` — verify, and exit nonzero if anything is unhappy
+
+Preview it first if you like — this changes nothing:
+
+```bash
+m3 upgrade --dry-run
+```
+
+```
+[detect] install method: pipx
+         evidence      : pipx_metadata.json found at ~/pipx/venvs/m3-memory
+
+[1/4] stopping m3 DB writers ...
+[2/4] upgrading the package ...
+[3/4] finalizing (agent configs, migrations, services) ...
+[4/4] verifying ...
+```
+
+| flag | what it does |
+| --- | --- |
+| `--dry-run` | print the detected method and the exact plan; change nothing |
+| `-y`, `--yes` | do not prompt (scripted / unattended upgrades) |
+| `--skip-stop` | skip step 1 — only if you have already stopped the writers |
+
+### Why not just `pipx upgrade m3-memory`?
+
+Because it is **wrong for most installs and fails silently when it is.** The
+docs mention `pip install m3-memory` far more often than `pipx`, and
+**`pipx upgrade` against a pip install exits 0 having upgraded nothing** — which
+reads as success. You stay on the old version believing you upgraded.
+
+There are two more traps `m3 upgrade` handles for you, both observed on real
+installs:
+
+- **Windows file locking.** pip uninstalls before it installs, and Windows holds
+  an open `.exe` against deletion. With m3 running (MCP servers, cognitive loop,
+  dashboard, embed server) the upgrade **deletes the package and then fails** on
+  `[WinError 32] … Scripts\m3.exe`, leaving **no m3 installed**. Stopping the
+  writers first turns that into an ordinary upgrade.
+- **pip's HTTP cache.** pipx can report "already at latest version" while PyPI is
+  serving a newer one.
+
+If you want to do it by hand anyway, run the four steps above in that order —
+and on Windows add `--pip-args=--no-cache-dir` to the upgrade.
+
+### Host plugin installs
+
+If m3 was installed as a **host plugin** (Claude Code, Antigravity), `m3 upgrade`
+**refuses** and points you at the host's own update flow. Running pip there
+fights whatever manages the plugin. An install it cannot classify also refuses
+rather than guessing.
+
+> ⚠️ **`m3 update` is NOT a package upgrade.** It only re-syncs the
+> payload/bridge to your **already-installed** version — it will not pull a newer
+> release. Use `m3 upgrade` for that. (`m3 update` prints a nudge when PyPI has a
+> newer version than you have installed.)
 
 The rest of this guide is for **developers upgrading a git checkout in place.**
 

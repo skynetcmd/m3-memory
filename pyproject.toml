@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.9.12.0"
+version = "2026.9.13.0"
 description = "Give your AI agent a memory — local-first, private, easy to install. Guided setup wizard; works out of the box on your own machine, no cloud. For everyday agent users, homelabs, and developers alike · 99.2% LongMemEval-S retrieval @ k=10 · Works with Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · any MCP agent (native + one-command plugins) · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable"
 
 readme = "README.md"
@@ -15,7 +15,7 @@ license = "Apache-2.0"
 # Ship the LICENSE and the Apache NOTICE (attribution to skynetCMD) in every
 # sdist/wheel — setuptools>=77 packages these globs into the distribution.
 license-files = ["LICENSE", "NOTICE"]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 # skynetcmd is THE author, maintainer, and copyright holder (see NOTICE). The AI
 # coding assistants that helped build m3 (Gemini CLI, Claude Code, Google
 # Antigravity) are credited in the README's "Built with" acknowledgment — NOT
@@ -78,10 +78,10 @@ classifiers = [
     "Intended Audience :: System Administrators",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Operating System :: OS Independent",
@@ -96,8 +96,11 @@ dependencies = [
     "psycopg2-binary>=2.9.12,<3",
     "cryptography>=50.0.0,<51",
     "keyring>=25.7.0,<26",
-    # Cap <2.5: numpy 2.5.0's stub uses PEP 695 `type` syntax that mypy rejects
-    # under python_version 3.11 (our floor). See requirements.txt for the full note.
+    # Cap <2.5: numpy 2.5.0's stub uses PEP 695 `type` syntax, which mypy
+    # rejected under the OLD 3.11 floor. The floor is now 3.12, where PEP 695 is
+    # valid, so this cap is probably liftable -- but that is a dependency bump
+    # with its own blast radius, not a side effect of a floor change. Tracked
+    # separately; see requirements.txt for the full note.
     "numpy>=2.4.4,<2.5",
     "python-dotenv>=1.2.2,<2",
     "PyYAML>=6.0.3,<7",
@@ -301,7 +304,7 @@ ignore = ["E501", "E402", "E701", "E702", "E741"]
 "bin/dashboard_server.py" = ["F821"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 ignore_missing_imports = true
 # Match the codebase's pre-PEP 484 style: `def f(x: str = None)` means Optional.
 implicit_optional = true

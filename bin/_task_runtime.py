@@ -49,6 +49,23 @@ def no_window_kwargs() -> dict:
 
     On POSIX this is an empty dict (CREATE_NO_WINDOW is a Windows-only flag),
     so the call site stays cross-platform.
+
+    ONLY USE THIS WITH capture_output=True (or explicit pipes).
+    CREATE_NO_WINDOW suppresses the child's INHERITED stdout/stderr, not just
+    the window. Measured in a real console 2026-09-12:
+
+        WITH the flag, inherited handles    -> child output LOST
+        WITHOUT it, inherited handles       -> child output visible
+        WITH the flag, capture_output=True  -> captured fine
+
+    Every current caller passes capture_output, so they are safe. For a
+    subprocess whose output must reach an inherited console -- an installer
+    step, anything a user is watching -- use STARTUPINFO with
+    STARTF_USESHOWWINDOW + SW_HIDE instead: it hides the window and keeps the
+    pipes. PR #154 nearly shipped CREATE_NO_WINDOW into install_os.py's
+    run_cmd, which passes no capture_output for non-optional calls; every
+    installer subprocess would have gone silent and a failing `pip install`
+    would have printed only "[ERROR] Command failed" with the reason gone.
     """
     if sys.platform == "win32":
         return {"creationflags": subprocess.CREATE_NO_WINDOW}

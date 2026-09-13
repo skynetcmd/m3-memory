@@ -380,6 +380,44 @@ def _supervise_postgres(args) -> int:
 
     return 2
 
+def _backend_is_postgres() -> bool:
+    """Which lane does the SEAM say we are on? Never inferred from a file.
+
+    #163 requires "ask `dialect().backend`, do not infer". Reading
+    `M3_DB_BACKEND` directly here looked equivalent and was not: the selector
+    resolves through `getenv_compat("M3_DB_BACKEND", "DB_BACKEND", ...)`, so
+    the still-supported `DB_BACKEND` alias made the two disagree. Measured
+    2026-09-12 with `DB_BACKEND=postgres` and `M3_DB_BACKEND` unset::
+
+        SEAM resolves to  : postgres
+        WAITER would take : SQLITE WAL path
+
+    That is the §3 failure this feature exists to prevent, in its worst form:
+    the waiter would watch `agent_memory.db-wal` -- a file PostgreSQL never
+    writes -- and poll forever finding nothing, with no error and no log line.
+    A blind waiter that looks perfectly healthy.
+
+    The import is DEFERRED, not top-level: the supervisor must stay
+    stdlib-only at import time to survive `pipx upgrade` (#163). One call at
+    startup costs one import in a process that is about to run for hours.
+
+    Fails CLOSED to the SQLite lane: if the seam cannot be imported at all we
+    are almost certainly running from a stripped supervisor payload where
+    SQLite is the only reachable engine, and guessing "postgres" there would
+    spawn a child that cannot connect. The env read is the fallback, not the
+    source of truth, and it is logged so the degradation is never silent.
+    """
+    try:
+        from memory.backends import dialect  # deferred: see docstring
+        return dialect().backend == "postgres"
+    except Exception as exc:
+        env = (os.environ.get("M3_DB_BACKEND")
+               or os.environ.get("DB_BACKEND") or "sqlite").strip().lower()
+        _warn(f"could not ask the backend seam ({exc!r}); falling back to "
+              f"env backend={env!r}")
+        return env == "postgres"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--agent-id", required=True,
@@ -416,7 +454,7 @@ def main() -> int:
     if args.child:
         return pg_child_loop(args)
 
-    if os.environ.get("M3_DB_BACKEND", "sqlite").lower() == "postgres":
+    if _backend_is_postgres():
         if args.supervise:
             while True:
                 rc = _supervise_postgres(args)

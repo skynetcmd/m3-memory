@@ -2880,6 +2880,15 @@ def _start_service_for_role(role: str) -> bool:
     module already owns the per-OS mechanism and the _SELF_HEAL_TASKS gate, and a
     second copy here would drift from it (§10a).
 
+    That delegation was RIGHT but this docstring was WRONG for a while:
+    `_start_longlived_tasks` was hardcoded to `schtasks /Run`, so on Linux
+    `m3 setup` reached "Verifying background services are running" and raised
+    FileNotFoundError into a bare `except` — the cognitive loop stayed down
+    behind a warning. Reported from a real Linux install 2026-09-12 and fixed in
+    install_schedules (name translated through _ROLE_TO_SERVICE, with
+    _service_exists guarding systemd's unreliable exit code), NOT by adding a
+    platform branch here. Keep it that way: one owner, verified on all three.
+
     Why setup must do this at all: install_schedules only restarts the tasks THIS
     run registered. An upgrade that re-registers nothing therefore restarts
     nothing, while preflight has already stopped every writer — so the keep-alive

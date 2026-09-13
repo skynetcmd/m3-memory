@@ -637,6 +637,46 @@ class Dialect:
         """Backend fragment for :meth:`glob_match` (post-validation)."""
         raise NotImplementedError("subclass must implement _glob_fragment()")
 
+    def literal_prefix_match(self, column: str, placeholder: str, prefix: str) -> "tuple[str, str]":
+        """A "column starts with this LITERAL prefix" fragment + bound value.
+
+        Returns ``(sql_fragment, bound_value)`` for the same reason
+        :meth:`glob_match` does: the caller supplies INTENT ("starts with
+        ``claude-code@``") and the dialect decides both the operator and how the
+        value must be rewritten. A call site that builds ``LIKE 'x%' ESCAPE
+        '\\'`` itself is a portability bug waiting for the next backend (§10a).
+
+        The subtlety this exists to own is that the prefix is LITERAL: agent ids
+        and similar keys routinely contain ``_``, which is a single-character
+        wildcard in SQL ``LIKE``. ``e2e_builder@%`` would match
+        ``e2eXbuilder@s1``. So every wildcard in the prefix is escaped before
+        the ``%`` is appended.
+
+        Verified on both backends 2026-09-12: ``LIKE ? ESCAPE '\\'`` matches
+        only ``we%rd@s1`` (not ``weXrd@s1``) on SQLite and PostgreSQL alike.
+        MariaDB spells LIKE the same way; a document store would not, which is
+        precisely why this is a seam method and not an f-string at the call
+        site.
+        """
+        if not column.isidentifier():
+            raise ValueError(f"column must be a bare identifier: {column!r}")
+        return self._literal_prefix_fragment(column, placeholder, prefix)
+
+    def _literal_prefix_fragment(self, column: str, placeholder: str, prefix: str) -> "tuple[str, str]":
+        """Backend fragment for :meth:`literal_prefix_match` (post-validation).
+
+        Concrete here rather than NotImplementedError: SQLite, PostgreSQL and
+        MariaDB all spell this identically, so a backend only overrides it if it
+        genuinely differs. Making every backend restate the same three lines
+        would be the duplication §10a warns about.
+        """
+        esc = (
+            prefix.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        return f"{column} LIKE {placeholder} ESCAPE '\\'", esc + "%"
+
     # -- temporal validity ---------------------------------------------------
     def temporal_open_clause(self, column: str, op: str) -> str:
         """A "validity bound is open OR satisfies `op`" WHERE fragment.
@@ -969,6 +1009,52 @@ class Dialect:
 # acyclic (RH1): `<name>_backend.py` imports the base `Dialect` from here and
 # registers its singleton with the registry; `dialect_for` reads it back from the
 # registry lazily. `dialect.py -> registry.py`, never `dialect.py -> *_backend.py`.
+
+
+def dialect_for_connection(obj: object) -> Dialect:
+    """The :class:`Dialect` for the CONNECTION (or cursor) you actually hold.
+
+    The seam's other entry points answer "what is this deployment configured to
+    use?" — they read ``M3_DB_BACKEND``. That is the wrong question whenever a
+    function is HANDED a connection: a process can legitimately hold two at
+    once. ``pg_sync`` is exactly that shape — a local SQLite store and a remote
+    PostgreSQL warehouse in the same call — and it had a module-level
+    ``_LOCAL_PARAM`` baked at import from the global, so with
+    ``M3_DB_BACKEND=postgres`` it rendered ``%s`` into statements executed on
+    the SQLite cursor::
+
+        WARNING pg_sync: Lock acquisition failed: near "%": syntax error
+
+    16 tests failed that way on a real PostgreSQL run (#171).
+
+    This lives in the seam rather than at the call site because identifying a
+    backend from a driver object is backend knowledge: adding MariaDB should
+    mean teaching THIS function, not editing every module that holds a
+    connection (§10a). Detection is by driver type, never by env, so it stays
+    correct when the two disagree — which is the whole point.
+
+    Falls back to the configured dialect for anything unrecognised, so a
+    wrapper or pooled proxy behaves exactly as it did before.
+    """
+    import sqlite3
+
+    if isinstance(obj, (sqlite3.Cursor, sqlite3.Connection)):
+        return dialect_for("sqlite")
+    conn = getattr(obj, "connection", None)
+    if isinstance(conn, sqlite3.Connection):
+        return dialect_for("sqlite")
+
+    mod = type(obj).__module__ or ""
+    if mod.startswith(("psycopg", "psycopg2")):
+        return dialect_for("postgres")
+    if conn is not None and (type(conn).__module__ or "").startswith(
+        ("psycopg", "psycopg2")
+    ):
+        return dialect_for("postgres")
+
+    from .selector import dialect as _configured
+
+    return _configured()
 
 
 def dialect_for(backend: BackendName) -> Dialect:

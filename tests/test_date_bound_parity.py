@@ -157,12 +157,41 @@ class TestDateBoundPostgresLive(unittest.TestCase):
         self.assertEqual(self._count("since", "2026-09-06"), _EXPECT_SINCE_0906)
 
     def test_legacy_bare_date_was_broken_differently(self):
-        """PG's failure mode differs from SQLite's: the bare date casts to
-        midnight, keeping exactly the 00:00:00 row instead of dropping all."""
+        """PG's failure mode differs from SQLite's: the bare date casts to a
+        TIMESTAMP rather than dropping every row.
+
+        Pinned against the SERVER'S OWN cast, not a hardcoded count. The column
+        is `timestamptz`, so a bare date casts to midnight in the SERVER's
+        TimeZone -- not UTC. Measured 2026-09-12 on a box set to
+        America/New_York: `'2026-09-06'::timestamptz` is `2026-09-06
+        00:00:00-04:00` = 04:00Z, which captures rows 1 (00:00Z) AND 2
+        (02:01Z), so the count is 2, not the 1 this asserted.
+
+        The old assertion was only true on a UTC server: green in CI, red on
+        any developer box in a non-UTC zone, for a reason the failure text did
+        not reveal. The INVARIANT being tested is "the bare date keeps the rows
+        at-or-before its cast, rather than dropping all of them as SQLite
+        does" -- so derive the expectation from the same cast the query uses.
+        """
         cur = self.conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM _m3_date_bound_parity "
+                    "WHERE created_at <= '2026-09-06'::timestamptz")
+        expected = cur.fetchone()[0]
+
         cur.execute("SELECT COUNT(*) FROM _m3_date_bound_parity WHERE created_at <= %s",
                     ("2026-09-06",))
-        self.assertEqual(cur.fetchone()[0], 1)
+        actual = cur.fetchone()[0]
+
+        self.assertEqual(actual, expected)
+        # The point of the test: PG keeps SOME rows (unlike SQLite, which drops
+        # all), but fewer than the whole day -- which is why the bare date is
+        # broken and `date_bound()` exists.
+        self.assertGreater(actual, 0,
+                           "PG's bare-date cast dropped every row -- that is "
+                           "SQLite's failure mode, not PG's")
+        self.assertLess(actual, _EXPECT_UNTIL_0906,
+                        "the bare date kept the whole day; then it would not "
+                        "be broken and date_bound() would be unnecessary")
 
     def test_inclusive_millisecond_bound_would_lose_a_row(self):
         """Why half-open, not '...23:59:59.999Z' — pins the design decision."""

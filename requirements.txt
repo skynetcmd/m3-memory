@@ -97,4 +97,18 @@ types-setuptools>=77.0.0,<82
 # setuptools>=77 for the SPDX `license = "Apache-2.0"` form; <82 stays within
 # torch 2.11's declared `setuptools<82` so pip doesn't warn about a conflict.
 # (Also pinned in pyproject.toml build-system.requires for isolated builds.)
+#
+# One CVE remains under this ceiling and is ACCEPTED:
+#   - CVE-2026-59890 / PYSEC-2026-3447 — fix only in 83.0.0 (above the <82
+#     ceiling). FileList matched MANIFEST.in exclude/prune globs without Unicode
+#     normalization, so on macOS APFS/HFS+ an NFD filename could bypass an NFC
+#     exclusion and get packed into an sdist. It affects what a package AUTHOR
+#     ships when building a source distribution on macOS; it is not a runtime
+#     path, and m3's releases are built in CI on ubuntu-latest. Revisit when
+#     torch's `setuptools<82` pin lifts (same trigger as types-setuptools above).
+#
+# This CVE was invisible until 2026-09-12: the DefectDojo pipeline's pip-audit
+# ran `find | head -1` and audited examples/mac-agent/requirements.txt ONLY, so
+# the root manifest was never scanned. Fixed in scan_repo.py (audits all three;
+# 261 packages, was ~8). See m3 memory 1c6429ef.
 setuptools>=77,<82

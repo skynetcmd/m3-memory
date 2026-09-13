@@ -23,6 +23,232 @@ _Nothing yet._
 
 ---
 
+## [2026.9.13.0] — 2026-09-13 — the checks that reported health without looking
+
+Ten issues, one theme: **a check that tests something adjacent to the thing that
+matters.** Every defect below was found by running the system, not reading it —
+and each had been reporting green.
+
+| what it claimed | what it actually checked |
+| --- | --- |
+| "PostgreSQL lane" | resolved the seam to `sqlite` |
+| "task registered" | `schtasks`' exit code, not the task's existence |
+| "embed-server not installed" | a PATH lookup, while the service was serving |
+| "Notifications for : (empty)" | identity refused, rendered as an empty inbox |
+| "No issues identified" (Bandit) | a file it could not parse and silently skipped |
+
+### Added
+
+- **`m3 upgrade` — one command that upgrades m3 correctly on all three OSes.**
+
+  ```bash
+  m3 upgrade            # detect, stop, upgrade, re-wire, verify
+  m3 upgrade --dry-run  # print the plan, change nothing
+  ```
+
+  It detects how m3 was actually installed — `pipx`, `pip`, `pip --user`, or a
+  host plugin — and runs the right sequence: `m3 stop`, the package upgrade,
+  `m3 setup`, `m3 doctor`.
+
+  The orchestrator (`bin/m3_upgrade.py`) shipped in 2026.9.11.1, but **nothing
+  pointed at it**: `m3 --help`, the README, FAQ and the upgrade guide all
+  recommended bare `pipx upgrade m3-memory` instead. That command, run against
+  a **pip** install, exits 0 having upgraded **nothing** — which reads as
+  success, so you stay on the old version believing you upgraded. A correct
+  tool nobody can find does not prevent that; a discoverable one does.
+
+  The command is a **launcher, not an implementation**. The upgrade replaces the
+  very package the CLI is running from, so the work happens in a fresh process
+  that never imports `m3_memory`. On Windows that is a file-locking failure, not
+  a theoretical one: pip uninstalls before it installs, Windows holds an open
+  `.exe` against deletion, and the upgrade deletes the package and then fails —
+  leaving **no m3 installed**. A test asserts the orchestrator never imports the
+  package it replaces.
+
+  A host-plugin install is **refused**, pointing at the host's own update flow,
+  because running pip there fights whatever manages the plugin. An install it
+  cannot classify also refuses rather than guessing.
+
+  `m3 stop` and `m3 update` help text, `docs/HOW-TO-UPGRADE.md`, `docs/FAQ.md`
+  and `docs/TROUBLESHOOTING.md` now all point here instead of at a specific
+  package manager.
+
+### Fixed
+
+- **`m3 setup` crashed on Linux and left the cognitive loop down** (#166).
+  `_start_longlived_tasks` was hardcoded to Windows `schtasks /Run` with no
+  platform guard, so setup reached "Verifying background services are running",
+  raised `FileNotFoundError` into a bare `except`, and reported a warning while
+  the loop stayed down.
+
+  The obvious fix is a trap: `_SELF_HEAL_TASKS` is keyed by the **Windows** task
+  name, so swapping in a platform command yields `systemctl --user start
+  AgentOS_CognitiveLoop` — and `systemctl start` does not reliably report a
+  missing unit. Same command, same missing unit, measured the same day:
+  systemd 255 (Ubuntu 24.04) returns **exit 0**; systemd 257 (Debian 13)
+  returns exit 5. On the older release that prints "Started" over a service
+  never touched — worse than the crash, which was at least loud.
+
+  Names now translate through `_ROLE_TO_SERVICE`, with `_service_exists`
+  (systemd `LoadState`) as the version-independent discriminator. Verified on a
+  real Debian 13 / systemd 257 host: zero `schtasks` calls, zero Windows names
+  leaked, `embed-server` correctly skipped (it self-manages on Linux), and a
+  genuinely absent unit reported loudly instead of as "Started".
+
+- **N sessions of one agent shared ONE inbox, and silently stole each other's
+  work** (#170). `agent_id` was one flat identity with one row per agent *type*,
+  so three sister Claude sessions all addressed `claude-code`:
+
+  ```
+  session 1 sees: [856, 857]
+  session 2 sees: [856, 857]      <- duplicate work
+  session 1 acks -> session 2 now sees: []   <- work vanished mid-flight
+  ```
+
+  The second failure is the serious one: session 2 had already **read** those
+  items and they disappeared with no error and no trace.
+
+  The scheme is `agent_type@instance_id` and it is **purely additive** —
+  `split_agent_id("claude-code")` returns `("claude-code", None)`, so every
+  existing caller is unchanged. No migration, no schema change, no flag day. A
+  bare type is a fan-out read (its own inbox plus every instance, so broadcasts
+  still reach all sessions); a qualified id is a direct read.
+
+  `@` was chosen by elimination: `-` already appears inside 14 of 26 live ids
+  (`claude-code` would parse as type `claude`), and `:` on NTFS creates an
+  **alternate data stream** rather than a file — m3 names spill files after
+  agents, so such an id would write data that is simply invisible.
+
+- **`pg_sync` sent PostgreSQL syntax to a SQLite cursor** (#171). `_LOCAL_PARAM`
+  was a module constant bound **once at import** from `M3_DB_BACKEND`. Sync
+  legitimately holds two stores at once — a local SQLite store and the
+  PostgreSQL warehouse — so with the warehouse configured it rendered `%s` onto
+  the SQLite cursor: `near "%": syntax error`. 16 tests failed this way.
+
+  Fixed at the seam, not the call site: `Dialect.dialect_for_connection()`
+  answers "which backend is this driver object?", so adding a backend means
+  teaching one function rather than editing every module that holds a
+  connection.
+
+- **The notification waiter inferred its backend instead of asking** (#163).
+  It read `M3_DB_BACKEND` directly, but the selector resolves through both that
+  name and the still-supported `DB_BACKEND` alias — so the two could disagree,
+  and the waiter would watch `agent_memory.db-wal`, a file PostgreSQL never
+  writes, polling forever with no error. A blind waiter that looks healthy.
+
+- **The waiter watched a dead agent and missed the live one** (#167). It was
+  launched with an agent last seen in May while a live agent went unwatched:
+  36 notifications delivered to it, **zero with receipt recorded**, for hours.
+  Now filters by last-seen (30-day window, **fails open** — watching a dead
+  inbox costs one poll; missing a live one is the failure this feature exists
+  to prevent).
+
+- **An empty `agent_id` reported an empty inbox.** The anti-spoofing guard
+  blanks an LLM-supplied id — correct — and five implementations then rendered
+  that blank as "no mail". An agent that trusts the answer silently drops work
+  addressed to it. Now refuses loudly, through a single shared owner rather
+  than the same check copied five times.
+
+- **The chatlog lane was missing the `vector_kind` port** (#165), so every
+  embedding write routed there raised `OperationalError`. 55 turns sat in spill
+  quarantine unnoticed on macOS. A new parity test guards the whole class,
+  diffing shared-table columns across both migration lanes.
+
+- **A pre-#142 nested venv survived upgrades and silently killed services**
+  (#164). It is a `--copies` venv pinned to an exact interpreter patch version,
+  so a Homebrew point-release moved out from under it and two launchd services
+  died on every launch with `dyld: Library not loaded`, exit signal 6 —
+  silently, while status reported HEALTHY.
+
+- **Task registration trusted `schtasks`' exit code** without verifying the
+  task exists (#161).
+
+### Changed
+
+- **The PostgreSQL CI lane now actually runs PostgreSQL** (#160). It set the
+  warehouse DSN but never `M3_DB_BACKEND`, so a job titled "PostgreSQL lane"
+  resolved the seam to `sqlite` and reported green — a declared guarantee with
+  no enforcement site. Its probe checked that the *cluster* was reachable,
+  which is adjacent: a cluster can be perfectly reachable while the code under
+  test never speaks to it.
+
+  It also ran only `-m requires_pg`: **102 of 4,307 tests (2.4%)**. The other
+  4,205 are not SQLite-specific — they exercise the storage seam against
+  whichever backend is configured, and had never run against PostgreSQL in CI.
+  That gap is exactly where #171 lived.
+
+  The lane now asserts the resolved backend is `postgres` (and exits nonzero if
+  not) and runs the full suite: **4,200 collected, a 41× increase.** It stays
+  advisory for now — it surfaced 16 real failures on its first honest run, and
+  making it blocking in the same change invites disabling it on the first flake.
+
+- **CI runs on `main` pushes, not only pull requests** (#147).
+
+### Security
+
+- **Bandit reported "No issues identified" over code it never read.** A single
+  unparseable file is skipped silently and the exit code stays 0 — and `-q`
+  hides the "Files skipped" line entirely. CI gated on that exit code. The step
+  now parses the JSON report and fails on any scan error: an unscanned file is
+  not a clean file.
+
+- **Example manifests: 20 OSV findings → 0.** They declared only open version
+  floors, so the scanner resolved and reported vulnerable transitive versions
+  that appear nowhere in the repo — a finding nobody could act on, recurring on
+  every scan. Security floors added to both manifests, with each pin verified
+  installable and the full resolution re-checked.
+
+- **`CVE-2026-59890` (setuptools) assessed and accepted.** It surfaced only
+  after the scanner pipeline stopped auditing a single manifest chosen by
+  `find | head -1` (which was an example, never the root manifest — coverage
+  went from 8 to 261 packages). The flaw affects `MANIFEST.in` handling when
+  **building an sdist on macOS**; m3's releases are built on `ubuntu-latest`, so
+  it cannot reach a shipped artifact. Revisit trigger recorded in-file.
+
+### Verification
+
+Both backends we ship by contract, not just the convenient one:
+
+```
+SQLite        4,153 passed · 157 skipped
+PostgreSQL    4,152 passed ·  51 skipped   (real PG 16.15; was 16 FAILED)
+ruff clean · mypy clean
+Bandit        0 findings · 0 skipped · 99,729 lines
+Linux         verified on a real Debian 13 / systemd 257 host
+```
+
+Every new guard was mutation-tested — a violation was planted and the guard
+watched to trip — because a guard that cannot demonstrate a catch is
+indistinguishable from one that is blind.
+
+---
+
+## [2026.9.12.0] — 2026-09-12 — the waiter, and the console flashes
+
+### Added
+
+- **WAL-triggered notification waiter, registered as an OS task by the
+  installer** (#158, #162, #163). A long-lived supervisor that wakes on store
+  activity instead of polling, with heartbeat-based wedge detection and a
+  child process that owns the database framework — so the supervisor itself
+  stays stdlib-only and survives a `pipx upgrade`.
+
+### Fixed
+
+- **`--help` crashed on a literal `%` in the `--ack` help text.**
+- **Console-window flashes on Windows**: `run_cmd` now passes
+  `CREATE_NO_WINDOW` (#154).
+
+### Changed
+
+- **The tool-catalog drift gate covers every `bin/` and `scripts/` source**
+  (#152, #156), so a generated page can no longer silently lag its source.
+- **Example dependency pins updated** for the mac-agent sample (#155).
+- **Multi-agent notification delivery documented with measured numbers**
+  (#157).
+
+---
+
 ## [2026.9.11.1] — 2026-09-12 — upgrading, and the handoffs that were silently dropping
 
 One new tool, three silent-failure fixes, and the docs correction that

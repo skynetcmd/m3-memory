@@ -2,4 +2,12 @@ fastapi>=0.136.1,<1
 uvicorn[standard]>=0.46.0,<1
 httpx>=0.28.1,<1
 sentence-transformers>=5.4.1,<6
+# Floors below are SECURITY floors, not feature floors: they exclude the
+# versions OSV flags in this file's transitive tree (measured 2026-09-12).
+# Without them a fresh install resolves to the vulnerable version and the
+# scan reports it against THIS file every time -- a finding nobody can act
+# on, because there was no pin here to bump.
+torch>=2.13.0                # OSV: 4 vulns <2.10.0
+transformers>=5.10.0         # OSV: 2 vulns <5.10.0
+idna>=3.15                   # OSV: 2 vulns <3.15
 python-dotenv>=1.2.2,<2

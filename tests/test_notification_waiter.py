@@ -242,8 +242,37 @@ def test_no_bare_m3_and_no_hardcoded_interpreter_paths():
     """
     src = _SRC.read_text(encoding="utf-8")
     assert '"m3", "admin"' not in src, "bare `m3` on PATH ignores M3_ENGINE_ROOT"
-    assert "pipx" not in src, "hardcoded interpreter path"
-    assert "Users" not in src.replace("Users of", ""), "a real home path leaked in"
+
+    # Scan CODE, not prose. These were substring checks over the whole file, so
+    # the word "pipx" in a DOCSTRING -- explaining why the supervisor stays
+    # stdlib-only to survive `pipx upgrade` -- failed the test with
+    # "hardcoded interpreter path" while no path was hardcoded anywhere.
+    #
+    # A check that fires when nothing is wrong is a §3 violation in its own
+    # right: it trains you to edit the comment to appease the guard. And it is
+    # the same mistake the note below already records -- pinning TEXT instead of
+    # the INVARIANT. The invariant is about string literals the code evaluates,
+    # so ast gives exactly those and nothing else.
+    import ast as _ast
+
+    literals = [
+        n.value for n in _ast.walk(_ast.parse(src))
+        if isinstance(n, _ast.Constant) and isinstance(n.value, str)
+    ]
+    docstrings = set()
+    for node in _ast.walk(_ast.parse(src)):
+        if isinstance(node, (_ast.Module, _ast.FunctionDef,
+                             _ast.AsyncFunctionDef, _ast.ClassDef)):
+            doc = _ast.get_docstring(node, clean=False)
+            if doc is not None:
+                docstrings.add(doc)
+    code_literals = [lit for lit in literals if lit not in docstrings]
+
+    for lit in code_literals:
+        assert "pipx" not in lit, f"hardcoded interpreter path in literal {lit!r}"
+        assert "Users" not in lit.replace("Users of", ""), (
+            f"a real home path leaked into literal {lit!r}"
+        )
     # Count the SUBPROCESS invocations, do not require a minimum of them.
     #
     # This asserted >= 2 and went red when the Option D work moved unread_ids

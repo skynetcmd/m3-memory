@@ -66,10 +66,68 @@ def log(msg): print(f"[setup] {msg}", file=sys.stderr)
 def run(*args, **kw):
     subprocess.run(args, check=True, **kw)
 
+def _nested_venv_path() -> "pathlib.Path | None":
+    """The doomed venv a pre-#142 installer built INSIDE the installed payload.
+
+    Returns the path if it exists, else None. Never raises -- this runs during
+    an upgrade and must not be the thing that breaks one.
+    """
+    try:
+        import m3_memory
+        pkg = pathlib.Path(m3_memory.__file__).resolve().parent
+    except Exception:  # noqa: BLE001
+        return None
+    nested = pkg / ".venv"
+    return nested if nested.is_dir() else None
+
+
+def remove_stale_nested_venv(dry_run: bool = False) -> "str | None":
+    """Remove a pre-#142 venv nested inside site-packages/m3_memory.
+
+    WHY THIS EXISTS SEPARATELY FROM #142. The installer no longer CREATES this
+    (setup_memory.py gates on `_INSTALLED`, shipped in #142 and present in
+    2026.9.12.0). But nothing REMOVED the one an older install left behind, and
+    it is not inert: it is a `--copies` venv pinned to an exact interpreter
+    patch version.
+
+    Measured on macOS 2026-09-12: Homebrew moved python@3.14 from 3.14.6 to
+    3.14.7, and two launchd services whose ProgramArguments still pointed into
+    that venv died on every launch with
+
+        dyld: Library not loaded: .../Cellar/python@3.14/3.14.6/...
+
+    exit signal 6, silently, while `m3 status` reported HEALTHY -- because the
+    check confirmed the plist was REGISTERED, never that the process ran.
+
+    Returns a description of what it did (or would do), or None if there was
+    nothing to remove. Best-effort by contract: a failure to delete is reported
+    to the caller, never raised, because a stale venv is a latent hazard and a
+    broken upgrade is an immediate one.
+    """
+    nested = _nested_venv_path()
+    if nested is None:
+        return None
+    if dry_run:
+        return f"would remove stale nested venv: {nested}"
+    try:
+        import shutil as _shutil
+        _shutil.rmtree(nested)
+    except Exception as exc:  # noqa: BLE001
+        return (
+            f"could NOT remove stale nested venv {nested}: {exc!r} -- remove it "
+            f"by hand; a service pointing into it will die on the next "
+            f"interpreter patch bump"
+        )
+    return f"removed stale nested venv: {nested}"
+
 # 1. Create venv — only for a source checkout; an installed payload reuses the
 #    interpreter that launched us (see the resolution note above).
 if _INSTALLED:
     log(f"Installed layout detected; using the running interpreter {PY}")
+    # Sweep the pre-#142 artifact if one survived from an older install (#164).
+    _swept = remove_stale_nested_venv()
+    if _swept:
+        log(_swept)
 elif not PY.exists():
     log(f"Creating virtual environment at {VENV} ...")
     run(sys.executable, "-m", "venv", str(VENV))
