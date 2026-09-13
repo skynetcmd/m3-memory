@@ -53,12 +53,46 @@ def _resolve_python_cmd(m3_repo_root: str) -> str:
     else:
         venv_py = os.path.join(m3_repo_root, ".venv", "bin", "python")
     if os.path.exists(venv_py) and not _is_installed_layout(m3_repo_root):
-        return venv_py.replace("\\", "/")
+        return _windowless(venv_py).replace("\\", "/")
     if sys.executable and _is_abs_any(sys.executable) and os.path.exists(sys.executable):
-        return sys.executable.replace("\\", "/")
+        return _windowless(sys.executable).replace("\\", "/")
     return "python" if os.name == "nt" else (
         "python3" if shutil.which("python3") else "python"
     )
+
+
+def _windowless(interpreter: str) -> str:
+    """Prefer ``pythonw.exe`` for a CLIENT-SPAWNED process on Windows (#153).
+
+    Everything this resolver feeds — MCP servers, capture hooks, the statusline
+    — is launched by the agent client with **pipes attached**, and never by a
+    human at a prompt. ``python.exe`` is a console-subsystem binary, so Windows
+    allocates a console for each one and the user sees a window flash.
+
+    MEASURED before changing this, because the obvious objection is that
+    ``pythonw.exe`` has no stdout and these are stdio transports. That is true
+    only when NO pipe is attached. With pipes — which is always, here — it
+    behaves identically. Both 2026-09-13, same scripts, same venv::
+
+        python.exe   grok_bridge.py  -> MCP handshake replied: True
+        pythonw.exe  grok_bridge.py  -> MCP handshake replied: True
+
+        python.exe   session_start_capture_check.py -> rc=0, 97B stdout
+        pythonw.exe  session_start_capture_check.py -> rc=0, 97B stdout (identical)
+
+    A raw ``sys.stdout.write`` + ``flush`` also succeeds under pythonw.exe when
+    the parent captures it; ``sys.stdout`` is a normal TextIOWrapper, not None.
+
+    No-op off Windows and when the sibling is missing: returns the interpreter
+    unchanged rather than inventing a path that may not exist.
+    """
+    if os.name != "nt":
+        return interpreter
+    directory, name = os.path.split(interpreter)
+    if not name.lower().startswith("python") or name.lower().startswith("pythonw"):
+        return interpreter
+    cand = os.path.join(directory, name.lower().replace("python", "pythonw", 1))
+    return cand if os.path.isfile(cand) else interpreter
 
 
 def _hook_env_prefix(engine_root: str, config_root: str) -> str:

@@ -12,9 +12,13 @@ reordered default:
     diagnostics silently — worse than the cosmetic flash, and harder to notice;
   * a genuinely background spawn has no reader, so the flash is pure noise.
 
-And it must NOT be applied to stdio MCP servers at all: they speak the protocol
-over stdout (`grok_bridge.py:11` — "stdout is the MCP stdio transport
-channel"), so `pythonw.exe` there kills the transport outright (#153).
+A CORRECTION lives here too. This file originally said `pythonw.exe` must
+never be applied to stdio MCP servers, because they speak the protocol over
+stdout. That is wrong: `pythonw.exe` has no stdout only when NO pipe is
+attached. Measured 2026-09-13 with pipes -- which is always, for a
+client-spawned server -- it writes to stdout identically and completes a full
+MCP handshake. #153 is fixed on that basis; see
+tests/test_windowless_client_spawns.py.
 """
 from __future__ import annotations
 
@@ -83,14 +87,24 @@ def test_posix_is_unaffected(monkeypatch, tmp_path):
     assert _platform.python_exe(windowless=True) == _platform.python_exe()
 
 
-def test_stdio_mcp_bridges_are_not_registered_windowless():
-    """THE thing that must never be "fixed" by this flag.
+def test_a_registered_mcp_interpreter_can_serve_stdio():
+    """Whatever interpreter the MCP registrations name, it must be able to
+    speak the stdio transport.
 
-    These bridges speak MCP over stdout. pythonw.exe has no stdout, so pointing
-    a registration at it trades a 100ms flash for four silently dead servers.
+    This test previously asserted the OPPOSITE -- that no registration may use
+    `pythonw.exe`, on the reasoning that "pythonw has no stdout". That
+    reasoning was wrong, and I closed #153 as won't-fix on it without checking.
+    Measured 2026-09-13: with a pipe attached (which is always, for a
+    client-spawned server) pythonw.exe writes to stdout exactly like
+    python.exe, and completes a full MCP handshake. `sys.stdout` there is a
+    normal TextIOWrapper, not None; it is None only when NO pipe is attached.
+
+    So the invariant is not "which binary" -- it is "can it serve". Asserting
+    the binary name pinned a belief; this asserts the behaviour.
     """
     import json
     import pathlib
+    import subprocess
 
     cfg = pathlib.Path.home() / ".claude.json"
     if not cfg.exists():
@@ -100,16 +114,16 @@ def test_stdio_mcp_bridges_are_not_registered_windowless():
     except Exception:
         pytest.skip("~/.claude.json is not readable JSON")
 
-    bad = []
+    interpreters = set()
 
     def walk(o):
         if isinstance(o, dict):
             for key, val in o.items():
                 if key == "mcpServers" and isinstance(val, dict):
-                    for name, spec in val.items():
+                    for spec in val.values():
                         cmd = (spec or {}).get("command") or ""
-                        if "pythonw" in str(cmd).lower():
-                            bad.append(f"{name}: {cmd}")
+                        if "python" in str(cmd).lower():
+                            interpreters.add(str(cmd))
                 else:
                     walk(val)
         elif isinstance(o, list):
@@ -117,7 +131,18 @@ def test_stdio_mcp_bridges_are_not_registered_windowless():
                 walk(v)
 
     walk(data)
-    assert not bad, (
-        "stdio MCP server(s) registered with pythonw.exe, which has no stdout "
-        f"-- the transport is dead: {bad}"
-    )
+    if not interpreters:
+        pytest.skip("no python-based MCP servers registered here")
+
+    for exe in sorted(interpreters):
+        if not os.path.isfile(exe):
+            continue
+        r = subprocess.run(
+            [exe, "-c", "import sys; sys.stdout.write('OK'); sys.stdout.flush()"],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert r.returncode == 0 and r.stdout == "OK", (
+            f"{exe} cannot write to a captured pipe (rc={r.returncode}, "
+            f"stdout={r.stdout!r}) -- every stdio MCP server registered with it "
+            f"is dead"
+        )
