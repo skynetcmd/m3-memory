@@ -56,9 +56,21 @@ def test_injecting_tool_is_still_marked_as_such(poll_spec):
 
 def test_llm_path_cannot_spoof_another_agent(poll_spec):
     """m3_call passes agent_id="" and does NOT opt in, so a caller-supplied
-    agent_id must be discarded -- otherwise an LLM reads anyone's inbox."""
-    out = str(_call(poll_spec, {"agent_id": "someone-else", "unread_only": False},
-                    agent_id=""))
+    agent_id must be discarded -- otherwise an LLM reads anyone's inbox.
+
+    The blanked id then REACHES the impl, which refuses it (ValueError) rather
+    than rendering "Notifications for : (empty)". That empty rendering is what
+    this test used to observe, and it was a §3 false negative: an agent polling
+    through m3_call read "no mail" while 10 notifications sat unread. So assert
+    the INVARIANT -- the spoofed id never leaks, by any path -- not the
+    particular string the old behaviour produced.
+    """
+    try:
+        out = str(_call(poll_spec, {"agent_id": "someone-else", "unread_only": False},
+                        agent_id=""))
+    except ValueError as e:
+        out = str(e)
+        assert "requires an agent_id" in out, f"unexpected refusal: {out}"
     assert "someone-else" not in out, (
         "LLM path leaked a caller-supplied agent_id -- spoofing is possible"
     )

@@ -504,13 +504,27 @@ def _readme_test_floors() -> list[int]:
 
 
 def _count_test_functions() -> int:
-    """`def test_` functions across tests/ -- environment-independent."""
+    """`def test_` / `async def test_` functions across tests/.
+
+    Counts BOTH forms. It used to match only `def test_`, so all 244 async
+    tests were invisible: this counter said 2,965 while
+    `test_doc_fact_drift.py` (regex, counts both) said 3,209 -- two guards over
+    the same fact disagreeing by 8%. The undercount made an HONEST README claim
+    fail as "overstates the suite", which pushes you to lower a truthful number
+    (measured 2026-09-12).
+
+    Environment-independent by design: source text, never collection, so it
+    cannot drift with installed extras or skips.
+    """
     total = 0
     for root, _dirs, files in os.walk(os.path.join(_ROOT, "tests")):
         for fn in files:
             if fn.startswith("test_") and fn.endswith(".py"):
                 with open(os.path.join(root, fn), encoding="utf-8", errors="replace") as fh:
-                    total += sum(1 for ln in fh if ln.lstrip().startswith("def test_"))
+                    for ln in fh:
+                        stripped = ln.lstrip()
+                        if stripped.startswith(("def test_", "async def test_")):
+                            total += 1
     return total
 
 
