@@ -43,44 +43,62 @@ if _BIN not in sys.path:
 import generate_configs as gc  # noqa: E402
 
 
+def _as_windows(monkeypatch, present: "set[str]") -> None:
+    """Make `_windowless` take its Windows branch, WITHOUT forcing os.name.
+
+    `monkeypatch.setattr(os, "name", "nt")` looks like the obvious way and is a
+    trap on POSIX: `pathlib.Path()` picks PosixPath vs WindowsPath from
+    `os.name` AT CONSTRUCTION TIME, so every Path built while it is live becomes
+    a WindowsPath and raises NotImplementedError. conftest.py documents this at
+    length and actively RESTORES os.name before each report is rendered -- which
+    silently undid the patch mid-test and made these tests fail on Linux and
+    macOS while passing on Windows (where os.name is natively "nt", so the
+    monkeypatch was a no-op).
+
+    Patching the module's own lookups instead is what the rest of the suite
+    already does (see test_cross_platform_config), and it works identically on
+    every host.
+    """
+    monkeypatch.setattr(gc, "_is_windows", lambda: True)
+    monkeypatch.setattr(gc.os.path, "isfile", lambda p: str(p).replace("\\", "/") in present)
+
+
+_SCRIPTS = "C:/venv/Scripts"
+
+
 @pytest.fixture
-def win_scripts(tmp_path, monkeypatch):
-    d = tmp_path / "Scripts"
-    d.mkdir()
-    for n in ("python.exe", "pythonw.exe"):
-        (d / n).write_bytes(b"")
-    monkeypatch.setattr(os, "name", "nt")
-    return d
+def win_scripts(monkeypatch):
+    """A simulated Windows venv holding BOTH interpreters."""
+    _as_windows(monkeypatch, {f"{_SCRIPTS}/python.exe", f"{_SCRIPTS}/pythonw.exe"})
+    return _SCRIPTS
 
 
 def test_console_interpreter_is_swapped_for_the_gui_one(win_scripts):
-    got = gc._windowless(str(win_scripts / "python.exe"))
+    got = gc._windowless(f"{win_scripts}/python.exe")
     assert os.path.basename(got).lower() == "pythonw.exe", got
 
 
 def test_it_is_idempotent(win_scripts):
     """Applying it twice must not produce `pythonww.exe`."""
-    once = gc._windowless(str(win_scripts / "python.exe"))
+    once = gc._windowless(f"{win_scripts}/python.exe")
     assert gc._windowless(once) == once
 
 
-def test_a_missing_sibling_leaves_the_interpreter_alone(tmp_path, monkeypatch):
+def test_a_missing_sibling_leaves_the_interpreter_alone(monkeypatch):
     """Never invent a path. A venv without pythonw.exe must keep working."""
-    d = tmp_path / "Scripts"
-    d.mkdir()
-    (d / "python.exe").write_bytes(b"")
-    monkeypatch.setattr(os, "name", "nt")
-    assert gc._windowless(str(d / "python.exe")) == str(d / "python.exe")
+    _as_windows(monkeypatch, {f"{_SCRIPTS}/python.exe"})
+    src = f"{_SCRIPTS}/python.exe"
+    assert gc._windowless(src) == src
 
 
 def test_posix_is_untouched(monkeypatch):
     """pythonw is a Windows concept; this must be inert elsewhere."""
-    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(gc, "_is_windows", lambda: False)
     assert gc._windowless("/usr/bin/python3") == "/usr/bin/python3"
 
 
 def test_a_non_python_command_is_not_rewritten(win_scripts):
-    assert gc._windowless(str(win_scripts / "node.exe")).endswith("node.exe")
+    assert gc._windowless(f"{win_scripts}/node.exe").endswith("node.exe")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows-only behaviour")

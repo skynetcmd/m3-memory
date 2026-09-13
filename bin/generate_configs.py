@@ -61,6 +61,25 @@ def _resolve_python_cmd(m3_repo_root: str) -> str:
     )
 
 
+def _is_windows() -> bool:
+    """Are we on Windows?
+
+    A named function, not an inline ``os.name == "nt"``, so a test can simulate
+    Windows by patching THIS rather than the global ``os.name``. Forcing
+    ``os.name`` is a trap on POSIX: ``pathlib.Path()`` picks PosixPath vs
+    WindowsPath from it at construction time, so every Path built while the
+    patch is live raises NotImplementedError. tests/conftest.py documents that
+    at length and actively RESTORES ``os.name`` before each report renders --
+    which silently undoes such a patch mid-test.
+
+    That is not hypothetical: it made this module's own tests pass on Windows
+    (where the patch is a no-op) and FAIL on the Linux and macOS CI lanes
+    (2026-09-13). Mirrors ``m3_memory._platform.is_windows`` for the same
+    reason.
+    """
+    return os.name == "nt"
+
+
 def _windowless(interpreter: str) -> str:
     """Prefer ``pythonw.exe`` for a CLIENT-SPAWNED process on Windows (#153).
 
@@ -86,7 +105,7 @@ def _windowless(interpreter: str) -> str:
     No-op off Windows and when the sibling is missing: returns the interpreter
     unchanged rather than inventing a path that may not exist.
     """
-    if os.name != "nt":
+    if not _is_windows():
         return interpreter
     directory, name = os.path.split(interpreter)
     if not name.lower().startswith("python") or name.lower().startswith("pythonw"):
