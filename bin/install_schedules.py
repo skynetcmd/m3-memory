@@ -1026,6 +1026,38 @@ def _platform_key() -> str:
     return "linux"
 
 
+def _service_exists(name: str) -> bool:
+    """Is `name` a service this platform actually knows about?
+
+    Exists because the exit code of `systemctl --user start` is NOT a reliable
+    signal for a missing unit -- it varies by systemd version. Both measured
+    2026-09-12, same command, same missing unit::
+
+        WSL Ubuntu 24.04 (systemd 255)  ->  exit 0   <- reports SUCCESS
+        Debian 13        (systemd 257)  ->  exit 5
+
+    So a returncode check silently accepts a wrong or Windows-shaped name on
+    the older release, and a typo reads there as a successful restart. Do not
+    "simplify" this away after testing on one box: the whole point is that the
+    two boxes disagree. LoadState is the version-independent discriminator --
+    `loaded` vs `not-found`.
+
+    FAILS OPEN on every other platform and on any probe error: schtasks and
+    launchctl do report a bad name through their exit code, so their callers
+    already have a working signal and must not be gated on this.
+    """
+    if _platform_key() != "linux":
+        return True
+    try:
+        probe = subprocess.run(
+            ["systemctl", "--user", "show", "-p", "LoadState", "--value", name],
+            capture_output=True, text=True,
+        )
+    except Exception:  # noqa: BLE001 — probe failure must not block a start
+        return True
+    return probe.stdout.strip() != "not-found"
+
+
 def _restart_command(name: str) -> list:
     """The per-platform command that starts an already-registered service."""
     key = _platform_key()
@@ -1065,23 +1097,14 @@ def restart_reaped_services(covered: set) -> None:
         if name in covered:
             continue  # already handled by the task loop
 
-        # systemd returns EXIT 0 for `start` on a unit that does not exist.
-        # Measured on WSL Ubuntu 24.04, 2026-09-12:
-        #     systemctl --user start m3-nonexistent.service -> exit 0
-        # So the returncode check below cannot detect a wrong name on Linux, and
-        # a typo would read as a successful restart. LoadState is the clean
-        # discriminator: `loaded` vs `not-found`.
-        if _platform_key() == "linux":
-            probe = subprocess.run(
-                ["systemctl", "--user", "show", "-p", "LoadState", "--value", name],
-                capture_output=True, text=True,
+        # A wrong name cannot be detected from the exit code on Linux — see
+        # _service_exists, the single owner of that discrimination.
+        if not _service_exists(name):
+            _safe_print(
+                f"{FAIL} Stopped {role} but unit {name!r} does not exist — it "
+                f"will stay DOWN. _ROLE_TO_SERVICE has the wrong Linux name."
             )
-            if probe.stdout.strip() == "not-found":
-                _safe_print(
-                    f"{FAIL} Stopped {role} but unit {name!r} does not exist — it "
-                    f"will stay DOWN. _ROLE_TO_SERVICE has the wrong Linux name."
-                )
-                continue
+            continue
 
         cmd = _restart_command(name)
         try:
@@ -1161,6 +1184,32 @@ def _verify_task_registered(name: str) -> "str | None":
         )
     return None
 
+def _service_name_for_task(task_name: str) -> "tuple[str | None, bool]":
+    """Translate a Windows TASK name to THIS platform's service name.
+
+    Returns ``(service_name, known)``. ``known`` distinguishes the two reasons
+    a name can be ``None``, which must never be rendered the same way:
+
+      * ``(None, True)``  -- the platform genuinely has no such service (e.g.
+        embed-server self-manages on Linux). Skip it, and say so.
+      * ``(None, False)`` -- we do not know how to name it here. LOUD: we were
+        asked to start something and cannot.
+
+    _SELF_HEAL_TASKS is keyed by the WINDOWS task name, so passing that name
+    straight to a platform command is the trap this function exists to close.
+    `systemctl --user start AgentOS_CognitiveLoop` does not fail -- measured
+    2026-09-12, systemd returns **exit 0 for a unit that does not exist** -- so
+    the caller would print "Started" over a service that was never touched.
+    That is strictly worse than the Windows-only FileNotFoundError it replaced,
+    because the crash was at least loud.
+    """
+    key = _platform_key()
+    for role, mapping in _ROLE_TO_SERVICE.items():
+        if mapping.get("win") == task_name:
+            return mapping.get(key), True
+    return None, False
+
+
 def _start_longlived_tasks(tasks: list) -> None:
     """Kick the ONSTART services so they run now, not at next boot/logon.
 
@@ -1170,21 +1219,45 @@ def _start_longlived_tasks(tasks: list) -> None:
 
     Best-effort by contract — a task that fails to start is reported, never
     fatal, because the registration itself already succeeded.
+
+    CROSS-PLATFORM. This was hardcoded to `schtasks /Run`, so `m3 setup` on
+    Linux reached "Verifying background services are running", called this, and
+    raised FileNotFoundError into a bare `except` -- the cognitive loop stayed
+    down with a warning. Reported from a real Linux install 2026-09-12.
+
+    The name is translated through _ROLE_TO_SERVICE, never reused verbatim:
+    see _service_name_for_task for why passing the Windows task name to
+    systemctl would be the worse bug.
     """
     for task in tasks:
         name = task["name"]
         if name not in _SELF_HEAL_TASKS:
             continue
+
+        service, known = _service_name_for_task(name)
+        if service is None:
+            if known:
+                # Real platforms differ; this is not a failure.
+                _safe_print(f"{OK} {name} is not a managed service here — skipping")
+            else:
+                _safe_print(
+                    f"{WARN} Cannot start {name}: no entry for it in "
+                    f"_ROLE_TO_SERVICE on {_platform_key()}. Add one, or it "
+                    f"stays DOWN."
+                )
+            continue
+
+        cmd = _restart_command(service)
         try:
-            res = subprocess.run(
-                ["schtasks", "/Run", "/TN", name],
-                capture_output=True, text=True,
-            )
+            res = subprocess.run(cmd, capture_output=True, text=True)
         except Exception as e:  # noqa: BLE001 — starting is best-effort
             _safe_print(f"{WARN} Could not start {name}: {type(e).__name__}: {e}")
             continue
-        if res.returncode == 0:
-            # schtasks /Run reports success as soon as it LAUNCHES the task -- it
+
+        # rc alone cannot tell us the start was real on Linux; _service_exists
+        # owns that discrimination.
+        if res.returncode == 0 and _service_exists(service):
+            # A start command reports success as soon as it LAUNCHES -- it
             # cannot know the process then died. On 2026-07-27 that produced a
             # clean "9/9 [OK]" while the dashboard had already exited 1, so the
             # install reported success over a dead service. Confirm the thing is
@@ -1196,12 +1269,13 @@ def _start_longlived_tasks(tasks: list) -> None:
                 _safe_print(f"{OK} Started {name} (serving)")
             else:
                 _safe_print(f"{WARN} Started {name} but it is NOT serving: {detail}")
-                _safe_print(f"        check its log, then: schtasks /Run /TN {name}")
+                _safe_print(f"        check its log, then: {' '.join(cmd)}")
         else:
-            err = (res.stderr or res.stdout).strip()
+            err = (res.stderr or res.stdout).strip() or (
+                f"{service!r} is not a known service on {_platform_key()}"
+            )
             _safe_print(f"{WARN} Registered {name} but could not start it: {err}")
-            _safe_print(f"        start it with: schtasks /Run /TN {name}")
-
+            _safe_print(f"        start it with: {' '.join(cmd)}")
 
 
 def _agent_is_live(agent_id: str, max_age_days: int = 30) -> bool:

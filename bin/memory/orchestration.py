@@ -259,6 +259,35 @@ def agent_type_of(agent_id: str) -> str:
     return split_agent_id(agent_id)[0]
 
 
+def require_agent_id(agent_id: str, tool: str) -> str:
+    """Refuse an empty agent_id instead of querying nobody's inbox.
+
+    An empty id is not "no mail" -- it is "identity refused". It reaches an impl
+    when the anti-spoofing guard in `catalog.dispatch` blanks an LLM-supplied
+    id: an LLM-facing caller (`m3_call`) may not address an arbitrary agent
+    unless the entry point opts in via `allow_caller_agent_id` (#144).
+
+    Rendering those two as the same empty result is a §3 false negative on the
+    one check an agent uses to decide whether it has work. Measured 2026-09-12:
+    `m3_call notifications_poll agent_id=claude-code` returned "(empty)" while
+    the direct impl returned 10 notifications, one an unread handoff.
+
+    ONE owner rather than the same `if not agent_id` at five call sites -- a
+    copied predicate is the defect independent of correctness (§10a), and the
+    five would drift the moment one gained a nuance.
+    """
+    if not agent_id:
+        raise ValueError(
+            f"{tool} requires an agent_id. It was empty, which means the "
+            f"caller's identity was refused by the anti-spoofing guard -- NOT "
+            f"that the inbox is empty. An LLM-facing caller (m3_call) cannot "
+            f"address an arbitrary agent; use the CLI (`m3 admin {tool} "
+            f"--agent-id <id>`) or an entry point that sets "
+            f"allow_caller_agent_id."
+        )
+    return agent_id
+
+
 def _addressing_predicate(agent_id: str, param: str) -> "tuple[str, tuple]":
     """SQL fragment + params selecting the rows an inbox read should see.
 
@@ -310,6 +339,7 @@ def notifications_unread_ids_impl(agent_id: str) -> list[int]:
     Returns a list of unread notification IDs for the given agent.
     Returns structured data rather than prose, strictly conforming to DESIGN_PHILOSOPHIES.md (3).
     """
+    require_agent_id(agent_id, "notifications_unread_ids")
     p = dialect().param()
     pred, params = _addressing_predicate(agent_id, p)
     with _db() as db:
@@ -321,7 +351,25 @@ def notifications_unread_ids_impl(agent_id: str) -> list[int]:
     return [row[0] for row in rows]
 
 def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
-    """Retrieves notifications for an agent."""
+    """Retrieves notifications for an agent.
+
+    An empty `agent_id` is REFUSED, not queried. It reaches here when the
+    anti-spoofing guard in `catalog.dispatch` blanks an LLM-supplied id (an
+    LLM-facing caller such as `m3_call` may not poll an arbitrary inbox unless
+    the entry point opts in via `allow_caller_agent_id`) -- so it means
+    "identity refused", never "this agent has no mail".
+
+    Reporting that as `Notifications for : (empty)` was a §3 false negative on
+    the single check an agent uses to decide whether it has work. Measured
+    2026-09-12: `m3_call notifications_poll agent_id=claude-code` returned
+    "(empty)" while the direct impl returned 10 notifications, one of them an
+    unread handoff. An agent that trusts the empty answer silently drops work
+    that was addressed to it.
+
+    The two conditions are not distinguishable downstream, so they must not
+    share a rendering.
+    """
+    require_agent_id(agent_id, "notifications_poll")
     p = dialect().param()
     _pred, _addr = _addressing_predicate(agent_id, p)
     where_clause = f"WHERE {_pred}"
@@ -366,6 +414,7 @@ def notifications_mark_received_impl(agent_id: str) -> str:
     the most recent poll -- which is the number a receipt SLA is measured
     against.
     """
+    require_agent_id(agent_id, "notifications_mark_received")
     now = datetime.now(timezone.utc).isoformat()
 
     with _db() as db:
@@ -399,6 +448,7 @@ def notifications_ack_impl(notification_id: int) -> str:
 
 def notifications_ack_all_impl(agent_id: str) -> str:
     """Marks all unread notifications for an agent as read."""
+    require_agent_id(agent_id, "notifications_ack_all")
     now = datetime.now(timezone.utc).isoformat()
 
     with _db() as db:

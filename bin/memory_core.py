@@ -1459,6 +1459,8 @@ def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
 
 def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
     """Retrieves handoff messages for an agent, optionally filtered to unread."""
+    from memory.orchestration import require_agent_id
+    require_agent_id(agent_id, "memory_inbox")
     from memory.backends import dialect as _dialect
     _p = _dialect().param()
     # Build WHERE clause dynamically
