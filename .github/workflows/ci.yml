@@ -138,6 +138,19 @@ jobs:
   # and then failed the 3.11 lane on THREE consecutive main pushes before
   # anyone looked. A version we promise but never gate on will break silently.
   # If requires-python moves, move this cell with it.
+  #
+  # THE SAME THING HAPPENED AGAIN, 2026-09-13 — this time to the version list.
+  # pyproject classifies 3.12/3.13/3.14/3.15 as supported, but the matrix ran
+  # 3.12/3.13/3.15: **3.14, the current stable and the version most users are
+  # actually on, was claimed and never gated.** Meanwhile the 3.15 cell failed
+  # at setup (rc-only, see allow-prereleases below) on every push, so the job
+  # was permanently red and three real CI failures went unnoticed until someone
+  # read the Actions tab by hand.
+  #
+  # KEEP THIS LIST EQUAL TO pyproject's "Programming Language :: Python ::"
+  # classifiers. A red-forever lane is worse than no lane: it trains everyone
+  # to ignore the one that matters (DESIGN_PHILOSOPHIES §3 — a false alarm is
+  # a violation, not a safe default).
   matrix-setup:
     name: Resolve test matrix
     runs-on: ubuntu-latest
@@ -149,7 +162,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo 'matrix={"os":["ubuntu-latest"],"python-version":["3.12"]}' >> "$GITHUB_OUTPUT"
           else
-            echo 'matrix={"os":["ubuntu-latest","macos-latest","windows-latest"],"python-version":["3.12","3.13","3.15"]}' >> "$GITHUB_OUTPUT"
+            echo 'matrix={"os":["ubuntu-latest","macos-latest","windows-latest"],"python-version":["3.12","3.13","3.14","3.15"]}' >> "$GITHUB_OUTPUT"
           fi
 
   test:
@@ -169,6 +182,20 @@ jobs:
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
         python-version: ${{ matrix.python-version }}
+        # 3.15 is in its release-candidate window (3.15.0 final: 2026-10-01,
+        # PEP 790). The runners publish 14 builds of it, but EVERY ONE is
+        # stable=false, and a bare "3.15" matches stable builds only — so
+        # setup-python failed with "The version '3.15' ... was not found"
+        # before a single test ran, on every push, on all three OSes.
+        #
+        # allow-prereleases resolves it to the newest rc today and switches to
+        # the stable build automatically once it ships, with no follow-up edit.
+        # Pinning "3.15.0-rc.2" instead would go stale the moment it lands.
+        #
+        # It is deliberately NOT scoped to 3.15: the flag only has an effect
+        # when no stable build matches, so 3.12/3.13/3.14 keep resolving to
+        # their stable releases exactly as before.
+        allow-prereleases: true
         cache: 'pip'
 
     - name: Install Dependencies
