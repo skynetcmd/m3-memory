@@ -30,6 +30,7 @@ if _ROOT not in sys.path:
 
 from m3_memory import _platform  # noqa: E402
 
+
 @pytest.fixture
 def fake_shim(tmp_path, monkeypatch):
     """Pretend we were launched by the `m3.exe` console-script shim, with both
