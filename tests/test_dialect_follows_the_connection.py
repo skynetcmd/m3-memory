@@ -93,10 +93,22 @@ def test_an_unknown_driver_falls_back_rather_than_raising():
 def test_a_real_postgres_cursor_gets_the_postgres_param(monkeypatch):
     """The other half: the detector must actually DISCRIMINATE. Without this,
     a function that always returned '?' would pass every test above."""
-    import psycopg
+    # Either driver proves the point; take whichever this environment has.
+    # CI installs psycopg2-binary (what postgres_backend itself uses), while a
+    # dev box may have psycopg 3. Importing only one made this a hard FAILURE
+    # on the CI lane rather than a skip -- measured 2026-09-13.
+    driver = None
+    for mod in ("psycopg", "psycopg2"):
+        try:
+            driver = __import__(mod)
+            break
+        except ImportError:
+            continue
+    if driver is None:
+        pytest.skip("neither psycopg nor psycopg2 is installed")
 
     monkeypatch.setenv("M3_DB_BACKEND", "sqlite")  # global says the opposite
-    conn = psycopg.connect(os.environ["M3_PRIMARY_PG_URL"], connect_timeout=10)
+    conn = driver.connect(os.environ["M3_PRIMARY_PG_URL"], connect_timeout=10)
     try:
         assert dialect_for_connection(conn).param() == "%s"
         assert dialect_for_connection(conn.cursor()).param() == "%s"
