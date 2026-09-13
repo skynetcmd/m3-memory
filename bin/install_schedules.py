@@ -1204,6 +1204,35 @@ def _start_longlived_tasks(tasks: list) -> None:
 
 
 
+def _agent_is_live(agent_id: str, max_age_days: int = 30) -> bool:
+    """Has this agent checked in recently enough to be worth watching?
+
+    Best-effort and FAILS OPEN: if `last_seen` cannot be read or parsed, the
+    agent is treated as live. Watching a stale inbox wastes one poll; dropping
+    a live one loses messages silently, and the second is the failure mode this
+    whole feature exists to remove.
+    """
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        from memory.backends import dialect  # type: ignore
+        from memory.orchestration import _db  # type: ignore
+
+        with _db() as db:
+            ph = dialect().param()
+            rows = db.execute(
+                f"SELECT last_seen FROM agents WHERE agent_id = {ph}", (agent_id,)
+            ).fetchall()
+        if not rows or not rows[0]["last_seen"]:
+            return True
+        seen = datetime.fromisoformat(str(rows[0]["last_seen"]).replace("Z", "+00:00"))
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - seen) <= timedelta(days=max_age_days)
+    except Exception:  # noqa: BLE001 - fail OPEN, see docstring
+        return True
+
+
 def _waiter_agent_args() -> list:
     """`--agent-id X` per registered agent, for the notification waiter.
 
@@ -1220,7 +1249,18 @@ def _waiter_agent_args() -> list:
         import re as _re
 
         from memory.orchestration import agent_list_impl  # type: ignore
-        ids = _re.findall(r"\[([A-Za-z0-9_.-]+)\]", agent_list_impl("", "") or "")
+        # "@" is in the class: an agent id may be "type@instance" (#170), and a
+        # character class that excluded it would silently truncate every
+        # instance-addressed inbox to its bare type -- re-creating the shared
+        # inbox this scheme exists to split.
+        ids = _re.findall(r"\[([A-Za-z0-9_.~@+-]+)\]", agent_list_impl("", "") or "")
+        # Watch only agents that are ACTUALLY ACTIVE. A registry row is forever;
+        # a dead identity is not. On 2026-09-12 the waiter was launched with
+        # `antigravity-agent` (last seen in MAY) while the live agent `agy` went
+        # unwatched -- 36 notifications to it, ZERO with receipt recorded, for
+        # hours. Watching a dead inbox costs a poll; MISSING a live one is the
+        # failure this feature exists to prevent.
+        ids = [a for a in ids if _agent_is_live(a)] or ids
     except Exception:  # noqa: BLE001 - registry is best-effort at install time
         ids = []
     if not ids:

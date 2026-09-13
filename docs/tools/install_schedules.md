@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: 7ea320e02348
-mtime_utc: 2026-09-12T23:38:29.179981+00:00
-generated_utc: 2026-09-12T23:38:45.698503+00:00
+sha1: 1cd241493bf1
+mtime_utc: 2026-09-13T00:25:17.947867+00:00
+generated_utc: 2026-09-13T00:25:24.367615+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 1570)
+- `def main()` (line 1610)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -58,7 +58,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 - `subprocess.run()  → `['crontab', '-l']`` (line 61)
 - `subprocess.run()  → `['crontab', tmp_path]`` (line 114)
-- `subprocess.run()  → `['launchctl', 'list']`` (line 1485)
+- `subprocess.run()  → `['launchctl', 'list']`` (line 1525)
 - `subprocess.run()  → `['launchctl', 'load', dest]`` (line 163)
 - `subprocess.run()  → `['launchctl', 'load', dest]`` (line 215)
 - `subprocess.run()  → `['launchctl', 'load', dest]`` (line 324)
@@ -67,11 +67,11 @@ Uses project virtual environment paths and ensures log directories exist.
 - `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 323)
 - `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 341)
 - `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 355)
-- `subprocess.run()  → `['plutil', '-extract', 'KeepAlive', 'raw', '-o', '-', dest]`` (line 1498)
-- `subprocess.run()  → `['schtasks', '/Create', '/TN', task['name'], '/XML', xml_path, '/F']`` (line 1285)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 1265)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 1404)
-- `subprocess.run()  → `['schtasks', '/Query', '/TN', name, '/XML', 'ONE']`` (line 1419)
+- `subprocess.run()  → `['plutil', '-extract', 'KeepAlive', 'raw', '-o', '-', dest]`` (line 1538)
+- `subprocess.run()  → `['schtasks', '/Create', '/TN', task['name'], '/XML', xml_path, '/F']`` (line 1325)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 1305)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 1444)
+- `subprocess.run()  → `['schtasks', '/Query', '/TN', name, '/XML', 'ONE']`` (line 1459)
 - `subprocess.run()  → `['schtasks', '/Query', '/TN', name, '/XML']`` (line 1144)
 - `subprocess.run()  → `['schtasks', '/Run', '/TN', name]`` (line 1179)
 - `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 179)
@@ -84,7 +84,7 @@ Uses project virtual environment paths and ensures log directories exist.
 - `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-cognitive-loop.service']`` (line 234)
 - `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-dashboard.service']`` (line 180)
 - `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-loop-watchdog.timer']`` (line 271)
-- `subprocess.run()  → `['systemctl', '--user', 'is-active', unit]`` (line 1522)
+- `subprocess.run()  → `['systemctl', '--user', 'is-active', unit]`` (line 1562)
 - `subprocess.run()  → `['systemctl', '--user', 'show', '-p', 'LoadState', '--value', name]`` (line 1075)
 - `subprocess.run()  → `[probe, '-c', 'import m3_memory']`` (line 409)
 - `subprocess.run()  → `cmd`` (line 1088)
@@ -95,6 +95,8 @@ Uses project virtual environment paths and ensures log directories exist.
 ## Notable external imports
 
 - `m3_core.autonomy (ensure_autonomy_config)`
+- `memory.backends (dialect)`
+- `memory.orchestration (_db)`
 - `memory.orchestration (agent_list_impl)`
 
 ---

@@ -208,6 +208,83 @@ def agent_offline_impl(agent_id: str) -> str:
 
 # ── Notifications (4 functions) ───────────────────────────────────────────────────
 
+# ── Agent addressing: "type" or "type@instance" ───────────────────────────────
+#
+# `agent_id` was one flat identity with ONE ROW PER AGENT TYPE, so N running
+# instances of the same agent shared one inbox. Measured 2026-09-12 with two
+# sessions polling one identity:
+#
+#     session 1 sees: [856, 857]
+#     session 2 sees: [856, 857]     <- same items, duplicate work
+#     session 1 acks -> session 2 now sees: []   <- work silently vanished
+#
+# The second failure is the serious one: session 2 had already READ those items
+# and they disappeared mid-flight, with no error and no trace.
+#
+# The scheme is `agent_type@instance_id`. "@" was chosen by elimination, not
+# taste (see #170):
+#
+#   "-"  DISQUALIFIED: already inside 14 of 26 live ids, so `claude-code`
+#        would parse as type "claude", instance "code".
+#   ":"  DISQUALIFIED: on NTFS a ":" in a filename creates an ALTERNATE DATA
+#        STREAM rather than the file. m3 names spill files and logs after
+#        agents, so an id containing ":" writes data that is simply invisible.
+#        Verified through the Win32 API.
+#   "@"  CHOSEN: absent from every live id, already legal in m3's
+#        collection-path charset, not a shell metacharacter, and `user@host`
+#        makes the compound reading obvious.
+#
+# BACK-COMPAT IS THE POINT. `split_agent_id("claude-code")` returns
+# ("claude-code", None) -- a bare type is unchanged, so every existing caller
+# keeps working and instance addressing is purely additive. No migration, no
+# schema change, no flag day.
+
+_AGENT_SEP = "@"
+
+
+def split_agent_id(agent_id: str) -> "tuple[str, str | None]":
+    """('claude-code@abc', ) -> ('claude-code', 'abc'); ('claude-code',) -> (…, None).
+
+    maxsplit=1 so an instance id may itself contain "@" without the type
+    absorbing it.
+    """
+    if not agent_id or _AGENT_SEP not in agent_id:
+        return agent_id, None
+    head, _, tail = agent_id.partition(_AGENT_SEP)
+    return head, (tail or None)
+
+
+def agent_type_of(agent_id: str) -> str:
+    """The type half. `agent_type_of("claude-code@abc") == "claude-code"`."""
+    return split_agent_id(agent_id)[0]
+
+
+def _addressing_predicate(agent_id: str, param: str) -> "tuple[str, tuple]":
+    """SQL fragment + params selecting the rows an inbox read should see.
+
+    Two different questions, and conflating them is what made the original
+    behaviour the worst of both:
+
+      * a bare TYPE ("claude-code") is a FAN-OUT read -- it matches the type's
+        own inbox AND every instance of it, so a broadcast reaches all sessions
+        and a legacy caller keeps seeing everything it used to.
+      * a QUALIFIED id ("claude-code@abc") is a DIRECT read -- exactly that
+        instance, so one session's work cannot be claimed or acked by another.
+
+    The prefix match goes through the dialect seam (``literal_prefix_match``),
+    not a hand-built LIKE: the operator and the value rewrite are
+    backend-specific, and an agent id containing "%" or "_" must stay literal
+    rather than becoming a wildcard that matches other agents' inboxes.
+    §10a -- call sites express intent, the dialect renders SQL.
+    """
+    _t, instance = split_agent_id(agent_id)
+    if instance is not None:
+        return f"agent_id = {param}", (agent_id,)
+    frag, bound = dialect().literal_prefix_match(
+        "agent_id", param, agent_id + _AGENT_SEP
+    )
+    return f"(agent_id = {param} OR {frag})", (agent_id, bound)
+
 def notify_impl(agent_id: str, kind: str, payload: dict = None) -> str:
     """Sends a notification to an agent."""
     now = datetime.now(timezone.utc).isoformat()
@@ -234,19 +311,21 @@ def notifications_unread_ids_impl(agent_id: str) -> list[int]:
     Returns structured data rather than prose, strictly conforming to DESIGN_PHILOSOPHIES.md (3).
     """
     p = dialect().param()
+    pred, params = _addressing_predicate(agent_id, p)
     with _db() as db:
         rows = db.execute(
-            f"SELECT id FROM notifications WHERE agent_id = {p} "
+            f"SELECT id FROM notifications WHERE {pred} "
             f"AND read_at IS NULL ORDER BY id ASC",
-            (agent_id,),
+            params,
         ).fetchall()
     return [row[0] for row in rows]
 
 def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
     """Retrieves notifications for an agent."""
     p = dialect().param()
-    where_clause = f"WHERE agent_id = {p}"
-    params = [agent_id]
+    _pred, _addr = _addressing_predicate(agent_id, p)
+    where_clause = f"WHERE {_pred}"
+    params = list(_addr)
 
     if unread_only:
         where_clause += " AND read_at IS NULL"
@@ -291,10 +370,11 @@ def notifications_mark_received_impl(agent_id: str) -> str:
 
     with _db() as db:
         p = dialect().param()
+        pred, addr = _addressing_predicate(agent_id, p)
         cur = db.execute(
             f"UPDATE notifications SET received_at = {p} "
-            f"WHERE agent_id = {p} AND received_at IS NULL",
-            (now, agent_id)
+            f"WHERE {pred} AND received_at IS NULL",
+            (now, *addr)
         )
         rowcount = cur.rowcount
 
@@ -323,9 +403,14 @@ def notifications_ack_all_impl(agent_id: str) -> str:
 
     with _db() as db:
         p = dialect().param()
+        # Ack follows the SAME addressing rule as the read that produced the
+        # list: a qualified id acks only that instance's rows, a bare type acks
+        # the type and its instances. Any other pairing is how one session's
+        # ack empties another's inbox -- the silent-theft half of #170.
+        pred, addr = _addressing_predicate(agent_id, p)
         cur = db.execute(
-            f"UPDATE notifications SET read_at = {p} WHERE agent_id = {p} AND read_at IS NULL",
-            (now, agent_id)
+            f"UPDATE notifications SET read_at = {p} WHERE {pred} AND read_at IS NULL",
+            (now, *addr)
         )
         rowcount = cur.rowcount
 

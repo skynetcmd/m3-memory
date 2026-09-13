@@ -637,6 +637,46 @@ class Dialect:
         """Backend fragment for :meth:`glob_match` (post-validation)."""
         raise NotImplementedError("subclass must implement _glob_fragment()")
 
+    def literal_prefix_match(self, column: str, placeholder: str, prefix: str) -> "tuple[str, str]":
+        """A "column starts with this LITERAL prefix" fragment + bound value.
+
+        Returns ``(sql_fragment, bound_value)`` for the same reason
+        :meth:`glob_match` does: the caller supplies INTENT ("starts with
+        ``claude-code@``") and the dialect decides both the operator and how the
+        value must be rewritten. A call site that builds ``LIKE 'x%' ESCAPE
+        '\\'`` itself is a portability bug waiting for the next backend (§10a).
+
+        The subtlety this exists to own is that the prefix is LITERAL: agent ids
+        and similar keys routinely contain ``_``, which is a single-character
+        wildcard in SQL ``LIKE``. ``e2e_builder@%`` would match
+        ``e2eXbuilder@s1``. So every wildcard in the prefix is escaped before
+        the ``%`` is appended.
+
+        Verified on both backends 2026-09-12: ``LIKE ? ESCAPE '\\'`` matches
+        only ``we%rd@s1`` (not ``weXrd@s1``) on SQLite and PostgreSQL alike.
+        MariaDB spells LIKE the same way; a document store would not, which is
+        precisely why this is a seam method and not an f-string at the call
+        site.
+        """
+        if not column.isidentifier():
+            raise ValueError(f"column must be a bare identifier: {column!r}")
+        return self._literal_prefix_fragment(column, placeholder, prefix)
+
+    def _literal_prefix_fragment(self, column: str, placeholder: str, prefix: str) -> "tuple[str, str]":
+        """Backend fragment for :meth:`literal_prefix_match` (post-validation).
+
+        Concrete here rather than NotImplementedError: SQLite, PostgreSQL and
+        MariaDB all spell this identically, so a backend only overrides it if it
+        genuinely differs. Making every backend restate the same three lines
+        would be the duplication §10a warns about.
+        """
+        esc = (
+            prefix.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        return f"{column} LIKE {placeholder} ESCAPE '\\'", esc + "%"
+
     # -- temporal validity ---------------------------------------------------
     def temporal_open_clause(self, column: str, op: str) -> str:
         """A "validity bound is open OR satisfies `op`" WHERE fragment.
