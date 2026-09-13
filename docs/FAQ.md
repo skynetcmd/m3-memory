@@ -69,15 +69,17 @@ python bin/install_schedules.py --repair
 ## General
 
 ### Q: How do I update m3 to the latest version?
-**A:** If you installed via **pipx** (the common case), upgrade the package and then reconcile the payload:
+**A:** One command, on every OS:
 
 ```bash
-pipx upgrade m3-memory      # pull the latest release from PyPI
-m3 setup                    # re-wire agents/hooks + apply DB migrations
-m3 doctor                   # verify
+m3 upgrade
 ```
 
-> ⚠️ **`m3 update` is not a package upgrade.** It only re-syncs the payload/bridge to your **installed** version — it will not pull a newer release. Use `pipx upgrade m3-memory` for that. (As of **2026.8.19.3**, `m3 update` prints a nudge when PyPI has a newer version than you have installed.)
+It detects how m3 was installed (`pipx`, `pip`, `pip --user`, or a host plugin) and runs the right sequence: stop the DB writers, upgrade the package, `m3 setup`, `m3 doctor`. Add `--dry-run` to see the plan without changing anything.
+
+> ⚠️ **Do not reach for `pipx upgrade m3-memory` directly.** Against a **pip** install it exits 0 having upgraded **nothing**, which reads as success — you stay on the old version believing you upgraded. `m3 upgrade` detects the method instead of assuming it.
+
+> ⚠️ **`m3 update` is not a package upgrade.** It only re-syncs the payload/bridge to your **installed** version — it will not pull a newer release. Use `m3 upgrade` for that. (`m3 update` prints a nudge when PyPI has a newer version than you have installed.)
 
 Upgrading a **git checkout** instead? See the [Upgrade Guide](HOW-TO-UPGRADE.md).
 

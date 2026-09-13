@@ -4,7 +4,8 @@
 
 ### "I ran `pipx upgrade m3-memory` and nothing changed"
 - **Cause**: M3 was installed via standard `pip`, `pip --user`, or virtualenv rather than `pipx`. `pipx upgrade` exits with status 0 without modifying environments it does not manage.
-- **Solution**: Run `python bin/m3_upgrade.py` (or `python bin/m3_upgrade.py --dry-run` to inspect). The orchestrator automatically detects the active installation method (`pip`, `pipx`, `pip --user`, or plugin) and executes the correct upgrade steps.
+- **Solution**: Run `m3 upgrade` (or `m3 upgrade --dry-run` to inspect first). It detects the active installation method (`pip`, `pipx`, `pip --user`, or a host plugin) and executes the correct upgrade steps, identically on Windows, macOS and Linux. A host-plugin install is **refused** rather than guessed at, pointing you to the host's own update flow.
+- **From a git checkout** you can also invoke it directly: `python bin/m3_upgrade.py`.
 
 ---
 

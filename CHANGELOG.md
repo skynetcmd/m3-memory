@@ -37,6 +37,42 @@ and each had been reporting green.
 | "Notifications for : (empty)" | identity refused, rendered as an empty inbox |
 | "No issues identified" (Bandit) | a file it could not parse and silently skipped |
 
+### Added
+
+- **`m3 upgrade` — one command that upgrades m3 correctly on all three OSes.**
+
+  ```bash
+  m3 upgrade            # detect, stop, upgrade, re-wire, verify
+  m3 upgrade --dry-run  # print the plan, change nothing
+  ```
+
+  It detects how m3 was actually installed — `pipx`, `pip`, `pip --user`, or a
+  host plugin — and runs the right sequence: `m3 stop`, the package upgrade,
+  `m3 setup`, `m3 doctor`.
+
+  The orchestrator (`bin/m3_upgrade.py`) shipped in 2026.9.11.1, but **nothing
+  pointed at it**: `m3 --help`, the README, FAQ and the upgrade guide all
+  recommended bare `pipx upgrade m3-memory` instead. That command, run against
+  a **pip** install, exits 0 having upgraded **nothing** — which reads as
+  success, so you stay on the old version believing you upgraded. A correct
+  tool nobody can find does not prevent that; a discoverable one does.
+
+  The command is a **launcher, not an implementation**. The upgrade replaces the
+  very package the CLI is running from, so the work happens in a fresh process
+  that never imports `m3_memory`. On Windows that is a file-locking failure, not
+  a theoretical one: pip uninstalls before it installs, Windows holds an open
+  `.exe` against deletion, and the upgrade deletes the package and then fails —
+  leaving **no m3 installed**. A test asserts the orchestrator never imports the
+  package it replaces.
+
+  A host-plugin install is **refused**, pointing at the host's own update flow,
+  because running pip there fights whatever manages the plugin. An install it
+  cannot classify also refuses rather than guessing.
+
+  `m3 stop` and `m3 update` help text, `docs/HOW-TO-UPGRADE.md`, `docs/FAQ.md`
+  and `docs/TROUBLESHOOTING.md` now all point here instead of at a specific
+  package manager.
+
 ### Fixed
 
 - **`m3 setup` crashed on Linux and left the cognitive loop down** (#166).

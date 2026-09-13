@@ -268,17 +268,18 @@ def _warn_if_pypi_newer() -> None:
             # `m3 stop` quiesces the writers first, which makes the upgrade a
             # normal one. POSIX replaces a running binary's inode happily, so
             # the plain form stays correct there.
-            if os.name == "nt":
-                upgrade = ("       m3 stop                                     "
-                           "# release the file locks first\n"
-                           "       pipx upgrade m3-memory --pip-args=--no-cache-dir\n"
-                           "       m3 setup")
-            else:
-                upgrade = "       pipx upgrade m3-memory      # then: m3 setup"
+            # `m3 upgrade` now owns every caveat above: it DETECTS the install
+            # method (pipx / pip / pip --user / plugin) instead of assuming one,
+            # stops the writers, upgrades, re-wires and verifies — identically
+            # on all three OSes. Naming a specific package manager here was the
+            # bug: `pipx upgrade m3-memory` against a PIP install exits 0 having
+            # upgraded NOTHING, which reads as success.
+            upgrade = "       m3 upgrade      # detects pipx/pip, stops, upgrades, verifies"
             print(
                 f"\n[m3] A newer release is on PyPI: {latest} (you have {installed}).\n"
                 f"     `m3 update` only re-syncs the payload for your INSTALLED version —\n"
-                f"     it does NOT upgrade the package. To upgrade:\n"
+                f"     it does NOT upgrade the package. To upgrade (any OS, any\n"
+                f"     install method):\n"
                 f"{upgrade}",
                 file=sys.stderr,
             )
@@ -427,6 +428,82 @@ def _cmd_stop(args: argparse.Namespace) -> int:
               "lock. Re-run from an elevated shell.", file=sys.stderr)
         return 1
     return 0
+
+
+def _cmd_upgrade(args: argparse.Namespace) -> int:
+    """`m3 upgrade` — upgrade the PACKAGE, using the right command for how it
+    was actually installed.
+
+    Thin on purpose. The work lives in ``bin/m3_upgrade.py`` and is executed in
+    a FRESH PROCESS that never imports ``m3_memory``, because the upgrade
+    replaces the very package this function is running from. On Windows that is
+    a file-locking failure, not a theoretical one: pip uninstalls before it
+    installs, Windows holds an open ``.exe`` against deletion, and the upgrade
+    deletes the package and then fails -- leaving NO m3 installed.
+
+    So this is a LAUNCHER, not an implementation. Doing the upgrade inline here
+    would reintroduce exactly the hazard the standalone script exists to avoid.
+
+    Why the command exists at all: the script shipped in the payload but nothing
+    told anyone it was there. `m3 --help`, the README and HOW-TO-UPGRADE all
+    pointed at bare `pipx upgrade m3-memory` -- which, against a pip install,
+    exits 0 having upgraded NOTHING and reads as success. A correct tool nobody
+    can find does not prevent that; a discoverable one does.
+    """
+    import subprocess  # nosec B404 - relaunches our own script, argv list, no shell
+
+    # bin_dir() is the SINGLE owner of "where is the payload's bin/?" -- it
+    # already handles both layouts (a dev checkout has bin/ at the repo root; an
+    # installed wheel has it under m3_memory/bin/) and honours $M3_PATH_BIN.
+    # A second resolver here would drift from it (§10a); a hand-rolled
+    # `__file__/../bin` was wrong in the dev tree on the first try.
+    from m3_memory.installer import bin_dir
+
+    bd = bin_dir()
+    script = (bd / "m3_upgrade.py") if bd else None
+    if script is None or not script.is_file():
+        print(
+            f"Error: the upgrade helper is missing from this install "
+            f"(looked in {bd or 'no resolvable bin/ directory'}). Reinstall "
+            f"m3, or upgrade manually: "
+            f"`m3 stop`, then your package manager's upgrade, then `m3 setup`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    cmd = [_interpreter(), str(script)]
+    if getattr(args, "dry_run", False):
+        cmd.append("--dry-run")
+    if getattr(args, "yes", False):
+        cmd.append("--yes")
+    if getattr(args, "skip_stop", False):
+        cmd.append("--skip-stop")
+    try:
+        return subprocess.run(cmd).returncode  # nosec B603 - argv list, no shell
+    except KeyboardInterrupt:
+        print(chr(10) + "Upgrade interrupted.", file=sys.stderr)
+        return 130
+
+
+def _interpreter() -> str:
+    """A real interpreter for relaunching our own script.
+
+    `sys.executable` is the console-script SHIM (`m3.exe`) under a pipx/pip
+    install, and handing that to subprocess re-enters this CLI with a .py path
+    as its subcommand -- argparse rejects it and the child exits 2. The
+    interpreter always lives beside the shim in Scripts/ or bin/.
+    """
+    exe = sys.executable or ""
+    stem = os.path.splitext(os.path.basename(exe))[0].lower()
+    if stem.startswith("python"):
+        return exe
+    if exe:
+        here = os.path.dirname(exe)
+        for name in ("python.exe", "python3", "python"):
+            cand = os.path.join(here, name)
+            if os.path.isfile(cand):
+                return cand
+    return exe or "python3"
 
 
 def _cmd_update(args: argparse.Namespace) -> int:
@@ -1534,7 +1611,8 @@ Examples:
     p_stop = subparsers.add_parser(
         "stop",
         help="Stop every running m3 DB-writer (cognitive loop, embed server, "
-             "dashboard, MCP). Run this before `pipx upgrade` on Windows.",
+             "dashboard, MCP). `m3 upgrade` does this for you; run it by hand "
+             "only for a manual package upgrade on Windows.",
     )
     p_stop.add_argument(
         "--timeout", type=float, default=8.0, metavar="SECONDS",
@@ -1543,10 +1621,33 @@ Examples:
     )
     p_stop.set_defaults(func=_cmd_stop)
 
+    p_upgrade = subparsers.add_parser(
+        "upgrade",
+        help="Upgrade the m3 PACKAGE end to end, using the right command for "
+             "how it was installed (pipx / pip / pip --user), then re-wire and "
+             "verify. Works the same on Windows, macOS and Linux.",
+    )
+    p_upgrade.add_argument(
+        "--dry-run", dest="dry_run", action="store_true",
+        help="Print the detected install method and the exact plan, change "
+             "nothing.",
+    )
+    p_upgrade.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Do not prompt; for scripted/unattended upgrades.",
+    )
+    p_upgrade.add_argument(
+        "--skip-stop", dest="skip_stop", action="store_true",
+        help="Do not stop DB writers first. Only when you have already stopped "
+             "them; on Windows an upgrade with writers running can delete the "
+             "package and then fail, leaving NO m3 installed.",
+    )
+    p_upgrade.set_defaults(func=_cmd_upgrade)
+
     p_update = subparsers.add_parser(
         "update",
-        help="Re-sync the payload for the INSTALLED version (NOT a package upgrade — "
-             "use `pipx upgrade m3-memory` for that).",
+        help="Re-sync the payload for the INSTALLED version (NOT a package "
+             "upgrade — use `m3 upgrade` for that).",
     )
     p_update.add_argument(
         "--tag", default=None,
