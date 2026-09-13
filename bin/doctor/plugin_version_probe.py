@@ -185,8 +185,14 @@ def run(brief: bool = False) -> int:
         elif clone_cold:
             # No ⚠️ — an unrefreshed clone is not a fault (air-gapped installs
             # never refresh), so this stays a plain FYI in the one-line summary.
+            # It DOES name the remedy: third-party marketplaces ship with
+            # auto-update off, so a networked user who never learns that will
+            # sit on the install version indefinitely (observed: 620 commits /
+            # 68 days behind on one host, 132 on another). Stating the problem
+            # without the fix is what let that happen twice.
             print(f"✅ plugin: {installed} (marketplace clone {age_days:.0f}d old — "
-                  "version check may be behind upstream)")
+                  "version check may be behind upstream; enable auto-update in "
+                  "/plugin -> Marketplaces -> skynetcmd)")
         else:
             print(f"✅ plugin: {installed}" + (" (enabled)" if enabled else ""))
         return 0
@@ -220,6 +226,9 @@ def run(brief: bool = False) -> int:
         print("              /reload-plugins")
         print("              (if m3 then vanishes from /mcp, see the DISABLED fix above —")
         print("               re-install can flip the enabled flag off.)")
+        print("  avoid next time: /plugin -> Marketplaces -> skynetcmd -> auto-update on.")
+        print("              Third-party marketplaces default to OFF, so without it this")
+        print("              nag returns every release.")
     if not problem and clone_cold:
         print("  status    : OK — installed and enabled. Version check is only as")
         print("              fresh as the marketplace clone, last refreshed")
@@ -227,6 +236,13 @@ def run(brief: bool = False) -> int:
         print("  note      : expected if this machine is offline / air-gapped —")
         print("              nothing is wrong. If it IS networked and you want the")
         print("              latest: /plugin marketplace update skynetcmd")
+        print("  why       : third-party marketplaces have auto-update OFF by default")
+        print("              (Anthropic's own are ON), so this clone only moves when")
+        print("              someone refreshes it by hand — it does not drift, it")
+        print("              simply never updates. A one-time fix:")
+        print("  fix       : /plugin -> Marketplaces -> skynetcmd -> enable auto-update")
+        print("              (then the clone refreshes itself after session start;")
+        print("               /reload-plugins applies it without a restart)")
     elif not problem:
         print("  status    : OK — installed, enabled, and current.")
 
