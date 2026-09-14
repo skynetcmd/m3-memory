@@ -23,6 +23,8 @@ a silent fallback to SQLite.
 """
 from __future__ import annotations
 
+import uuid
+
 import os
 import threading
 from contextlib import contextmanager
@@ -376,6 +378,12 @@ class PostgresDialect(Dialect):
         # %s binds an int number of days; multiply a 1-day interval.
         return f"NOW() - ({days_placeholder} * INTERVAL '1 day')"
 
+    def now_plus_seconds(self, seconds_placeholder: str) -> str:
+        # make_interval takes a bound int; `NOW() + %s * INTERVAL '1 second'`
+        # would also work but multiplies a literal interval by a bind, which
+        # some drivers type-infer badly.
+        return f"NOW() + make_interval(secs => {seconds_placeholder})"
+
     def now_minus_minutes(self, minutes_placeholder: str) -> str:
         # %s binds an int number of minutes; multiply a 1-minute interval.
         return f"NOW() - ({minutes_placeholder} * INTERVAL '1 minute')"
@@ -462,8 +470,8 @@ class PostgresDialect(Dialect):
 
     def claim_message(
         self, conn: object, *, table: str, where_sql: str, where_params: tuple,
-        claimant: str,
-    ) -> "object | None":
+        claimant: str, lease_ttl: int = 300,
+    ) -> "tuple | None":
         """Claim via ``FOR UPDATE SKIP LOCKED`` -- the native primitive.
 
         SKIP LOCKED is what SQLite cannot express: a candidate row already
@@ -481,16 +489,62 @@ class PostgresDialect(Dialect):
         It matters less on PG than on SQLite, but a caller written against one
         backend's forgiveness is a caller that breaks on the other.
         """
+        token = str(uuid.uuid4())
         cur = conn.execute(  # type: ignore[attr-defined]
-            f"UPDATE {table} SET claimed_by = %s, claimed_at = {self.now()} "
+            f"UPDATE {table} SET claimed_by = %s, claimed_at = {self.now()}, "
+            f"lease_token = %s, "
+            f"claim_expires_at = {self.now_plus_seconds('%s')}, "
+            f"attempt_count = attempt_count + 1 "
             f"WHERE id = (SELECT id FROM {table} WHERE {where_sql} "
             f"AND claimed_by IS NULL ORDER BY id LIMIT 1 "
-            f"FOR UPDATE SKIP LOCKED) RETURNING id",
-            (claimant, *where_params),
+            f"FOR UPDATE SKIP LOCKED) RETURNING id, lease_token",
+            (claimant, token, lease_ttl, *where_params),
         )
         row = cur.fetchone()
         conn.commit()  # type: ignore[attr-defined]
-        return row[0] if row else None
+        # (id, lease_token) -- same contract as every backend. No select-back
+        # needed here: RETURNING hands both columns out of the one statement.
+        return (row[0], row[1]) if row else None
+
+    def sweep_expired_leases(
+        self, conn: object, *, table: str, max_attempts: int = 5,
+        limit: int = 100,
+    ) -> "tuple[int, int]":
+        """Reclaim lapsed leases, dividing the work between concurrent sweepers.
+
+        Same contract and same outcome as the base implementation; the
+        difference is FOR UPDATE SKIP LOCKED, which lets N sweepers run at once
+        without contending -- each skips rows another is already reclaiming
+        instead of blocking on them. The base version is correct on SQLite
+        because SQLite serializes writers anyway, so there is never a second
+        concurrent sweeper to divide work with.
+
+        LIMIT bounds each pass so a large backlog is reclaimed incrementally
+        rather than in one long transaction holding locks across thousands of
+        rows.
+        """
+        expired = (
+            "claim_expires_at IS NOT NULL AND claim_expires_at <= NOW() "
+            "AND read_at IS NULL AND failed_at IS NULL"
+        )
+        dead = conn.execute(  # type: ignore[attr-defined]
+            f"UPDATE {table} SET failed_at = NOW(), claimed_by = NULL, "
+            f"lease_token = NULL, claim_expires_at = NULL "
+            f"WHERE id IN (SELECT id FROM {table} WHERE {expired} "
+            f"AND attempt_count >= %s ORDER BY claim_expires_at LIMIT %s "
+            f"FOR UPDATE SKIP LOCKED)",
+            (max_attempts, limit),
+        ).rowcount  # type: ignore[attr-defined]
+        back = conn.execute(  # type: ignore[attr-defined]
+            f"UPDATE {table} SET claimed_by = NULL, lease_token = NULL, "
+            f"claim_expires_at = NULL, claimed_at = NULL "
+            f"WHERE id IN (SELECT id FROM {table} WHERE {expired} "
+            f"AND attempt_count < %s ORDER BY claim_expires_at LIMIT %s "
+            f"FOR UPDATE SKIP LOCKED)",
+            (max_attempts, limit),
+        ).rowcount  # type: ignore[attr-defined]
+        conn.commit()  # type: ignore[attr-defined]
+        return (back, dead)
 
     def last_insert_id(self, cursor: object) -> object:
         return cursor.fetchone()[0]  # type: ignore[attr-defined]

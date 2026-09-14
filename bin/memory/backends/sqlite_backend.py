@@ -54,6 +54,21 @@ class SqliteDialect(Dialect):
         # `?` binds an int; build the '-N days' modifier string in SQL.
         return f"datetime('now', '-' || {days_placeholder} || ' days')"
 
+    def now_plus_seconds(self, seconds_placeholder: str) -> str:
+        # strftime (not datetime) so the result matches the ISO-8601 'Z' shape
+        # the other timestamp columns use; datetime() would emit a space-
+        # separated form that sorts differently against them.
+        #
+        # No '+' sign is prepended: SQLite accepts a signed modifier ('-5
+        # seconds'), but '+-5 seconds' is INVALID and strftime returns NULL for
+        # it rather than erroring. A NULL lease deadline is the worst possible
+        # outcome -- the row is never expired, so the sweeper never reclaims it
+        # and the claim is immortal. Found by a test that passed a negative TTL
+        # (§3: this used to fail silently). Callers are additionally guarded at
+        # claim_message, which rejects a non-positive TTL outright.
+        return (f"strftime('%Y-%m-%dT%H:%M:%SZ','now',"
+                f"{seconds_placeholder} || ' seconds')")
+
     def now_minus_minutes(self, minutes_placeholder: str) -> str:
         return f"datetime('now', '-' || {minutes_placeholder} || ' minutes')"
 
@@ -111,8 +126,8 @@ class SqliteDialect(Dialect):
 
     def claim_message(
         self, conn: object, *, table: str, where_sql: str, where_params: tuple,
-        claimant: str,
-    ) -> "object | None":
+        claimant: str, lease_ttl: int = 300,
+    ) -> "tuple | None":
         """Claim via BEGIN IMMEDIATE + a unique token + SELECT-back.
 
         Deliberately does NOT use ``UPDATE ... RETURNING``, even though it would
@@ -132,14 +147,27 @@ class SqliteDialect(Dialect):
         unambiguous: two sisters claiming at once write different tokens, so
         neither can read the other's row.
         """
+        if lease_ttl <= 0:
+            # Fail loud. A non-positive TTL yields a lease that is already
+            # expired (or, on SQLite, a NULL deadline that NEVER expires), and
+            # both are silent: the row either churns forever or is held
+            # forever, with no error either way.
+            raise ValueError(
+                f"lease_ttl must be positive, got {lease_ttl}; a claim with no "
+                f"future deadline is either immediately reclaimable or never "
+                f"reclaimable, and neither fails visibly"
+            )
         token = f"{claimant}#{uuid.uuid4()}"
         conn.execute("BEGIN IMMEDIATE")  # type: ignore[attr-defined]
         try:
             cur = conn.execute(  # type: ignore[attr-defined]
-                f"UPDATE {table} SET claimed_by = ?, claimed_at = {self.now()} "
+                f"UPDATE {table} SET claimed_by = ?, claimed_at = {self.now()}, "
+                f"lease_token = ?, "
+                f"claim_expires_at = {self.now_plus_seconds('?')}, "
+                f"attempt_count = attempt_count + 1 "
                 f"WHERE id = (SELECT id FROM {table} WHERE {where_sql} "
                 f"AND claimed_by IS NULL ORDER BY id LIMIT 1)",
-                (token, *where_params),
+                (token, token, lease_ttl, *where_params),
             )
             if not cur.rowcount:
                 conn.commit()  # type: ignore[attr-defined]
@@ -153,8 +181,16 @@ class SqliteDialect(Dialect):
                 f"UPDATE {table} SET claimed_by = ? WHERE claimed_by = ?",
                 (claimant, token),
             )
+            # lease_token deliberately KEEPS the token value: claimed_by names
+            # WHO holds the row (for humans and for liveness), lease_token is
+            # the per-attempt FENCE the caller must present back. Overwriting it
+            # with the agent id would make the fence forgeable by any process
+            # that can read the agent name.
             conn.commit()  # type: ignore[attr-defined]
-            return row[0] if row else None
+            # (id, lease_token). The token is returned rather than merely
+            # stored, because a fence the caller cannot hold is not a fence:
+            # complete/fail/renew all require presenting it back.
+            return (row[0], token) if row else None
         except Exception:
             conn.rollback()  # type: ignore[attr-defined]
             raise

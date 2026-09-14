@@ -155,6 +155,19 @@ class Dialect:
         """
         raise NotImplementedError("subclass must implement day_bucket()")
 
+    def now_plus_seconds(self, seconds_placeholder: str) -> str:
+        """SQL expression for "the store's clock, N seconds from now".
+
+        The forward counterpart of :meth:`now_minus_minutes`, added because a
+        lease deadline is the first thing in m3 that needs a FUTURE timestamp.
+        It belongs in the dialect rather than at the call site: the arithmetic
+        is backend-specific (SQLite builds a modifier string, Postgres
+        multiplies an interval), and a lease that is computed in Python is a
+        lease judged by the agent's clock instead of the database's -- an
+        N-clock comparison across the two hosts m3 already spans.
+        """
+        raise NotImplementedError("subclass must implement now_plus_seconds()")
+
     def now_minus_minutes(self, minutes_placeholder: str) -> str:
         """A "current time minus N minutes" expression; ``minutes_placeholder``
         binds an INTEGER number of minutes (positive). The minutes analog of
@@ -400,12 +413,20 @@ class Dialect:
 
     def claim_message(
         self, conn: object, *, table: str, where_sql: str, where_params: "tuple",
-        claimant: str,
-    ) -> "object | None":
+        claimant: str, lease_ttl: int = 300,
+    ) -> "tuple | None":
         """Atomically claim ONE unclaimed row, or return None if there are none.
 
-        Returns the claimed row's id. Exactly one concurrent caller can win a
-        given row; the losers either claim a different row or get None.
+        Returns ``(row_id, lease_token)``, or None when nothing is claimable.
+        Exactly one concurrent caller can win a given row; the losers either
+        claim a different row or get None.
+
+        The token is RETURNED, not merely stored: it is the per-attempt fence
+        that :meth:`complete_message`, :meth:`fail_message` and
+        :meth:`renew_lease` require, and a fence the caller cannot hold is not
+        a fence. ``claim_expires_at`` is set ``lease_ttl`` seconds ahead ON THE
+        DATABASE CLOCK, and ``attempt_count`` is incremented so a row that keeps
+        being reclaimed can be dead-lettered rather than retried forever.
 
         CONTRACT -- CLAIM THEN RELEASE. This method opens and COMMITS its own
         transaction, and the caller MUST NOT hold a transaction open across the
@@ -433,6 +454,119 @@ class Dialect:
         writer. Same answer, different latency under contention.
         """
         raise NotImplementedError("subclass must implement claim_message()")
+
+    def complete_message(
+        self, conn: object, *, table: str, row_id: object, lease_token: str,
+    ) -> bool:
+        """Mark a claimed row COMPLETED. True iff the fence matched.
+
+        Backend-neutral: pure IS NULL / equality, no dialect function, so it is
+        implemented once here rather than duplicated per backend.
+
+        The fence is the point. A worker whose lease expired and was reclaimed
+        by the sweeper MUST NOT be able to complete the row -- another agent now
+        owns that attempt, and a late completion would report someone else's
+        work as finished. Returning False rather than raising lets the caller
+        distinguish "I lost my lease" from an error, which is the normal and
+        expected outcome of a slow worker.
+        """
+        p = self.param()
+        cur = conn.execute(  # type: ignore[attr-defined]
+            f"UPDATE {table} SET read_at = {self.now()} "
+            f"WHERE id = {p} AND lease_token = {p} AND read_at IS NULL "
+            f"AND failed_at IS NULL",
+            (row_id, lease_token),
+        )
+        conn.commit()  # type: ignore[attr-defined]
+        return bool(cur.rowcount)  # type: ignore[attr-defined]
+
+    def fail_message(
+        self, conn: object, *, table: str, row_id: object, lease_token: str,
+    ) -> bool:
+        """Mark a claimed row FAILED. True iff the fence matched.
+
+        Fenced for the same reason as completion, and terminal in the same way:
+        a row with ``failed_at`` set is not swept and not reclaimed, so a
+        genuinely broken message stops consuming attempts instead of cycling
+        forever.
+        """
+        p = self.param()
+        cur = conn.execute(  # type: ignore[attr-defined]
+            f"UPDATE {table} SET failed_at = {self.now()} "
+            f"WHERE id = {p} AND lease_token = {p} AND read_at IS NULL "
+            f"AND failed_at IS NULL",
+            (row_id, lease_token),
+        )
+        conn.commit()  # type: ignore[attr-defined]
+        return bool(cur.rowcount)  # type: ignore[attr-defined]
+
+    def renew_lease(
+        self, conn: object, *, table: str, row_id: object, lease_token: str,
+        lease_ttl: int = 300,
+    ) -> bool:
+        """Push a live claim's deadline out. True iff the fence matched.
+
+        RENEWAL IS FENCED TOO, and this is the one that is easy to miss. If a
+        worker could renew without presenting its token, a worker whose lease had
+        already lapsed and been reclaimed could renew its way back into ownership
+        of a row another agent is now processing -- reintroducing the duplicate
+        execution the fence exists to prevent.
+
+        Also refuses to renew an ALREADY-EXPIRED lease (`claim_expires_at >
+        now()`): once the deadline passes the row is the sweeper's to reclaim,
+        and letting a straggler extend it would make expiry advisory. The worker
+        learns it lost the race from the False and can stop rather than keep
+        working on a row it no longer owns.
+        """
+        p = self.param()
+        cur = conn.execute(  # type: ignore[attr-defined]
+            f"UPDATE {table} SET claim_expires_at = "
+            f"{self.now_plus_seconds(p)} "
+            f"WHERE id = {p} AND lease_token = {p} AND read_at IS NULL "
+            f"AND failed_at IS NULL AND claim_expires_at > {self.now()}",
+            (lease_ttl, row_id, lease_token),
+        )
+        conn.commit()  # type: ignore[attr-defined]
+        return bool(cur.rowcount)  # type: ignore[attr-defined]
+
+    def sweep_expired_leases(
+        self, conn: object, *, table: str, max_attempts: int = 5,
+        limit: int = 100,
+    ) -> "tuple[int, int]":
+        """Reclaim lapsed leases. Returns ``(reclaimed, dead_lettered)``.
+
+        A row whose lease expired is returned to PENDING -- claim ownership and
+        the fence are cleared, so the previous holder's token no longer matches
+        anything and its late complete/fail/renew all return False.
+
+        A row that has been reclaimed ``max_attempts`` times is DEAD-LETTERED
+        (``failed_at`` set) instead, so a message that crashes every worker that
+        touches it stops cycling. Without that bound a poison message is an
+        infinite retry loop that looks like healthy queue activity.
+
+        Overridden by backends that can do better: Postgres adds FOR UPDATE SKIP
+        LOCKED so concurrent sweepers divide the expired rows rather than
+        contend for them.
+        """
+        p = self.param()
+        expired = (
+            f"claim_expires_at IS NOT NULL AND claim_expires_at <= {self.now()} "
+            f"AND read_at IS NULL AND failed_at IS NULL"
+        )
+        dead = conn.execute(  # type: ignore[attr-defined]
+            f"UPDATE {table} SET failed_at = {self.now()}, claimed_by = NULL, "
+            f"lease_token = NULL, claim_expires_at = NULL "
+            f"WHERE {expired} AND attempt_count >= {p}",
+            (max_attempts,),
+        ).rowcount  # type: ignore[attr-defined]
+        back = conn.execute(  # type: ignore[attr-defined]
+            f"UPDATE {table} SET claimed_by = NULL, lease_token = NULL, "
+            f"claim_expires_at = NULL, claimed_at = NULL "
+            f"WHERE {expired} AND attempt_count < {p}",
+            (max_attempts,),
+        ).rowcount  # type: ignore[attr-defined]
+        conn.commit()  # type: ignore[attr-defined]
+        return (back, dead)
 
     def last_insert_id(self, cursor: object) -> object:
         """Read the id generated by the INSERT just executed on ``cursor``.

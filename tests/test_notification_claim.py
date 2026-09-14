@@ -36,7 +36,9 @@ def _make_db(path: str, rows: int = 200) -> None:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(
         "CREATE TABLE notifications (id INTEGER PRIMARY KEY, agent_id TEXT, "
-        "claimed_by TEXT, claimed_at TEXT)"
+        "claimed_by TEXT, claimed_at TEXT, read_at TEXT, failed_at TEXT, "
+        "lease_token TEXT, claim_expires_at TEXT, "
+        "attempt_count INTEGER NOT NULL DEFAULT 0)"
     )
     conn.executemany(
         "INSERT INTO notifications (id, agent_id, claimed_by, claimed_at) "
@@ -61,10 +63,17 @@ def _open(path: str) -> sqlite3.Connection:
     return conn
 
 
-def _claim(conn, claimant: str):
+def _claim(conn, claimant: str, lease_ttl: int = 300):
+    """Returns the row id, or None. Tests that need the fence use _claim2."""
+    got = _claim2(conn, claimant, lease_ttl)
+    return got[0] if got else None
+
+
+def _claim2(conn, claimant: str, lease_ttl: int = 300):
+    """Returns the full (id, lease_token) contract."""
     return SqliteDialect().claim_message(
         conn, table="notifications", where_sql="agent_id = ?",
-        where_params=("worker",), claimant=claimant,
+        where_params=("worker",), claimant=claimant, lease_ttl=lease_ttl,
     )
 
 
@@ -116,14 +125,14 @@ def test_the_addressing_predicate_is_honoured(db_path):
     """A claim must not reach across to another addressee's mail."""
     conn = _open(db_path)
     conn.execute(
-        "INSERT INTO notifications (id, agent_id, claimed_by) "
-        "VALUES (9999, 'someone-else', NULL)"
+        "INSERT INTO notifications (id, agent_id, claimed_by, attempt_count) "
+        "VALUES (9999, 'someone-else', NULL, 0)"
     )
     got = SqliteDialect().claim_message(
         conn, table="notifications", where_sql="agent_id = ?",
         where_params=("someone-else",), claimant="claude-code@s1",
     )
-    assert got == 9999
+    assert got and got[0] == 9999
     # And the reverse: claiming 'worker' never returns the other row.
     for _ in range(200):
         assert _claim(conn, "claude-code@s1") != 9999
@@ -141,7 +150,7 @@ def _worker(args):
                 where_params=("worker",), claimant=name,
             )
             if row is not None:
-                got.append(row)
+                got.append(row[0])
         except Exception as exc:  # noqa: BLE001
             errs.append(repr(exc))
     conn.close()
