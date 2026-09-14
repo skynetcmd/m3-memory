@@ -1623,11 +1623,11 @@ def _drop_embed_task_if_rust_owns_port(tasks: "list[dict]") -> "list[dict]":
             f"registered as the SCM service `{_WINDOWS_RUST_EMBED_SERVICE}` and "
             f"owns :8082.")
         _safe_print(
-            f"      Both bind the same port; registering the task too would put "
-            f"two supervisors on one port.")
+            "      Both bind the same port; registering the task too would put "
+            "two supervisors on one port.")
         _safe_print(
-            f"      `m3 embedder install` owns the embed-server keep-alive here. "
-            f"To use the Python task instead: `m3 embedder uninstall` first.")
+            "      `m3 embedder install` owns the embed-server keep-alive here. "
+            "To use the Python task instead: `m3 embedder uninstall` first.")
     else:
         _safe_print(
             f"{WARN} skipping {task_name}: could not determine whether the Rust "
