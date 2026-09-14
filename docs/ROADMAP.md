@@ -11,7 +11,7 @@
 - [x] **CrewAI (v1.x) integration** — a native `StorageBackend` (`m3-memory[crewai]`); a CrewAI memory stays searchable by every other m3 agent.
 - [x] **PydanticAI integration** — deps-injected tools + a recall history-processor, plus a formal `M3MemoryToolset` (`m3-memory[pydantic-ai]`); Python 3.14-native.
 - [x] **Procedural memory** — a first-class `procedure` type (skill/runbook/how-to/checklist) auto-distilled from successful task runs, with `distills_from` provenance and a procedural retrieval boost.
-- [x] **Test suite hardening** — 4,048 collected tests (2,785 test functions) across 306 files, run with `filterwarnings=error` (a new warning fails the build).
+- [x] **Test suite hardening** — 4,392 collected tests (3,291 test functions) across 306 files, run with `filterwarnings=error` (a new warning fails the build).
 
 ## ✅ Shipped — 2026-Q2 highlights
 

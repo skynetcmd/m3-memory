@@ -219,6 +219,7 @@ def install_unix_cognitive_loop(m3_memory_root):
             _safe_print(f"{FAIL} launchctl load failed: {r.stderr.strip()}")
 
         _install_macos_loop_watchdog(m3_memory_root, python_exe)
+        _install_embed_server_or_report(m3_memory_root, python_exe)
 
     elif os_name == "Linux":
         template = os.path.join(bin_dir, "m3-cognitive-loop.service")
@@ -241,8 +242,207 @@ def install_unix_cognitive_loop(m3_memory_root):
             _safe_print(f"{FAIL} systemctl enable --now failed: {r.stderr.strip()}")
 
         _install_linux_loop_watchdog(m3_memory_root, python_exe)
+        _install_embed_server_or_report(m3_memory_root, python_exe)
     else:
         _safe_print(f"{WARN} install_unix_cognitive_loop: unsupported OS {os_name}")
+
+
+def _install_embed_server_or_report(m3_memory_root: str, python_exe: str) -> None:
+    """Install the embed-server unit, reporting a conflict without aborting.
+
+    install_unix_embed_server() is the LAST call in both branches of
+    install_unix_cognitive_loop(), so letting EmbedServerConflict propagate
+    would abort the installer after the cognitive loop is already installed --
+    punishing every correctly-configured Rust host with a failed install for a
+    condition that is not an error for the loop. The conflict is fatal to the
+    embed-server unit ONLY.
+
+    Still LOUD: FAIL, the full remediation text, and a trailing reminder, so it
+    cannot be mistaken for the routine skip it replaced.
+    """
+    try:
+        install_unix_embed_server(m3_memory_root, python_exe)
+    except EmbedServerConflict as e:
+        _safe_print(f"{FAIL} embed-server keep-alive NOT installed:")
+        for line in str(e).splitlines():
+            _safe_print(f"   {line}")
+        _safe_print(f"{WARN} Everything else installed. Resolve the above if "
+                    f"you want the Python embed-server unit.")
+
+
+class EmbedServerConflict(RuntimeError):
+    """The Rust embed-server already owns :8082 on this host.
+
+    Raised rather than returned so the caller cannot proceed by ignoring a
+    falsy value. See _assert_no_rust_embed_service() for why refusing beats
+    skipping."""
+
+
+def _rust_embed_service_loaded() -> "bool | None":
+    """Is the Rust m3-embed-server registered with the platform service manager?
+
+    Returns True (registered), False (definitely not), or **None when the
+    answer could not be determined** — the caller must treat None as a refusal,
+    not as absence.
+
+    WHY THE SERVICE MANAGER AND NOT THE BINARY: launchd owns the port, not the
+    filesystem. The two diverge in both directions, and one of them is live on
+    the user's own Mac right now (measured 2026-09-14, brs-macbook-pro):
+
+        launchctl list | grep -iE 'm3|embed'
+        -  0  com.skynetcmd.m3-embed-server      <- LOADED
+        lsof -iTCP:8082 -sTCP:LISTEN              <- NOTHING LISTENING
+
+    That host has the label loaded, `state = not running`, and a free :8082.
+    A binary-existence check plus embed_server_inproc._already_serving()
+    GETting /health BOTH read "clear" there, so the installer would happily
+    add a competing unit next to a registered supervisor. The collision then
+    surfaces later, when launchd starts the Rust service on demand -- far from
+    the install that caused it.
+
+    The reverse also occurs: a pipx upgrade or uninstall removes the wheel
+    while the launchd label survives, so the binary is gone and the service
+    manager still holds the registration.
+    """
+    osn = _os_name()
+    if osn == "Darwin":
+        label = _ROLE_TO_SERVICE["embed-server"]["darwin"]
+        try:
+            r = subprocess.run(["launchctl", "list"],
+                               capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.SubprocessError) as e:
+            _safe_print(f"{WARN} could not run `launchctl list`: "
+                        f"{type(e).__name__}: {e}")
+            return None
+        if r.returncode != 0:
+            _safe_print(f"{WARN} `launchctl list` failed rc={r.returncode}: "
+                        f"{(r.stderr or '').strip()}")
+            return None
+        return label in (r.stdout or "")
+
+    if osn == "Linux":
+        # Measured, not assumed: _ROLE_TO_SERVICE maps embed-server to None on
+        # linux because the Rust binary manages its own service there and ships
+        # no systemd unit. There is therefore no unit name to query -- and
+        # inventing one is exactly the 3-of-5 mangling that map's comment
+        # documents. No registration can exist, so there is nothing to collide
+        # with the unit we install.
+        if _ROLE_TO_SERVICE["embed-server"]["linux"] is None:
+            return False
+        return None
+
+    return None
+
+
+def _assert_no_rust_embed_service() -> None:
+    """Refuse the install when the Rust embed-server owns :8082, or when we
+    cannot tell.
+
+    Both services bind :8082 and are MUTUALLY EXCLUSIVE; two supervisors on one
+    port is the failure this guard exists to prevent.
+
+    REFUSE RATHER THAN SKIP, and refuse on None: returning False on an
+    indeterminate answer means "go ahead and install", so every error path --
+    a missing launchctl, a timeout, a non-zero rc -- would silently produce the
+    exact collision. That is the DESIGN_PHILOSOPHIES section 3 fail-silent trap:
+    the safe-looking default is the dangerous one. An installer that stops with
+    a clear message costs the operator one command; one that installs a second
+    supervisor costs them a port fight they will debug much later.
+    """
+    loaded = _rust_embed_service_loaded()
+    if loaded is False:
+        return
+    if loaded is None:
+        raise EmbedServerConflict(
+            "Could not determine whether the Rust m3-embed-server is registered "
+            "on this host, and both it and the Python unit bind :8082. Refusing "
+            "to install a possible second supervisor.\n"
+            "  Check: launchctl list | grep m3-embed-server\n"
+            "  If it is absent, re-run; if present, `m3 embedder install` owns "
+            "the keep-alive and no Python unit is needed."
+        )
+    # Darwin is the only platform that can reach here: _rust_embed_service_loaded
+    # returns True only on the launchctl path (linux is a measured False,
+    # everything else None).
+    label = _ROLE_TO_SERVICE["embed-server"]["darwin"]
+    raise EmbedServerConflict(
+        f"The Rust m3-embed-server is already registered as `{label}` and owns "
+        f":8082. Installing the Python unit would give this host two supervisors "
+        f"racing for one port.\n"
+        f"  `m3 embedder install` owns the embed-server keep-alive here.\n"
+        f"  To hand it to the Python unit instead, first remove the Rust "
+        f"service, then re-run."
+    )
+
+
+def install_unix_embed_server(m3_memory_root: str, python_exe: "str | None" = None) -> None:
+    """Install the shared embed server (:8082) as a native user service.
+
+    Closes the Unix half of the keep-alive story: until now only Windows had
+    an embed-server supervisor (the Rust binary registered with SCM by
+    `m3 embedder install`), so a Linux/macOS host running shared mode had
+    NOTHING restarting :8082 after a crash or reboot — the gap tracked since
+    2026-07 and made concrete by the 2026-09-13 outage.
+
+    REFUSES (raises EmbedServerConflict) when the Rust embed-server is
+    registered with the service manager, or when that cannot be determined --
+    the two are mutually exclusive on :8082. This is deliberately louder than
+    the rest of the installer: every other failure here leaves the host without
+    a keep-alive, which is the status quo, whereas installing next to the Rust
+    service creates a NEW fault (two supervisors, one port) that did not exist
+    before. A guard that degrades to "install anyway" is not a guard.
+
+    Other failures are still swallowed -- a keep-alive that breaks the
+    installer is worse than no keep-alive.
+    """
+    _assert_no_rust_embed_service()
+    try:
+        os_name = _os_name()
+        if os_name not in ("Darwin", "Linux"):
+            return
+        python_exe = python_exe or _venv_python(m3_memory_root)
+        bin_dir = os.path.join(m3_memory_root, "bin")
+        os.makedirs(os.path.join(m3_memory_root, "logs"), exist_ok=True)
+
+        if os_name == "Darwin":
+            template = os.path.join(bin_dir, "com.m3memory.embedserver.plist")
+            if not os.path.exists(template):
+                _safe_print(f"{WARN} Missing embed-server template: {template}")
+                return
+            dest_dir = os.path.expanduser("~/Library/LaunchAgents")
+            os.makedirs(dest_dir, exist_ok=True)
+            dest = os.path.join(dest_dir, "com.m3memory.embedserver.plist")
+            with open(dest, "w", encoding="utf-8") as f:
+                f.write(_render_template(template, m3_memory_root, python_exe))
+            subprocess.run(["launchctl", "unload", dest], capture_output=True)
+            r = subprocess.run(["launchctl", "load", dest],
+                               capture_output=True, text=True)
+            if r.returncode == 0:
+                _safe_print(f"{OK} Installed + loaded launchd agent (embed server :8082): {dest}")
+            else:
+                _safe_print(f"{FAIL} launchctl load failed: {r.stderr.strip()}")
+            return
+
+        template = os.path.join(bin_dir, "m3-embed-server.service")
+        if not os.path.exists(template):
+            _safe_print(f"{WARN} Missing embed-server template: {template}")
+            return
+        dest_dir = os.path.expanduser("~/.config/systemd/user")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, "m3-embed-server.service")
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(_render_template(template, m3_memory_root, python_exe))
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        r = subprocess.run(
+            ["systemctl", "--user", "enable", "--now", "m3-embed-server.service"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            _safe_print(f"{OK} Installed + started systemd --user unit (embed server :8082): {dest}")
+        else:
+            _safe_print(f"{FAIL} systemctl enable --now failed: {r.stderr.strip()}")
+    except Exception as e:  # noqa: BLE001 — never break the installer
+        _safe_print(f"{WARN} install_unix_embed_server skipped: {type(e).__name__}: {e}")
 
 
 def _install_linux_loop_watchdog(m3_memory_root: str, python_exe: str) -> None:

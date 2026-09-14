@@ -8,8 +8,11 @@ independently and silently:
   1. CONFIG   — <config_root>/.embed_config.json disables the per-process
                 embedder and points clients at the shared server.
   2. SERVER   — that server actually answers :8082/health.
-  3. KEEPALIVE— the AgentOS_EmbedServer task is registered with its 1-min
-                self-heal so the server survives a crash/reboot.
+  3. KEEPALIVE— something will actually bring :8082 back: the Rust
+                m3-embed-server OS service RUNNING, or the AgentOS_EmbedServer
+                task registered with its 1-min self-heal. Registration alone is
+                NOT a keep-alive — OS restart actions fire only on abnormal
+                exit, so a stopped service revives nothing.
 
 `run(brief, fix)` FLAGS every broken piece with the exact remedy (returns
 non-zero so `m3 doctor` surfaces it), and with `fix=True` REPAIRS what it can:
@@ -288,17 +291,52 @@ def _task_registered_ok() -> bool | None:
         return False
 
 
-def _rust_service_present() -> bool:
-    """True if the Rust m3-embed-server binary is installed — the PREFERRED,
-    cross-platform keep-alive (registered as a systemd/launchd/Windows Service
-    with OS-native restart). When present it, not the Python scheduled task, owns
-    :8082, so the task legitimately does not exist."""
+def _rust_service_state() -> str:
+    """Actual state of the Rust m3-embed-server OS service.
+
+    Returns one of:
+      'running'       — the service manager reports it RUNNING (a real keep-alive)
+      'stopped'       — registered but NOT running (SCM/systemd restarts only on
+                        abnormal exit, so a cleanly-stopped or never-started
+                        service is NOT a keep-alive)
+      'not-installed' — the binary exists on disk but no service is registered
+      'absent'        — no binary at all
+
+    Why this is not `_server_binary() is not None`: a binary sitting in the wheel
+    says nothing about whether anything will restart :8082. Reporting keep-alive
+    OK from disk presence alone made `doctor` print "keepalive: OK" for ten weeks
+    while the server was down and `--fix` skipped the repair (§3: a check that
+    passes while the thing it checks is dead is worse than no check).
+
+    Delegates to embedder_admin's existing service seam rather than re-deriving
+    `sc.exe`/`systemctl` parsing here (§10a: one owner, no copied predicate).
+    """
     try:
         sys.path.insert(0, os.path.join(_payload_bin(), "..", "m3_memory"))
         from m3_memory import embedder_admin
-        return embedder_admin._server_binary() is not None
-    except Exception:  # noqa: BLE001
-        return False
+        binary = embedder_admin._server_binary()
+        if binary is None:
+            return "absent"
+        gguf = embedder_admin._find_bundled_gguf()
+        if gguf is None:
+            # No model to hand the probe; we can still ask SCM, but the helpers
+            # want a path. Without it we cannot honestly claim a state.
+            return "not-installed"
+        if embedder_admin._service_reports_running(binary, gguf):
+            return "running"
+        if embedder_admin._service_reports_installed(binary, gguf):
+            return "stopped"
+        return "not-installed"
+    except Exception:  # noqa: BLE001 — probe must never crash the doctor (§3)
+        return "absent"
+
+
+def _rust_service_present() -> bool:
+    """True if the Rust binary is on disk. Says NOTHING about liveness — use
+    _rust_service_state() for keep-alive verdicts. Kept for the `--fix` branch,
+    which needs to know whether to register the Rust service or the Python task
+    (they are mutually exclusive: both bind :8082)."""
+    return _rust_service_state() != "absent"
 
 
 def _keepalive() -> tuple[str, bool]:
@@ -308,8 +346,15 @@ def _keepalive() -> tuple[str, bool]:
     Preference order matches setup: the Rust OS service wins; the Python
     scheduled task is the fallback. 'none' with a live server means someone
     started it by hand — it works now but won't survive a crash/reboot."""
-    if _rust_service_present():
+    state = _rust_service_state()
+    if state == "running":
         return "rust-service", True
+    if state in ("stopped", "not-installed"):
+        # The binary is here but nothing will bring :8082 back. Do NOT fall
+        # through to the Python task: it is mutually exclusive with the Rust
+        # service (both bind :8082), so reporting the task as the keep-alive
+        # would hide the real, actionable fault.
+        return f"rust-service-{state}", False
     task = _task_registered_ok()
     if task is True:
         return "windows-task", True
@@ -333,6 +378,34 @@ def _fix_write_config() -> bool:
         return True
     except Exception as e:  # noqa: BLE001
         print(f"  [fix] could not write .embed_config.json: {e}")
+        return False
+
+
+def _fix_start_rust_service() -> bool:
+    """Start the registered Rust m3-embed-server OS service, then VERIFY it is
+    actually running before claiming success.
+
+    Returns False on any failure — including the common unelevated case, where
+    SCM refuses to start a LocalSystem service. Never report a repair we did not
+    observe (§3: a fix that lies is worse than a fix that declines).
+    """
+    try:
+        sys.path.insert(0, os.path.join(_payload_bin(), "..", "m3_memory"))
+        from m3_memory import embedder_admin
+        binary = embedder_admin._server_binary()
+        gguf = embedder_admin._find_bundled_gguf()
+        if binary is None or gguf is None:
+            return False
+        embedder_admin._service_cmd(binary, gguf, "start")
+        # Verify rather than trust the exit code: "already running" and "start
+        # failed" are not distinguishable from it.
+        import time
+        for _ in range(10):
+            if embedder_admin._service_reports_running(binary, gguf):
+                return True
+            time.sleep(1)
+        return False
+    except Exception:  # noqa: BLE001 — never crash the doctor
         return False
 
 
@@ -538,10 +611,25 @@ def run(brief: bool = False, fix: bool = False) -> int:
         if "keepalive-missing" in problems:
             # Prefer the Rust OS service; only register the Python task fallback
             # when the Rust binary is absent (mutually exclusive — both bind :8082).
-            if _rust_service_present():
-                print("  [fix] Rust m3-embed-server present — register its OS service "
-                      "with `m3 embedder install` (keeps :8082 up cross-platform).")
-                # Re-evaluate: if the service is now the keep-alive, clear it.
+            state = _rust_service_state()
+            if state == "stopped":
+                # Registered but down: the actionable repair is to START it, not
+                # to re-register. Do not clear the problem unless it comes up.
+                print("  [fix] Rust m3-embed-server service registered but stopped "
+                      "— starting it.")
+                if _fix_start_rust_service():
+                    print("  [fix] service now RUNNING. Re-embed the outage window "
+                          "with `m3 embedder backfill`.")
+                    problems = [p for p in problems if p != "keepalive-missing"]
+                else:
+                    print("  [fix] could not start it here (LocalSystem service "
+                          "usually needs an ADMIN shell).")
+                    print("        run: `m3 embedder start`  or  "
+                          "`sc.exe start m3-embed-server`")
+            elif state == "not-installed":
+                print("  [fix] Rust m3-embed-server present but not registered — "
+                      "register its OS service with `m3 embedder install` "
+                      "(keeps :8082 up cross-platform).")
                 if _keepalive()[1]:
                     problems = [p for p in problems if p != "keepalive-missing"]
             elif _fix_register_task():
@@ -596,8 +684,21 @@ def run(brief: bool = False, fix: bool = False) -> int:
             print(_ln)
 
     if ka_kind == "rust-service":
-        print("  keepalive: OK — Rust m3-embed-server OS service "
+        print("  keepalive: OK — Rust m3-embed-server OS service RUNNING "
               "(systemd/launchd/Windows Service, OS-native restart).")
+    elif ka_kind == "rust-service-stopped":
+        print("  keepalive: [FAIL] Rust m3-embed-server service is REGISTERED but")
+        print("             STOPPED — nothing is keeping :8082 alive. OS restart")
+        print("             actions fire only on an abnormal exit, so a cleanly")
+        print("             stopped or never-started service is never revived and")
+        print("             embedding stays down fleet-wide until started by hand.")
+        print("             fix: `m3 embedder start`  (Windows: ADMIN shell, or")
+        print("                  `sc.exe start m3-embed-server`)")
+        print("             then re-embed the gap: `m3 embedder backfill`")
+    elif ka_kind == "rust-service-not-installed":
+        print("  keepalive: [FAIL] the Rust m3-embed-server binary is on disk but")
+        print("             NO service is registered — nothing restarts :8082.")
+        print("             fix: `m3 embedder install`  (Windows: ADMIN shell)")
     elif ka_kind == "windows-task":
         print(f"  keepalive: OK — {_TASK} scheduled task (1-min self-heal, "
               "Python-server fallback).")

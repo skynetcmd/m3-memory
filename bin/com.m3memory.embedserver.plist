@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  m3-memory Shared Embed Server (:8082) — macOS launchd agent template.
+
+  Installed by bin/install_schedules.py, which substitutes [M3_MEMORY_ROOT]
+  and [M3_PYTHON] and writes the result to
+  ~/Library/LaunchAgents/com.m3memory.embedserver.plist.
+
+  WHICH SERVER THIS RUNS: bin/embed_server_inproc.py, the Python server that
+  wraps m3_core_rs.EmbeddedEmbedder in-process. The Rust m3-embed-server
+  binary is the alternative implementation of the SAME /health + /embedding
+  contract; the two are MUTUALLY EXCLUSIVE because both bind :8082. Install
+  this agent only on a host that is not running the Rust OS service
+  (`m3 embedder install`). embed_server_inproc._already_serving() GETs
+  /health before loading the model and exits 0 if another instance answers,
+  so a redundant launch can never load a second GPU/CUDA context.
+
+  MODEL RESOLUTION: no M3_EMBED_GGUF is set here on purpose. The server falls
+  back to discover_bge_m3_gguf(), which searches the documented model roots.
+  A headless launchd agent inherits none of your shell environment (§3), so
+  an env var baked in here would be one more thing to drift out of sync with
+  .embed_config.json — auto-detection is the resolution path that works
+  identically in a terminal and under launchd.
+
+  KeepAlive is unconditional, matching com.m3memory.cognitiveloop: a clean
+  exit (an upgrade, an operator stop) must still be restarted, because the
+  entire fleet defers to this one process in shared mode. ThrottleInterval
+  bounds a crash-on-startup loop. com.m3memory.loopwatchdog runs
+  bin/m3_embed_watchdog.py as the second layer, for the case KeepAlive cannot
+  see: the agent is loaded and launchd is satisfied, but the port is not
+  serving.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.m3memory.embedserver</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>[M3_PYTHON]</string>
+        <string>[M3_MEMORY_ROOT]/bin/embed_server_inproc.py</string>
+        <string>--port</string>
+        <string>8082</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+    <key>StandardOutPath</key>
+    <string>[M3_MEMORY_ROOT]/logs/embed_server_inproc.log</string>
+    <key>StandardErrorPath</key>
+    <string>[M3_MEMORY_ROOT]/logs/embed_server_inproc.log</string>
+</dict>
+</plist>

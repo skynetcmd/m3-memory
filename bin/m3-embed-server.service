@@ -1,0 +1,50 @@
+# m3-memory Shared Embed Server (:8082) — Linux systemd --user unit template.
+#
+# Installed by bin/install_schedules.py, which substitutes [M3_MEMORY_ROOT]
+# and [M3_PYTHON] and writes the result to
+# ~/.config/systemd/user/m3-embed-server.service, then runs
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now m3-embed-server.service
+#
+# WHICH SERVER THIS RUNS: bin/embed_server_inproc.py, the Python server that
+# wraps m3_core_rs.EmbeddedEmbedder in-process. The Rust m3-embed-server
+# binary is the alternative implementation of the SAME /health + /embedding
+# contract; the two are MUTUALLY EXCLUSIVE because both bind :8082. Install
+# this unit only on a host not running the Rust OS service
+# (`m3 embedder install`). embed_server_inproc._already_serving() GETs /health
+# before loading the model and exits 0 if another instance answers, so a
+# redundant start can never load a second GPU/CUDA context.
+#
+# MODEL RESOLUTION: no M3_EMBED_GGUF is set here on purpose. The server falls
+# back to discover_bge_m3_gguf(), which searches the documented model roots. A
+# headless systemd --user unit inherits none of your shell environment (§3),
+# so an env var baked in here would be one more thing to drift out of sync
+# with .embed_config.json — auto-detection works identically in a terminal and
+# under systemd.
+#
+# Headless / server boxes where the user is not always logged in may want
+#   loginctl enable-linger <user>
+# so the service runs without an active login session.
+
+[Unit]
+Description=m3-memory Shared Embed Server (:8082)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=[M3_PYTHON] [M3_MEMORY_ROOT]/bin/embed_server_inproc.py --port 8082
+# Unconditional, matching the cognitive loop: a CLEAN exit (an upgrade, an
+# operator stop) must still be restarted, because in shared mode the whole
+# fleet defers to this one process.
+Restart=always
+RestartSec=10
+# NOTE: deliberately NO StartLimitBurst/StartLimitIntervalSec override here.
+# systemd's start-limit is a restart BUDGET, and an exhausted budget is the
+# exact failure this server hit on Windows (2026-09-13: SCM spent RESTART x3
+# on a sick GPU driver, the driver was fixed the next day, and nothing ever
+# retried — 30h down). bin/m3_embed_watchdog.py is the budget-free layer that
+# recovers a server whose ENVIRONMENT healed after the supervisor gave up.
+LimitNOFILE=4096
+
+[Install]
+WantedBy=default.target

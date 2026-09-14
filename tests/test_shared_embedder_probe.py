@@ -41,10 +41,18 @@ def _write_shared_config(root, url="http://127.0.0.1:8082"):
     )
 
 
-def _patch(monkeypatch, *, health="ok", rust=False, task=None):
-    """Mock the three detectors. task: True/False/None (None = non-Windows)."""
+def _patch(monkeypatch, *, health="ok", rust=False, task=None, rust_state=None):
+    """Mock the three detectors. task: True/False/None (None = non-Windows).
+
+    `rust` is the legacy boolean shorthand: True means a RUNNING service (the
+    only state that is a real keep-alive). Pass `rust_state` explicitly to model
+    'stopped' / 'not-installed' — registered-but-down is NOT a keep-alive.
+    """
+    if rust_state is None:
+        rust_state = "running" if rust else "absent"
     monkeypatch.setattr(P, "_server_health", lambda url, timeout=3.0: (health, {"model": "bge", "dim": 1024}))
-    monkeypatch.setattr(P, "_rust_service_present", lambda: rust)
+    monkeypatch.setattr(P, "_rust_service_state", lambda: rust_state)
+    monkeypatch.setattr(P, "_rust_service_present", lambda: rust_state != "absent")
     monkeypatch.setattr(P, "_task_registered_ok", lambda: task)
 
 
@@ -245,3 +253,52 @@ def test_no_leak_verbose_stays_clean(monkeypatch, cfg_root, capsys, no_env_leak)
     out = capsys.readouterr().out
     assert rc == 0
     assert "no M3_EMBED_GGUF leak" in out
+
+
+# ── keep-alive must assert RUNNING, not merely installed ──────────────────────
+# Regression guard for the 2026-09-13 outage: `_rust_service_present()` returned
+# True from the binary being on disk, so doctor printed "keepalive: OK" for ten
+# weeks while :8082 was dead and `--fix` skipped the repair entirely.
+
+def test_registered_but_stopped_service_is_not_a_keepalive(monkeypatch, cfg_root, capsys, no_env_leak):
+    _write_shared_config(cfg_root)
+    _patch(monkeypatch, health="down", rust_state="stopped", task=None)
+    rc = P.run(brief=False, fix=False)
+    out = capsys.readouterr().out
+    assert rc != 0
+    assert "REGISTERED but" in out
+    assert "STOPPED" in out
+    # must NOT claim the keep-alive is fine
+    assert "keepalive: OK" not in out
+
+
+def test_binary_on_disk_but_unregistered_is_not_a_keepalive(monkeypatch, cfg_root, capsys, no_env_leak):
+    _write_shared_config(cfg_root)
+    _patch(monkeypatch, health="down", rust_state="not-installed", task=None)
+    rc = P.run(brief=False, fix=False)
+    out = capsys.readouterr().out
+    assert rc != 0
+    assert "NO service is registered" in out
+    assert "keepalive: OK" not in out
+
+
+def test_running_service_is_a_keepalive(monkeypatch, cfg_root, capsys, no_env_leak):
+    _write_shared_config(cfg_root)
+    _patch(monkeypatch, health="ok", rust_state="running", task=None)
+    rc = P.run(brief=False, fix=False)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "RUNNING" in out
+
+
+def test_stopped_service_does_not_fall_through_to_python_task(monkeypatch, cfg_root, capsys, no_env_leak):
+    """A registered-but-stopped Rust service must report ITS OWN fault, not be
+    masked by a present Python task — they are mutually exclusive on :8082, so
+    reporting the task as the keep-alive would hide the actionable problem."""
+    _write_shared_config(cfg_root)
+    _patch(monkeypatch, health="down", rust_state="stopped", task=True)
+    rc = P.run(brief=False, fix=False)
+    out = capsys.readouterr().out
+    assert rc != 0
+    assert "STOPPED" in out
+    assert "scheduled task (1-min self-heal" not in out

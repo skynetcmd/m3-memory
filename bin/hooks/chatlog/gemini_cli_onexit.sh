@@ -24,15 +24,33 @@ m3_usable() {
     [ -n "$1" ] && [ -x "$1" ] && "$1" -c "import httpx" >/dev/null 2>&1
 }
 
+# WINDOWS: pythonw.exe BEFORE python.exe at every location.
+# Both are the same interpreter; python.exe is the CONSOLE build, so each
+# invocation from a hook allocates a conhost and FLASHES A WINDOW that steals
+# focus. This wrapper runs up to three interpreters per hook fire (the
+# usable-probe, the envelope parse, and the ingest exec), and the Stop hook
+# fires on every turn - so the console build produced a visible flash every
+# few seconds (observed 2026-09-13).
+# The Python hooks already pass CREATE_NO_WINDOW for exactly this reason; a
+# shell script has no such flag, so the fix is choosing the windowless binary.
+# Verified 2026-09-13 that pythonw.exe is correct for all three call shapes
+# here: exit-code probes, stdout through a pipe, and stderr through a pipe all
+# behave identically (the "pythonw has no stdout" caveat applies to an
+# inherited console, not to redirected handles). python.exe is KEPT as the
+# next candidate at each location so a layout without pythonw still resolves.
 PY=""
 for _cand in \
     "$BASE/.venv/bin/python" \
+    "$BASE/.venv/Scripts/pythonw.exe" \
     "$BASE/.venv/Scripts/python.exe" \
     "$HOME/.local/share/pipx/venvs/m3-memory/bin/python" \
+    "$HOME/.local/share/pipx/venvs/m3-memory/Scripts/pythonw.exe" \
     "$HOME/.local/share/pipx/venvs/m3-memory/Scripts/python.exe" \
     "$HOME/.local/pipx/venvs/m3-memory/bin/python" \
+    "$HOME/.local/pipx/venvs/m3-memory/Scripts/pythonw.exe" \
     "$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe" \
     "${PIPX_HOME:+$PIPX_HOME/venvs/m3-memory/bin/python}" \
+    "${PIPX_HOME:+$PIPX_HOME/venvs/m3-memory/Scripts/pythonw.exe}" \
     "${PIPX_HOME:+$PIPX_HOME/venvs/m3-memory/Scripts/python.exe}" \
     "$M3_PYTHON"
 do

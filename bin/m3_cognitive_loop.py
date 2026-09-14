@@ -1087,6 +1087,23 @@ async def run_embed_pass(args):
                     f"Embed-backfill: {counters.embedded} rows embedded in "
                     f"{os.path.basename(db_path)}"
                 )
+            elif counters.scanned:
+                # SILENT ZERO (§3). Logging only successes made a 30-hour
+                # tier-2 outage indistinguishable from an idle sweep: this
+                # pass ran every cycle, embedded nothing, and said nothing
+                # (2026-09-13). The loop is the only component that knows
+                # BOTH that work was pending and that none of it landed, so
+                # it is the only one that can report this. State what was
+                # observed; never assert a cause the code has not confirmed.
+                logger.warning(
+                    f"Embed-backfill: observed {counters.scanned} row(s) scanned "
+                    f"and 0 embedded in {os.path.basename(db_path)} "
+                    f"(failed batches: {counters.failed_batches}, content "
+                    f"failures: {counters.content_failures}) — possible: no "
+                    f"embedder tier is returning vectors, or every row was "
+                    f"skipped; inspect: `m3 doctor` and the shared embed "
+                    f"server's /health"
+                )
         except Exception as e:
             logger.error(
                 f"Embed-backfill pass error on {os.path.basename(db_path)}: "

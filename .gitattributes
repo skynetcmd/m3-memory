@@ -5,6 +5,12 @@
 *.sh       text eol=lf
 *.py       text eol=lf
 *.ps1      text eol=crlf
+# launchd plists and systemd units are consumed by Unix service managers and
+# must be LF. Without this, a Windows checkout with core.autocrlf=true writes
+# CRLF and systemd rejects the unit ("Invalid section header") — a breakage
+# that is invisible on the machine that authored the file.
+*.service  text eol=lf
+*.plist    text eol=lf
 # Generated SVGs (e.g. docs/star-history.svg) are byte-compared by their
 # generator to avoid spurious commits — pin LF so the committed file matches
 # what the generator writes on any runner, regardless of core.autocrlf.

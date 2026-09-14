@@ -263,10 +263,31 @@ def restart(reason: str) -> int:
     return 0
 
 
+def _tick_embed_watchdog() -> None:
+    """Run the shared-embedder liveness check on this same tick.
+
+    Co-located deliberately: this watchdog already runs every 5 minutes on all
+    three OSes with backoff and logging, so guarding :8082 needs no second
+    scheduled job to install, verify or drift (§10a — one owner). It is
+    non-fatal by construction (§3): the embed check must never prevent the
+    cognitive-loop check that is this process's primary duty.
+    """
+    try:
+        import m3_embed_watchdog
+        m3_embed_watchdog.main()
+    except Exception as e:  # noqa: BLE001 — never take the loop watchdog down
+        log(f"embed-watchdog tick failed (non-fatal): {type(e).__name__}: {e}")
+
+
 def main() -> int:
     if halt_active():
         log("HALT_m3 is live — an exclusive op owns the DBs; standing down")
         return 0
+
+    # Guard :8082 before the loop check. An embed server that is down does not
+    # stop the loop from cycling, so the loop's own heartbeat cannot reveal it
+    # — the two checks are independent by design.
+    _tick_embed_watchdog()
 
     age, interval = heartbeat_age()
     stale_after = max(_MIN_STALE_S, interval * _MISSED_CYCLES)

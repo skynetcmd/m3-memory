@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-09-12T12:08:20.635002+00:00._
+_Generated 2026-09-14T03:08:03.289918+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -71,6 +71,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/m3_chatlog_backfill_title.py](m3_chatlog_backfill_title.md) | m3_chatlog_backfill_title — Backfill missing/useless titles from content. |  |
 | [bin/m3_chatlog_enrich_backfill.py](m3_chatlog_enrich_backfill.md) | Backfill `observation_queue` from existing chatlog rows. |  |
 | [bin/m3_cognitive_loop.py](m3_cognitive_loop.md) | m3_cognitive_loop — The autonomous heartbeat of m3-memory. |  |
+| [bin/m3_embed_watchdog.py](m3_embed_watchdog.md) | m3 shared-embedder watchdog — liveness-based self-heal for all three OSes. |  |
 | [bin/m3_enrich.py](m3_enrich.md) | m3_enrich — User-facing enrichment CLI for core memory + chatlogs. |  |
 | [bin/m3_enrich_assign.py](m3_enrich_assign.md) | m3_enrich_assign.py — assign enrichment_groups.send_to for routed runs. |  |
 | [bin/m3_enrich_batch.py](m3_enrich_batch.md) | m3-enrich-batch — async/batch variant of bin/m3_enrich.py. |  |
@@ -87,6 +88,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/mcp_proxy.py](mcp_proxy.md) | MCP Tool Execution Proxy  v2.0 |  |
 | [bin/mcp_tool_catalog.py](mcp_tool_catalog.md) | mcp_tool_catalog.py — single source of truth for the m3-memory MCP tool catalog. |  |
 | [bin/measure_tool_tokens.py](measure_tool_tokens.md) | measure_tool_tokens.py — quantify token cost of MCP tool schemas. |  |
+| [bin/measure_tool_usage.py](measure_tool_usage.md) | Freeze the m3 tool-usage baseline from agent transcripts. |  |
 | [bin/mem0_scan.py](mem0_scan.md) | mem0_scan.py — Scan a codebase for mem0 usage and report the m3 swap. |  |
 | [bin/memory_bridge.py](memory_bridge.md) | (no docstring) |  |
 | [bin/memory_core.py](memory_core.md) | Core memory primitives: single + bulk write, search, enrichment, emitters. |  |

@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_loop_watchdog.py
-sha1: 5cb38d1819f9
-mtime_utc: 2026-08-09T19:41:32.422028+00:00
-generated_utc: 2026-08-12T00:59:01.549116+00:00
+sha1: 06fc529e4388
+mtime_utc: 2026-09-13T22:42:44.191378+00:00
+generated_utc: 2026-09-13T22:44:36.856675+00:00
 private: false
 ---
 
@@ -53,7 +53,7 @@ DESIGN (§2 modularity, §3 fail-safe, §5 effectiveness)
 
 ## Entry points
 
-- `def main()` (line 266)
+- `def main()` (line 282)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -75,6 +75,7 @@ _(no argparse arguments detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `_task_runtime (no_window_kwargs)`
+- `m3_embed_watchdog`
 - `m3_halt`
 - `m3_sdk (get_m3_config_root, get_m3_engine_root)`
 
