@@ -49,10 +49,10 @@ AS_RECORDS_TOOLS = [
     "memory_cost_report",
     "m3_help_capabilities",
     "conversation_search",
+    # Carries nearly every live caller (65 direct + 32 CLI), so it landed in its
+    # own commit to keep a regression bisectable.
+    "memory_search",
 ]
-
-# memory_search lands in its own commit: it carries nearly every live caller
-# (65 direct + 32 CLI), so an isolated commit keeps a regression bisectable.
 
 # Async impls: calling them needs an event loop, so the shape assertions that
 # invoke a tool skip these. Their spec/impl agreement is still checked.

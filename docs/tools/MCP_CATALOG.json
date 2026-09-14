@@ -2590,6 +2590,11 @@
           "type": "boolean"
         },
         {
+          "name": "as_records",
+          "required": false,
+          "type": "boolean"
+        },
+        {
           "name": "timeout",
           "required": false,
           "type": "number"

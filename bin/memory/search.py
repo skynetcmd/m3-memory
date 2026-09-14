@@ -2365,6 +2365,7 @@ async def memory_search_impl(
     intent_hint="",
     mmr=True,
     requesting_agent="",
+    as_records=False,
     _depth=0,
 ):
     _resolve_mc_callbacks()  # bind memory_core callbacks on first call
@@ -2387,11 +2388,18 @@ async def memory_search_impl(
         extra_columns=["metadata_json", "conversation_id"] if intent_hint else None,
         requesting_agent=requesting_agent,
     )
+    from . import records as _records
     if ranked is None:
-        return "Search failed: FTS and semantic both unavailable."
+        # A BACKEND FAILURE, not an empty result: both retrieval paths are down,
+        # so "no results" would tell the caller the corpus lacks a match when
+        # the truth is that nothing was searched.
+        return _records.emit("Search failed: FTS and semantic both unavailable.",
+                             _records.error_payload("search_unavailable", query=query),
+                             as_records)
 
     if not ranked:
-        return "No results found."
+        return _records.emit("No results found.",
+                             _records.as_records_payload((), query=query), as_records)
     lines = [f"Top {len(ranked)} results:"]
     for rank, (score, item) in enumerate(ranked, 1):
         content = item.get("content") or ""
@@ -2415,4 +2423,16 @@ async def memory_search_impl(
 
         lines.append(f"Content:\n{content}\n")
     lines.append("-" * 40)
-    return "\n".join(lines)
+    # `ranked` is (score, item) pairs; the score is computed here and exists
+    # nowhere else, so it must ride each record or a records caller loses the
+    # ranking entirely. `_explanation` is included only when explain=True, the
+    # same condition the display path uses.
+    _items = []
+    for _score, _item in ranked:
+        _rec = {k: v for k, v in _item.items() if not k.startswith("_")}
+        _rec["score"] = _score
+        if explain and "_explanation" in _item:
+            _rec["explanation"] = _item["_explanation"]
+        _items.append(_rec)
+    return _records.emit("\n".join(lines),
+                         _records.as_records_payload(_items, query=query), as_records)
