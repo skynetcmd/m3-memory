@@ -123,6 +123,29 @@ background before implementation.
 
 ---
 
+## Store separation — evaluate before building
+
+The queue currently lives in `agent_memory.db` alongside long-term memory. Those
+two have opposite access profiles: the queue is high-churn and disposable, the
+memory store is low-churn and permanent. Sharing one file means queue polling
+and deep memory search contend for the same write lock — acute on SQLite, which
+has one writer per database — and it makes aggressive pruning or `VACUUM` of
+spent messages a risk to durable data.
+
+**m3 already proves the pattern.** The chatlog is a separate store
+(`agent_chatlog.db`) for exactly this reason. Measured on this machine:
+**133,220 chatlog rows against 5,203 in main.** Had those shared a file, every
+memory search would queue behind chatlog writes.
+
+A dedicated queue store would also let the two diverge where they should: the
+queue wants short retention, cheap indexes and frequent compaction; memory wants
+embeddings, FTS and permanence. Nothing the queue needs requires memory's
+machinery.
+
+The cost is a third root to configure, migrate and back up, and the split-brain
+hazard already documented for the engine/config roots applies — pin both or
+neither. Recommended direction, not yet decided.
+
 ## Open questions
 
 - Request authentication: bearer vs JWT vs mTLS (see Security).
