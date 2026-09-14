@@ -106,8 +106,8 @@ def agent_register_impl(agent_id: str, role: str = "", capabilities: list | None
 
 def agent_heartbeat_impl(agent_id: str) -> str:
     """Updates agent's last_seen timestamp and status to active.
-    
-    Note: calling this explicitly is now optional. `notifications_poll` performs 
+
+    Note: calling this explicitly is now optional. `notifications_poll` performs
     an implicit heartbeat automatically when an agent checks its mail.
     """
     now = datetime.now(timezone.utc).isoformat()
