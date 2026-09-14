@@ -116,12 +116,23 @@ Before any push to a remote:
    places than the two documented generators touch. A `git status` that is not
    clean after running all five is the same STOP signal.
 
-2. **Bench-data leakage scan.** Never push LME-M/LongMemEval-M data,
+2. **Commit messages and `CHANGELOG.md` describe the change, not the
+   reasoning.** State what changed. Decision process, measurement narrative,
+   rejected alternatives and post-mortems do not belong in a public git
+   artifact — they go in the maintainer's private notes. This applies to
+   commit messages, `CHANGELOG.md`, `docs/` pages, PR descriptions and release
+   notes.
+
+   Never publish: live session or agent identifiers, and unfixed defects
+   described in enough detail to act on. A scanner matching the shape of
+   internal data will not catch the same content rewritten as prose.
+
+3. **Bench-data leakage scan.** Never push LME-M/LongMemEval-M data,
    methodology, in-flight bench results, or local absolute paths / secrets to a
    public remote. The pre-push hook scans the outgoing diff for the known
    markers; a hit blocks the push.
 
-3. **Follow the design philosophies (author's responsibility).** When a push
+4. **Follow the design philosophies (author's responsibility).** When a push
    changes code (`bin/`/`m3_memory/` `.py`), the hook prints a short reminder
    of the core tenets — Effectiveness (§5), Robustness (§3), Efficiency/
    Performance (§4/§8), Hardening/Privacy (§6/§7), Modularity / one-feature-
