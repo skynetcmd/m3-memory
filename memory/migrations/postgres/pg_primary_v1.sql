@@ -399,7 +399,16 @@ CREATE TABLE IF NOT EXISTS notifications (
     -- WHICH sister instance owns this row, distinct from both of the above.
     -- See pg_055_notification_claim.up.sql.
     claimed_by     TEXT DEFAULT NULL,
-    claimed_at     TIMESTAMPTZ DEFAULT NULL
+    claimed_at     TIMESTAMPTZ DEFAULT NULL,
+    -- Renewable lease + fencing + threading. See pg_056_notification_lease.
+    -- No `status` column by design: the four states derive from these columns,
+    -- and a stored copy would shadow the live `read_at IS NULL` predicates.
+    claim_expires_at TIMESTAMPTZ DEFAULT NULL,
+    lease_token      TEXT DEFAULT NULL,
+    attempt_count    INTEGER NOT NULL DEFAULT 0,
+    failed_at        TIMESTAMPTZ DEFAULT NULL,
+    conversation_id  TEXT DEFAULT NULL,
+    reply_to_id      BIGINT DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_notif_agent_unread
     ON notifications(agent_id, read_at, created_at);

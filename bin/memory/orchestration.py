@@ -329,6 +329,70 @@ def _addressing_predicate(agent_id: str, param: str) -> "tuple[str, tuple]":
     )
     return f"(agent_id = {param} OR {frag})", (agent_id, bound)
 
+# ── Message state: ONE owner for the predicate ───────────────────────────────
+# The four states are DERIVED, never stored. A `status` column would give "is
+# this pending" two sources of truth that nothing forces to agree, and six live
+# call sites already filter on `read_at IS NULL` -- one of them the waiter that
+# delivers agent mail. A stored status would shadow those predicates rather than
+# replace them, and the first write path that sets one without the other breaks
+# delivery silently. §10a: a copied predicate is the defect independent of
+# correctness, and the copies drift. P0 of this same effort was exactly that
+# failure -- memory_inbox kept a private copy of the addressing rule and silently
+# missed the #170 fix.
+#
+# Order matters. A row can satisfy several raw conditions at once (a completed
+# row still carries its claimed_by), so these are evaluated most-terminal-first
+# and the FIRST match wins.
+MESSAGE_STATES = ("FAILED", "COMPLETED", "CLAIMED", "PENDING")
+
+
+def message_state_sql(state: str) -> str:
+    """SQL predicate selecting rows in ``state``. The single owner.
+
+    Call sites express intent (`message_state_sql("PENDING")`); this renders the
+    condition. Backend-neutral -- it is pure IS NULL / IS NOT NULL, no dialect
+    function -- so it needs no Dialect method, but it lives here so that adding a
+    state or changing one is one edit rather than a search for hand-written
+    filters.
+    """
+    preds = {
+        "FAILED": "failed_at IS NOT NULL",
+        "COMPLETED": "failed_at IS NULL AND read_at IS NOT NULL",
+        "CLAIMED": ("failed_at IS NULL AND read_at IS NULL "
+                    "AND claimed_by IS NOT NULL"),
+        "PENDING": ("failed_at IS NULL AND read_at IS NULL "
+                    "AND claimed_by IS NULL"),
+    }
+    try:
+        return preds[state]
+    except KeyError:
+        raise ValueError(
+            f"unknown message state {state!r}; expected one of {MESSAGE_STATES}"
+        ) from None
+
+
+def message_state_of(row) -> str:
+    """The state of a fetched row, by the SAME rules as :func:`message_state_sql`.
+
+    Deliberately mirrors the SQL rather than re-deciding: if these two ever
+    disagree, a row is filtered as one state and displayed as another. The test
+    suite asserts they agree for every column combination.
+    """
+    def _set(name):
+        try:
+            return row[name] is not None
+        except (KeyError, IndexError, TypeError):
+            return False
+
+    if _set("failed_at"):
+        return "FAILED"
+    if _set("read_at"):
+        return "COMPLETED"
+    if _set("claimed_by"):
+        return "CLAIMED"
+    return "PENDING"
+
+
 def notify_impl(agent_id: str, kind: str, payload: dict = None,
                 from_agent: str = "", from_session: str = "") -> str:
     """Sends a notification to an agent.
@@ -471,7 +535,8 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
 
     with _db() as db:
         rows = db.execute(
-            f"SELECT id, kind, payload_json, created_at, read_at FROM notifications {where_clause} ORDER BY created_at DESC LIMIT {p}",
+            f"SELECT id, kind, payload_json, created_at, read_at, received_at "
+            f"FROM notifications {where_clause} ORDER BY created_at DESC LIMIT {p}",
             params + [limit]
         ).fetchall()
 
@@ -484,7 +549,16 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
     read_type = "unread" if unread_only else "total"
     lines = [f"Notifications for {agent_id} ({len(rows)} {read_type}):"]
     for row in rows:
-        lines.append(f"  [{row['id']}] kind={row['kind']} payload={row['payload_json']} created={row['created_at']}")
+        # received_at is shown only when SET. It was write-only until now --
+        # written by notifications_mark_received, read by nothing -- so the <30s
+        # receipt SLA it exists to satisfy could not actually be measured, and a
+        # message that had been delivered but not acted on was indistinguishable
+        # from one that never arrived. Omitted when NULL rather than rendered as
+        # "received=None": NULL means "we do not know when this was received",
+        # which is a different statement from a measurement (§12c), and padding
+        # every line of the common case with a null would bury the signal.
+        _recv = f" received={row['received_at']}" if row["received_at"] else ""
+        lines.append(f"  [{row['id']}] kind={row['kind']} payload={row['payload_json']} created={row['created_at']}{_recv}")
 
     return records.emit("\n".join(lines),
                         records.as_records_payload(
