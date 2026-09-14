@@ -65,6 +65,12 @@ def install_unix_crontab(m3_memory_root):
         result = _run(["crontab", "-l"], capture_output=True, text=True)
         if result.returncode == 0:
             current_cron = result.stdout
+    except subprocess.TimeoutExpired:
+        # A crontab read that does not return is not a reason to abort the
+        # install: an empty current_cron is the same state as "no crontab yet",
+        # which this function already handles. The write below still fails
+        # loudly if it cannot apply.
+        print("Warning: 'crontab -l' timed out; treating the crontab as empty.")
     except FileNotFoundError:
         print("Error: 'crontab' command not found. Ensure cron is installed.")
         sys.exit(1)
@@ -1829,10 +1835,17 @@ def _verify_windows_task(name: str) -> bool:
     MultipleInstances=IgnoreNew). Cross-checks the LIVE task, not the spec, so it
     catches a task that was created but silently lost a setting. Returns True on
     match. Never raises — a missing task is a clean False."""
-    r = _run(
-        ["schtasks", "/Query", "/TN", name, "/XML", "ONE"],
-        capture_output=True, text=True,
-    )
+    try:
+        r = _run(
+            ["schtasks", "/Query", "/TN", name, "/XML", "ONE"],
+            capture_output=True, text=True,
+        )
+    except subprocess.TimeoutExpired:
+        # The docstring above promises this never raises. A query that does not
+        # return is indistinguishable from one that found nothing, and both mean
+        # "cannot confirm this task is correctly registered" -- which is False.
+        _safe_print(f"{FAIL} {name}: verification timed out")
+        return False
     if r.returncode != 0 or not r.stdout.strip():
         _safe_print(f"{FAIL} {name}: not registered ({(r.stderr or '').strip() or 'no such task'})")
         return False
@@ -1895,7 +1908,11 @@ def _verify_unix_cognitive_loop() -> bool:
         if not os.path.exists(dest):
             _safe_print(f"{FAIL} launchd agent not installed: {dest}")
             return False
-        loaded = _run(["launchctl", "list"], capture_output=True, text=True)
+        try:
+            loaded = _run(["launchctl", "list"], capture_output=True, text=True)
+        except subprocess.TimeoutExpired:
+            _safe_print(f"{FAIL} launchctl list timed out; cannot verify load state")
+            return False
         if "com.m3memory.cognitiveloop" in (loaded.stdout or ""):
             _safe_print(f"{OK} launchd agent installed and loaded: {dest}")
             # KeepAlive is the self-heal knob. Checking only that the KEY exists
@@ -1932,9 +1949,13 @@ def _verify_unix_cognitive_loop() -> bool:
         if not os.path.exists(dest):
             _safe_print(f"{FAIL} systemd --user unit not installed: {dest}")
             return False
-        active = _run(
-            ["systemctl", "--user", "is-active", unit], capture_output=True, text=True
-        )
+        try:
+            active = _run(
+                ["systemctl", "--user", "is-active", unit], capture_output=True, text=True
+            )
+        except subprocess.TimeoutExpired:
+            _safe_print(f"{FAIL} systemctl is-active timed out; cannot verify {unit}")
+            return False
         state = (active.stdout or "").strip()
         if state == "active":
             _safe_print(f"{OK} systemd --user unit installed and active: {unit}")
