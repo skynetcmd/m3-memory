@@ -331,6 +331,43 @@ def _rust_embed_service_loaded() -> "bool | None":
             return False
         return None
 
+    if osn == "Windows":
+        # SCM owns the port here, exactly as launchd does on Darwin. `m3
+        # embedder install` registers the Rust binary as the SCM service
+        # `m3-embed-server`; the Python AgentOS_EmbedServer task binds the same
+        # :8082. Both registered = two supervisors racing for one port.
+        #
+        # MEASURED on this host 2026-09-13, which is what motivated extending
+        # the guard here:
+        #     Get-Service m3-embed-server           -> Running / Automatic
+        #     Get-ScheduledTask AgentOS_EmbedServer -> Ready
+        # Both armed at once. The task fires ONSTART (plus a PT5M self-heal)
+        # into a port the service already holds.
+        #
+        # `sc.exe query` is the SCM equivalent of `launchctl list`: it reports
+        # the REGISTRATION, which is the thing that collides. A binary check or
+        # a /health probe reads "clear" while a registered-but-stopped service
+        # still owns the port the moment SCM starts it -- the same divergence
+        # documented for Darwin above.
+        try:
+            r = subprocess.run(["sc.exe", "query", _WINDOWS_RUST_EMBED_SERVICE],
+                               capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.SubprocessError) as e:
+            _safe_print(f"{WARN} could not run `sc.exe query "
+                        f"{_WINDOWS_RUST_EMBED_SERVICE}`: {type(e).__name__}: {e}")
+            return None
+        blob = f"{r.stdout}\n{r.stderr}"
+        # 1060 = ERROR_SERVICE_DOES_NOT_EXIST: a DEFINITE "not registered", the
+        # only negative we accept. Any other non-zero rc is indeterminate
+        # (access denied, SCM unreachable) and must refuse, not proceed.
+        if "1060" in blob:
+            return False
+        if r.returncode != 0:
+            _safe_print(f"{WARN} `sc.exe query {_WINDOWS_RUST_EMBED_SERVICE}` "
+                        f"rc={r.returncode}: {blob.strip()[:160]}")
+            return None
+        return "SERVICE_NAME" in blob or "STATE" in blob
+
     return None
 
 
@@ -1175,6 +1212,14 @@ _ROLE_TO_TASK = {
 # it means that platform genuinely has no such service, and we must say so
 # rather than construct a plausible name and fail silently (DESIGN_PHILOSOPHIES
 # section 3).
+# The Rust embed-server's SCM service name, as registered by `m3 embedder
+# install` (m3_memory/embedder_admin.py). Deliberately NOT a _ROLE_TO_SERVICE
+# entry: that map names m3's OWN supervisor per role, while this is the
+# COMPETING implementation that binds the same :8082. Kept adjacent so the
+# Windows conflict check and embedder_admin cannot drift apart silently.
+_WINDOWS_RUST_EMBED_SERVICE = "m3-embed-server"
+
+
 _ROLE_TO_SERVICE = {
     "dashboard": {
         "win": "AgentOS_Dashboard",
@@ -1548,6 +1593,50 @@ def _waiter_agent_args() -> list:
         out += ["--agent-id", a]
     return out
 
+def _drop_embed_task_if_rust_owns_port(tasks: "list[dict]") -> "list[dict]":
+    """Remove AgentOS_EmbedServer when the Rust SCM service already owns :8082.
+
+    The Unix installer REFUSES outright (EmbedServerConflict) because the embed
+    unit is the only thing it installs there. Windows cannot refuse: this task
+    list also carries the cognitive loop, dashboard and watchdog, and aborting
+    the whole install over one conflicting entry would be a worse outcome than
+    the conflict. So the Windows behaviour is to DROP that one task and say so
+    loudly -- same decision, scoped to what the caller can act on.
+
+    Indeterminate (None) drops the task too. Both supervisors bind :8082, so a
+    check that cannot tell must not register a possible second one; a missing
+    keep-alive is recoverable with one command, a port fight is debugged much
+    later (DESIGN_PHILOSOPHIES section 3: the safe-looking default is the
+    dangerous one).
+    """
+    names = [t["name"] for t in tasks]
+    if _ROLE_TO_SERVICE["embed-server"]["win"] not in names:
+        return tasks
+    loaded = _rust_embed_service_loaded()
+    if loaded is False:
+        return tasks
+
+    task_name = _ROLE_TO_SERVICE["embed-server"]["win"]
+    if loaded is True:
+        _safe_print(
+            f"{WARN} skipping {task_name}: the Rust m3-embed-server is already "
+            f"registered as the SCM service `{_WINDOWS_RUST_EMBED_SERVICE}` and "
+            f"owns :8082.")
+        _safe_print(
+            f"      Both bind the same port; registering the task too would put "
+            f"two supervisors on one port.")
+        _safe_print(
+            f"      `m3 embedder install` owns the embed-server keep-alive here. "
+            f"To use the Python task instead: `m3 embedder uninstall` first.")
+    else:
+        _safe_print(
+            f"{WARN} skipping {task_name}: could not determine whether the Rust "
+            f"m3-embed-server is registered, and both bind :8082.")
+        _safe_print(
+            f"      inspect: sc.exe query {_WINDOWS_RUST_EMBED_SERVICE}")
+    return [t for t in tasks if t["name"] != task_name]
+
+
 def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard_port: int = 8088):
     # pythonw.exe (GUI subsystem) — avoids the console window python.exe
     # (console subsystem) flashes every fire, even without a cmd.exe wrapper.
@@ -1563,6 +1652,8 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard
     os.makedirs(log_dir, exist_ok=True)
 
     tasks = _filter_tasks(get_schedule_specs(m3_memory_root, dashboard_port), selector)
+    # Never register a second :8082 supervisor beside the Rust SCM service.
+    tasks = _drop_embed_task_if_rust_owns_port(tasks)
     if not tasks:
         _safe_print(f"{FAIL} No schedule matches selector={selector!r}. Try --list to see all.")
         return

@@ -506,7 +506,11 @@ def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns,
 
 
 async def memory_search_scored_impl(
-    query,
+    # Defaults to "" because the ToolSpec documents exactly that: `query` has
+    # `"default": ""` and is absent from `required`, with the description
+    # "Empty string = filter-only (type/scope) listing." The impl required it
+    # positionally, so the documented filter-only call raised TypeError.
+    query="",
     mmr=True,
     k=8,
     type_filter="",

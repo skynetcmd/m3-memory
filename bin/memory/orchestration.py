@@ -68,8 +68,18 @@ def _agent_exists(agent_id: str) -> bool:
 
 # ── Agent Registry (5 functions) ──────────────────────────────────────────────────
 
-def agent_register_impl(agent_id: str, role: str, capabilities: list, metadata: dict) -> str:
-    """Registers or updates an agent in the registry."""
+def agent_register_impl(agent_id: str, role: str = "", capabilities: list | None = None,
+                        metadata: dict | None = None) -> str:
+    """Registers or updates an agent in the registry.
+
+    Every parameter but `agent_id` defaults, because the ToolSpec has always
+    marked them optional: `required` lists only `agent_id`. An agent that read
+    the contract and called with just an id got a TypeError from a tool that
+    said the call was valid. The ToolSpec is the agent's contract, so the impl
+    moves to meet it (section 12a) -- widening a signature breaks no existing
+    caller, while narrowing the spec would break every agent already relying on
+    the documented shape.
+    """
     if not agent_id:
         return "Error: agent_id cannot be empty"
 

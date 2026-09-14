@@ -1413,7 +1413,7 @@ def _memory_link_inner(from_id: str, to_id: str, relationship_type: str, db) -> 
 
 
 def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
-                        context_ids: list, note: str = "",
+                        context_ids: list | None = None, note: str = "",
                         task_id: str = "", from_session: str = "") -> str:
     """Creates a handoff memory for inter-agent task transfer.
 
@@ -1421,7 +1421,16 @@ def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
     sent this, so the recipient can reply to that sister rather than to the
     agent name (which N concurrent sessions share — see notify_impl). Omitted,
     behaviour is exactly as before.
+
+    ``context_ids`` defaults because the ToolSpec has always marked it
+    optional; the impl used to require it positionally, so an agent that read
+    the contract and omitted it got a TypeError (section 12a -- the ToolSpec is
+    the contract, so the impl moves to meet it).
     """
+    # Normalize here rather than at each use: the body iterates context_ids and
+    # takes its len(), so a None default would move the TypeError rather than
+    # remove it.
+    context_ids = list(context_ids or [])
     # 0. Validate agents are registered
     if not _agent_exists(to_agent):
         return f"Error: to_agent '{to_agent}' is not registered. Call agent_register first."
