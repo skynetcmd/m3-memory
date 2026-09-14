@@ -232,3 +232,16 @@ m3_memory/install_os.py
 
 # mypyc build staging (setup.py copies these for in-package compilation)
 m3_memory/bin/
+
+# Agent scratch dumps at repo ROOT (not nested — .scratch/ above covers those).
+# These are shell redirects of tool output (e.g. `m3 admin notifications_poll
+# > out.txt`) written while debugging. They carry cross-agent operational
+# internals — inbox addresses, session UUIDs, inter-agent review memos, and
+# unfixed-defect discussion — which the pre-push credential/bench scanners do
+# NOT model, so they pass the gate while still being unpublishable. One was
+# staged for a public commit on 2026-09-14; deleted before it shipped.
+# Durable findings belong in m3 memory, never a root .txt.
+/out.txt
+/review.txt
+/round*.txt
+/notifications*.txt
