@@ -1377,11 +1377,18 @@ def _add_tool_domain_subcommands(subparsers) -> None:
                 mx.add_argument(
                     "--json", dest="_json_args", metavar="OBJ",
                     help="Tool arguments as a single JSON object "
-                         "(this tool has a structured argument).",
+                         "(this tool has a structured argument). Large payloads "
+                         "must use --json-file instead: cmd.exe caps a command "
+                         "line at 8,191 chars and rejects the call before this "
+                         "program runs (Windows CreateProcess itself allows "
+                         "~32 KB, so the ceiling depends on the shell).",
                 )
                 mx.add_argument(
                     "--json-file", dest="_json_file", metavar="PATH",
-                    help="Read tool arguments from a JSON file (or '-' for stdin).",
+                    help="Read tool arguments from a JSON file (or '-' for "
+                         "stdin). Use this for any payload over a few KB -- "
+                         "--json passes the object through the command line, "
+                         "which the invoking shell may refuse outright.",
                 )
             else:
                 for pname, pdef in props.items():
