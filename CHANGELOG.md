@@ -23,6 +23,46 @@ _Nothing yet._
 
 ---
 
+## [2026.9.14.0] — 2026-09-14 — Smaller startup surface, structured returns
+
+### Added
+
+- **Narrowed tool variants.** `memory_search_slim`, `memory_write_slim`,
+  `chatlog_search_slim` and `memory_supersede_slim` sit beside the full tools
+  and share their implementations. The startup set is now ~2,216 tokens of
+  schema against ~33,686 for the whole catalog. Which parameters each keeps
+  came from measured usage: search uses two of nineteen in almost every call.
+- **`as_records` on twelve display-string tools** (and the slim variant that
+  inherits it from one of them). Opt-in structured output;
+  the default is byte-identical to before. These tools held rows and flattened
+  them, so a caller who wanted to filter or sort had to parse the string back.
+  Errors return `{error, ...}` without `count`/`items` — an error is not an
+  empty result.
+- **User-owned startup tool set** via `M3_TOOLS_STARTUP` or
+  `.tools_config.json`. The default is derived in code and never written to
+  disk, so it tracks upgrades instead of pinning against them. An unknown tool
+  name is refused with a suggestion; a set missing the escape hatch is refused
+  outright. `m3 doctor` reports the resolved set and where it came from.
+- **Unix keep-alive for the shared embed server.** launchd agent, systemd user
+  unit, and a watchdog. Previously only Windows had a supervisor.
+- **Tool-usage measurement** across direct, proxy-delegated and CLI calls.
+  Counting only direct calls had been missing most of the picture.
+
+### Fixed
+
+- Three tools required arguments their schemas described as optional, so a
+  caller that honored the contract got a TypeError. A guard now checks the
+  whole catalog in both directions.
+- The installer now refuses when the Rust embed-server is registered, or when
+  that cannot be determined. Both bind the same port.
+- The embed-server health probe is restricted to http(s). A `file:` URL read a
+  local path and reported the server healthy while nothing was listening.
+- The security scan orchestrator refuses to upload a partial run. A missing
+  scanner was stepped over, and the partial upload rendered as a normal scan.
+- Notification payloads stored double-encoded are decoded on read.
+
+---
+
 ## [2026.9.13.0] — 2026-09-13 — Python floor raised to 3.12
 
 ### Changed — BREAKING
