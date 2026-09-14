@@ -6,6 +6,11 @@ M3 Memory is not an agent runtime — it does not schedule or execute agents. It
 
 > **Looking for a wire-up guide for Claude Code + Gemini CLI + OpenCode sharing one m3-memory store?** See the practical setup notes — subscription vs API token tradeoffs, unified tag schema across agents, per-agent install steps — at [Multi-Agent Subscription Models with m3-Memory](./multi_agent_subscription_models.htm) (saved page; covers the day-to-day workflow underneath the primitives below).
 
+> **Running a project with two agents?** See
+> [MULTI_AGENT_HOWTO.md](./MULTI_AGENT_HOWTO.md) for the operational guide —
+> roles, message discipline, handling disagreement, and the failure modes that
+> show up in practice. This page covers the primitives those patterns use.
+
 ## 🧩 Primitives
 
 ### 👤 Agent registry
