@@ -100,6 +100,22 @@ Before any push to a remote:
    A non-zero exit (or any leftover `git diff` in the generated docs) is a
    STOP signal — regenerate, update the count claims, commit, then push.
 
+   **There are FIVE generators.** `check_tool_catalog_drift.py` runs the first
+   three; the last two it does not know about, so they are caught only by the
+   full suite, at the end of a ~5.5-minute run. Run all five after any catalog
+   or `bin/` change:
+   ```
+   python bin/gen_tool_manifest.py      # docs/tools/MCP_CATALOG.json
+   python bin/gen_mcp_inventory.py      # docs/MCP_TOOLS.md
+   python bin/gen_tool_inventory.py     # docs/tools/*.md  (one page per bin/ script)
+   python bin/gen_capability_matrix.py  # docs/CAPABILITY_MATRIX.md
+   python bin/gen_features_json.py      # docs/features.json
+   ```
+   `gen_capability_matrix.py` and `gen_features_json.py` were undocumented
+   until a tool-count change tripped them: the count claim lives in three more
+   places than the two documented generators touch. A `git status` that is not
+   clean after running all five is the same STOP signal.
+
 2. **Bench-data leakage scan.** Never push LME-M/LongMemEval-M data,
    methodology, in-flight bench results, or local absolute paths / secrets to a
    public remote. The pre-push hook scans the outgoing diff for the known
@@ -436,6 +452,36 @@ These work identically regardless of which model is on either side:
 | `notifications_poll(agent_id, unread_only, limit)` | Pull unacked notifications (including `refresh_due` from maintenance). |
 | `notifications_ack(notification_id)` / `notifications_ack_all(agent_id)` | Dismiss after addressing. |
 | `task_create` / `task_assign` / `task_update` / `task_delete` / `task_set_result` / `task_get` / `task_list` / `task_tree` | Shared task graph across the fleet — any agent can read or update. |
+
+#### ⚠ Addressing is asymmetric — read this before wiring a poller
+
+An agent id can be a bare **type** (`claude-code`) or a **qualified instance**
+(`claude-code@4a87f9`). Delivery between them is one-way:
+
+> **A bare poller sees instance mail. An instance poller does NOT see bare mail.**
+
+Measured, not inferred. The consequences run in both directions, and two agents
+reviewing this very mechanism each got it wrong the opposite way:
+
+- **Poll bare when you are one of several sessions** and you will *steal* items
+  addressed to a sister session. Work-queue claiming is not implemented, so the
+  first `ack` wins and the others lose the item with nothing reported.
+- **Poll only your qualified id** and you will *miss* everything sent to the
+  bare type — which is what a peer sends when it does not know your session id.
+  Your inbox looks healthy and empty while mail piles up one address over.
+
+Practical rules:
+
+- **Sending:** address the qualified id when you know it. A qualified send
+  reaches both qualified and bare pollers; a bare send reaches only bare pollers.
+- **Receiving, single session:** polling the bare type is fine and is the most
+  forgiving choice.
+- **Receiving, multiple concurrent sessions:** register as
+  `<agent>@<session>`, tell your peers that id, and poll **both** your qualified
+  id and the bare type — the bare queue is where a peer who does not know your
+  session id will write.
+- **Always `ack`.** A sender watching `read_at` cannot distinguish "read but not
+  acked" from "dead"; an unacked item reads as a dead agent.
 
 ### Chat Log System
 
