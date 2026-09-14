@@ -547,3 +547,10 @@ def test_readme_test_count_floor_is_honest():
             "exist -- the floor is stale. Round the real number down and update it "
             "(the At-a-Glance table and the Why Trust This section)."
         )
+def test_generator_tool_count_is_correct():
+    """Ensure gen_mcp_inventory's EXPECTED_TOOL_COUNT is accurate."""
+    import subprocess
+    import sys
+    cmd = [sys.executable, os.path.join(_ROOT, "bin", "gen_mcp_inventory.py")]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode == 0, f"gen_mcp_inventory.py failed: {res.stderr}"
