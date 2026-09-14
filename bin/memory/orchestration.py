@@ -301,7 +301,7 @@ def require_agent_id(agent_id: str, tool: str) -> str:
             f"caller's identity was refused by the anti-spoofing guard -- NOT "
             f"that the inbox is empty. An LLM-facing caller (m3_call) cannot "
             f"address an arbitrary agent; use the CLI (`m3 admin {tool} "
-            f"--agent-id <id>`) or an entry point that sets "
+            f"--agent_id <id>`) or an entry point that sets "
             f"allow_caller_agent_id."
         )
     return agent_id

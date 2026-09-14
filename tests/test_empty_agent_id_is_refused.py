@@ -82,3 +82,37 @@ def test_the_guard_has_exactly_one_owner():
     assert len(owners) == 1, (
         f"require_agent_id must have exactly ONE definition; found {owners}"
     )
+
+
+def test_the_refusal_hint_names_a_flag_the_cli_actually_accepts():
+    """§3: the hint exists to unblock a caller who is ALREADY confused about
+    identity, so handing them a command that fails is worse than silence.
+
+    It drifted to `--agent-id` (hyphen) and stayed wrong because nothing
+    pinned it: `m3 admin` derives each flag from the tool's PARAMETER name,
+    which is `agent_id`, so every one of the five tools sharing this helper
+    rejected the command the error told them to run.
+
+    Asserted as a PROPERTY -- the flag the CLI builds for this parameter --
+    rather than a hardcoded string, so renaming the parameter updates both
+    sides instead of pitting a literal against the code.
+    """
+    import re
+
+    with pytest.raises(ValueError) as exc:
+        orchestration.require_agent_id("", "notifications_poll")
+    hint = str(exc.value)
+
+    flags = set(re.findall(r"--[A-Za-z0-9_-]+", hint))
+    assert flags, f"the refusal names no flag at all: {hint!r}"
+
+    # argparse builds `--<param>` from the ToolSpec parameter name verbatim.
+    expected = "--agent_id"
+    assert expected in flags, (
+        f"the refusal hint names {sorted(flags)}, but `m3 admin` accepts "
+        f"{expected} -- the suggested command fails with a usage error"
+    )
+    assert "--agent-id" not in flags, (
+        "the hyphenated spelling is not accepted by `m3 admin` for this "
+        "parameter; it is a different tool's flag"
+    )
