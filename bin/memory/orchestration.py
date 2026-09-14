@@ -536,7 +536,21 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
     params = list(_addr)
 
     if unread_only:
-        where_clause += " AND read_at IS NULL"
+        # PENDING, via the single owner -- not a hand-written predicate.
+        #
+        # A claimed row is work IN FLIGHT: `claim_message` writes the lease, and
+        # until this read honoured it the lease bound nothing, so two agents
+        # were handed the same message and did it twice. That is the whole
+        # point of a lease (#1058, ruled 2026-09-14).
+        #
+        # Spelling it `read_at IS NULL AND claimed_by IS NULL` inline looks
+        # equivalent and is NOT: it drops `failed_at IS NULL`, so a
+        # DEAD-LETTERED row is offered again forever -- the poison-message loop
+        # `sweep_expired_leases` dead-letters precisely to stop, rendered as
+        # healthy queue activity. Measured before this fix: a row with
+        # failed_at set was still returned by poll. §10a -- one owner, because
+        # a copied predicate drifts and this one already had.
+        where_clause += f" AND {message_state_sql('PENDING')}"
 
     with _db() as db:
         # Implicit heartbeat: polling proves the POLLER is alive, so an agent
@@ -646,18 +660,57 @@ def notifications_mark_received_impl(agent_id: str) -> str:
     return f"Marked {rowcount} notifications received for {agent_id}"
 
 def notifications_ack_impl(notification_id: int) -> str:
-    """Marks a notification as read."""
-    now = datetime.now(timezone.utc).isoformat()
+    """Marks a notification as read. Refuses a row someone holds a lease on.
+
+    A CLAIMED row is another agent's in-flight work, and only its leaseholder
+    may close it -- through :meth:`Dialect.complete_message`, which fences on
+    ``lease_token`` for exactly this reason. Acking reaches the SAME ``read_at``
+    column through a door that never looked at the lease, so before this guard
+    an ack silently completed someone else's attempt: measured, the holder's own
+    ``complete_message`` then returned False, having lost work it was actively
+    doing with nothing raised anywhere.
+
+    A DEAD-LETTERED row (``failed_at`` set) is still ackable: poll hides it
+    because it is not work to hand out, but the inbox must still be clearable.
+    That is why this predicate is not ``message_state_sql("PENDING")``.
+
+    The timestamp comes from the DATABASE clock, matching ``complete_message``.
+    Two writers to one column must not use two clocks -- pg_sync spans two
+    hosts, so a caller-stamped ``read_at`` is the N-clock problem already
+    rejected for ``claimed_at`` and ``last_seen``, and it kept two FORMATS in
+    the column besides (a Python isoformat() writes microseconds and a +00:00
+    offset where the DB writes ...Z).
+    """
+    _d = dialect()
+    p = _d.param()
 
     with _db() as db:
-        p = dialect().param()
         cur = db.execute(
-            f"UPDATE notifications SET read_at = {p} WHERE id = {p} AND read_at IS NULL",
-            (now, notification_id)
+            f"UPDATE notifications SET read_at = {_d.now()} "
+            f"WHERE id = {p} AND read_at IS NULL AND claimed_by IS NULL",
+            (notification_id,)
         )
         rowcount = cur.rowcount
 
+        if rowcount == 0:
+            # Distinguish the three ways this lands on nothing. "Not found" for
+            # a row that is merely claimed would send the caller hunting for a
+            # missing message instead of waiting for a lease to clear (§3).
+            row = db.execute(
+                f"SELECT read_at, claimed_by FROM notifications WHERE id = {p}",
+                (notification_id,)
+            ).fetchone()
+
     if rowcount == 0:
+        if row is None:
+            return f"Error: notification {notification_id} not found"
+        if row["claimed_by"] is not None:
+            return (
+                f"Error: notification {notification_id} is claimed by "
+                f"{row['claimed_by']} and is being worked on. Only the "
+                f"leaseholder can complete it; acking would report another "
+                f"agent's work as finished."
+            )
         return f"Error: notification {notification_id} not found or already acked"
 
     return f"Acked notification {notification_id}"
@@ -665,22 +718,48 @@ def notifications_ack_impl(notification_id: int) -> str:
 def notifications_ack_all_impl(agent_id: str) -> str:
     """Marks all unread notifications for an agent as read."""
     require_agent_id(agent_id, "notifications_ack_all")
-    now = datetime.now(timezone.utc).isoformat()
+    _d = dialect()
 
     with _db() as db:
-        p = dialect().param()
+        p = _d.param()
         # Ack follows the SAME addressing rule as the read that produced the
         # list: a qualified id acks only that instance's rows, a bare type acks
         # the type and its instances. Any other pairing is how one session's
         # ack empties another's inbox -- the silent-theft half of #170.
         pred, addr = _addressing_predicate(agent_id, p)
+        # CLAIMED rows are skipped, not acked: they are another agent's
+        # in-flight work and only its leaseholder may close them, via
+        # complete_message's fence. See notifications_ack_impl for the measured
+        # failure. Clock is the DB's, matching complete_message -- one column,
+        # one clock, one format.
+        #
+        # NOT message_state_sql("PENDING"), deliberately. PENDING also requires
+        # `failed_at IS NULL`, which would make a DEAD-LETTERED row permanently
+        # unackable -- it would sit unread in the inbox with no way to clear it.
+        # The asymmetry is the intended one: poll HIDES dead-lettered rows (they
+        # are not work to hand out), ack still CLEARS them (an operator must be
+        # able to empty the queue). Do not "unify" these two predicates.
         cur = db.execute(
-            f"UPDATE notifications SET read_at = {p} WHERE {pred} AND read_at IS NULL",
-            (now, *addr)
+            f"UPDATE notifications SET read_at = {_d.now()} "
+            f"WHERE {pred} AND read_at IS NULL AND claimed_by IS NULL",
+            tuple(addr)
         )
         rowcount = cur.rowcount
 
-    return f"Acked {rowcount} notifications for {agent_id}"
+        # Say so when work was left behind. Reporting "Acked 0" while rows sit
+        # claimed reads as an empty queue, which is the state it is NOT (§3).
+        skipped = db.execute(
+            f"SELECT COUNT(*) AS c FROM notifications "
+            f"WHERE {pred} AND read_at IS NULL AND claimed_by IS NOT NULL",
+            tuple(addr)
+        ).fetchone()["c"]
+
+    note = ""
+    if skipped:
+        note = (
+            f" ({skipped} claimed and left for their leaseholders to complete)"
+        )
+    return f"Acked {rowcount} notifications for {agent_id}{note}"
 
 # ── Tasks (7 functions) ───────────────────────────────────────────────────────────
 
