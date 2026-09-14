@@ -186,7 +186,7 @@
     "ENTITY_SEED_STOPLIST": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'yes', 'thanks', 'their', 'thank', 'it', 'hi', 'no', 'the', 'hello', 'this', 'that', 'there', 'them', 'they', 'okay', 'its', 'ok'})"
+      "value_repr": "frozenset({'they', 'the', 'okay', 'hi', 'it', 'no', 'there', 'thank', 'their', 'ok', 'yes', 'hello', 'them', 'thanks', 'this', 'that', 'its'})"
     },
     "EXPANSION_DISPLACEMENT_MARGIN": {
       "kind": "constant",
@@ -356,7 +356,7 @@
     "TASK_STATE_TRANSITIONS": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "{'pending': {'cancelled', 'blocked', 'in_progress'}, 'in_progress': {'completed', 'cancelled', 'failed', 'blocked'}, 'blocked': {'cancelled', 'in_progress'}, 'completed': set(), 'failed': set(), 'cancelled': set()}"
+      "value_repr": "{'pending': {'in_progress', 'cancelled', 'blocked'}, 'in_progress': {'blocked', 'completed', 'cancelled', 'failed'}, 'blocked': {'in_progress', 'cancelled'}, 'completed': set(), 'failed': set(), 'cancelled': set()}"
     },
     "TERMINAL_TASK_STATES": {
       "kind": "constant",
@@ -371,37 +371,37 @@
     "VALID_AGENT_STATUSES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'offline', 'idle', 'active'})"
+      "value_repr": "frozenset({'idle', 'offline', 'active'})"
     },
     "VALID_CHANGE_AGENTS": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "{'openclaw', 'aider', 'grok', 'manual', 'system', 'deepseek', 'legacy', 'unknown', 'claude', 'gemini'}"
+      "value_repr": "{'gemini', 'deepseek', 'grok', 'unknown', 'aider', 'system', 'claude', 'legacy', 'openclaw', 'manual'}"
     },
     "VALID_ENTITY_PREDICATES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'imports', 'runs_on', 'judged_by', 'has_quantity', 'references', 'produced_artifact', 'deprecates', 'on_vlan', 'fails_over_to', 'introduced_in', 'after', 'supersedes', 'works_at', 'knows', 'calls', 'measured_on', 'affects_category', 'has_location', 'prefers', 'same_as', 'family_of', 'assigned_ip', 'has_participant', 'uses_model', 'mentions', 'authorizes_budget', 'listens_on', 'before', 'defined_in', 'hosts', 'owns', 'has_time', 'located_in', 'source_of'})"
+      "value_repr": "frozenset({'has_quantity', 'owns', 'prefers', 'before', 'supersedes', 'produced_artifact', 'works_at', 'hosts', 'has_location', 'has_time', 'defined_in', 'knows', 'introduced_in', 'references', 'calls', 'family_of', 'source_of', 'mentions', 'same_as', 'deprecates', 'fails_over_to', 'after', 'assigned_ip', 'located_in', 'measured_on', 'listens_on', 'on_vlan', 'uses_model', 'runs_on', 'authorizes_budget', 'imports', 'has_participant', 'affects_category', 'judged_by'})"
     },
     "VALID_ENTITY_TYPES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'task_category', 'endpoint_url', 'vlan', 'module', 'date', 'variant', 'product', 'migration', 'quantity', 'class_or_table', 'function', 'container', 'device', 'model', 'cli_flag', 'commit_or_branch', 'place', 'service', 'port', 'legacy_object', 'event', 'protocol', 'metric', 'env_var', 'file_path', 'topic', 'mac_address', 'legacy_concept', 'organization', 'benchmark', 'bench_run_id', 'preference', 'person', 'memory_id', 'dataset_field', 'host', 'bench_artifact', 'task_id', 'datetime', 'ip_address', 'memory_type', 'firewall_rule'})"
+      "value_repr": "frozenset({'device', 'person', 'endpoint_url', 'product', 'port', 'bench_artifact', 'protocol', 'function', 'host', 'file_path', 'ip_address', 'vlan', 'place', 'topic', 'migration', 'module', 'datetime', 'date', 'quantity', 'memory_type', 'env_var', 'task_id', 'preference', 'organization', 'container', 'mac_address', 'commit_or_branch', 'model', 'service', 'metric', 'cli_flag', 'bench_run_id', 'memory_id', 'benchmark', 'legacy_concept', 'dataset_field', 'legacy_object', 'task_category', 'event', 'variant', 'firewall_rule', 'class_or_table'})"
     },
     "VALID_RELATIONSHIP_TYPES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "{'precedes', 'follows', 'message', 'references', 'contradicts', 'extends', 'consolidates', 'supports', 'handoff', 'related', 'supersedes'}"
+      "value_repr": "{'consolidates', 'supports', 'supersedes', 'related', 'follows', 'references', 'contradicts', 'precedes', 'extends', 'message', 'handoff'}"
     },
     "VALID_SCOPES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "{'session', 'user', 'org', 'agent'}"
+      "value_repr": "{'session', 'agent', 'org', 'user'}"
     },
     "VALID_TASK_STATES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'pending', 'in_progress', 'blocked', 'completed', 'cancelled', 'failed'})"
+      "value_repr": "frozenset({'in_progress', 'cancelled', 'pending', 'failed', 'completed', 'blocked'})"
     },
     "_ACCESS_FLUSH_INTERVAL": {
       "kind": "constant",
@@ -441,12 +441,12 @@
     "_DEFAULT_VALID_ENTITY_PREDICATES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'imports', 'runs_on', 'judged_by', 'has_quantity', 'references', 'produced_artifact', 'deprecates', 'on_vlan', 'fails_over_to', 'introduced_in', 'after', 'supersedes', 'works_at', 'knows', 'calls', 'measured_on', 'affects_category', 'has_location', 'prefers', 'same_as', 'family_of', 'assigned_ip', 'has_participant', 'uses_model', 'mentions', 'authorizes_budget', 'listens_on', 'before', 'defined_in', 'hosts', 'owns', 'has_time', 'located_in', 'source_of'})"
+      "value_repr": "frozenset({'has_quantity', 'owns', 'prefers', 'before', 'supersedes', 'produced_artifact', 'works_at', 'hosts', 'has_location', 'has_time', 'defined_in', 'knows', 'introduced_in', 'references', 'calls', 'family_of', 'source_of', 'mentions', 'same_as', 'deprecates', 'fails_over_to', 'after', 'assigned_ip', 'located_in', 'measured_on', 'listens_on', 'on_vlan', 'uses_model', 'runs_on', 'authorizes_budget', 'imports', 'has_participant', 'affects_category', 'judged_by'})"
     },
     "_DEFAULT_VALID_ENTITY_TYPES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'task_category', 'endpoint_url', 'vlan', 'module', 'date', 'variant', 'product', 'migration', 'quantity', 'class_or_table', 'function', 'container', 'device', 'model', 'cli_flag', 'commit_or_branch', 'place', 'service', 'port', 'legacy_object', 'event', 'protocol', 'metric', 'env_var', 'file_path', 'topic', 'mac_address', 'legacy_concept', 'organization', 'benchmark', 'bench_run_id', 'preference', 'person', 'memory_id', 'dataset_field', 'host', 'bench_artifact', 'task_id', 'datetime', 'ip_address', 'memory_type', 'firewall_rule'})"
+      "value_repr": "frozenset({'device', 'person', 'endpoint_url', 'product', 'port', 'bench_artifact', 'protocol', 'function', 'host', 'file_path', 'ip_address', 'vlan', 'place', 'topic', 'migration', 'module', 'datetime', 'date', 'quantity', 'memory_type', 'env_var', 'task_id', 'preference', 'organization', 'container', 'mac_address', 'commit_or_branch', 'model', 'service', 'metric', 'cli_flag', 'bench_run_id', 'memory_id', 'benchmark', 'legacy_concept', 'dataset_field', 'legacy_object', 'task_category', 'event', 'variant', 'firewall_rule', 'class_or_table'})"
     },
     "_DENSE_ERR_RE": {
       "kind": "constant",
@@ -466,12 +466,12 @@
     "_EMBED_BACKEND_STATS_LOCK": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<unlocked _thread.lock object at 0x0000024EA0AFD210>"
+      "value_repr": "<unlocked _thread.lock object at 0x00000203D9067E10>"
     },
     "_EMBED_BULK_SEM": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<asyncio.locks.Semaphore object at 0x0000024EA0A43250 [unlocked, value:4]>"
+      "value_repr": "<asyncio.locks.Semaphore object at 0x00000203D8FD3390 [unlocked, value:4]>"
     },
     "_EMBED_CLIENT": {
       "kind": "constant",
@@ -481,7 +481,7 @@
     "_EMBED_CLIENT_LOCK": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<unlocked _thread.lock object at 0x0000024EA0AFD150>"
+      "value_repr": "<unlocked _thread.lock object at 0x00000203D9067D50>"
     },
     "_EMBED_CLIENT_LOOP_ID": {
       "kind": "constant",
@@ -531,7 +531,7 @@
     "_EMBED_SEM": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<asyncio.locks.Semaphore object at 0x0000024EA0A22BA0 [unlocked, value:4]>"
+      "value_repr": "<asyncio.locks.Semaphore object at 0x00000203D903D6A0 [unlocked, value:4]>"
     },
     "_EMBED_URL_OVERRIDE": {
       "kind": "constant",
@@ -546,7 +546,7 @@
     "_ENTITY_EXTRACT_SEM": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<memory.entity.LoopScopedSemaphoreProxy object at 0x0000024EA1B50AD0>"
+      "value_repr": "<memory.entity.LoopScopedSemaphoreProxy object at 0x00000203D903F4D0>"
     },
     "_ENTITY_MENTION_PATTERNS": {
       "kind": "constant",
@@ -596,7 +596,7 @@
     "_FACT_ENRICH_SEM": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<asyncio.locks.Semaphore object at 0x0000024EA1BD8FC0 [unlocked, value:2]>"
+      "value_repr": "<asyncio.locks.Semaphore object at 0x00000203D91A48A0 [unlocked, value:2]>"
     },
     "_FTS_OPERATORS": {
       "kind": "constant",
@@ -711,7 +711,7 @@
     "_UNSET": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<object object at 0x0000024E927A4170>"
+      "value_repr": "<object object at 0x00000203CAD69140>"
     },
     "_access_flusher_task": {
       "kind": "constant",
@@ -721,7 +721,7 @@
     "_access_lock": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<asyncio.locks.Lock object at 0x0000024EA0A206E0 [unlocked]>"
+      "value_repr": "<asyncio.locks.Lock object at 0x00000203D8ECF0E0 [unlocked]>"
     },
     "_access_pending": {
       "kind": "constant",
@@ -951,7 +951,7 @@
     "_init_lock": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<unlocked _thread.RLock object owner=0 count=0 at 0x0000024EA0A55E00>"
+      "value_repr": "<unlocked _thread.RLock object owner=0 count=0 at 0x00000203D8FDD3B0>"
     },
     "_initialized": {
       "kind": "constant",
@@ -981,7 +981,7 @@
     "_local": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<_thread._local object at 0x0000024E9271D530>"
+      "value_repr": "<_thread._local object at 0x00000203CACE5D50>"
     },
     "_lru_cache": {
       "kind": "function",
@@ -1195,7 +1195,7 @@
     },
     "agent_list_impl": {
       "kind": "function",
-      "signature": "(status: 'str' = '', role: 'str' = '') -> 'str'",
+      "signature": "(status: 'str' = '', role: 'str' = '', as_records: 'bool' = False) -> 'str'",
       "value_repr": null
     },
     "agent_offline_impl": {
@@ -1205,7 +1205,7 @@
     },
     "agent_register_impl": {
       "kind": "function",
-      "signature": "(agent_id: 'str', role: 'str', capabilities: 'list', metadata: 'dict') -> 'str'",
+      "signature": "(agent_id: 'str', role: 'str' = '', capabilities: 'list | None' = None, metadata: 'dict | None' = None) -> 'str'",
       "value_repr": null
     },
     "agent_set_trust_impl": {
@@ -1260,7 +1260,7 @@
     "ctx": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<m3_core.context.M3Context object at 0x0000024EA1B52900>"
+      "value_repr": "<m3_core.context.M3Context object at 0x00000203D9139400>"
     },
     "datetime": {
       "kind": "class",
@@ -1347,7 +1347,7 @@
     },
     "memory_cost_report_impl": {
       "kind": "function",
-      "signature": "() -> 'str'",
+      "signature": "(as_records: 'bool' = False) -> 'str'",
       "value_repr": null
     },
     "memory_delete_bulk_impl": {
@@ -1377,17 +1377,17 @@
     },
     "memory_graph_impl": {
       "kind": "function",
-      "signature": "(memory_id: 'str', depth: 'int' = 1) -> 'str'",
+      "signature": "(memory_id: 'str', depth: 'int' = 1, as_records: 'bool' = False) -> 'str'",
       "value_repr": null
     },
     "memory_handoff_impl": {
       "kind": "function",
-      "signature": "(from_agent: 'str', to_agent: 'str', task: 'str', context_ids: 'list', note: 'str' = '', task_id: 'str' = '', from_session: 'str' = '') -> 'str'",
+      "signature": "(from_agent: 'str', to_agent: 'str', task: 'str', context_ids: 'list | None' = None, note: 'str' = '', task_id: 'str' = '', from_session: 'str' = '') -> 'str'",
       "value_repr": null
     },
     "memory_history_impl": {
       "kind": "function",
-      "signature": "(memory_id: 'str', limit: 'int' = 20) -> 'str'",
+      "signature": "(memory_id: 'str', limit: 'int' = 20, as_records: 'bool' = False) -> 'str'",
       "value_repr": null
     },
     "memory_inbox_ack_impl": {
@@ -1397,7 +1397,7 @@
     },
     "memory_inbox_impl": {
       "kind": "function",
-      "signature": "(agent_id: 'str', unread_only: 'bool' = True, limit: 'int' = 20) -> 'str'",
+      "signature": "(agent_id: 'str', unread_only: 'bool' = True, limit: 'int' = 20, as_records: 'bool' = False) -> 'str'",
       "value_repr": null
     },
     "memory_link_bulk_impl": {
@@ -1417,12 +1417,12 @@
     },
     "memory_refresh_queue_impl": {
       "kind": "function",
-      "signature": "(agent_id: 'str' = '', limit: 'int' = 50, include_future: 'bool' = False) -> 'str'",
+      "signature": "(agent_id: 'str' = '', limit: 'int' = 50, include_future: 'bool' = False, as_records: 'bool' = False) -> 'str'",
       "value_repr": null
     },
     "memory_search_impl": {
       "kind": "async_function",
-      "signature": "(query, k=8, type_filter='', agent_filter='', search_mode='hybrid', include_scratchpad=False, user_id='', scope='', as_of='', explain=False, conversation_id='', recency_bias=0.0, adaptive_k=False, variant='', intent_hint='', mmr=True, requesting_agent='', _depth=0)",
+      "signature": "(query, k=8, type_filter='', agent_filter='', search_mode='hybrid', include_scratchpad=False, user_id='', scope='', as_of='', explain=False, conversation_id='', recency_bias=0.0, adaptive_k=False, variant='', intent_hint='', mmr=True, requesting_agent='', as_records=False, _depth=0)",
       "value_repr": null
     },
     "memory_search_multi_db_impl": {
@@ -1437,7 +1437,7 @@
     },
     "memory_search_scored_impl": {
       "kind": "async_function",
-      "signature": "(query, mmr=True, k=8, type_filter='', agent_filter='', search_mode='hybrid', user_id='', scope='', as_of='', conversation_id='', explain=False, extra_columns=None, recency_bias=0.0, vector_weight=0.7, adaptive_k=False, elbow_sensitivity=1.5, adaptive_k_min=0, adaptive_k_max=0, smart_time_boost=0.0, smart_neighbor_sessions=0, variant='', intent_hint='', vector_kind_strategy='default', requesting_agent='', _depth=0, _capture_dict: 'dict' = None)",
+      "signature": "(query='', mmr=True, k=8, type_filter='', agent_filter='', search_mode='hybrid', user_id='', scope='', as_of='', conversation_id='', explain=False, extra_columns=None, recency_bias=0.0, vector_weight=0.7, adaptive_k=False, elbow_sensitivity=1.5, adaptive_k_min=0, adaptive_k_max=0, smart_time_boost=0.0, smart_neighbor_sessions=0, variant='', intent_hint='', vector_kind_strategy='default', requesting_agent='', _depth=0, _capture_dict: 'dict' = None)",
       "value_repr": null
     },
     "memory_suggest_impl": {
@@ -1507,7 +1507,7 @@
     },
     "notifications_poll_impl": {
       "kind": "function",
-      "signature": "(agent_id: 'str', unread_only: 'bool' = True, limit: 'int' = 20) -> 'str'",
+      "signature": "(agent_id: 'str', unread_only: 'bool' = True, limit: 'int' = 20, as_records: 'bool' = False) -> 'str'",
       "value_repr": null
     },
     "notify_impl": {
@@ -1571,7 +1571,7 @@
     },
     "task_list_impl": {
       "kind": "function",
-      "signature": "(owner_agent: 'str' = '', state: 'str' = '', parent_task_id: 'str' = '', limit: 'int' = 20, include_deleted: 'bool' = False) -> 'str'",
+      "signature": "(owner_agent: 'str' = '', state: 'str' = '', parent_task_id: 'str' = '', limit: 'int' = 20, include_deleted: 'bool' = False, as_records: 'bool' = False) -> 'str'",
       "value_repr": null
     },
     "task_set_result_impl": {
@@ -1581,7 +1581,7 @@
     },
     "task_tree_impl": {
       "kind": "function",
-      "signature": "(root_task_id: 'str', max_depth: 'int' = 10) -> 'str'",
+      "signature": "(root_task_id: 'str', max_depth: 'int' = 10, as_records: 'bool' = False) -> 'str'",
       "value_repr": null
     },
     "task_update_impl": {
