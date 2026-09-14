@@ -35,6 +35,7 @@ import os
 import plistlib
 import posixpath
 import re
+import shlex
 import subprocess
 import sys
 
@@ -105,9 +106,51 @@ def _query_task_xml(name: str) -> str | None:
     return proc.stdout
 
 
+def _script_from_args(arg_text: str) -> str | None:
+    """The script path from a task's <Arguments>, skipping interpreter flags.
+
+    NOT simply the first token. A task may pass interpreter options before the
+    script -- AgentOS_NotificationWaiter ships as:
+
+        <Arguments>"-u" "...\\bin\\m3_notification_waiter.py" "--agent-id" ...
+
+    Taking token[0] yields "-u", which never exists on disk, so the probe
+    reported a HEALTHY, running task as "script '-u' (missing)" and told the
+    operator to run `m3 setup` against it. That is the section 3 false-alarm
+    trap: a warning that fires when nothing is wrong trains the reader to
+    ignore the one that matters, and here it also invited a needless re-register
+    of a working job. (Observed 2026-09-14; the task was State=Running with its
+    script present and two live pythonw processes.)
+
+    Skips leading `-x` / `--x` tokens and returns the first argument that looks
+    like a path. Returns None when there is no such token -- an interpreter
+    invoked with flags only (`-c`, `-m`) declares no script file, which is
+    "nothing to check", not "missing".
+    """
+    toks = shlex.split(arg_text, posix=False)
+    skip_next = False
+    for tok in toks:
+        tok = tok.strip().strip('"')
+        if not tok:
+            continue
+        if skip_next:
+            # Consumed as the VALUE of -c/-m: a code string or module name, not
+            # a file on disk. Returning it would invent a new false alarm of
+            # exactly the kind this function exists to remove.
+            skip_next = False
+            continue
+        if tok in ("-c", "-m"):
+            skip_next = True
+            continue
+        if tok.startswith("-"):
+            continue  # interpreter flag (-u, -S, -E, -X utf8 ...)
+        return tok
+    return None
+
+
 def _parse_exec_paths(task_xml: str) -> tuple[str | None, str | None]:
     """(interpreter, script) from a task's <Exec>. <Command> may be quoted;
-    the first <Arguments> token is the script (quotes stripped)."""
+    the script is the first non-flag <Arguments> token (see _script_from_args)."""
     # ET is defusedxml at runtime (see import above); the value is schtasks
     # /query output (trusted local OS), not untrusted network XML.
     root = ET.fromstring(task_xml)  # nosec B314
@@ -119,7 +162,7 @@ def _parse_exec_paths(task_xml: str) -> tuple[str | None, str | None]:
     args_el = exec_el.find(f"{_TASK_NS}Arguments")
     script = None
     if args_el is not None and args_el.text and args_el.text.strip():
-        script = args_el.text.strip().split(" ")[0].strip('"') or None
+        script = _script_from_args(args_el.text.strip())
     return interpreter, script
 
 
