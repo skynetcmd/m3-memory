@@ -23,6 +23,20 @@ _Nothing yet._
 
 ---
 
+## [2026.9.14.3] — 2026-09-14 — a healthy scheduled task no longer reads as broken
+
+### Fixed
+- **`m3 doctor` no longer reports a healthy scheduled task as broken.** The
+  schedule probe read the first argument token as the script path, so a task
+  invoked as `-u script.py` was reported as `script '-u' (missing)` while running
+  correctly. Interpreter flags are now skipped; `-c`/`-m` consume their value.
+
+### Added
+- Tests for the Windows dual `:8082` embed-server registration guard, which keeps
+  `AgentOS_EmbedServer` from being registered beside the Rust SCM service.
+
+---
+
 ## [2026.9.14.2] - 2026-09-14
 
 ### Added
