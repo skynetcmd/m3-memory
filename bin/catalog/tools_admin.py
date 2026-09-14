@@ -78,6 +78,7 @@ TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": "Optional keyword search term to filter tools.",
                 },
+                "as_records": {"type": "boolean", "description": "Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged.", "default": False},
             },
             "required": [],
         },

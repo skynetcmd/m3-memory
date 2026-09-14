@@ -86,19 +86,23 @@ def list_domains() -> str:
     return json.dumps(out)
 
 
-def help_capabilities(domain: str = "", query: str = "") -> str:
+def help_capabilities(domain: str = "", query: str = "", as_records: bool = False) -> str:
     """Impl for `m3_help_capabilities` MCP tool."""
     import mcp_tool_catalog
     from tool_domains import DOMAIN_DESCRIPTIONS, domain_of_tool, is_essential
+
+    from memory import records as _records
 
     domain = (domain or "").strip().lower()
     query = (query or "").strip().lower()
 
     if domain and domain not in DOMAIN_DESCRIPTIONS:
-        return (
+        return _records.emit(
             f"Error: unknown domain '{domain}'. "
-            f"Valid domains: {', '.join(sorted(DOMAIN_DESCRIPTIONS.keys()))}"
-        )
+            f"Valid domains: {', '.join(sorted(DOMAIN_DESCRIPTIONS.keys()))}",
+            _records.error_payload("unknown_domain", domain=domain,
+                                   valid_domains=sorted(DOMAIN_DESCRIPTIONS.keys())),
+            as_records)
 
     matched_tools = []
     for spec in mcp_tool_catalog.TOOLS:
@@ -123,7 +127,13 @@ def help_capabilities(domain: str = "", query: str = "") -> str:
             "domain": td,
             "description": spec.description,
             "is_essential": is_essential(spec.name),
-            "parameters": params_info
+            "parameters": params_info,
+            # The real schema, kept alongside the rendered bullets. A records
+            # caller wants the parameter CONTRACT (types, defaults, required);
+            # re-parsing "- **k** (integer, optional): ..." back out of markdown
+            # is precisely the fallback this param removes. Dropped from the
+            # display path, which keeps using `parameters`.
+            "_schema": {"properties": props, "required": list(required)},
         })
 
     # Group by domain for clean formatting
@@ -140,7 +150,10 @@ def help_capabilities(domain: str = "", query: str = "") -> str:
 
     if not matched_tools:
         lines.append("No matching tools found.")
-        return "\n".join(lines)
+        return _records.emit("\n".join(lines),
+                             _records.as_records_payload((), domain=domain or None,
+                                                         query=query or None),
+                             as_records)
 
     for d_name in sorted(grouped.keys()):
         d_desc = DOMAIN_DESCRIPTIONS.get(d_name, "")
@@ -160,5 +173,15 @@ def help_capabilities(domain: str = "", query: str = "") -> str:
                 lines.append("**Parameters:** None")
             lines.append("")
 
-    return "\n".join(lines)
+    # Records swap the markdown bullets for the real schema; the display path
+    # above already consumed `parameters`, so only the structured form ships.
+    _items = []
+    for _t in matched_tools:
+        _rec = {k: v for k, v in _t.items() if k not in ("parameters", "_schema")}
+        _rec["parameters"] = _t.get("_schema", {})
+        _items.append(_rec)
+    return _records.emit("\n".join(lines),
+                         _records.as_records_payload(_items, domain=domain or None,
+                                                     query=query or None),
+                         as_records)
 

@@ -36,8 +36,7 @@ import mcp_tool_catalog as cat  # noqa: E402
 
 from memory import records  # noqa: E402
 
-# The 12 display-string tools P1 covers. Three are async/wrapper-shaped and are
-# tracked separately; this list is the sync set wired so far.
+# The 12 display-string tools P1 covers.
 AS_RECORDS_TOOLS = [
     "agent_list",
     "memory_graph",
@@ -48,7 +47,16 @@ AS_RECORDS_TOOLS = [
     "memory_inbox",
     "memory_refresh_queue",
     "memory_cost_report",
+    "m3_help_capabilities",
+    "conversation_search",
 ]
+
+# memory_search lands in its own commit: it carries nearly every live caller
+# (65 direct + 32 CLI), so an isolated commit keeps a regression bisectable.
+
+# Async impls: calling them needs an event loop, so the shape assertions that
+# invoke a tool skip these. Their spec/impl agreement is still checked.
+ASYNC_TOOLS = {"conversation_search", "memory_search"}
 
 # Tools whose result is a SUMMARY rather than rows. They take as_records for
 # uniformity -- a flag on 11 of 12 siblings is a surface an agent cannot reason

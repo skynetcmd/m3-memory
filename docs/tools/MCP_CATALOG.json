@@ -163,6 +163,11 @@
           "type": "string"
         },
         {
+          "name": "as_records",
+          "required": false,
+          "type": "boolean"
+        },
+        {
           "name": "timeout",
           "required": false,
           "type": "number"
@@ -914,6 +919,11 @@
           "name": "k",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "as_records",
+          "required": false,
+          "type": "boolean"
         },
         {
           "name": "timeout",

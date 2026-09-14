@@ -772,6 +772,7 @@ Search messages across conversations using hybrid semantic/keyword search.
 | --- | --- | --- | --- | --- |
 | `query` | `string` | Yes | Search query. | `-` |
 | `k` | `integer` | No | Max results (1-100). | `8` |
+| `as_records` | `boolean` | No | Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -2024,6 +2025,7 @@ Discover m3-memory tool capabilities, parameters, and availability. Allows filte
 | --- | --- | --- | --- | --- |
 | `domain` | `string` | No | Optional domain to filter capabilities (e.g., 'memory', 'files'). | `-` |
 | `query` | `string` | No | Optional keyword search term to filter tools. | `-` |
+| `as_records` | `boolean` | No | Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 

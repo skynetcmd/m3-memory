@@ -63,6 +63,7 @@ TOOLS: list[ToolSpec] = [
             "properties": {
                 "query": {"type": "string", "description": "Search query."},
                 "k":     {"type": "integer", "description": "Max results (1-100).", "default": 8},
+                "as_records": {"type": "boolean", "description": "Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged.", "default": False},
             },
             "required": ["query"],
         },

@@ -316,7 +316,7 @@ def m3_index_impl(domain: str = "") -> str:
     return json.dumps({"count": len(rows), "tools": rows}, default=str)
 
 # ── Inline impl wrapper for conversation_search ──────────────────────────────
-async def _conversation_search_impl(query, k=8):
+async def _conversation_search_impl(query, k=8, as_records=False):
     """Search messages with automatic adjacent-turn pairing.
 
     When a user turn is found, the next assistant turn from the same
@@ -326,10 +326,17 @@ async def _conversation_search_impl(query, k=8):
         query, k=int(k), type_filter="message",
         extra_columns=["metadata_json", "conversation_id"],
     )
+    from memory import records as _records
     if ranked is None:
-        return "Search failed: FTS and semantic both unavailable."
+        # A BACKEND FAILURE, not an empty result: both retrieval paths are down,
+        # so "no results" would tell the caller the corpus lacks a match when the
+        # truth is nothing was searched.
+        return _records.emit("Search failed: FTS and semantic both unavailable.",
+                             _records.error_payload("search_unavailable", query=query),
+                             as_records)
     if not ranked:
-        return "No results found."
+        return _records.emit("No results found.",
+                             _records.as_records_payload((), query=query), as_records)
 
     # Build initial result set
     items = []
@@ -394,7 +401,16 @@ async def _conversation_search_impl(query, k=8):
         lines.append(f"{rank}. [{item['id']}] score={item['score']:.4f}  type: {item.get('type', 'unknown')}  title: {item.get('title','')}")
         lines.append(f"Content:\n{content}\n")
     lines.append("-" * 40)
-    return "\n".join(lines)
+    # `_meta` is this function's internal scratch (used for turn pairing) and is
+    # not part of the tool's contract; surface it as `metadata` and drop the raw
+    # metadata_json the caller would otherwise have to parse a second time.
+    _items = []
+    for _it in items:
+        _rec = {k: v for k, v in _it.items() if k not in ("_meta", "metadata_json")}
+        _rec["metadata"] = _it.get("_meta") or {}
+        _items.append(_rec)
+    return _records.emit("\n".join(lines),
+                         _records.as_records_payload(_items, query=query), as_records)
 
 # ── Inline impl wrapper for memory_verify ────────────────────────────────────
 # The LLM-facing parameter is `id` (preserves the existing bridge contract);
