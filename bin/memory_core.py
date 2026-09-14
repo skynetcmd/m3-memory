@@ -1470,7 +1470,13 @@ def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
     # 4. Record history
     _record_history(new_id, "handoff_create", None, task, "content", from_agent)
 
-    # 5. Fire-and-forget notify to to_agent
+    # 5. Dispatch to the queue. THE TWO LAYERS ARE DELIBERATELY SEPARATE:
+    # memory_items is the PAYLOAD layer (and keeps the FTS + embedding rows that
+    # make a handoff searchable -- notifications has neither), while
+    # notifications is the ORCHESTRATION layer that carries delivery and state.
+    # The notification therefore carries the memory_id rather than a copy of the
+    # content: one row owns the text, the other owns the state machine.
+    notified = True
     try:
         notify_impl(to_agent, "handoff", {
             "memory_id": new_id,
@@ -1479,10 +1485,18 @@ def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
             "task_id": task_id or None,
         }, from_agent=from_agent, from_session=from_session)
     except Exception as e:
+        # Report it in the RETURN VALUE, not only the log. The memory row is
+        # already committed at this point, so a swallowed failure leaves a
+        # handoff that exists but that nobody was told about -- the sender reads
+        # "Handoff created" and reasonably assumes it was delivered. The log
+        # line alone is not seen by the caller (§3).
+        notified = False
         logger.warning(f"handoff notify failed for {to_agent}: {e}")
 
     # 6. Return status
-    return f"Handoff created: {new_id} ({from_agent} -> {to_agent}, {len(context_ids)} context links)"
+    delivery = "" if notified else " -- WARNING: stored but NOT notified, the recipient has no queue entry"
+    return (f"Handoff created: {new_id} ({from_agent} -> {to_agent}, "
+            f"{len(context_ids)} context links){delivery}")
 
 def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20,
                       as_records: bool = False) -> str:
@@ -1536,24 +1550,48 @@ def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20,
 
     return "\n".join(lines)
 
-def memory_inbox_ack_impl(memory_id: str) -> str:
-    """Marks a handoff memory as read."""
+def memory_inbox_ack_impl(memory_id: str, agent_id: str = "") -> str:
+    """Marks a handoff memory as read.
+
+    ``agent_id`` scopes the ack to mail the caller can actually see, using the
+    SAME addressing rule as the read that produced the list -- a qualified id
+    acks only that instance's rows, a bare type acks the type and its instances.
+    ``notifications_ack_all`` has had that pairing since #170, with the comment
+    that any other pairing is how one session's ack empties another's inbox.
+    The handoff ack had no such guard: it took only a ``memory_id``, so ANY
+    agent could ack ANY handoff, including one addressed to a sister mid-flight.
+
+    Left OPTIONAL rather than required. The ToolSpec now injects the caller's
+    id, so the guard is on by default at the tool boundary, but an empty value
+    keeps the historical behaviour for internal callers that ack by id alone --
+    making it required would break them at a distance for no safety gain they
+    are not already covered by.
+    """
     # 1. Compute current timestamp
     now = datetime.now(timezone.utc).isoformat()
 
     # 2. Update read_at and updated_at
     from memory.backends import dialect as _dialect
     _p = _dialect().param()
+    scope_sql, scope_params = "", ()
+    if agent_id:
+        from memory.orchestration import _addressing_predicate
+        _pred, scope_params = _addressing_predicate(agent_id, _p)
+        scope_sql = f" AND {_pred}"
     with _db() as db:
         db.execute(
-            f"UPDATE memory_items SET read_at = {_p}, updated_at = {_p} WHERE id = {_p} AND type = 'handoff' AND is_deleted = 0",
-            (now, now, memory_id)
+            f"UPDATE memory_items SET read_at = {_p}, updated_at = {_p} "
+            f"WHERE id = {_p} AND type = 'handoff' AND is_deleted = 0{scope_sql}",
+            (now, now, memory_id, *scope_params)
         )
 
-        # Verify update actually happened
+        # Verify update actually happened. Scoped the same way, so a caller that
+        # acked someone else's handoff is told it was not found rather than
+        # being handed a false success.
         verify = db.execute(
-            f"SELECT id FROM memory_items WHERE id = {_p} AND type = 'handoff' AND is_deleted = 0 AND read_at IS NOT NULL",
-            (memory_id,)
+            f"SELECT id FROM memory_items WHERE id = {_p} AND type = 'handoff' "
+            f"AND is_deleted = 0 AND read_at IS NOT NULL{scope_sql}",
+            (memory_id, *scope_params)
         ).fetchone()
 
     # 3. Check result

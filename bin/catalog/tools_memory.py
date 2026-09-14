@@ -887,11 +887,16 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="memory_inbox_ack",
-        description="Mark a handoff memory as read (sets read_at = now).",
+        description=(
+            "Mark a handoff memory as read (sets read_at = now). Scoped to the "
+            "calling agent's own mail, by the same addressing rule as "
+            "memory_inbox."
+        ),
         parameters={
             "type": "object",
             "properties": {
                 "memory_id": {"type": "string", "description": "Handoff memory UUID."},
+                "agent_id": {"type": "string", "description": "Acking agent id. Injected; scopes the ack to mail addressed to this agent."},
             },
             "required": ["memory_id"],
         },
@@ -899,7 +904,7 @@ TOOLS: list[ToolSpec] = [
         is_async=False,
         validators=(),
         default_allowed=True,
-        inject_agent_id=False,
+        inject_agent_id=True,
     ),
     ToolSpec(
         name="memory_refresh_queue",

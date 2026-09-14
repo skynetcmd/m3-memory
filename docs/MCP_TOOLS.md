@@ -68,7 +68,7 @@ This document provides a comprehensive inventory of all 126 MCP tools available 
 | `notify` | Agent Registry & Notifications | Send a notification to an agent. Lightweight wake signal — agents poll notifications_poll. |
 | `memory_handoff` | Multi-Agent Coordination | Hand off a task from one agent to another. Writes a new handoff-type memory owned by to_agent and links it to the given context memories with 'handoff' edges. Returns a confirmation string with the new memory id. |
 | `memory_inbox` | Multi-Agent Coordination | List handoff messages addressed to agent_id, newest first. Pass unread_only=False to include already-acked items. |
-| `memory_inbox_ack` | Multi-Agent Coordination | Mark a handoff memory as read (sets read_at = now). |
+| `memory_inbox_ack` | Multi-Agent Coordination | Mark a handoff memory as read (sets read_at = now). Scoped to the calling agent's own mail, by the same addressing rule as memory_inbox. |
 | `memory_refresh_queue` | Multi-Agent Coordination | List memories whose refresh_on timestamp has arrived and need review. Read-only — to actually refresh a memory, call memory_update with new content/refresh_on. Pass include_future=True to see all memories with refresh_on set, not just overdue ones. |
 | `chatlog_cost_report` | Chat Log System | Aggregate tokens and cost_usd across chat_log rows. Groups: provider|model_id|host_agent|conversation_id|day. |
 | `chatlog_list_conversations` | Chat Log System | List distinct conversation_ids with turn counts and timespans. |
@@ -1213,7 +1213,7 @@ List handoff messages addressed to agent_id, newest first. Pass unread_only=Fals
 
 ### `memory_inbox_ack`
 
-Mark a handoff memory as read (sets read_at = now).
+Mark a handoff memory as read (sets read_at = now). Scoped to the calling agent's own mail, by the same addressing rule as memory_inbox.
 
 **Source:** mcp_tool_catalog.py
 
@@ -1222,6 +1222,7 @@ Mark a handoff memory as read (sets read_at = now).
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
 | `memory_id` | `string` | Yes | Handoff memory UUID. | `-` |
+| `agent_id` | `string` | No | Acking agent id. Injected; scopes the ack to mail addressed to this agent. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 

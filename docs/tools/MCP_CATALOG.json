@@ -2377,6 +2377,11 @@
           "type": "string"
         },
         {
+          "name": "agent_id",
+          "required": false,
+          "type": "string"
+        },
+        {
           "name": "timeout",
           "required": false,
           "type": "number"
