@@ -160,16 +160,16 @@
     "wiki_docs": "docs/WIKI.md"
   },
   "tools": {
-    "total": 111,
+    "total": 115,
     "by_domain": {
       "admin": 15,
       "agent": 6,
-      "chatlog": 10,
+      "chatlog": 11,
       "conversations": 4,
       "diagnostics": 3,
       "entity": 3,
       "files": 26,
-      "memory": 36,
+      "memory": 39,
       "tasks": 8
     },
     "catalog": "docs/tools/MCP_CATALOG.json",

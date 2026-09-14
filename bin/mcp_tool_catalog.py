@@ -117,6 +117,10 @@ import catalog.tools_diagnostics as tools_diagnostics
 import catalog.tools_entity as tools_entity
 import catalog.tools_files as tools_files
 import catalog.tools_memory as tools_memory
+
+# Imported AFTER the modules it derives from: tools_slim builds its specs from
+# the live tools_memory / tools_chatlog entries rather than copying them.
+import catalog.tools_slim as tools_slim
 import catalog.tools_tasks as tools_tasks
 import tool_loader as _tool_loader  # noqa: F401  (side-effect import: registers lazy domain-expansion impls)
 from m3_sdk import active_database  # noqa: F401  (re-exported on the import surface)
@@ -135,6 +139,9 @@ TOOLS: list[ToolSpec] = [
     *tools_entity.TOOLS,
     *tools_diagnostics.TOOLS,
     *tools_files.TOOLS,
+    # P2: narrowed variants of the highest-traffic tools. Additive -- the plain
+    # tools above keep their full semantics and parameter sets.
+    *tools_slim.TOOLS,
 ]
 
 

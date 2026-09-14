@@ -2,14 +2,14 @@
 
 > **Generated** by `bin/gen_capability_matrix.py` from `docs/tools/MCP_CATALOG.json` — do not edit by hand; re-run after any tool-catalog change. This is the single scannable index of *what M3 can do* and *which tool does it*, for humans, search engines, and AI agents.
 
-**111 tools across 9 capability groups.** The **Consent** column reflects the dispatch gate: a ⚠️ tool will not run until it is explicitly allowed (it deletes, exports, or runs a bulk/long operation), while a default-allowed tool runs without extra opt-in. It is **not** a read/write distinction — `memory_write` is default-allowed, and read-only `memory_export` is not.
+**115 tools across 9 capability groups.** The **Consent** column reflects the dispatch gate: a ⚠️ tool will not run until it is explicitly allowed (it deletes, exports, or runs a bulk/long operation), while a default-allowed tool runs without extra opt-in. It is **not** a read/write distinction — `memory_write` is default-allowed, and read-only `memory_export` is not.
 
 > **Beyond MCP tools:** M3 also ships a **storage backend** choice (SQLite default; PostgreSQL as a first-class primary via `M3_DB_BACKEND=postgres`) and native **framework adapters** — LangChain/LangGraph, CrewAI, and PydanticAI. These are deployment/framework facts, not MCP tools, so they don't appear in the table below. See [CORE_FEATURES](CORE_FEATURES.md) and [COMPARISON](COMPARISON.md).
 
 ## Capability groups
 
-- [🧠 Memory](#memory) — Write, retrieve, version, and reconcile long-term agent memory. (36 tools)
-- [💬 Chat Log](#chat-log) — Capture verbatim conversation turns before compaction; audit and replay. (10 tools)
+- [🧠 Memory](#memory) — Write, retrieve, version, and reconcile long-term agent memory. (39 tools)
+- [💬 Chat Log](#chat-log) — Capture verbatim conversation turns before compaction; audit and replay. (11 tools)
 - [📁 Files Memory](#files-memory) — Index, search, and recall project files as memory. (26 tools)
 - [🕸️ Entity Graph](#entity-graph) — Extract and query entities and their relationships across sessions. (3 tools)
 - [🗂️ Conversations](#conversations) — Group and inspect turns by conversation / team session. (4 tools)
@@ -51,15 +51,18 @@ _Write, retrieve, version, and reconcile long-term agent memory._
 | `memory_search_multi_db` | Search across multiple SQLite databases (e.g. | ⚠️ opt-in required |
 | `memory_search_routed` | Temporal-aware routed retrieval. | ⚠️ opt-in required |
 | `memory_search_scored` | Structured hybrid FTS5+vector+MMR search. | default-allowed |
+| `memory_search_slim` | Search memory (semantic + keyword). | default-allowed |
 | `memory_set_retention` | Set or update per-agent memory retention policy. | ⚠️ opt-in required |
 | `memory_suggest` | Preview which memories would be retrieved for a query, with score breakdowns explaining why each wa… | default-allowed |
 | `memory_supersede` | Explicitly supersede an existing memory with a new one. | default-allowed |
+| `memory_supersede_slim` | Replace an existing memory with a corrected one, preserving the audit link. | default-allowed |
 | `memory_unpin` | Unpin a memory, restoring normal decay/expiry/retention handling. | default-allowed |
 | `memory_update` | Updates a MemoryItem by ID. | default-allowed |
 | `memory_update_bulk` | Apply many metadata-only updates in one transaction per chunk. | default-allowed |
 | `memory_verify` | Verify content integrity by comparing stored hash with computed hash. | default-allowed |
 | `memory_write` | Creates a MemoryItem and optionally embeds it for semantic search. | default-allowed |
 | `memory_write_from_file` | Write a memory whose content is read from a file on disk. | default-allowed |
+| `memory_write_slim` | Write a memory. | default-allowed |
 
 ## 💬 Chat Log
 
@@ -72,6 +75,7 @@ _Capture verbatim conversation turns before compaction; audit and replay._
 | `chatlog_promote` | Promote chat_log rows into the main memory DB under a new type (default 'conversation'). | default-allowed |
 | `chatlog_rescrub` | Re-apply redaction to existing chat_log rows. | default-allowed |
 | `chatlog_search` | Search chat_log rows. | default-allowed |
+| `chatlog_search_slim` | Search captured chat turns (FTS5 keyword; filter-only when query is empty). | default-allowed |
 | `chatlog_set_redaction` | Flip redaction on/off and update patterns. | default-allowed |
 | `chatlog_status` | One-call health summary of the chat log subsystem: mode, DB paths, row counts, queue depth, spill f… | default-allowed |
 | `chatlog_write` | Append one chat turn to the chat log DB. | default-allowed |

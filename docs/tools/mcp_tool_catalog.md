@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_tool_catalog.py
-sha1: 8ad93772d245
-mtime_utc: 2026-07-19T03:04:59.603522+00:00
-generated_utc: 2026-07-19T19:29:22.557899+00:00
+sha1: e684256c8647
+mtime_utc: 2026-09-14T03:36:03.686413+00:00
+generated_utc: 2026-09-14T03:38:24.262446+00:00
 private: false
 ---
 
@@ -97,6 +97,7 @@ _(no subprocess / http / sqlite calls detected)_
 - `catalog.tools_entity`
 - `catalog.tools_files`
 - `catalog.tools_memory`
+- `catalog.tools_slim`
 - `catalog.tools_tasks`
 - `catalog.validators (_gdpr_user_id_validator, _memory_delete_validator, _memory_search_gated_validator, _memory_search_scored_validator, _memory_search_validator, _memory_set_retention_validator, _memory_suggest_validator, _memory_supersede_validator, _memory_update_validator, _memory_write_validator, _variant_gate)`
 
