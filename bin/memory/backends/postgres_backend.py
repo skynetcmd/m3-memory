@@ -460,6 +460,38 @@ class PostgresDialect(Dialect):
     def returning_id_clause(self) -> str:
         return " RETURNING id"  # no last_insert_rowid on PG; RETURNING is the way
 
+    def claim_message(
+        self, conn: object, *, table: str, where_sql: str, where_params: tuple,
+        claimant: str, now: str,
+    ) -> "object | None":
+        """Claim via ``FOR UPDATE SKIP LOCKED`` -- the native primitive.
+
+        SKIP LOCKED is what SQLite cannot express: a candidate row already
+        locked by another claimer is SKIPPED rather than waited on, so N
+        claimers proceed in parallel instead of serializing. The SQLite path
+        reaches the same guarantee by blocking, which is why these are two
+        renderings and not shared SQL (see the base docstring's measurement).
+
+        No token is needed here. The subselect locks the row it picks, so the
+        UPDATE cannot collide, and RETURNING is unconditionally available on
+        every supported PostgreSQL.
+
+        Same CLAIM-THEN-RELEASE contract as every backend: this commits before
+        returning and the caller must not hold a transaction across the work.
+        It matters less on PG than on SQLite, but a caller written against one
+        backend's forgiveness is a caller that breaks on the other.
+        """
+        cur = conn.execute(  # type: ignore[attr-defined]
+            f"UPDATE {table} SET claimed_by = %s, claimed_at = %s "
+            f"WHERE id = (SELECT id FROM {table} WHERE {where_sql} "
+            f"AND claimed_by IS NULL ORDER BY id LIMIT 1 "
+            f"FOR UPDATE SKIP LOCKED) RETURNING id",
+            (claimant, now, *where_params),
+        )
+        row = cur.fetchone()
+        conn.commit()  # type: ignore[attr-defined]
+        return row[0] if row else None
+
     def last_insert_id(self, cursor: object) -> object:
         return cursor.fetchone()[0]  # type: ignore[attr-defined]
 
