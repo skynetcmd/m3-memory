@@ -152,10 +152,27 @@ def _load_dd_token() -> str:
     sys.exit(2)
 
 
-DD_TOKEN = _load_dd_token()
+# Resolved LAZILY, not at import. `--check-only` and the missing-scanner
+# preflight must work on a host with no DefectDojo credentials -- which is
+# exactly the host most likely to be missing scanners. Resolving here would
+# exit 2 before either could report, making the check unusable precisely where
+# it matters.
+DD_TOKEN = None
 
-# Ensure all scanner paths are in the PATH
-os.environ['PATH'] = '/usr/local/bin:/usr/bin:/bin:/root/.local/bin'
+
+def _dd_token():
+    global DD_TOKEN
+    if DD_TOKEN is None:
+        DD_TOKEN = _load_dd_token()
+    return DD_TOKEN
+
+
+# Ensure all scanner paths are in the PATH.
+# Only on POSIX: this REPLACES PATH outright, so doing it on Windows would hide
+# every installed tool from shutil.which() and make the preflight report all 19
+# scanners missing on a host that has some of them.
+if os.name != 'nt':
+    os.environ['PATH'] = '/usr/local/bin:/usr/bin:/bin:/root/.local/bin'
 
 # Minimal VALID empty-SARIF fallback. DefectDojo's SARIF importer 500s on a bare
 # `{}` (no version/runs[] keys), so SARIF-emitting scanners must fall back to a
@@ -246,7 +263,7 @@ def run_scanner(name, argv_tmpl, out_dir, repo_path):
 
 def dd_request(path, method='GET', data=None):
     url = f'{DD_URL}{path}'
-    req = urllib.request.Request(url, method=method, headers={'Authorization': f'Token {DD_TOKEN}', 'Content-Type': 'application/json'})
+    req = urllib.request.Request(url, method=method, headers={'Authorization': f'Token {_dd_token()}', 'Content-Type': 'application/json'})
     body = json.dumps(data).encode() if data else None
     try:
         # B310: DD_URL scheme whitelisted to http/https at module load.
@@ -275,18 +292,110 @@ def upload_import(engagement_id, scan_type, file_path):
         # ingester a generous read budget. Connect is the short leg.
         r = requests.post(
             url,
-            headers={'Authorization': f'Token {DD_TOKEN}'},
+            headers={'Authorization': f'Token {_dd_token()}'},
             data={'engagement': engagement_id, 'scan_type': scan_type, 'active': True, 'verified': False},
             files={'file': f},
             timeout=(10, 300),
         )
     return r.status_code, r.text[:200]
 
+def _scanner_binary(argv_tmpl):
+    """The executable a scanner entry actually needs on PATH.
+
+    Most entries are ['tool', ...]; a few are ['bash','-c','...'] wrappers, so
+    take the first word of the script instead of reporting 'bash' as present.
+    """
+    if not argv_tmpl:
+        return None
+    head = argv_tmpl[0]
+    if head in ('bash', 'sh') and len(argv_tmpl) >= 3:
+        script = argv_tmpl[2].lstrip()
+        for token in script.split():
+            if token and not token.startswith(('$', '#', 'PIICFG')) and '=' not in token:
+                return token
+        return head
+    if head in ('python', 'python3', sys.executable) and len(argv_tmpl) >= 3 \
+            and argv_tmpl[1] == '-m':
+        return argv_tmpl[2]
+    return head
+
+
+def missing_scanners():
+    """Scanners in SCANNERS with no executable on PATH. Cheap, no subprocesses."""
+    import shutil
+    missing = []
+    for name, tmpl, _fname, _dd in SCANNERS:
+        binary = _scanner_binary(tmpl)
+        if not binary:
+            continue
+        if shutil.which(binary) is None:
+            missing.append(name)
+    return missing
+
+
+def _preflight(force_partial):
+    """Refuse to upload a partial run unless the operator forced it.
+
+    THE FOOTGUN THIS CLOSES: run_scanner() catches a missing binary, prints
+    `[name] ERROR`, and RETURNS. main() then uploads whatever report files do
+    exist. On a host with only a few of the scanners installed -- a dev
+    workstation rather than the scan box -- that publishes a partial run to the
+    central DefectDojo engagement, where it renders as a normal scan. The
+    dashboard then becomes the evidence: a reader sees few findings and
+    concludes the repo is clean, when in truth most scanners never ran.
+
+    A silent partial upload is worse than no scan at all, because no scan is
+    visibly absent while a partial one looks complete (DESIGN_PHILOSOPHIES
+    section 3 -- fail loud, never silent; a false green trains people to trust
+    the dashboard).
+
+    Exits 3 on a deficient host. `--force-partial-upload` is the documented
+    escape hatch, and it STILL prints what is missing so the operator cannot
+    force it by accident and forget what they suppressed.
+    """
+    missing = missing_scanners()
+    if not missing:
+        return
+    print(f'!! {len(missing)} of {len(SCANNERS)} scanners are NOT installed on '
+          f'this host:', file=sys.stderr)
+    for name in missing:
+        print(f'     - {name}', file=sys.stderr)
+    if force_partial:
+        print('!! --force-partial-upload given: uploading anyway. The '
+              'engagement will NOT reflect the scanners listed above.',
+              file=sys.stderr)
+        return
+    print('', file=sys.stderr)
+    print('Refusing to upload a partial run. A partial upload renders in '
+          'DefectDojo as a normal scan, so a reader sees few findings and '
+          'concludes the repo is clean.', file=sys.stderr)
+    print('  Run this on the scan host where every scanner is installed, or '
+          'pass --force-partial-upload if you accept a partial engagement.',
+          file=sys.stderr)
+    sys.exit(3)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('repo')
     ap.add_argument('--engagement-name', default=None)
+    ap.add_argument('--force-partial-upload', action='store_true',
+                    help='Upload even when scanners are missing from this host. '
+                         'The engagement will not reflect them; the missing '
+                         'list is printed regardless.')
+    ap.add_argument('--check-only', action='store_true',
+                    help='Report which scanners are missing and exit. No scan, '
+                         'no upload. Exits 0 when complete, 3 when deficient.')
     args = ap.parse_args()
+    if args.check_only:
+        missing = missing_scanners()
+        if not missing:
+            print(f'all {len(SCANNERS)} scanners present')
+            return 0
+        print(f'{len(missing)} of {len(SCANNERS)} scanners missing: '
+              + ', '.join(missing), file=sys.stderr)
+        return 3
+    _preflight(args.force_partial_upload)
     repo = Path(args.repo).resolve()
     ts = datetime.now().strftime('%Y%m%dT%H%M%SZ')
     out_dir = Path('/data/reports') / repo.name / ts
@@ -303,6 +412,11 @@ def main():
             code, body = upload_import(eng_id, dd_type, fpath)
             print(f'[{name}] upload {dd_type}: {code} {body[:120]}')
     print(f'== done; reports in {out_dir}, DefectDojo: {DD_URL}')
+    return 0
 
 if __name__ == '__main__':
-    main()
+    # Propagate the code: --check-only returns 3 on a deficient host, and a
+    # caller scripting this (CI, a cron wrapper) must be able to see that.
+    # Returning it from main() without raising SystemExit would exit 0 and make
+    # the check unusable from a script.
+    raise SystemExit(main())

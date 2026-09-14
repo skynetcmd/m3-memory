@@ -1,8 +1,8 @@
 ---
 tool: scan_repo_v7.py
-sha1: 555e31c688b6
-mtime_utc: 2026-06-28T12:28:55.232264+00:00
-generated_utc: 2026-06-30T22:19:18.649821+00:00
+sha1: 2766448c7099
+mtime_utc: 2026-09-14T04:11:58.194196+00:00
+generated_utc: 2026-09-14T04:12:09.205133+00:00
 private: false
 ---
 
@@ -43,7 +43,7 @@ with a setup hint covering both input shapes.
 
 ## Entry points
 
-- `def main()` (line 285)
+- `def main()` (line 378)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -54,6 +54,8 @@ with a setup hint covering both input shapes.
 |---|---|---|---|---|---|
 | `repo` |  | — | Positional — required; script exits with argparse error if omitted. | str | Resolves PATH to an absolute repo root and scans every file under it. |
 | `--engagement-name` |  | None | Auto-names the DefectDojo engagement `scan <UTC-timestamp>`. | str | Uses NAME as the DefectDojo engagement title; lets you group related runs. |
+| `--force-partial-upload` | Upload even when scanners are missing from this host. The engagement will not reflect them; the missing list is printed regardless. | `False` |  | store_true |  |
+| `--check-only` | Report which scanners are missing and exit. No scan, no upload. Exits 0 when complete, 3 when deficient. | `False` |  | store_true |  |
 
 ---
 
@@ -77,11 +79,11 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `argv`` (line 235)
+- `subprocess.run()  → `argv`` (line 252)
 
 **http**
 
-- `requests.post()  → `url`` (line 276)
+- `requests.post()  → `url`` (line 293)
 
 
 ---
