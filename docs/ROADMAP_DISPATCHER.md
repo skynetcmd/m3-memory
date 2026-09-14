@@ -158,6 +158,14 @@ neither. Recommended direction, not yet decided.
 
 ## Prerequisites
 
-The test suite is not currently order-independent: several tests write to the
-live store under fixed identifiers. That must be fixed before a daemon with
-shared state is added, or its tests will be untrustworthy in the same way.
+None outstanding.
+
+Test isolation was previously listed here as a blocker, on the understanding
+that several tests wrote to the live store under fixed identifiers. They do
+not: `tests/conftest.py` applies an autouse sandbox that pins `M3_ENGINE_ROOT`,
+`M3_CONFIG_ROOT` and `M3_MEMORY_ROOT` to a per-test `tmp_path`, so each test
+resolves to its own database. `tmp_path` is unique per test and per worker, so
+this holds under `pytest-xdist -n auto` as well.
+
+`pytest-xdist` is still not a declared dev dependency, which is the only reason
+parallel runs are not used.
