@@ -142,8 +142,11 @@ def test_every_mermaid_block_renders() -> None:
                 pytest.skip(f"mermaid-cli unusable: {exc}")
 
             if not out.exists() or out.stat().st_size == 0:
-                err = (proc.stderr or proc.stdout or "").strip().splitlines()
+                err_str = proc.stderr or proc.stdout or ""
+                err = err_str.strip().splitlines()
                 detail = next((ln for ln in err if "Parse error" in ln), "")
+                if "MODULE_NOT_FOUND" in err_str or "command not found" in err_str:
+                    pytest.skip("mermaid-cli is broken in this environment")
                 if not detail and not err:
                     pytest.skip("mermaid-cli produced no output and no error")
                 failures.append(f"{path} block {idx}: {detail or err[-1][:160]}")

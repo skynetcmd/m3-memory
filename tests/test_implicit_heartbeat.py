@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,33 +34,23 @@ from memory.orchestration import (  # noqa: E402
     notifications_poll_impl,
 )
 
-_TYPE = "pytest-hb"
-_S1 = f"{_TYPE}@s1"
-_S2 = f"{_TYPE}@s2"
 _ANCIENT = "2020-01-01T00:00:00Z"
 
 
 @pytest.fixture
-def agents():
-    def _purge():
-        with _db() as db:
-            p = dialect().param()
-            db.execute(
-                f"DELETE FROM agents WHERE agent_id = {p} OR agent_id LIKE {p}",
-                (_TYPE, _TYPE + "@%"),
-            )
-            db.execute(
-                f"DELETE FROM notifications WHERE agent_id = {p} "
-                f"OR agent_id LIKE {p}",
-                (_TYPE, _TYPE + "@%"),
-            )
+def agents(monkeypatch, tmp_path):
+    from conftest import create_full_main_schema
+    db_path = tmp_path / "heartbeat.db"
+    create_full_main_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
 
-    _purge()
-    agent_register_impl(_TYPE, "test")
-    agent_register_impl(_S1, "test")
-    agent_register_impl(_S2, "test")
-    yield
-    _purge()
+    type_ = f"pytest-hb-{uuid.uuid4().hex[:12]}"
+    s1, s2 = f"{type_}@s1", f"{type_}@s2"
+
+    agent_register_impl(type_, "test")
+    agent_register_impl(s1, "test")
+    agent_register_impl(s2, "test")
+    yield SimpleNamespace(type=type_, s1=s1, s2=s2)
 
 
 def _last_seen(agent_id: str):
@@ -80,9 +72,9 @@ def _backdate(agent_id: str) -> None:
 
 
 def test_polling_records_a_heartbeat_for_the_poller(agents):
-    _backdate(_S1)
-    notifications_poll_impl(_S1)
-    assert _last_seen(_S1) != _ANCIENT, (
+    _backdate(agents.s1)
+    notifications_poll_impl(agents.s1)
+    assert _last_seen(agents.s1) != _ANCIENT, (
         "polling did not record a heartbeat -- the agent is invisible to "
         "liveness checks despite demonstrably running"
     )
@@ -98,16 +90,18 @@ def test_a_fan_out_poll_does_not_revive_the_sisters_it_read_for(agents):
     that cannot say "dead" is not a liveness signal, and the sweeper downstream
     would trust it. Reading a sister's mail is not evidence about the sister.
     """
-    _backdate(_S1)
-    _backdate(_S2)
+    _backdate(agents.s1)
+    _backdate(agents.s2)
 
-    notifications_poll_impl(_TYPE, unread_only=False)
+    notifications_poll_impl(agents.type, unread_only=False)
 
-    assert _last_seen(_S1) == _ANCIENT, (
+    assert _last_seen(agents.s1) == _ANCIENT, (
         "a bare-type poll revived sister s1 -- a dead agent now looks alive"
     )
-    assert _last_seen(_S2) == _ANCIENT
-    assert _last_seen(_TYPE) != _ANCIENT, "the poller itself must be stamped"
+    assert _last_seen(agents.s2) == _ANCIENT
+    assert _last_seen(agents.type) != _ANCIENT, (
+        "the poller itself must be stamped"
+    )
 
 
 def test_the_heartbeat_uses_the_database_clock(agents):
@@ -117,8 +111,8 @@ def test_the_heartbeat_uses_the_database_clock(agents):
     the column -- a Python isoformat() writes microseconds and a +00:00 offset
     where the DB writes ...Z.
     """
-    notifications_poll_impl(_S1)
-    stamped = _last_seen(_S1)
+    notifications_poll_impl(agents.s1)
+    stamped = _last_seen(agents.s1)
 
     with _db() as db:
         db_now = db.execute(f"SELECT {dialect().now()}").fetchone()[0]
@@ -142,7 +136,7 @@ def test_an_unregistered_poller_is_told_it_left_no_trace(agents):
     An agent that believes it is heartbeating while invisible to every liveness
     check is a §3 false negative on the one signal a reclaim decision needs.
     """
-    out = notifications_poll_impl(f"{_TYPE}@never-registered")
+    out = notifications_poll_impl(f"{agents.type}@never-registered")
 
     assert "not registered" in out, (
         f"an unregistered poll recorded no heartbeat and said nothing: {out!r}"
@@ -153,7 +147,7 @@ def test_an_unregistered_poller_is_told_it_left_no_trace(agents):
 def test_a_registered_poller_gets_no_warning(agents):
     """The other polarity. A note that fires when nothing is wrong trains
     people to ignore the one that matters (§3)."""
-    out = notifications_poll_impl(_S1)
+    out = notifications_poll_impl(agents.s1)
     assert "not registered" not in out, (
         f"false alarm on a registered agent: {out!r}"
     )
@@ -163,9 +157,11 @@ def test_structured_output_carries_the_heartbeat_flag(agents):
     """A records caller must be able to branch on it without parsing prose."""
     import json
 
-    reg = json.loads(notifications_poll_impl(_S1, as_records=True))
+    reg = json.loads(notifications_poll_impl(agents.s1, as_records=True))
     unreg = json.loads(
-        notifications_poll_impl(f"{_TYPE}@never-registered", as_records=True)
+        notifications_poll_impl(
+            f"{agents.type}@never-registered", as_records=True
+        )
     )
     assert reg.get("heartbeat_recorded") is True
     assert unreg.get("heartbeat_recorded") is False

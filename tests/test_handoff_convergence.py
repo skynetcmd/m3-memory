@@ -25,22 +25,16 @@ import memory_core  # noqa: E402
 from memory.backends import dialect  # noqa: E402
 from memory.orchestration import _db  # noqa: E402
 
-_PREFIX = "pytest-conv"
-
 
 @pytest.fixture
-def clean():
-    def _purge():
-        with _db() as db:
-            p = dialect().param()
-            db.execute(
-                f"DELETE FROM memory_items WHERE type = 'handoff' AND "
-                f"(agent_id = {p} OR agent_id LIKE {p})",
-                (_PREFIX, _PREFIX + "@%"),
-            )
-    _purge()
-    yield
-    _purge()
+def clean(monkeypatch, tmp_path):
+    from conftest import create_full_main_schema
+    db_path = tmp_path / "handoff.db"
+    create_full_main_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+
+    prefix = f"pytest-conv-{uuid.uuid4().hex[:12]}"
+    yield prefix
 
 
 def _handoff_to(target: str, task: str) -> str:
@@ -72,17 +66,17 @@ def test_ack_refuses_a_handoff_addressed_to_someone_else(clean):
     """THE gap. The ack took only a memory_id, so any agent could ack any
     handoff -- including one a sister was mid-flight on. notifications_ack_all
     has guarded this since #170; the handoff ack did not."""
-    victim = _handoff_to(f"{_PREFIX}@s1", "work for s1")
+    victim = _handoff_to(f"{clean}@s1", "work for s1")
 
-    out = memory_core.memory_inbox_ack_impl(victim, agent_id=f"{_PREFIX}@s2")
+    out = memory_core.memory_inbox_ack_impl(victim, agent_id=f"{clean}@s2")
 
     assert "Error" in out, f"a sister acked another's handoff: {out!r}"
     assert _read_at(victim) is None, "the row was acked despite the refusal"
 
 
 def test_ack_accepts_the_addressee(clean):
-    mine = _handoff_to(f"{_PREFIX}@s1", "work for s1")
-    out = memory_core.memory_inbox_ack_impl(mine, agent_id=f"{_PREFIX}@s1")
+    mine = _handoff_to(f"{clean}@s1", "work for s1")
+    out = memory_core.memory_inbox_ack_impl(mine, agent_id=f"{clean}@s1")
     assert "Error" not in out, out
     assert _read_at(mine) is not None
 
@@ -91,8 +85,8 @@ def test_a_bare_type_may_ack_its_instances_mail(clean):
     """Same fan-out rule as the read that produced the list: a bare type covers
     the type and its instances, or an orchestrator could not clear a queue it
     can legitimately see."""
-    mid = _handoff_to(f"{_PREFIX}@s1", "work for s1")
-    out = memory_core.memory_inbox_ack_impl(mid, agent_id=_PREFIX)
+    mid = _handoff_to(f"{clean}@s1", "work for s1")
+    out = memory_core.memory_inbox_ack_impl(mid, agent_id=clean)
     assert "Error" not in out, out
     assert _read_at(mid) is not None
 
@@ -101,7 +95,7 @@ def test_ack_without_an_agent_id_keeps_working(clean):
     """agent_id is optional by design: the ToolSpec injects it so the guard is
     on at the boundary, but internal callers that ack by id alone must not
     break at a distance."""
-    mid = _handoff_to(f"{_PREFIX}@s1", "work for s1")
+    mid = _handoff_to(f"{clean}@s1", "work for s1")
     out = memory_core.memory_inbox_ack_impl(mid)
     assert "Error" not in out, out
     assert _read_at(mid) is not None
@@ -127,11 +121,11 @@ def test_a_failed_dispatch_is_reported_to_the_caller(monkeypatch, clean):
         raise RuntimeError("queue down")
 
     monkeypatch.setattr(memory_core, "notify_impl", _boom)
-    memory_core.agent_register_impl(f"{_PREFIX}@from", "test")
-    memory_core.agent_register_impl(f"{_PREFIX}@to", "test")
+    memory_core.agent_register_impl(f"{clean}@from", "test")
+    memory_core.agent_register_impl(f"{clean}@to", "test")
 
     out = memory_core.memory_handoff_impl(
-        from_agent=f"{_PREFIX}@from", to_agent=f"{_PREFIX}@to", task="t",
+        from_agent=f"{clean}@from", to_agent=f"{clean}@to", task="t",
     )
     assert "NOT notified" in out, (
         f"a failed dispatch was reported as a clean success: {out!r}"
