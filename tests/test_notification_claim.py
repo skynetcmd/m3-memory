@@ -29,7 +29,6 @@ if _BIN not in sys.path:
 
 from memory.backends.sqlite_backend import SqliteDialect  # noqa: E402
 
-_NOW = "2026-09-14T00:00:00Z"
 
 
 def _make_db(path: str, rows: int = 200) -> None:
@@ -65,7 +64,7 @@ def _open(path: str) -> sqlite3.Connection:
 def _claim(conn, claimant: str):
     return SqliteDialect().claim_message(
         conn, table="notifications", where_sql="agent_id = ?",
-        where_params=("worker",), claimant=claimant, now=_NOW,
+        where_params=("worker",), claimant=claimant,
     )
 
 
@@ -80,7 +79,7 @@ def test_claim_returns_a_row_and_stamps_the_claimant(db_path):
     assert row[0] == "claude-code@s1", (
         f"the caller's real id must replace the internal token, got {row[0]!r}"
     )
-    assert row[1] == _NOW
+    assert row[1], "claimed_at must be stamped by the database, not left NULL"
     conn.close()
 
 
@@ -122,7 +121,7 @@ def test_the_addressing_predicate_is_honoured(db_path):
     )
     got = SqliteDialect().claim_message(
         conn, table="notifications", where_sql="agent_id = ?",
-        where_params=("someone-else",), claimant="claude-code@s1", now=_NOW,
+        where_params=("someone-else",), claimant="claude-code@s1",
     )
     assert got == 9999
     # And the reverse: claiming 'worker' never returns the other row.
@@ -139,7 +138,7 @@ def _worker(args):
         try:
             row = SqliteDialect().claim_message(
                 conn, table="notifications", where_sql="agent_id = ?",
-                where_params=("worker",), claimant=name, now=_NOW,
+                where_params=("worker",), claimant=name,
             )
             if row is not None:
                 got.append(row)
@@ -316,4 +315,44 @@ def test_a_killed_claimer_leaves_no_ghost():
     assert orphaned == 0, (
         f"{orphaned} rows stranded by a killed claimer -- the claim is no "
         f"longer atomic and a reclaim path IS required"
+    )
+
+
+def test_claim_time_comes_from_the_database_not_the_caller(db_path):
+    """The claim must not be stampable with a caller's clock.
+
+    m3 spans two machines -- pg_sync replicates to the warehouse host -- so
+    once claimed_at backs a lease deadline, letting each agent supply its own
+    timestamp means two agents reach different verdicts about the SAME lease.
+    The signature is the guard: there is no `now` parameter to pass.
+
+    Asserted two ways, because the signature alone could be satisfied while the
+    implementation still used a Python clock internally: the method rejects a
+    caller timestamp, AND the value it writes tracks the DB's own now().
+    """
+    import inspect
+
+    sig = inspect.signature(SqliteDialect.claim_message)
+    assert "now" not in sig.parameters, (
+        "claim_message accepts a caller clock again -- an N-clock comparison "
+        "is a correctness bug once claimed_at backs a lease"
+    )
+
+    conn = _open(db_path)
+    claimed = _claim(conn, "claude-code@s1")
+    stamped = conn.execute(
+        "SELECT claimed_at FROM notifications WHERE id = ?", (claimed,)
+    ).fetchone()[0]
+    db_now = conn.execute(f"SELECT {SqliteDialect().now()}").fetchone()[0]
+    conn.close()
+
+    assert stamped, "claimed_at was not stamped"
+    # Same second-resolution format the column default uses, so a Python-side
+    # isoformat() (microseconds, +00:00 offset) would not match this shape.
+    assert stamped[:13] == db_now[:13], (
+        f"claimed_at {stamped!r} does not track the database clock {db_now!r}"
+    )
+    assert stamped.endswith("Z") and "+" not in stamped, (
+        f"claimed_at {stamped!r} is not in the DB's own format -- a Python "
+        f"datetime.isoformat() leaks a +00:00 offset and microseconds"
     )

@@ -400,7 +400,7 @@ class Dialect:
 
     def claim_message(
         self, conn: object, *, table: str, where_sql: str, where_params: "tuple",
-        claimant: str, now: str,
+        claimant: str,
     ) -> "object | None":
         """Atomically claim ONE unclaimed row, or return None if there are none.
 
@@ -416,6 +416,16 @@ class Dialect:
         but p99 1307ms and max 1638ms -- a 17x p99 blowup versus 74.7ms with no
         hold. That is not a tuning detail, it is the difference between a queue
         and a hang, so it is stated here rather than left as folklore.
+
+        THE CLAIM TIME COMES FROM THE DATABASE, never from the caller. This
+        method deliberately takes no ``now`` argument: it stamps ``claimed_at``
+        with :meth:`now`, which renders the STORE's clock on every backend. A
+        caller-supplied timestamp would make each agent judge time by its own
+        clock, and m3 already spans two machines (pg_sync replicates to the
+        warehouse host), so skew between them is real rather than theoretical.
+        Once ``claimed_at`` backs a lease deadline, an N-clock comparison is a
+        correctness bug: two agents reach different verdicts about the SAME
+        lease. One clock -- the database's -- is the only defensible answer.
 
         Postgres and SQLite reach the same guarantee by DIFFERENT mechanisms,
         which is why this is a dialect method and not shared SQL:

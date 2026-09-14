@@ -111,7 +111,7 @@ class SqliteDialect(Dialect):
 
     def claim_message(
         self, conn: object, *, table: str, where_sql: str, where_params: tuple,
-        claimant: str, now: str,
+        claimant: str,
     ) -> "object | None":
         """Claim via BEGIN IMMEDIATE + a unique token + SELECT-back.
 
@@ -136,10 +136,10 @@ class SqliteDialect(Dialect):
         conn.execute("BEGIN IMMEDIATE")  # type: ignore[attr-defined]
         try:
             cur = conn.execute(  # type: ignore[attr-defined]
-                f"UPDATE {table} SET claimed_by = ?, claimed_at = ? "
+                f"UPDATE {table} SET claimed_by = ?, claimed_at = {self.now()} "
                 f"WHERE id = (SELECT id FROM {table} WHERE {where_sql} "
                 f"AND claimed_by IS NULL ORDER BY id LIMIT 1)",
-                (token, now, *where_params),
+                (token, *where_params),
             )
             if not cur.rowcount:
                 conn.commit()  # type: ignore[attr-defined]
