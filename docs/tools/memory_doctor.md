@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: c2d4bc1d863e
-mtime_utc: 2026-09-08T00:01:56.248943+00:00
-generated_utc: 2026-09-08T00:04:40.860012+00:00
+sha1: 698a68581884
+mtime_utc: 2026-09-14T03:42:48.729821+00:00
+generated_utc: 2026-09-14T03:43:16.521657+00:00
 private: false
 ---
 
@@ -49,6 +49,7 @@ tested in isolation.
 | `--skip-locks` | Skip the single-instance lock health check. | `False` |  | store_true |  |
 | `--skip-embed-space` | Skip the mixed embed-space check (vectors from >1 model in one index). | `False` |  | store_true |  |
 | `--skip-schedule` | Skip the dangling scheduled-task interpreter check. | `False` |  | store_true |  |
+| `--skip-startup-tools` | Skip the MCP startup tool-set check (resolved set + its source). | `False` |  | store_true |  |
 | `--skip-shared-embedder` | Skip the shared-embedder-mode check (config + server + keep-alive task). | `False` |  | store_true |  |
 | `--skip-plugin` | Skip the Claude Code plugin version/enabled check. | `False` |  | store_true |  |
 | `--skip-agent-paths` | Skip the cross-agent dead-path check (Gemini/OpenCode/Hermes/...). | `False` |  | store_true |  |
@@ -104,6 +105,7 @@ _(no subprocess / http / sqlite calls detected)_
 - `doctor (plugin_version_probe)`
 - `doctor (schedule_probe)`
 - `doctor (shared_embedder_probe)`
+- `doctor (startup_tools_probe)`
 - `m3_core.paths (resolve_engine_file)`
 - `memory.backends (active_backend)`
 - `memory.doctor (memory_doctor_fix_impl)`

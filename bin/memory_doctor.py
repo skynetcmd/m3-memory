@@ -80,6 +80,10 @@ def main() -> int:
         help="Skip the dangling scheduled-task interpreter check.",
     )
     parser.add_argument(
+        "--skip-startup-tools", action="store_true",
+        help="Skip the MCP startup tool-set check (resolved set + its source).",
+    )
+    parser.add_argument(
         "--skip-shared-embedder", action="store_true",
         help="Skip the shared-embedder-mode check (config + server + keep-alive task).",
     )
@@ -304,6 +308,17 @@ def main() -> int:
         # deliberate one-time cost the operator chooses, so this warns and never
         # bumps the exit code.
         embed_space_probe.run(brief=brief)
+
+    if not getattr(args, "skip_startup_tools", False):
+        from doctor import startup_tools_probe
+        # DOES bump the exit code, but only when the configured set cannot be
+        # honored (unknown tool name, empty set, missing escape hatch). Those
+        # are not degraded-but-working states: m3 would start with a surface the
+        # user did not ask for, and from inside a session that is
+        # indistinguishable from the tool not existing. A healthy resolution is
+        # report-only — it prints the set AND the precedence level that produced
+        # it, so an operator can explain their own startup surface.
+        exit_code = max(exit_code, startup_tools_probe.run(brief=brief))
 
     if not args.skip_schedule:
         from doctor import schedule_probe
