@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
-> 100+ MCP tools, lazy-loaded to just ~1.8% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20 on LongMemEval-S). 4,392 collected tests (3,291 test functions) across 306 files. Pluggable storage backend (SQLite default / PostgreSQL primary). Framework adapters for LangChain, CrewAI, and PydanticAI. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Multi-agent orchestration. Zero cloud dependency.
+> 100+ MCP tools, lazy-loaded to just ~1.8% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20 on LongMemEval-S). 4,903 collected tests (3,377 test functions) across 369 files. Pluggable storage backend (SQLite default / PostgreSQL primary). Framework adapters for LangChain, CrewAI, and PydanticAI. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Multi-agent orchestration. Zero cloud dependency.
 
 For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
