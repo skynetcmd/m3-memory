@@ -600,9 +600,12 @@ def _remove_macos_loop_watchdog() -> None:
         dest = os.path.expanduser(
             "~/Library/LaunchAgents/com.m3memory.loopwatchdog.plist")
         if os.path.exists(dest):
-            _run(["launchctl", "unload", dest], capture_output=True)
-            os.unlink(dest)
-            _safe_print(f"{OK} Removed loop watchdog: {dest}")
+            r = _run(["launchctl", "unload", dest], capture_output=True)
+            if r.returncode == 0:
+                os.unlink(dest)
+                _safe_print(f"{OK} Removed loop watchdog: {dest}")
+            else:
+                _safe_print(f"{FAIL} could not unload loop watchdog, left file in place: {dest}")
     except (OSError, subprocess.SubprocessError) as e:
         _safe_print(f"{WARN} could not remove loop watchdog: {e}")
 
@@ -614,9 +617,12 @@ def remove_unix_cognitive_loop():
         dest = os.path.expanduser(
             "~/Library/LaunchAgents/com.m3memory.cognitiveloop.plist")
         if os.path.exists(dest):
-            _run(["launchctl", "unload", dest], capture_output=True)
-            os.unlink(dest)
-            _safe_print(f"{OK} Removed launchd agent: {dest}")
+            r = _run(["launchctl", "unload", dest], capture_output=True)
+            if r.returncode == 0:
+                os.unlink(dest)
+                _safe_print(f"{OK} Removed launchd agent: {dest}")
+            else:
+                _safe_print(f"{FAIL} could not unload launchd agent, left file in place: {dest}")
         else:
             _safe_print(f"{WARN} launchd agent not installed (nothing to remove).")
         # Leaving the watchdog behind would kickstart a job that no longer exists.
@@ -624,14 +630,17 @@ def remove_unix_cognitive_loop():
     elif os_name == "Linux":
         dest = os.path.expanduser(
             "~/.config/systemd/user/m3-cognitive-loop.service")
-        _run(
+        r = _run(
             ["systemctl", "--user", "disable", "--now", "m3-cognitive-loop.service"],
             capture_output=True,
         )
         if os.path.exists(dest):
-            os.unlink(dest)
-            _run(["systemctl", "--user", "daemon-reload"], capture_output=True)
-            _safe_print(f"{OK} Removed systemd --user unit: {dest}")
+            if r.returncode == 0:
+                os.unlink(dest)
+                _run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+                _safe_print(f"{OK} Removed systemd --user unit: {dest}")
+            else:
+                _safe_print(f"{FAIL} could not disable unit, left file in place: {dest}")
         else:
             _safe_print(f"{WARN} systemd unit not installed (nothing to remove).")
         # Leaving the watchdog behind would restart a unit that no longer exists.
