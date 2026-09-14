@@ -23,6 +23,35 @@ _Nothing yet._
 
 ---
 
+## [2026.9.14.2] - 2026-09-14
+
+### Added
+- Atomic claim seam for sister-agent work-stealing: `Dialect.claim_message`
+  renders `FOR UPDATE SKIP LOCKED` on Postgres and a `BEGIN IMMEDIATE` claim
+  token on SQLite, with claim-then-release as a documented contract.
+- Renewable leases with per-attempt fencing. `claim_message` returns
+  `(id, lease_token)`; complete, fail and renew each require that token.
+  `sweep_expired_leases` returns lapsed claims to the queue and dead-letters a
+  message past `max_attempts`.
+- Message state derived from existing columns — `message_state_sql` /
+  `message_state_of` own the PENDING/CLAIMED/COMPLETED/FAILED predicate.
+- Conversation threading columns (`conversation_id`, `reply_to_id`).
+- `Dialect.now_plus_seconds`.
+- `--json-file` for tool arguments, for payloads a shell will not carry.
+- Implicit agent heartbeat: polling notifications records the poller's
+  `last_seen`, so no separate heartbeat loop is needed.
+
+### Fixed
+- The handoff inbox obeys the instance-addressing rule; a qualified agent id
+  no longer misses its own type's handoffs.
+- The handoff ack is scoped to the caller's own mail.
+- A failed handoff dispatch is reported to the caller instead of only logged.
+- Claim and heartbeat timestamps come from the database clock.
+- `received_at` is surfaced in poll output.
+- Tool-count drift fails the build instead of printing a warning.
+
+---
+
 ## [2026.9.14.1] — 2026-09-14 — Smaller startup surface, structured returns
 
 ### Added
