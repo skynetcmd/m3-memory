@@ -455,17 +455,15 @@ These work identically regardless of which model is on either side:
 
 #### ⚠ Addressing is asymmetric — read this before wiring a poller
 
-An agent id can be a bare **type** (`claude-code`) or a **qualified instance**
-(`claude-code@4a87f9`). Delivery between them is one-way:
+An agent id can be a bare **type** (`my-agent`) or a **qualified instance**
+(`my-agent@<session>`). Delivery between them is one-way:
 
 > **A bare poller sees instance mail. An instance poller does NOT see bare mail.**
 
-Measured, not inferred. The consequences run in both directions, and two agents
-reviewing this very mechanism each got it wrong the opposite way:
+Measured, not inferred. The consequences run in both directions:
 
-- **Poll bare when you are one of several sessions** and you will *steal* items
-  addressed to a sister session. Work-queue claiming is not implemented, so the
-  first `ack` wins and the others lose the item with nothing reported.
+- **Poll bare when you are one of several sessions** and you may take items
+  intended for a sibling session.
 - **Poll only your qualified id** and you will *miss* everything sent to the
   bare type — which is what a peer sends when it does not know your session id.
   Your inbox looks healthy and empty while mail piles up one address over.

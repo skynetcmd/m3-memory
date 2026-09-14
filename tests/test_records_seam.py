@@ -156,7 +156,7 @@ def test_scalar_payload_normalizes_like_rows():
     assert out == {"total": 7.0, "when": "2026-09-14"}
 
 
-# ── errors are NOT empty results (orchestrator ruling: option B) ─────────────
+# ── errors are NOT empty results ────────────────────────────────────────────
 def test_error_envelope_has_no_count_or_items():
     """The missing keys are the contract. A caller that lazily reaches for
     data['items'] without checking for 'error' must get a KeyError -- that is
