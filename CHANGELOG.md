@@ -23,42 +23,35 @@ _Nothing yet._
 
 ---
 
-## [2026.9.14.0] — 2026-09-14 — Smaller startup surface, structured returns
+## [2026.9.14.1] — 2026-09-14 — Smaller startup surface, structured returns
 
 ### Added
 
-- **Narrowed tool variants.** `memory_search_slim`, `memory_write_slim`,
-  `chatlog_search_slim` and `memory_supersede_slim` sit beside the full tools
-  and share their implementations. The startup set is now ~2,216 tokens of
-  schema against ~33,686 for the whole catalog. Which parameters each keeps
-  came from measured usage: search uses two of nineteen in almost every call.
-- **`as_records` on twelve display-string tools** (and the slim variant that
-  inherits it from one of them). Opt-in structured output;
-  the default is byte-identical to before. These tools held rows and flattened
-  them, so a caller who wanted to filter or sort had to parse the string back.
-  Errors return `{error, ...}` without `count`/`items` — an error is not an
-  empty result.
+- **Narrowed tool variants**: `memory_search_slim`, `memory_write_slim`,
+  `chatlog_search_slim`, `memory_supersede_slim`. Same implementations as the
+  full tools, fewer parameters. Default startup set is ~2,216 tokens of schema
+  against ~33,686 for the whole catalog.
+- **`as_records`** on twelve display-string tools: opt-in JSON records instead
+  of the display string. Default output is unchanged. Errors return
+  `{error, ...}` without `count`/`items`.
 - **User-owned startup tool set** via `M3_TOOLS_STARTUP` or
-  `.tools_config.json`. The default is derived in code and never written to
-  disk, so it tracks upgrades instead of pinning against them. An unknown tool
-  name is refused with a suggestion; a set missing the escape hatch is refused
-  outright. `m3 doctor` reports the resolved set and where it came from.
-- **Unix keep-alive for the shared embed server.** launchd agent, systemd user
-  unit, and a watchdog. Previously only Windows had a supervisor.
-- **Tool-usage measurement** across direct, proxy-delegated and CLI calls.
-  Counting only direct calls had been missing most of the picture.
+  `.tools_config.json`. Unknown tool names and sets missing `m3_call` /
+  `tools_list_domains` / `tools_load_domain` are refused. `m3 doctor` reports
+  the resolved set and its source.
+- **Unix keep-alive for the shared embed server**: launchd agent, systemd user
+  unit, and a watchdog.
+- **`bin/measure_tool_usage.py`**: tool-usage counts across direct,
+  proxy-delegated and CLI calls.
 
 ### Fixed
 
-- Three tools required arguments their schemas described as optional, so a
-  caller that honored the contract got a TypeError. A guard now checks the
-  whole catalog in both directions.
-- The installer now refuses when the Rust embed-server is registered, or when
-  that cannot be determined. Both bind the same port.
-- The embed-server health probe is restricted to http(s). A `file:` URL read a
-  local path and reported the server healthy while nothing was listening.
-- The security scan orchestrator refuses to upload a partial run. A missing
-  scanner was stepped over, and the partial upload rendered as a normal scan.
+- `agent_register`, `memory_handoff` and `memory_search_scored` rejected calls
+  their schemas described as valid. Added a catalog-wide parity guard.
+- The installer refuses to register the Python embed-server unit when the Rust
+  service is registered, or when that cannot be determined.
+- The embed-server health probe is restricted to `http`/`https`.
+- The security scan orchestrator refuses to upload when scanners are missing;
+  added `--check-only` and `--force-partial-upload`.
 - Notification payloads stored double-encoded are decoded on read.
 
 ---
