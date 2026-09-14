@@ -42,7 +42,7 @@ def _installed_active() -> tuple[bool, Optional[bool], str]:
         if not os.path.exists(dest):
             return False, None, "launchd"
         try:
-            loaded = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
+            loaded = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=20)
             return True, (_LAUNCHD_LABEL in (loaded.stdout or "")), "launchd"
         except Exception:  # noqa: BLE001 — probe never crashes the doctor
             return True, None, "launchd"
@@ -53,7 +53,7 @@ def _installed_active() -> tuple[bool, Optional[bool], str]:
         try:
             active = subprocess.run(
                 ["systemctl", "--user", "is-active", _SYSTEMD_UNIT],
-                capture_output=True, text=True,
+                capture_output=True, text=True, timeout=20,
             )
             return True, ((active.stdout or "").strip() == "active"), "systemd --user"
         except Exception:  # noqa: BLE001
@@ -62,7 +62,7 @@ def _installed_active() -> tuple[bool, Optional[bool], str]:
         try:
             proc = subprocess.run(
                 ["schtasks", "/Query", "/TN", _WINDOWS_TASK],
-                capture_output=True, text=True,
+                capture_output=True, text=True, timeout=20,
             )
             if proc.returncode != 0:
                 return False, None, "Task Scheduler"

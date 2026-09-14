@@ -95,7 +95,7 @@ def _query_task_xml(name: str) -> str | None:
     """Task Scheduler XML for ``name``, or None if not installed. Raises on an
     unexpected schtasks failure (caught by the backend)."""
     proc = subprocess.run(
-        ["schtasks", "/Query", "/TN", name, "/XML"], capture_output=True, text=True
+        ["schtasks", "/Query", "/TN", name, "/XML"], capture_output=True, text=True, timeout=20
     )
     if proc.returncode != 0:
         stderr = (proc.stderr or "").upper()
@@ -204,7 +204,7 @@ def _dangling_linux(m3_memory_root: str) -> list[dict]:
 def _read_crontab() -> str | None:
     """Current user's crontab text, or None if there is none / crontab absent."""
     try:
-        proc = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        proc = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=20)
     except FileNotFoundError:
         return None  # no crontab binary — nothing scheduled that way
     if proc.returncode != 0:
