@@ -45,6 +45,7 @@ _SKIP_DIRS = {
     "to_be_deleted",
     ".venv",
     ".git",
+    ".claude",          # nested worktrees from Claude Code
     "examples",         # standalone samples, shipped to be read not run
     "scripts",          # one-off operator scripts, not the product
     "benchmarks",
