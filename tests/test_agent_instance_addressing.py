@@ -176,3 +176,148 @@ def test_qualified_reads_use_equality_not_like():
     pred, params = _addressing_predicate("agy@s1", "?")
     assert "LIKE" not in pred, pred
     assert params == ("agy@s1",)
+
+
+# ── Handoffs obey the same addressing rule ───────────────────────────────────
+# memory_inbox used a bare `agent_id = ?` long after #170 fixed notifications,
+# so the handoff half of the same feature silently kept the old behaviour.
+# Measured on a live box before the fix: bare `claude-code` returned 15
+# handoffs, `claude-code@4a87f9` returned 0.
+
+
+@pytest.fixture
+def clean_handoffs():
+    from memory_core import _db as _mdb
+
+    def _purge():
+        with _mdb() as db:
+            p = dialect().param()
+            db.execute(
+                f"DELETE FROM memory_items WHERE type = 'handoff' AND "
+                f"(agent_id = {p} OR agent_id LIKE {p})",
+                (_PREFIX, _PREFIX + "@%"),
+            )
+
+    _purge()
+    yield
+    _purge()
+
+
+def _handoff_to(target: str, task: str) -> None:
+    """Insert a handoff directly.
+
+    memory_handoff_impl refuses unregistered agents, and registering throwaway
+    sisters would leave rows in the agents table that this test does not own.
+    The addressing predicate is what is under test, not the registration gate.
+    """
+    import json as _json
+    import uuid as _uuid
+    from datetime import datetime, timezone
+
+    from memory_core import _db as _mdb
+
+    now = datetime.now(timezone.utc).isoformat()
+    with _mdb() as db:
+        p = dialect().param()
+        db.execute(
+            f"INSERT INTO memory_items (id, type, title, content, agent_id, "
+            f"scope, metadata_json, created_at, updated_at, is_deleted) "
+            f"VALUES ({p}, 'handoff', {p}, {p}, {p}, 'agent', {p}, {p}, {p}, 0)",
+            (str(_uuid.uuid4()), f"Handoff to {target}", task, target,
+             _json.dumps({"from_agent": "pytest"}), now, now),
+        )
+
+
+def test_handoff_inbox_qualified_id_sees_its_own_mail(clean_handoffs):
+    """THE regression -- and it must FAIL with the bare predicate put back.
+
+    Asserting only that `@s1` sees mail addressed to `@s1` is NOT coverage: a
+    bare `agent_id = ?` satisfies that too, since an exact id still matches its
+    own rows. Verified by reintroducing the defect -- that weaker assertion
+    stayed green. So this pins the DIRECT read from both sides, which the bare
+    predicate cannot do: `@s1` sees its own row and is not fed `@s2`'s.
+
+    Note what is deliberately NOT asserted: a qualified read does not pick up
+    the bare type's rows. DIRECT means strictly that instance (see
+    `_addressing_predicate`), so a bare-type broadcast reaches a sister only
+    through a bare-type poll -- which is why an agent registered qualified must
+    poll BOTH queues.
+    """
+    from memory_core import memory_inbox_impl
+
+    _handoff_to(f"{_PREFIX}@s1", "work for s1")
+    _handoff_to(f"{_PREFIX}@s2", "work for s2")
+
+    out = memory_inbox_impl(f"{_PREFIX}@s1", unread_only=True)
+    assert "work for s1" in out, (
+        f"a qualified id must see handoffs addressed to it, got: {out!r}"
+    )
+    assert "work for s2" not in out, (
+        f"DIRECT read leaked a sister's handoff, got: {out!r}"
+    )
+
+
+def test_handoff_inbox_bare_broadcast_is_invisible_to_a_qualified_read(
+    clean_handoffs,
+):
+    """Documents a real sharp edge rather than asserting a wish.
+
+    A handoff addressed to the bare TYPE does not appear in a qualified
+    sister's DIRECT inbox. That is the designed semantics, but it means a
+    broadcast silently skips every session that polls only its qualified id --
+    the delivery gap an orchestrator is most likely to trip over.
+    """
+    from memory_core import memory_inbox_impl
+
+    _handoff_to(_PREFIX, "broadcast work")
+
+    direct = memory_inbox_impl(f"{_PREFIX}@s1", unread_only=True)
+    assert "broadcast work" not in direct
+
+    fanout = memory_inbox_impl(_PREFIX, unread_only=True)
+    assert "broadcast work" in fanout, (
+        "the bare-type poll is the ONLY way a sister sees a broadcast"
+    )
+
+
+def test_handoff_inbox_qualified_id_is_not_fed_a_sisters_mail(clean_handoffs):
+    """The other polarity: DIRECT must stay direct, or the fix has merely
+    swapped one leak for another."""
+    from memory_core import memory_inbox_impl
+
+    _handoff_to(f"{_PREFIX}@s1", "work for s1")
+    _handoff_to(f"{_PREFIX}@s2", "work for s2")
+
+    out = memory_inbox_impl(f"{_PREFIX}@s1", unread_only=True)
+    assert "work for s1" in out
+    assert "work for s2" not in out, (
+        "instances are seeing each other's handoffs -- DIRECT read leaked"
+    )
+
+
+def test_handoff_inbox_bare_type_fans_out(clean_handoffs):
+    """A legacy caller must keep seeing everything it used to."""
+    from memory_core import memory_inbox_impl
+
+    _handoff_to(f"{_PREFIX}@s1", "work for s1")
+    _handoff_to(f"{_PREFIX}@s2", "work for s2")
+    _handoff_to(_PREFIX, "broadcast work")
+
+    out = memory_inbox_impl(_PREFIX, unread_only=True)
+    for expected in ("work for s1", "work for s2", "broadcast work"):
+        assert expected in out, (
+            f"fan-out missed {expected!r} -- a bare type must match the "
+            f"type's own inbox AND every instance. Got: {out!r}"
+        )
+
+
+def test_handoff_inbox_wildcards_in_an_agent_id_stay_literal(clean_handoffs):
+    """`%` must not become a wildcard that matches other sisters' inboxes."""
+    from memory_core import memory_inbox_impl
+
+    _handoff_to(f"{_PREFIX}@s1", "work for s1")
+
+    out = memory_inbox_impl(f"{_PREFIX}@%", unread_only=True)
+    assert "work for s1" not in out, (
+        "a literal % matched another inbox -- the prefix match is not escaping"
+    )

@@ -1487,12 +1487,20 @@ def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
 def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20,
                       as_records: bool = False) -> str:
     """Retrieves handoff messages for an agent, optionally filtered to unread."""
-    from memory.orchestration import require_agent_id
+    from memory.orchestration import _addressing_predicate, require_agent_id
     require_agent_id(agent_id, "memory_inbox")
     from memory.backends import dialect as _dialect
     _p = _dialect().param()
-    # Build WHERE clause dynamically
-    where_clause = f"WHERE agent_id = {_p} AND type = 'handoff' AND is_deleted = 0"
+    # Handoffs obey the SAME addressing rule as notifications: a bare type is a
+    # FAN-OUT read (the type and every instance of it), a qualified id is a
+    # DIRECT read. This used to be a bare `agent_id = ?`, so a sister addressed
+    # by its qualified id saw NONE of its type's handoffs -- measured on this
+    # box: bare `claude-code` returned 15, `claude-code@4a87f9` returned 0.
+    # Importing the single owner rather than re-deriving the predicate: a copied
+    # predicate is the defect independent of correctness (§10a), and this is the
+    # copy that drifted out of #170's fix.
+    _pred, _addr = _addressing_predicate(agent_id, _p)
+    where_clause = f"WHERE {_pred} AND type = 'handoff' AND is_deleted = 0"
     if unread_only:
         where_clause += " AND read_at IS NULL"
 
@@ -1501,7 +1509,7 @@ def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20,
         rows = db.execute(
             f"SELECT id, title, content, metadata_json, created_at, read_at FROM memory_items "
             f"{where_clause} ORDER BY created_at DESC LIMIT {_p}",
-            (agent_id, limit)
+            (*_addr, limit)
         ).fetchall()
 
     # Format result
