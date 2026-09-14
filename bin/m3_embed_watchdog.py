@@ -55,6 +55,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -158,9 +159,24 @@ def shared_mode() -> "tuple[bool, str]":
 def server_healthy(url: str) -> bool:
     """True when the server answers /health. This is the server's own
     contract, so the check is identical for the Rust binary and the Python
-    embed_server_inproc.py — neither is imported, only asked."""
+    embed_server_inproc.py — neither is imported, only asked.
+
+    The scheme is checked before the request. `url` comes from the config's
+    `fallback_url`, so a typo or a hand-edited config could hand urlopen a
+    `file:` or custom scheme, which would read a local path instead of probing
+    a server — and a successful read would report the embedder HEALTHY when
+    nothing is listening. Restricting to http/https makes that a loud False
+    rather than a wrong True.
+    """
+    if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+        log(f"refusing health probe: {url!r} is not an http(s) URL")
+        return False
     try:
-        with urllib.request.urlopen(f"{url}/health", timeout=_HEALTH_TIMEOUT_S) as r:
+        # nosec B310 - the scheme is restricted to http/https immediately above,
+        # which is exactly what B310 asks be audited. Load-bearing: removing the
+        # guard must re-trip this finding, so do not move the nosec off it.
+        with urllib.request.urlopen(url + "/health",  # nosec B310
+                                    timeout=_HEALTH_TIMEOUT_S) as r:
             return 200 <= r.status < 300
     except (urllib.error.URLError, OSError, ValueError):
         return False

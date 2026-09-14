@@ -297,3 +297,42 @@ def test_subprocess_failure_to_spawn_is_non_fatal(cfg_root, monkeypatch):
     monkeypatch.setattr(m.subprocess, "run", _boom)
     m.main()
     assert m.main() in (0, 1)  # did not raise
+
+
+# ── health-probe scheme guard (bandit B310) ──────────────────────────────────
+def test_health_probe_refuses_non_http_schemes(capsys):
+    """`url` comes from the config's fallback_url. A typo or hand-edited config
+    could hand urlopen a file:/custom scheme, which reads a local path instead
+    of probing a server -- and a SUCCESSFUL READ would report the embedder
+    healthy while nothing is listening. That is the section 3 failure this
+    watchdog exists to prevent, so the scheme is checked before the request."""
+    import m3_embed_watchdog as w
+    for bad in ("file:///etc/passwd", "ftp://host/x", "custom://x", "/tmp/x"):
+        assert w.server_healthy(bad) is False, f"{bad} must not be probed"
+
+
+def test_health_probe_refusal_is_logged(capsys):
+    """Loud, not silent: an operator with a malformed fallback_url needs to see
+    why their embedder reads as down."""
+    import m3_embed_watchdog as w
+    w.server_healthy("file:///etc/passwd")
+    out = capsys.readouterr()
+    assert "refusing health probe" in (out.out + out.err)
+
+
+def test_health_probe_still_accepts_http_and_https(monkeypatch):
+    """The guard must not break the real path."""
+    import m3_embed_watchdog as w
+
+    class _R:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    seen = {}
+    def _fake(url, timeout=None):
+        seen["url"] = url
+        return _R()
+    monkeypatch.setattr(w.urllib.request, "urlopen", _fake)
+    assert w.server_healthy("http://127.0.0.1:8082") is True
+    assert seen["url"] == "http://127.0.0.1:8082/health"
+    assert w.server_healthy("https://example.invalid") is True
