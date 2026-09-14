@@ -105,7 +105,11 @@ def agent_register_impl(agent_id: str, role: str = "", capabilities: list | None
     return f"Registered: {agent_id} (role={role}, status=active)" + _refresh_hint(agent_id)
 
 def agent_heartbeat_impl(agent_id: str) -> str:
-    """Updates agent's last_seen timestamp and status to active."""
+    """Updates agent's last_seen timestamp and status to active.
+    
+    Note: calling this explicitly is now optional. `notifications_poll` performs 
+    an implicit heartbeat automatically when an agent checks its mail.
+    """
     now = datetime.now(timezone.utc).isoformat()
 
     with _db() as db:
@@ -533,7 +537,16 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
     if unread_only:
         where_clause += " AND read_at IS NULL"
 
+    now_iso = datetime.now(timezone.utc).isoformat()
+
     with _db() as db:
+        # Implicit heartbeat: polling proves the agent is alive. We do this silently
+        # so unregistered agents can still poll without erroring.
+        db.execute(
+            f"UPDATE agents SET last_seen = {p}, status = 'active' WHERE agent_id = {p}",
+            (now_iso, agent_id)
+        )
+
         rows = db.execute(
             f"SELECT id, kind, payload_json, created_at, read_at, received_at "
             f"FROM notifications {where_clause} ORDER BY created_at DESC LIMIT {p}",
