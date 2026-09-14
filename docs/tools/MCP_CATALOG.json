@@ -263,6 +263,11 @@
           "type": "integer"
         },
         {
+          "name": "as_records",
+          "required": false,
+          "type": "boolean"
+        },
+        {
           "name": "timeout",
           "required": false,
           "type": "number"
@@ -389,6 +394,11 @@
           "name": "role",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "as_records",
+          "required": false,
+          "type": "boolean"
         },
         {
           "name": "timeout",
@@ -1942,6 +1952,11 @@
     {
       "args": [
         {
+          "name": "as_records",
+          "required": false,
+          "type": "boolean"
+        },
+        {
           "name": "timeout",
           "required": false,
           "type": "number"
@@ -2169,6 +2184,11 @@
           "type": "integer"
         },
         {
+          "name": "as_records",
+          "required": false,
+          "type": "boolean"
+        },
+        {
           "name": "timeout",
           "required": false,
           "type": "number"
@@ -2240,6 +2260,11 @@
           "type": "integer"
         },
         {
+          "name": "as_records",
+          "required": false,
+          "type": "boolean"
+        },
+        {
           "name": "timeout",
           "required": false,
           "type": "number"
@@ -2284,6 +2309,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "as_records",
+          "required": false,
+          "type": "boolean"
         },
         {
           "name": "timeout",
@@ -2448,6 +2478,11 @@
         },
         {
           "name": "include_future",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "name": "as_records",
           "required": false,
           "type": "boolean"
         },
@@ -3586,6 +3621,11 @@
           "type": "integer"
         },
         {
+          "name": "as_records",
+          "required": false,
+          "type": "boolean"
+        },
+        {
           "name": "timeout",
           "required": false,
           "type": "number"
@@ -3630,6 +3670,11 @@
           "name": "max_depth",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "as_records",
+          "required": false,
+          "type": "boolean"
         },
         {
           "name": "timeout",

@@ -4,7 +4,7 @@ import logging
 import sqlite3
 from collections.abc import Collection
 
-from . import config
+from . import config, records
 from .backends import dialect
 from .config import EMBED_DIM, ENTITY_SEED_STOPLIST
 from .db import _db
@@ -427,7 +427,7 @@ async def _score_extra_rows(query: str, rows_by_id: dict, base_score: float = 0.
     return out
 
 
-def memory_graph_impl(memory_id: str, depth: int = 1) -> str:
+def memory_graph_impl(memory_id: str, depth: int = 1, as_records: bool = False) -> str:
     """Returns the local graph neighborhood of a memory item up to N hops."""
     depth = min(max(int(depth), 1), 3)  # Clamp to 1-3
     with _db() as db:
@@ -436,7 +436,10 @@ def memory_graph_impl(memory_id: str, depth: int = 1) -> str:
         # Verify item exists
         root = db.execute(f"SELECT id, title, type FROM memory_items WHERE id = {p}", (memory_id,)).fetchone()
         if not root:
-            return f"Error: memory {memory_id} not found"
+            return records.emit(
+                f"Error: memory {memory_id} not found",
+                records.error_payload("not_found", memory_id=memory_id),
+                as_records)
 
         # Recursive CTE to traverse relationships up to `depth` hops
         rows = db.execute(f"""
@@ -458,7 +461,9 @@ def memory_graph_impl(memory_id: str, depth: int = 1) -> str:
         # Also get the edges
         node_ids = [r["id"] for r in rows]
         if not node_ids:
-            return f"No graph neighborhood for {memory_id}"
+            return records.emit(f"No graph neighborhood for {memory_id}",
+                                records.as_records_payload((), edges=[], root_id=memory_id),
+                                as_records)
         placeholders = _d.placeholder(len(node_ids))
         edges = db.execute(
             f"SELECT from_id, to_id, relationship_type FROM memory_relationships "
@@ -480,7 +485,14 @@ def memory_graph_impl(memory_id: str, depth: int = 1) -> str:
         for e in relevant_edges:
             lines.append(f"  {e['from_id'][:8]} --[{e['relationship_type']}]--> {e['to_id'][:8]}")
 
-    return "\n".join(lines)
+    # Nodes are the items; edges ride the envelope as a sibling key. Flattening
+    # both into one list would lose which is which -- the envelope exists so a
+    # second row set does not need a second tool.
+    return records.emit("\n".join(lines),
+                        records.as_records_payload(
+                            rows, edges=records.to_records(relevant_edges),
+                            root_id=memory_id, depth=depth),
+                        as_records)
 
 
 def _neighbor_session_ids(seed_ids: list, window: int, cap_per_session: int = 12) -> dict:

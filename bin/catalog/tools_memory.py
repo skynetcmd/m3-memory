@@ -614,6 +614,7 @@ TOOLS: list[ToolSpec] = [
             "properties": {
                 "memory_id": {"type": "string", "description": "Memory item UUID."},
                 "limit":     {"type": "integer", "description": "Max history records.", "default": 20},
+                "as_records": {"type": "boolean", "description": "Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged.", "default": False},
             },
             "required": ["memory_id"],
         },
@@ -689,6 +690,7 @@ TOOLS: list[ToolSpec] = [
             "properties": {
                 "memory_id": {"type": "string", "description": "Memory item UUID."},
                 "depth":     {"type": "integer", "description": "Traversal depth (1-3).", "default": 1},
+                "as_records": {"type": "boolean", "description": "Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged.", "default": False},
             },
             "required": ["memory_id"],
         },
@@ -818,7 +820,9 @@ TOOLS: list[ToolSpec] = [
         description="Returns current session operation counts and estimated token usage for memory operations.",
         parameters={
             "type": "object",
-            "properties": {},
+            "properties": {
+                "as_records": {"type": "boolean", "description": "Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged.", "default": False},
+            },
             "required": [],
         },
         impl=memory_core.memory_cost_report_impl,
@@ -870,6 +874,7 @@ TOOLS: list[ToolSpec] = [
                 "agent_id":     {"type": "string", "description": "Receiving agent id."},
                 "unread_only":  {"type": "boolean", "description": "Show only unread messages.", "default": True},
                 "limit":        {"type": "integer", "description": "Max messages to return.", "default": 20},
+                "as_records": {"type": "boolean", "description": "Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged.", "default": False},
             },
             "required": ["agent_id"],
         },
@@ -909,6 +914,7 @@ TOOLS: list[ToolSpec] = [
                 "agent_id":       {"type": "string", "description": "Restrict to memories owned by this agent.", "default": ""},
                 "limit":          {"type": "integer", "description": "Max rows to return (1-500).", "default": 50},
                 "include_future": {"type": "boolean", "description": "Include memories whose refresh_on is still in the future.", "default": False},
+                "as_records": {"type": "boolean", "description": "Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged.", "default": False},
             },
             "required": [],
         },

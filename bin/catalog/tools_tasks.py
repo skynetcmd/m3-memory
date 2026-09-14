@@ -132,6 +132,7 @@ TOOLS: list[ToolSpec] = [
                 "state":         {"type": "string", "description": "Filter by task state.", "default": ""},
                 "parent_task_id": {"type": "string", "description": "Filter by parent task id.", "default": ""},
                 "limit":         {"type": "integer", "description": "Max tasks to return.", "default": 50},
+                "as_records": {"type": "boolean", "description": "Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged.", "default": False},
             },
             "required": [],
         },
@@ -149,6 +150,7 @@ TOOLS: list[ToolSpec] = [
             "properties": {
                 "root_task_id": {"type": "string", "description": "Root task UUID."},
                 "max_depth":    {"type": "integer", "description": "Max recursion depth.", "default": 3},
+                "as_records": {"type": "boolean", "description": "Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged.", "default": False},
             },
             "required": ["root_task_id"],
         },

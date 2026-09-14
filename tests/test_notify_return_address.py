@@ -12,10 +12,8 @@ Identity in m3 is self-asserted by design (see bin/mcp_proxy.py's docstring).
 from __future__ import annotations
 
 import json
-import sys
 import pathlib
-
-import pytest
+import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "bin"))
 

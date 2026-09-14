@@ -701,6 +701,7 @@ Returns the local graph neighborhood of a memory item (connected memories up to 
 | --- | --- | --- | --- | --- |
 | `memory_id` | `string` | Yes | Memory item UUID. | `-` |
 | `depth` | `integer` | No | Traversal depth (1-3). | `1` |
+| `as_records` | `boolean` | No | Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -716,6 +717,7 @@ Returns the change history (audit trail) for a memory item. Tracks create, updat
 | --- | --- | --- | --- | --- |
 | `memory_id` | `string` | Yes | Memory item UUID. | `-` |
 | `limit` | `integer` | No | Max history records. | `20` |
+| `as_records` | `boolean` | No | Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -887,6 +889,7 @@ List tasks with optional filters. Newest updated first.
 | `state` | `string` | No | Filter by task state. | `` |
 | `parent_task_id` | `string` | No | Filter by parent task id. | `` |
 | `limit` | `integer` | No | Max tasks to return. | `50` |
+| `as_records` | `boolean` | No | Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -917,6 +920,7 @@ Render a recursive subtree of tasks rooted at root_task_id.
 | --- | --- | --- | --- | --- |
 | `root_task_id` | `string` | Yes | Root task UUID. | `-` |
 | `max_depth` | `integer` | No | Max recursion depth. | `3` |
+| `as_records` | `boolean` | No | Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -982,6 +986,7 @@ List registered agents, optionally filtered by status and/or role.
 | --- | --- | --- | --- | --- |
 | `status` | `string` | No | Filter by agent status. | `` |
 | `role` | `string` | No | Filter by agent role. | `` |
+| `as_records` | `boolean` | No | Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -1086,6 +1091,7 @@ List notifications addressed to agent_id, newest first.
 | `agent_id` | `string` | Yes | Recipient agent id. | `-` |
 | `unread_only` | `boolean` | No | Show only unread notifications. | `True` |
 | `limit` | `integer` | No | Max notifications to return. | `20` |
+| `as_records` | `boolean` | No | Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -1144,6 +1150,7 @@ List handoff messages addressed to agent_id, newest first. Pass unread_only=Fals
 | `agent_id` | `string` | Yes | Receiving agent id. | `-` |
 | `unread_only` | `boolean` | No | Show only unread messages. | `True` |
 | `limit` | `integer` | No | Max messages to return. | `20` |
+| `as_records` | `boolean` | No | Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -1174,6 +1181,7 @@ List memories whose refresh_on timestamp has arrived and need review. Read-only 
 | `agent_id` | `string` | No | Restrict to memories owned by this agent. | `` |
 | `limit` | `integer` | No | Max rows to return (1-500). | `50` |
 | `include_future` | `boolean` | No | Include memories whose refresh_on is still in the future. | `False` |
+| `as_records` | `boolean` | No | Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
@@ -2215,6 +2223,7 @@ Returns current session operation counts and estimated token usage for memory op
 
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
+| `as_records` | `boolean` | No | Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 

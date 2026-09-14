@@ -27,6 +27,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from . import records
 from .backends import dialect
 from .db import _db, _record_history
 
@@ -110,7 +111,7 @@ def agent_heartbeat_impl(agent_id: str) -> str:
 
     return f"Heartbeat: {agent_id} (last_seen={now})"
 
-def agent_list_impl(status: str = "", role: str = "") -> str:
+def agent_list_impl(status: str = "", role: str = "", as_records: bool = False) -> str:
     """Lists agents, optionally filtered by status and/or role."""
     where_clauses = []
     params = []
@@ -132,13 +133,17 @@ def agent_list_impl(status: str = "", role: str = "") -> str:
         ).fetchall()
 
     if not rows:
-        return "(no agents)"
+        # Note the empty case still honours as_records: a caller that opted into
+        # structured output must not get a display string back just because the
+        # result set was empty -- that is the branch a parser forgets to handle.
+        return records.emit("(no agents)", records.as_records_payload(()), as_records)
 
     lines = [f"Agents ({len(rows)}):"]
     for row in rows:
         lines.append(f"  [{row['agent_id']}] role={row['role']} status={row['status']} last_seen={row['last_seen']}")
 
-    return "\n".join(lines)
+    return records.emit("\n".join(lines),
+                        records.as_records_payload(rows), as_records)
 
 def agent_get_impl(agent_id: str) -> str:
     """Retrieves detailed information about a single agent."""
@@ -387,7 +392,46 @@ def notifications_unread_ids_impl(agent_id: str) -> list[int]:
         ).fetchall()
     return [row[0] for row in rows]
 
-def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
+def _decode_payload_json(rows) -> list[dict]:
+    """Rows with `payload_json` re-parsed into a real nested object.
+
+    The column stores JSON as TEXT. Emitting it verbatim inside a records
+    envelope would hand the caller a JSON string INSIDE JSON, forcing a second
+    json.loads on one field -- the same double-encode that makes memory_get
+    awkward to consume. A records caller asked for structure; give them
+    structure. Undecodable text is left as-is rather than dropped, so a
+    malformed row stays visible instead of silently vanishing.
+    """
+    out = []
+    for rec in records.to_records(rows):
+        raw = rec.get("payload_json")
+        if isinstance(raw, str) and raw:
+            try:
+                decoded = json.loads(raw)
+                # DOUBLE-ENCODED ROWS ARE REAL, NOT HYPOTHETICAL. Measured
+                # 2026-09-14: every notification in the live store decodes to a
+                # STRING on the first loads and to the dict on the second --
+                # some writers pass an already-serialized payload to a column
+                # that serializes again. Unwrapping here fixes the READ side for
+                # rows that already exist; it cannot be fixed at the writer
+                # alone, because the bad rows are durable. Bounded to one extra
+                # unwrap so a genuine string payload (or a pathological chain)
+                # cannot loop.
+                if isinstance(decoded, str):
+                    try:
+                        decoded = json.loads(decoded)
+                    except (ValueError, TypeError):
+                        pass  # a real string payload, not a double-encode
+                rec["payload"] = decoded
+                rec.pop("payload_json", None)
+            except (ValueError, TypeError):
+                pass  # keep payload_json verbatim; a bad row must stay visible
+        out.append(rec)
+    return out
+
+
+def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int = 20,
+                            as_records: bool = False) -> str:
     """Retrieves notifications for an agent.
 
     An empty `agent_id` is REFUSED, not queried. It reaches here when the
@@ -422,14 +466,21 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
         ).fetchall()
 
     if not rows:
-        return f"Notifications for {agent_id}: (empty)"
+        return records.emit(f"Notifications for {agent_id}: (empty)",
+                            records.as_records_payload((), agent_id=agent_id,
+                                                       unread_only=unread_only),
+                            as_records)
 
     read_type = "unread" if unread_only else "total"
     lines = [f"Notifications for {agent_id} ({len(rows)} {read_type}):"]
     for row in rows:
         lines.append(f"  [{row['id']}] kind={row['kind']} payload={row['payload_json']} created={row['created_at']}")
 
-    return "\n".join(lines)
+    return records.emit("\n".join(lines),
+                        records.as_records_payload(
+                            _decode_payload_json(rows), agent_id=agent_id,
+                            unread_only=unread_only),
+                        as_records)
 
 def notifications_mark_received_impl(agent_id: str) -> str:
     """Stamps transport receipt on an agent's undelivered notifications.
@@ -732,7 +783,7 @@ def task_delete_impl(task_id: str, hard: bool = False, actor: str = "") -> str:
     _record_history(task_id, "task_deleted", row["state"], "soft_deleted", "deleted_at", actor or "system")
     return f"Task {task_id} soft-deleted (tombstone will sync on next pg_sync run)"
 
-def task_list_impl(owner_agent: str = "", state: str = "", parent_task_id: str = "", limit: int = 20, include_deleted: bool = False) -> str:
+def task_list_impl(owner_agent: str = "", state: str = "", parent_task_id: str = "", limit: int = 20, include_deleted: bool = False, as_records: bool = False) -> str:
     """Lists tasks, optionally filtered by owner, state, and/or parent."""
     where_clauses = []
     params = []
@@ -759,15 +810,18 @@ def task_list_impl(owner_agent: str = "", state: str = "", parent_task_id: str =
         ).fetchall()
 
     if not rows:
-        return "Tasks: (empty)"
+        return records.emit("Tasks: (empty)", records.as_records_payload(()), as_records)
 
     lines = [f"Tasks ({len(rows)}):"]
     for row in rows:
         lines.append(f"  [{row['id'][:8]}] {row['title']} state={row['state']} owner={row['owner_agent']}")
 
-    return "\n".join(lines)
+    # Records carry the FULL id; the display line truncates to 8 chars for
+    # width. A caller that parsed the display string got a prefix it then had
+    # to disambiguate -- the fallback this param exists to remove.
+    return records.emit("\n".join(lines), records.as_records_payload(rows), as_records)
 
-def task_tree_impl(root_task_id: str, max_depth: int = 10) -> str:
+def task_tree_impl(root_task_id: str, max_depth: int = 10, as_records: bool = False) -> str:
     """Displays a task and its subtasks in a tree structure. Tombstoned tasks are hidden."""
     max_depth = max(1, min(max_depth, 20))
 
@@ -779,7 +833,10 @@ def task_tree_impl(root_task_id: str, max_depth: int = 10) -> str:
         ).fetchone()
 
         if not row:
-            return f"Error: task '{root_task_id}' not found"
+            return records.emit(
+                f"Error: task '{root_task_id}' not found",
+                records.error_payload("not_found", task_id=root_task_id),
+                as_records)
 
         rows = db.execute(
             f"""WITH RECURSIVE subtree(id, title, state, owner_agent, parent_task_id, depth) AS (
@@ -795,7 +852,10 @@ def task_tree_impl(root_task_id: str, max_depth: int = 10) -> str:
         ).fetchall()
 
     if not rows:
-        return f"Error: task '{root_task_id}' not found"
+        return records.emit(
+            f"Error: task '{root_task_id}' not found",
+            records.error_payload("not_found", task_id=root_task_id),
+            as_records)
 
     lines = [f"Task tree from {root_task_id[:8]} (max_depth={max_depth}):"]
     for row in rows:

@@ -56,6 +56,7 @@ TOOLS: list[ToolSpec] = [
             "properties": {
                 "status": {"type": "string", "description": "Filter by agent status.", "default": ""},
                 "role":   {"type": "string", "description": "Filter by agent role.", "default": ""},
+                "as_records": {"type": "boolean", "description": "Return structured records (JSON) instead of the display string. Default false keeps the human-readable output unchanged.", "default": False},
             },
             "required": [],
         },

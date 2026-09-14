@@ -511,8 +511,11 @@ def _record_history(
         logger.debug(f"History recording failed: {e}")
 
 
-def memory_history_impl(memory_id: str, limit: int = 20) -> str:
+def memory_history_impl(memory_id: str, limit: int = 20, as_records: bool = False) -> str:
     """Returns the change history for a memory item."""
+    # Local import: memory.records is leaf-level, but db.py sits low in the
+    # import graph and a module-scope import here risks a cycle for no gain.
+    from memory import records
     from memory.backends import dialect
 
     _p = dialect().param()
@@ -523,7 +526,9 @@ def memory_history_impl(memory_id: str, limit: int = 20) -> str:
             (memory_id, limit),
         ).fetchall()
     if not rows:
-        return f"No history found for {memory_id}"
+        return records.emit(f"No history found for {memory_id}",
+                            records.as_records_payload((), memory_id=memory_id),
+                            as_records)
     lines = [f"History for {memory_id} ({len(rows)} events):"]
     for r in rows:
         prev = (r["prev_value"] or "")[:80]
@@ -532,7 +537,12 @@ def memory_history_impl(memory_id: str, limit: int = 20) -> str:
             f"  [{r['created_at']}] {r['event']} ({r['field']}) by {r['actor_id'] or 'unknown'}: "
             f"{prev!r} -> {new!r}"
         )
-    return "\n".join(lines)
+    # Records carry prev_value/new_value IN FULL. The display truncates both to
+    # 80 chars for width, so a caller diffing an audit trail from the string got
+    # silently clipped values -- the exact fallback this param removes.
+    return records.emit("\n".join(lines),
+                        records.as_records_payload(rows, memory_id=memory_id),
+                        as_records)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

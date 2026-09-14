@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: ba6ec94894d1
-mtime_utc: 2026-09-13T18:27:53.507634+00:00
-generated_utc: 2026-09-13T18:28:46.507273+00:00
+sha1: 3171c8c2f5ba
+mtime_utc: 2026-09-14T03:17:33.418799+00:00
+generated_utc: 2026-09-14T03:18:58.008153+00:00
 private: false
 ---
 
@@ -103,6 +103,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 - `catalog.spec (VALID_MEMORY_TYPES)`
 - `importlib`
+- `memory (records)`
 - `memory.backends (dialect)`
 - `memory.config (FACT_ENRICH_CONCURRENCY)`
 - `memory.db (ensure_pinned_column)`

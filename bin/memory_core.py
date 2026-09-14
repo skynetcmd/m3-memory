@@ -809,12 +809,19 @@ def memory_verify_impl(memory_id: str) -> str:
             return f"Integrity OK: {memory_id} (hash: {computed_hash[:16]}...)"
         return f"INTEGRITY VIOLATION: {memory_id} — stored hash {stored_hash[:16]}... != computed {computed_hash[:16]}..."
 
-def memory_cost_report_impl() -> str:
+def memory_cost_report_impl(as_records: bool = False) -> str:
     """Returns current session cost/usage counters."""
+    from memory import records as _records
     lines = ["Memory Operation Costs (this session):"]
     for key, val in sorted(_COST_COUNTERS.items()):
         lines.append(f"  {key}: {val}")
-    return "\n".join(lines)
+    # A SUMMARY, not rows: counters keyed by name, so scalar_payload rather than
+    # the {count, items} envelope. It still takes as_records so the param means
+    # the same thing on every tool -- a flag present on 11 of 12 siblings is a
+    # surface an agent cannot reason about without special-casing.
+    return _records.emit("\n".join(lines),
+                         _records.scalar_payload(**dict(sorted(_COST_COUNTERS.items()))),
+                         as_records)
 
 async def memory_update_impl(id, content="", title="", metadata="", importance=-1.0, reembed=False, refresh_on="", refresh_reason="", conversation_id="", type=""):
     if isinstance(metadata, dict):
@@ -1468,7 +1475,8 @@ def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
     # 6. Return status
     return f"Handoff created: {new_id} ({from_agent} -> {to_agent}, {len(context_ids)} context links)"
 
-def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
+def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20,
+                      as_records: bool = False) -> str:
     """Retrieves handoff messages for an agent, optionally filtered to unread."""
     from memory.orchestration import require_agent_id
     require_agent_id(agent_id, "memory_inbox")
@@ -1488,8 +1496,12 @@ def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20) 
         ).fetchall()
 
     # Format result
+    from memory import records as _records
     if not rows:
-        return f"Inbox for {agent_id}: (empty)"
+        return _records.emit(f"Inbox for {agent_id}: (empty)",
+                             _records.as_records_payload((), agent_id=agent_id,
+                                                         unread_only=unread_only),
+                             as_records)
 
     lines = [f"Inbox for {agent_id} ({len(rows)} {'unread' if unread_only else 'total'}):"]
     for row in rows:
@@ -1572,7 +1584,8 @@ def _refresh_hint(agent_id: str = "") -> str:
     scope = "of yours" if agent_id else "in the store"
     return f" | {n} {noun} {scope} due for refresh (see memory_refresh_queue)"
 
-def memory_refresh_queue_impl(agent_id: str = "", limit: int = 50, include_future: bool = False) -> str:
+def memory_refresh_queue_impl(agent_id: str = "", limit: int = 50, include_future: bool = False,
+                              as_records: bool = False) -> str:
     """Lists memories whose refresh_on timestamp has arrived (or all with refresh_on set
     if include_future=True). Read-only — actual refresh goes through memory_update.
 
@@ -1608,7 +1621,11 @@ def memory_refresh_queue_impl(agent_id: str = "", limit: int = 50, include_futur
     if not rows:
         scope_label = f" for {agent_id}" if agent_id else ""
         when = "with refresh_on set" if include_future else "due for refresh"
-        return f"Refresh queue{scope_label}: (empty — no memories {when})"
+        from memory import records as _records
+        return _records.emit(f"Refresh queue{scope_label}: (empty — no memories {when})",
+                             _records.as_records_payload((), agent_id=agent_id or None,
+                                                         include_future=include_future),
+                             as_records)
 
     scope_label = f" for {agent_id}" if agent_id else ""
     lines = [f"Refresh queue{scope_label} ({len(rows)} item{'s' if len(rows) != 1 else ''}):"]
@@ -1619,7 +1636,12 @@ def memory_refresh_queue_impl(agent_id: str = "", limit: int = 50, include_futur
             f"  [{row['id'][:8]}] {row['type']:<12} due={row['refresh_on']} "
             f"reason={reason} title={title}"
         )
-    return "\n".join(lines)
+    # Full id and untruncated title in records; the display clips both.
+    from memory import records as _records
+    return _records.emit("\n".join(lines),
+                         _records.as_records_payload(rows, agent_id=agent_id or None,
+                                                     include_future=include_future),
+                         as_records)
 
 async def conversation_start_impl(title, agent_id="", model_id="", tags=""):
     cid = str(uuid.uuid4())
