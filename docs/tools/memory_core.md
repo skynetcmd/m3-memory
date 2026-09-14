@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 23f93aabb6e2
-mtime_utc: 2026-09-14T03:45:41.706568+00:00
-generated_utc: 2026-09-14T03:47:47.331953+00:00
+sha1: 9a631ff59af4
+mtime_utc: 2026-09-14T06:02:18.925878+00:00
+generated_utc: 2026-09-14T11:24:26.504286+00:00
 private: false
 ---
 
@@ -108,7 +108,8 @@ _(no subprocess / http / sqlite calls detected)_
 - `memory.config (FACT_ENRICH_CONCURRENCY)`
 - `memory.db (ensure_pinned_column)`
 - `memory.orchestration (TASK_STATE_TRANSITIONS, TERMINAL_TASK_STATES, VALID_AGENT_STATUSES, VALID_TASK_STATES, _agent_exists, _validate_task_transition, agent_get_impl, agent_heartbeat_impl, agent_list_impl, agent_offline_impl, agent_register_impl, agent_set_trust_impl, notifications_ack_all_impl, notifications_ack_impl, notifications_mark_received_impl, notifications_poll_impl, notify_impl, task_assign_impl, task_create_impl, task_delete_impl, task_get_impl, task_list_impl, task_set_result_impl, task_tree_impl, task_update_impl)`
-- `memory.orchestration (require_agent_id)`
+- `memory.orchestration (_addressing_predicate)`
+- `memory.orchestration (_addressing_predicate, require_agent_id)`
 - `memory.util (_POISON_PATTERNS, _check_content_safety)`
 
 ---

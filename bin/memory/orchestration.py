@@ -529,7 +529,8 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
     share a rendering.
     """
     require_agent_id(agent_id, "notifications_poll")
-    p = dialect().param()
+    _d = dialect()
+    p = _d.param()
     _pred, _addr = _addressing_predicate(agent_id, p)
     where_clause = f"WHERE {_pred}"
     params = list(_addr)
@@ -537,15 +538,30 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
     if unread_only:
         where_clause += " AND read_at IS NULL"
 
-    now_iso = datetime.now(timezone.utc).isoformat()
-
     with _db() as db:
-        # Implicit heartbeat: polling proves the agent is alive. We do this silently
-        # so unregistered agents can still poll without erroring.
-        db.execute(
-            f"UPDATE agents SET last_seen = {p}, status = 'active' WHERE agent_id = {p}",
-            (now_iso, agent_id)
+        # Implicit heartbeat: polling proves the POLLER is alive, so an agent
+        # that checks its mail needs no separate heartbeat loop.
+        #
+        # Scoped to `agent_id = ?` even when the READ is a bare-type fan-out.
+        # Heartbeating the addressing predicate was the tempting shortcut and it
+        # is wrong in the dangerous direction: an orchestrator draining the bare
+        # `claude-code` queue would stamp every registered sister alive,
+        # including ones that died hours ago. A liveness signal that cannot say
+        # "dead" is not a liveness signal, and the sweeper downstream would trust
+        # it. Reading a sister's mail is not evidence about the sister.
+        #
+        # The timestamp comes from the DATABASE clock, not the caller's. Same
+        # argument as claim_message (see e738e366): pg_sync spans two hosts, and
+        # once last_seen feeds a liveness decision, two agents comparing their
+        # own clocks reach different verdicts about the same agent. It also
+        # keeps ONE format in the column -- a Python isoformat() writes
+        # microseconds and a +00:00 offset where the DB writes ...Z.
+        _hb = db.execute(
+            f"UPDATE agents SET last_seen = {_d.now()}, status = 'active' "
+            f"WHERE agent_id = {p}",
+            (agent_id,)
         )
+        heartbeat_seen = bool(_hb.rowcount)
 
         rows = db.execute(
             f"SELECT id, kind, payload_json, created_at, read_at, received_at "
@@ -553,10 +569,24 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
             params + [limit]
         ).fetchall()
 
+    # An UNREGISTERED poller gets its mail but leaves no liveness trace: the
+    # heartbeat UPDATE matched no row, so nothing recorded that this agent is
+    # running. Not an error -- polling before registering is legitimate and the
+    # mail is genuinely returned -- but it must not be SILENT. An agent that
+    # believes it is heartbeating while invisible to every liveness check is a
+    # §3 false negative on the one signal a reclaim decision depends on.
+    _unreg = "" if heartbeat_seen else (
+        f"\n  NOTE: {agent_id} is not registered, so this poll recorded no "
+        f"heartbeat and the agent is invisible to liveness checks. "
+        f"Call agent_register to fix."
+    )
+
     if not rows:
-        return records.emit(f"Notifications for {agent_id}: (empty)",
-                            records.as_records_payload((), agent_id=agent_id,
-                                                       unread_only=unread_only),
+        return records.emit(f"Notifications for {agent_id}: (empty){_unreg}",
+                            records.as_records_payload(
+                                (), agent_id=agent_id,
+                                unread_only=unread_only,
+                                heartbeat_recorded=heartbeat_seen),
                             as_records)
 
     read_type = "unread" if unread_only else "total"
@@ -573,10 +603,11 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
         _recv = f" received={row['received_at']}" if row["received_at"] else ""
         lines.append(f"  [{row['id']}] kind={row['kind']} payload={row['payload_json']} created={row['created_at']}{_recv}")
 
-    return records.emit("\n".join(lines),
+    return records.emit("\n".join(lines) + _unreg,
                         records.as_records_payload(
                             _decode_payload_json(rows), agent_id=agent_id,
-                            unread_only=unread_only),
+                            unread_only=unread_only,
+                            heartbeat_recorded=heartbeat_seen),
                         as_records)
 
 def notifications_mark_received_impl(agent_id: str) -> str:
