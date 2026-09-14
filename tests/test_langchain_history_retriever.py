@@ -18,6 +18,7 @@ building:
 from __future__ import annotations
 
 import pytest
+import uuid
 
 pytest.importorskip("langchain_core", reason="needs the [langchain] extra")
 
@@ -54,7 +55,7 @@ def _flush():
 
 
 def test_history_roundtrip_order_and_roles():
-    h = M3ChatMessageHistory("conv-1", user_id="alex")
+    h = M3ChatMessageHistory(f"conv-1-{uuid.uuid4()}", user_id="alex")
     h.add_messages([HumanMessage(content="I love hiking"),
                     AIMessage(content="Where?"),
                     HumanMessage(content="The Alps")])
@@ -66,7 +67,7 @@ def test_history_roundtrip_order_and_roles():
 
 def test_history_multi_add_preserves_order():
     """turn_index continues across separate add_messages calls (monotonic)."""
-    h = M3ChatMessageHistory("conv-2", user_id="alex")
+    h = M3ChatMessageHistory(f"conv-2-{uuid.uuid4()}", user_id="alex")
     h.add_messages([HumanMessage(content="one"), AIMessage(content="two")])
     _flush()
     h.add_messages([HumanMessage(content="three"), AIMessage(content="four")])
@@ -75,7 +76,7 @@ def test_history_multi_add_preserves_order():
 
 
 def test_history_clear():
-    h = M3ChatMessageHistory("conv-3", user_id="alex")
+    h = M3ChatMessageHistory(f"conv-3-{uuid.uuid4()}", user_id="alex")
     h.add_messages([HumanMessage(content="ephemeral")])
     _flush()
     assert len(h.messages) == 1
@@ -90,16 +91,21 @@ def test_history_requires_conversation_id():
 
 
 def test_history_conversations_are_isolated():
-    a = M3ChatMessageHistory("conv-A", user_id="alex")
-    b = M3ChatMessageHistory("conv-B", user_id="alex")
-    a.add_messages([HumanMessage(content="alpha only")])
-    _flush()
-    assert [m.content for m in a.messages] == ["alpha only"]
-    assert b.messages == []
+    a = M3ChatMessageHistory(f"conv-A-{uuid.uuid4()}", user_id="alex")
+    b = M3ChatMessageHistory(f"conv-B-{uuid.uuid4()}", user_id="alex")
+    try:
+        a.add_messages([HumanMessage(content="alpha only")])
+        _flush()
+        assert [m.content for m in a.messages] == ["alpha only"]
+        assert b.messages == []
+    finally:
+        a.clear()
+        b.clear()
+        _flush()
 
 
 def test_system_message_roundtrips():
-    h = M3ChatMessageHistory("conv-sys", user_id="alex")
+    h = M3ChatMessageHistory(f"conv-sys-{uuid.uuid4()}", user_id="alex")
     h.add_messages([SystemMessage(content="you are helpful"),
                     HumanMessage(content="hi")])
     _flush()
