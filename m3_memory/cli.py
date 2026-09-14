@@ -1373,10 +1373,15 @@ def _add_tool_domain_subcommands(subparsers) -> None:
             required = set(spec.parameters.get("required", []))
 
             if complex_:
-                tp.add_argument(
+                mx = tp.add_mutually_exclusive_group()
+                mx.add_argument(
                     "--json", dest="_json_args", metavar="OBJ",
                     help="Tool arguments as a single JSON object "
                          "(this tool has a structured argument).",
+                )
+                mx.add_argument(
+                    "--json-file", dest="_json_file", metavar="PATH",
+                    help="Read tool arguments from a JSON file (or '-' for stdin).",
                 )
             else:
                 for pname, pdef in props.items():
@@ -1461,9 +1466,20 @@ def _cmd_tool_dispatch(args: argparse.Namespace) -> int:
     # Assemble the tool args.
     if getattr(args, "_tool_complex", False):
         raw = getattr(args, "_json_args", None)
-        if raw is None:
+        jfile = getattr(args, "_json_file", None)
+        if raw is None and jfile is None:
             tool_args = {}
         else:
+            if jfile is not None:
+                try:
+                    if jfile == "-":
+                        raw = sys.stdin.read()
+                    else:
+                        with open(jfile, "r", encoding="utf-8") as f:
+                            raw = f.read()
+                except Exception as e:
+                    print(f"Error: failed to read --json-file: {e}", file=sys.stderr)
+                    return 2
             try:
                 tool_args = _json.loads(raw)
             except (ValueError, _json.JSONDecodeError) as e:
