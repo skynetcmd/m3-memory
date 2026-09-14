@@ -13,7 +13,22 @@ import subprocess
 
 def _run(*args, **kwargs):
     kwargs.setdefault("timeout", 30)
-    return subprocess.run(*args, **kwargs)
+    try:
+        return subprocess.run(*args, **kwargs)
+    except subprocess.TimeoutExpired as e:
+        if kwargs.get("check"):
+            raise subprocess.CalledProcessError(124, e.cmd, output=e.stdout, stderr=e.stderr)
+        stderr_val = "timeout after 30s"
+        stdout_val = ""
+        if not kwargs.get("text") and not kwargs.get("universal_newlines"):
+            stderr_val = stderr_val.encode()
+            stdout_val = b""
+        return subprocess.CompletedProcess(
+            args=e.cmd,
+            returncode=124,
+            stdout=stdout_val,
+            stderr=stderr_val
+        )
 import sys
 import tempfile
 import time
