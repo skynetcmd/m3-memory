@@ -10,6 +10,10 @@ import os
 import pathlib
 import re
 import subprocess
+
+def _run(*args, **kwargs):
+    kwargs.setdefault("timeout", 30)
+    return subprocess.run(*args, **kwargs)
 import sys
 import tempfile
 import time
@@ -58,7 +62,7 @@ def install_unix_crontab(m3_memory_root):
     # Get current crontab
     current_cron = ""
     try:
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        result = _run(["crontab", "-l"], capture_output=True, text=True)
         if result.returncode == 0:
             current_cron = result.stdout
     except FileNotFoundError:
@@ -111,7 +115,7 @@ def install_unix_crontab(m3_memory_root):
         tmp_path = tmp.name
 
     try:
-        subprocess.run(["crontab", tmp_path], check=True)
+        _run(["crontab", tmp_path], check=True)
         _safe_print(f"{OK} Successfully installed crontab schedules for macOS/Linux.")
         _safe_print(f"   Logs available in: {log_dir}")
     except subprocess.CalledProcessError as e:
@@ -159,8 +163,8 @@ def install_unix_dashboard(m3_memory_root, port: int = 8088):
         dest = os.path.join(dest_dir, "com.m3memory.dashboard.plist")
         with open(dest, "w", encoding="utf-8") as f:
             f.write(_render_template(template, m3_memory_root, python_exe, port))
-        subprocess.run(["launchctl", "unload", dest], capture_output=True)
-        r = subprocess.run(["launchctl", "load", dest], capture_output=True, text=True)
+        _run(["launchctl", "unload", dest], capture_output=True)
+        r = _run(["launchctl", "load", dest], capture_output=True, text=True)
         if r.returncode == 0:
             _safe_print(f"{OK} Installed + loaded launchd agent (dashboard :{port}): {dest}")
         else:
@@ -176,8 +180,8 @@ def install_unix_dashboard(m3_memory_root, port: int = 8088):
         dest = os.path.join(dest_dir, "m3-dashboard.service")
         with open(dest, "w", encoding="utf-8") as f:
             f.write(_render_template(template, m3_memory_root, python_exe, port))
-        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
-        r = subprocess.run(
+        _run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        r = _run(
             ["systemctl", "--user", "enable", "--now", "m3-dashboard.service"],
             capture_output=True, text=True,
         )
@@ -211,8 +215,8 @@ def install_unix_cognitive_loop(m3_memory_root):
         with open(dest, "w", encoding="utf-8") as f:
             f.write(_render_template(template, m3_memory_root, python_exe))
         # unload first (ignore failure if not loaded), then load.
-        subprocess.run(["launchctl", "unload", dest], capture_output=True)
-        r = subprocess.run(["launchctl", "load", dest], capture_output=True, text=True)
+        _run(["launchctl", "unload", dest], capture_output=True)
+        r = _run(["launchctl", "load", dest], capture_output=True, text=True)
         if r.returncode == 0:
             _safe_print(f"{OK} Installed + loaded launchd agent: {dest}")
         else:
@@ -231,8 +235,8 @@ def install_unix_cognitive_loop(m3_memory_root):
         dest = os.path.join(dest_dir, "m3-cognitive-loop.service")
         with open(dest, "w", encoding="utf-8") as f:
             f.write(_render_template(template, m3_memory_root, python_exe))
-        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
-        r = subprocess.run(
+        _run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        r = _run(
             ["systemctl", "--user", "enable", "--now", "m3-cognitive-loop.service"],
             capture_output=True, text=True,
         )
@@ -308,7 +312,7 @@ def _rust_embed_service_loaded() -> "bool | None":
     if osn == "Darwin":
         label = _ROLE_TO_SERVICE["embed-server"]["darwin"]
         try:
-            r = subprocess.run(["launchctl", "list"],
+            r = _run(["launchctl", "list"],
                                capture_output=True, text=True, timeout=20)
         except (OSError, subprocess.SubprocessError) as e:
             _safe_print(f"{WARN} could not run `launchctl list`: "
@@ -350,7 +354,7 @@ def _rust_embed_service_loaded() -> "bool | None":
         # still owns the port the moment SCM starts it -- the same divergence
         # documented for Darwin above.
         try:
-            r = subprocess.run(["sc.exe", "query", _WINDOWS_RUST_EMBED_SERVICE],
+            r = _run(["sc.exe", "query", _WINDOWS_RUST_EMBED_SERVICE],
                                capture_output=True, text=True, timeout=20)
         except (OSError, subprocess.SubprocessError) as e:
             _safe_print(f"{WARN} could not run `sc.exe query "
@@ -451,8 +455,8 @@ def install_unix_embed_server(m3_memory_root: str, python_exe: "str | None" = No
             dest = os.path.join(dest_dir, "com.m3memory.embedserver.plist")
             with open(dest, "w", encoding="utf-8") as f:
                 f.write(_render_template(template, m3_memory_root, python_exe))
-            subprocess.run(["launchctl", "unload", dest], capture_output=True)
-            r = subprocess.run(["launchctl", "load", dest],
+            _run(["launchctl", "unload", dest], capture_output=True)
+            r = _run(["launchctl", "load", dest],
                                capture_output=True, text=True)
             if r.returncode == 0:
                 _safe_print(f"{OK} Installed + loaded launchd agent (embed server :8082): {dest}")
@@ -469,8 +473,8 @@ def install_unix_embed_server(m3_memory_root: str, python_exe: "str | None" = No
         dest = os.path.join(dest_dir, "m3-embed-server.service")
         with open(dest, "w", encoding="utf-8") as f:
             f.write(_render_template(template, m3_memory_root, python_exe))
-        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
-        r = subprocess.run(
+        _run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        r = _run(
             ["systemctl", "--user", "enable", "--now", "m3-embed-server.service"],
             capture_output=True, text=True,
         )
@@ -501,11 +505,11 @@ def _install_linux_loop_watchdog(m3_memory_root: str, python_exe: str) -> None:
                 return
             with open(os.path.join(dest_dir, unit), "w", encoding="utf-8") as f:
                 f.write(_render_template(template, m3_memory_root, python_exe))
-        subprocess.run(["systemctl", "--user", "daemon-reload"],
+        _run(["systemctl", "--user", "daemon-reload"],
                        capture_output=True)
         # Enable the TIMER, not the service: the service is oneshot and is meant
         # to be triggered, never enabled on its own.
-        r = subprocess.run(
+        r = _run(
             ["systemctl", "--user", "enable", "--now", "m3-loop-watchdog.timer"],
             capture_output=True, text=True,
         )
@@ -522,7 +526,7 @@ def _install_linux_loop_watchdog(m3_memory_root: str, python_exe: str) -> None:
 def _remove_linux_loop_watchdog() -> None:
     """Uninstall the watchdog timer + oneshot. Never raises."""
     try:
-        subprocess.run(
+        _run(
             ["systemctl", "--user", "disable", "--now", "m3-loop-watchdog.timer"],
             capture_output=True)
         dest_dir = os.path.expanduser("~/.config/systemd/user")
@@ -531,7 +535,7 @@ def _remove_linux_loop_watchdog() -> None:
             if os.path.exists(path):
                 os.unlink(path)
                 _safe_print(f"{OK} Removed loop watchdog unit: {path}")
-        subprocess.run(["systemctl", "--user", "daemon-reload"],
+        _run(["systemctl", "--user", "daemon-reload"],
                        capture_output=True)
     except (OSError, subprocess.SubprocessError) as e:
         _safe_print(f"{WARN} could not remove loop watchdog: {e}")
@@ -557,8 +561,8 @@ def _install_macos_loop_watchdog(m3_memory_root: str, python_exe: str) -> None:
         dest = os.path.join(dest_dir, "com.m3memory.loopwatchdog.plist")
         with open(dest, "w", encoding="utf-8") as f:
             f.write(_render_template(template, m3_memory_root, python_exe))
-        subprocess.run(["launchctl", "unload", dest], capture_output=True)
-        r = subprocess.run(["launchctl", "load", dest],
+        _run(["launchctl", "unload", dest], capture_output=True)
+        r = _run(["launchctl", "load", dest],
                            capture_output=True, text=True)
         if r.returncode == 0:
             _safe_print(f"{OK} Installed + loaded loop watchdog: {dest}")
@@ -575,7 +579,7 @@ def _remove_macos_loop_watchdog() -> None:
         dest = os.path.expanduser(
             "~/Library/LaunchAgents/com.m3memory.loopwatchdog.plist")
         if os.path.exists(dest):
-            subprocess.run(["launchctl", "unload", dest], capture_output=True)
+            _run(["launchctl", "unload", dest], capture_output=True)
             os.unlink(dest)
             _safe_print(f"{OK} Removed loop watchdog: {dest}")
     except (OSError, subprocess.SubprocessError) as e:
@@ -589,7 +593,7 @@ def remove_unix_cognitive_loop():
         dest = os.path.expanduser(
             "~/Library/LaunchAgents/com.m3memory.cognitiveloop.plist")
         if os.path.exists(dest):
-            subprocess.run(["launchctl", "unload", dest], capture_output=True)
+            _run(["launchctl", "unload", dest], capture_output=True)
             os.unlink(dest)
             _safe_print(f"{OK} Removed launchd agent: {dest}")
         else:
@@ -599,13 +603,13 @@ def remove_unix_cognitive_loop():
     elif os_name == "Linux":
         dest = os.path.expanduser(
             "~/.config/systemd/user/m3-cognitive-loop.service")
-        subprocess.run(
+        _run(
             ["systemctl", "--user", "disable", "--now", "m3-cognitive-loop.service"],
             capture_output=True,
         )
         if os.path.exists(dest):
             os.unlink(dest)
-            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+            _run(["systemctl", "--user", "daemon-reload"], capture_output=True)
             _safe_print(f"{OK} Removed systemd --user unit: {dest}")
         else:
             _safe_print(f"{WARN} systemd unit not installed (nothing to remove).")
@@ -643,7 +647,7 @@ def _interpreter_has_deps(candidate: str) -> bool:
         if os.path.exists(sibling):
             probe = sibling
     try:
-        return subprocess.run(
+        return _run(
             [probe, "-c", "import m3_memory"],
             capture_output=True, timeout=10,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -1294,7 +1298,7 @@ def _service_exists(name: str) -> bool:
     if _platform_key() != "linux":
         return True
     try:
-        probe = subprocess.run(
+        probe = _run(
             ["systemctl", "--user", "show", "-p", "LoadState", "--value", name],
             capture_output=True, text=True,
         )
@@ -1353,7 +1357,7 @@ def restart_reaped_services(covered: set) -> None:
 
         cmd = _restart_command(name)
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True)
+            res = _run(cmd, capture_output=True, text=True)
         except FileNotFoundError:
             # The service manager itself is missing — a platform-level fault,
             # not a per-service one. Report it once, in full.
@@ -1409,7 +1413,7 @@ def _verify_task_registered(name: str) -> "str | None":
     hour while Task Scheduler reported Running.
     """
     try:
-        q = subprocess.run(
+        q = _run(
             ["schtasks", "/Query", "/TN", name, "/XML"],
             capture_output=True, text=True, timeout=30,
         )
@@ -1494,7 +1498,7 @@ def _start_longlived_tasks(tasks: list) -> None:
 
         cmd = _restart_command(service)
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True)
+            res = _run(cmd, capture_output=True, text=True)
         except Exception as e:  # noqa: BLE001 — starting is best-effort
             _safe_print(f"{WARN} Could not start {name}: {type(e).__name__}: {e}")
             continue
@@ -1671,7 +1675,7 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard
     denied_any = False
     denied_tasks: list[str] = []
     for task in tasks:
-        subprocess.run(["schtasks", "/Delete", "/TN", task["name"], "/F"], capture_output=True)
+        _run(["schtasks", "/Delete", "/TN", task["name"], "/F"], capture_output=True)
         # Register from a full Task Scheduler XML definition. Unlike the CLI
         # flags, XML can express MultipleInstances=IgnoreNew, ExecutionTimeLimit,
         # and trigger Repetition in ONE call — so the PowerShell post-hardening
@@ -1691,7 +1695,7 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard
             fd, xml_path = tempfile.mkstemp(suffix=".xml", prefix=f"m3_{task['name']}_")
             with os.fdopen(fd, "w", encoding="utf-16") as fh:
                 fh.write(xml_doc)
-            result = subprocess.run(
+            result = _run(
                 ["schtasks", "/Create", "/TN", task["name"], "/XML", xml_path, "/F"],
                 capture_output=True, text=True,
             )
@@ -1810,7 +1814,7 @@ def remove_windows_tasks(selector: str | None, m3_memory_root: str):
                         f"`--remove all` to remove them all.")
             return
     for task in tasks:
-        r = subprocess.run(
+        r = _run(
             ["schtasks", "/Delete", "/TN", task["name"], "/F"],
             capture_output=True, text=True,
         )
@@ -1825,7 +1829,7 @@ def _verify_windows_task(name: str) -> bool:
     MultipleInstances=IgnoreNew). Cross-checks the LIVE task, not the spec, so it
     catches a task that was created but silently lost a setting. Returns True on
     match. Never raises — a missing task is a clean False."""
-    r = subprocess.run(
+    r = _run(
         ["schtasks", "/Query", "/TN", name, "/XML", "ONE"],
         capture_output=True, text=True,
     )
@@ -1891,7 +1895,7 @@ def _verify_unix_cognitive_loop() -> bool:
         if not os.path.exists(dest):
             _safe_print(f"{FAIL} launchd agent not installed: {dest}")
             return False
-        loaded = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
+        loaded = _run(["launchctl", "list"], capture_output=True, text=True)
         if "com.m3memory.cognitiveloop" in (loaded.stdout or ""):
             _safe_print(f"{OK} launchd agent installed and loaded: {dest}")
             # KeepAlive is the self-heal knob. Checking only that the KEY exists
@@ -1904,7 +1908,7 @@ def _verify_unix_cognitive_loop() -> bool:
             # raw yields "true" for KeepAlive=true, the sub-key name (e.g.
             # "Crashed") for the dict form, and rc!=0 when the key is absent.
             try:
-                r = subprocess.run(["plutil", "-extract", "KeepAlive", "raw",
+                r = _run(["plutil", "-extract", "KeepAlive", "raw",
                                     "-o", "-", dest],
                                    capture_output=True, text=True, timeout=20)
                 value = (r.stdout or "").strip()
@@ -1928,7 +1932,7 @@ def _verify_unix_cognitive_loop() -> bool:
         if not os.path.exists(dest):
             _safe_print(f"{FAIL} systemd --user unit not installed: {dest}")
             return False
-        active = subprocess.run(
+        active = _run(
             ["systemctl", "--user", "is-active", unit], capture_output=True, text=True
         )
         state = (active.stdout or "").strip()

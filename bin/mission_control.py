@@ -157,7 +157,7 @@ def get_gpu_usage() -> float:
         try:
             out = subprocess.check_output(
                 ["ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"],
-                stderr=subprocess.DEVNULL, **no_window_kwargs(),
+                stderr=subprocess.DEVNULL, timeout=10, **no_window_kwargs(),
             ).decode()
             m = re.search(r'"Device Utilization %"=(\d+)', out)
             return float(m.group(1)) if m else 0.0
@@ -181,7 +181,7 @@ def get_gpu_usage() -> float:
             out = subprocess.check_output(
                 ["nvidia-smi", "--query-gpu=utilization.gpu",
                  "--format=csv,noheader,nounits"],
-                stderr=subprocess.DEVNULL, **no_window_kwargs(),
+                stderr=subprocess.DEVNULL, timeout=10, **no_window_kwargs(),
             ).decode().strip()
             return float(out.splitlines()[0])
         except Exception:
@@ -195,7 +195,7 @@ def get_gpu_usage() -> float:
             out = subprocess.check_output(
                 ["nvidia-smi", "--query-gpu=utilization.gpu",
                  "--format=csv,noheader,nounits"],
-                stderr=subprocess.DEVNULL, **no_window_kwargs(),
+                stderr=subprocess.DEVNULL, timeout=10, **no_window_kwargs(),
             ).decode().strip()
             return float(out.splitlines()[0])
         except Exception:
@@ -223,7 +223,7 @@ def get_vram_usage() -> tuple[float, float, float] | None:
         out = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=memory.used,memory.total",
              "--format=csv,noheader,nounits"],
-            stderr=subprocess.DEVNULL, **no_window_kwargs(),
+            stderr=subprocess.DEVNULL, timeout=10, **no_window_kwargs(),
         ).decode().strip().splitlines()[0]
         used_mib, total_mib = (int(x.strip()) for x in out.split(","))
         used_gb  = used_mib  / 1024
@@ -241,7 +241,8 @@ def gpu_label() -> str:
     if IS_WIN or IS_LINUX:
         try:
             subprocess.check_output(
-                ["nvidia-smi"], stderr=subprocess.DEVNULL, **no_window_kwargs()
+                ["nvidia-smi"], stderr=subprocess.DEVNULL, timeout=10,
+                **no_window_kwargs()
             )
             return "GPU (NVIDIA)"
         except Exception:
@@ -299,7 +300,7 @@ def get_hw_info() -> tuple[str, str]:
             chip = subprocess.check_output(
                 ["powershell.exe", "-NoProfile", "-Command",
                  "(Get-WmiObject Win32_Processor).Name"],
-                stderr=subprocess.DEVNULL, **no_window_kwargs(),
+                stderr=subprocess.DEVNULL, timeout=10, **no_window_kwargs(),
             ).decode().strip().splitlines()[0].strip()
         except Exception:
             pass
@@ -307,13 +308,13 @@ def get_hw_info() -> tuple[str, str]:
         try:
             chip = subprocess.check_output(
                 ["sysctl", "-n", "machdep.cpu.brand_string"],
-                stderr=subprocess.DEVNULL, **no_window_kwargs(),
+                stderr=subprocess.DEVNULL, timeout=10, **no_window_kwargs(),
             ).decode().strip()
             # Prefer Apple Silicon marketing name if available
             try:
                 model = subprocess.check_output(
                     ["system_profiler", "SPHardwareDataType"],
-                    stderr=subprocess.DEVNULL, **no_window_kwargs(),
+                    stderr=subprocess.DEVNULL, timeout=10, **no_window_kwargs(),
                 ).decode()
                 m = re.search(r"Chip:\s+(.+)", model)
                 if m:
@@ -349,7 +350,7 @@ def get_hw_info() -> tuple[str, str]:
         out = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=name,memory.total",
              "--format=csv,noheader,nounits"],
-            stderr=subprocess.DEVNULL, **no_window_kwargs(),
+            stderr=subprocess.DEVNULL, timeout=10, **no_window_kwargs(),
         ).decode().strip().splitlines()[0]
         name, vram_mib = out.split(",", 1)
         vram_gb = round(int(vram_mib.strip()) / 1024)
@@ -359,7 +360,7 @@ def get_hw_info() -> tuple[str, str]:
             try:
                 out = subprocess.check_output(
                     ["system_profiler", "SPDisplaysDataType"],
-                    stderr=subprocess.DEVNULL, **no_window_kwargs(),
+                    stderr=subprocess.DEVNULL, timeout=10, **no_window_kwargs(),
                 ).decode()
                 m = re.search(r"Chipset Model:\s+(.+)", out)
                 vram_m = re.search(r"VRAM.*?:\s+(.+)", out)
