@@ -151,11 +151,11 @@ def _list_installed_task_names() -> set[str]:
             for name in candidates:
                 r = subprocess.run(
                     ["schtasks", "/Query", "/TN", name],
-                    capture_output=True, text=True,
+                    capture_output=True, text=True, timeout=20,
                 )
                 if r.returncode == 0 and name in r.stdout:
                     names.add(name)
-        except FileNotFoundError:
+        except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
         # Also catch legacy / hand-named tasks (e.g. the pre-bf110222
         # `m3-memory-sync`) that the canonical-name query above misses. These are
@@ -165,9 +165,10 @@ def _list_installed_task_names() -> set[str]:
 
     # Unix: cron entries carry the invoked command, not the AgentOS_* name.
     try:
-        r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        r = subprocess.run(["crontab", "-l"], capture_output=True, text=True,
+                           timeout=20)
         cron = r.stdout if r.returncode == 0 else ""
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         cron = ""
     return _unix_installed_from_cron(cron)
 
@@ -213,16 +214,28 @@ def detect_windows_legacy_action_tasks() -> set[str]:
     The match is path-anchored (see `_action_invokes_marker`) so this destructive
     detection cannot over-match a task that only mentions a script name.
 
-    Read-only and never raises: a missing `schtasks` or a parse hiccup yields an
-    empty set. Canonical-named tasks are excluded — they are already detected by
-    the name-based query, and re-listing them here would be redundant.
+    Read-only and never raises: a missing `schtasks`, a parse hiccup, or a query
+    that does not return promptly yields an empty set. Canonical-named tasks are
+    excluded — they are already detected by the name-based query, and re-listing
+    them here would be redundant.
+
+    The timeout is load-bearing, not defensive decoration. `schtasks /Query /V`
+    enumerates EVERY task on the machine including third-party ones, so its cost
+    is a property of the user's box rather than of m3. Without a bound it can
+    block forever, and because this runs inside setup's plan-gathering it takes
+    the whole installer down with it — silently, since the caller is waiting on
+    a subprocess rather than failing. Measured 2026-09-14: it hung the test
+    suite indefinitely (tests/test_setup_upgrade_skips_embedder.py), which is
+    how it was found. A degraded answer here is cheap: the name-based query
+    still finds canonical tasks, so a timeout costs only legacy hand-named
+    detection, whereas an unbounded wait costs the entire run.
     """
     try:
         r = subprocess.run(
             ["schtasks", "/Query", "/FO", "LIST", "/V"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=20,
         )
-    except (FileNotFoundError, OSError):
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return set()
     if r.returncode != 0 or not r.stdout:
         return set()
@@ -338,20 +351,28 @@ def try_remove_scheduled_tasks(names: list[str]) -> tuple[list[str], list[str]]:
 
     if os_name == "Windows":
         for name in names:
-            r = subprocess.run(
-                ["schtasks", "/Delete", "/TN", name, "/F"],
-                capture_output=True, text=True,
-            )
+            try:
+                r = subprocess.run(
+                    ["schtasks", "/Delete", "/TN", name, "/F"],
+                    capture_output=True, text=True, timeout=30,
+                )
+            except subprocess.TimeoutExpired:
+                # A timed-out DELETE is reported FAILED, never silently dropped:
+                # we do not know whether it applied, and claiming removal for a
+                # task that may still exist is the §3 false all-clear.
+                failed.append(name)
+                continue
             (removed if r.returncode == 0 else failed).append(name)
         return removed, failed
 
     # Unix: rewrite the user crontab, dropping the matched lines.
     try:
-        r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        r = subprocess.run(["crontab", "-l"], capture_output=True, text=True,
+                           timeout=20)
         if r.returncode != 0:
             return [], list(names)
         lines = r.stdout.splitlines()
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return [], list(names)
 
     markers = {n: _UNIX_CRON_MARKERS.get(n, "") for n in names}
@@ -369,10 +390,16 @@ def try_remove_scheduled_tasks(names: list[str]) -> tuple[list[str], list[str]]:
             tmp.write(new_cron)
             tmp_path = tmp.name
         try:
-            w = subprocess.run(["crontab", tmp_path], capture_output=True, text=True)
-            if w.returncode == 0:
+            try:
+                w = subprocess.run(["crontab", tmp_path], capture_output=True,
+                                   text=True, timeout=30)
+            except subprocess.TimeoutExpired:
+                # Same rule as the Windows delete: unknown outcome is FAILED.
+                failed.extend(sorted(dropped))
+                w = None
+            if w is not None and w.returncode == 0:
                 removed.extend(sorted(dropped))
-            else:
+            elif w is not None:
                 failed.extend(sorted(dropped))
         finally:
             os.unlink(tmp_path)
