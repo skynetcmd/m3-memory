@@ -49,6 +49,12 @@ _Nothing yet._
 - Claim and heartbeat timestamps come from the database clock.
 - `received_at` is surfaced in poll output.
 - Tool-count drift fails the build instead of printing a warning.
+- Every scheduler and hardware subprocess call is bounded by a timeout.
+  `schtasks /Query /V` enumerates every task on the machine and could block
+  indefinitely, hanging setup and the test suite; `nvidia-smi` could do the
+  same against a wedged driver. Reads degrade to their existing "unknown"
+  answer, writes report failure explicitly, and an uninstall no longer deletes
+  a unit file it could not unload.
 
 ---
 
