@@ -346,8 +346,10 @@ def _supervise_postgres(args) -> int:
                     break
             except queue.Empty:
                 if time.time() - last_hb > (args.interval * 3):
-                    # 2026-09-12 silent-failure outage and writes to stderr AND a file - but the log has nothing from those runs. Foreground reproduction exits 2 cleanly, so it only fails when backgrounded: the parent is killed while the child holds the WAL watch and dies before _warn can flush.
-                    # Fix: Flush explicitly before breaking, and use a shorter timeout.
+                    # Flush before breaking. Backgrounded, this process can be
+                    # killed while the child still holds the WAL watch, and a
+                    # buffered warning dies with it -- so the fail-loud path
+                    # reports nothing for its most common failure.
                     _warn(f"PG child wedged (no hb for {args.interval*3}s). Restarting.")
                     sys.stderr.flush()
                     child_failed = True
