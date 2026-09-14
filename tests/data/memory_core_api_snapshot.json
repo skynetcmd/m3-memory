@@ -1392,7 +1392,7 @@
     },
     "memory_inbox_ack_impl": {
       "kind": "function",
-      "signature": "(memory_id: 'str') -> 'str'",
+      "signature": "(memory_id: 'str', agent_id: 'str' = '') -> 'str'",
       "value_repr": null
     },
     "memory_inbox_impl": {
