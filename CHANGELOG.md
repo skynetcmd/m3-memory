@@ -23,6 +23,35 @@ _Nothing yet._
 
 ---
 
+## [2026.9.14.4] — 2026-09-14 — the message lease is enforced on read and on ack
+
+### Fixed
+
+- `notifications_poll` no longer returns claimed rows. An in-flight message was
+  offered to every poller, so two agents could do the same work. The unread path
+  now selects PENDING through `message_state_sql`; the audit view
+  (`unread_only=False`) still shows claimed work.
+- `notifications_ack` and `notifications_ack_all` no longer complete a row held
+  under another agent's lease. Both skip claimed rows and report what they left
+  behind; ack by id distinguishes a claimed row from a missing one.
+- `read_at` is written by the database clock in both ack paths, matching
+  `complete_message`.
+- `memory.backends.dialect` is pinned to the accessor function. A package
+  observed part-way through initialisation bound the attribute to the submodule,
+  and every `dialect()` call site then raised `'module' object is not callable`.
+- The wiki compile ledger propagates `TypeError`, `AttributeError`,
+  `ImportError` and `NameError` instead of logging them as non-fatal.
+  Environmental failures still degrade quietly.
+- The `agent_id` refusal error names `--agent_id`, the flag `m3 admin` accepts.
+
+### Changed
+
+- `docs/ROADMAP_DISPATCHER.md` records the dispatch design: constraints, store
+  separation, the pointer pattern, retention, webhook delivery, and the physical
+  mapping across backends.
+
+---
+
 ## [2026.9.14.3] — 2026-09-14 — a healthy scheduled task no longer reads as broken
 
 ### Fixed
