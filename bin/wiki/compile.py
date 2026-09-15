@@ -605,6 +605,8 @@ class _LedgerRun:
             self.run_id = ledger.open_run(
                 self._db, self._dialect, scope=self._scope, user_id=self._user_id,
                 importance_threshold=self._tau, entity_comention=self._comention)
+        except _LEDGER_BUGS:
+            raise
         except Exception as e:  # pragma: no cover - defensive
             _log_ledger("open", e)
             self.enabled = False
@@ -618,6 +620,8 @@ class _LedgerRun:
             head_id = result.synthesis_id
             for m in cluster.members:  # freeze ALL members (source + synthesis)
                 self._rows.append((cluster.key, m.id, chash, head_id))
+        except _LEDGER_BUGS:
+            raise
         except Exception as e:  # pragma: no cover - defensive
             _log_ledger("add", e)
 
@@ -633,6 +637,8 @@ class _LedgerRun:
             ledger.prune_superseded_members(self._db, self._dialect, self.run_id)
             if hasattr(self._db, "commit"):
                 self._db.commit()
+        except _LEDGER_BUGS:
+            raise
         except Exception as e:  # pragma: no cover - defensive
             _log_ledger("complete", e)
         finally:
@@ -641,6 +647,20 @@ class _LedgerRun:
                     self._own_cm.__exit__(None, None, None)
                 except Exception:
                     pass
+
+
+# Errors that mean THE CODE IS WRONG, not that the environment misbehaved.
+# The ledger is best-effort and must never abort a compile -- but "best-effort"
+# was implemented as a bare `except Exception`, which also swallowed these.
+# Measured 2026-09-14: a full-suite run logged
+#   compile ledger open failed (non-fatal): TypeError("'module' object is not
+#   callable")
+# and carried on. That is a broken module graph reported as a routine hiccup,
+# and it silently drops the ENTIRE audit trail while the compile reports
+# success -- a §3 false negative on the one record that says what was compiled.
+# These propagate; genuine environmental failures (a missing table, a locked or
+# read-only store) still degrade quietly, which is the behaviour this was for.
+_LEDGER_BUGS = (TypeError, AttributeError, ImportError, NameError)
 
 
 def _log_ledger(phase: str, e: Exception) -> None:
