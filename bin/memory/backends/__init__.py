@@ -52,6 +52,35 @@ from .selector import (
     resolve_backend_name,
 )
 
+# Re-assert the accessor AFTER every submodule import above, and fail loudly if
+# it is ever not the callable.
+#
+# The shadowing described in the NOTE above is a SIDE EFFECT OF IMPORT ORDER:
+# `from .dialect import ...` binds this attribute to the SUBMODULE, and the
+# `from .selector import ... dialect ...` line overwrites it with the function.
+# A COMPLETED import therefore always yields the function -- but a package
+# observed PART-WAY THROUGH initialisation (an import interrupted between those
+# two lines, or a reload that leaves a half-built module in sys.modules) yields
+# the module instead, and every `from memory.backends import dialect; dialect()`
+# call site then raises "'module' object is not callable".
+#
+# Measured 2026-09-14: a full-suite run produced 96 of exactly that TypeError
+# across 89 failing tests, starting mid-run and persisting to the end. The
+# failure is silent at the seam -- nothing reports that the package is broken,
+# only that a call failed somewhere far away.
+#
+# The explicit re-assert makes the binding independent of the order above, and
+# the assertion converts a future reordering from 96 mystery TypeErrors into one
+# ImportError naming the cause. Pinned by
+# tests/test_backends_dialect_binding.py.
+if not callable(dialect):  # pragma: no cover - guards a reordering mistake
+    raise ImportError(
+        "memory.backends.dialect must be the accessor FUNCTION, not the "
+        f"submodule (got {type(dialect).__name__}). A submodule import below "
+        "the selector import would shadow it and every `dialect()` call site "
+        "would raise \"'module' object is not callable\"."
+    )
+
 __all__ = [
     "BackendName",
     "Capabilities",
