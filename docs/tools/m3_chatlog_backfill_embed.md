@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_chatlog_backfill_embed.py
-sha1: 7a54dfbd14e1
-mtime_utc: 2026-09-08T23:41:01.508484+00:00
-generated_utc: 2026-09-08T23:41:23.769988+00:00
+sha1: 8718c1f788fa
+mtime_utc: 2026-09-16T15:20:54.444548+00:00
+generated_utc: 2026-09-16T15:29:43.532724+00:00
 private: false
 ---
 
@@ -40,7 +40,7 @@ Defaults:
 
 ## Entry points
 
-- `def main()` (line 345)
+- `def main()` (line 348)
 - `if __name__ == "__main__"` guard
 
 ---

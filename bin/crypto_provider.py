@@ -220,9 +220,10 @@ def _verify_lib_integrity(path: str) -> None:
     actual = h.hexdigest()
     if actual != expected:
         raise RuntimeError(
-            f"FATAL: wolfSSL library at {path} failed integrity pin "
-            f"(M3_WOLFSSL_SHA256): expected {expected[:16]}…, got {actual[:16]}…. "
-            f"Refusing to load a crypto library that does not match the pinned hash."
+            f"FATAL: wolfSSL library integrity check failed; refusing to load. "
+            f"observed: file {path} has SHA-256 {actual[:16]}…. "
+            f"cause: M3_WOLFSSL_SHA256={expected[:16]}… (pinned hash) does not match — possible library was swapped or corrupted on disk. "
+            f"inspect: re-verify the library binary (e.g., rebuild or restore from trusted source), then update M3_WOLFSSL_SHA256 to the correct hash."
         )
 
 
@@ -318,8 +319,10 @@ class CryptoProvider:
             except OSError as e:
                 if _fips_mode() or _fips_strict():
                     raise RuntimeError(
-                        f"FATAL: FIPS mode enabled but the wolfSSL library at the "
-                        f"trusted path {self._lib_path} could not be loaded: {e}."
+                        f"FATAL: FIPS mode enabled but wolfSSL library cannot be loaded. "
+                        f"observed: OSError loading {self._lib_path}: {e}. "
+                        f"possible: file permissions, corrupted library, or missing dependencies (e.g., ld-linux, MSVCRT). "
+                        f"inspect: check file permissions (`ls -l {self._lib_path}`), library dependencies (`ldd {self._lib_path}` on Linux), or reinstall wolfSSL."
                     )
                 logger.info(f"M3 Crypto: wolfSSL at {self._lib_path} failed to load ({e}); using DEFAULT.")
                 self.backend = "DEFAULT"
@@ -432,10 +435,10 @@ class CryptoProvider:
                 # full) without being repeated to someone who cannot act on it.
                 if _fips_strict():
                     logger.warning(
-                        "M3 Crypto: M3_FIPS_STRICT=1 but the loaded wolfSSL is the "
-                        "OPEN-SOURCE build — strict mode requires the CMVP-validated "
-                        "FIPS module. Install the commercial wolfSSL FIPS build or "
-                        "unset M3_FIPS_STRICT."
+                        f"M3_FIPS_STRICT=1 but wolfSSL is the open-source build (not CMVP-validated). "
+                        f"observed: loaded library at {self._lib_path} lacks POST/entropy FIPS service symbols. "
+                        f"cause: M3_FIPS_STRICT requires the commercial wolfSSL FIPS module but the open-source build was installed instead. "
+                        f"inspect: (1) verify which wolfSSL version is at {self._lib_path}; (2) purchase/obtain the CMVP-validated module; (3) rebuild/reinstall, or unset M3_FIPS_STRICT to use open-source mode."
                     )
                 elif _fips_mode() and not CryptoProvider._non_fips_notice_emitted:
                     CryptoProvider._non_fips_notice_emitted = True

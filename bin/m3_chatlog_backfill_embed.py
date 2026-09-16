@@ -287,7 +287,10 @@ async def _main_async(args) -> int:
             db_targets.append(("chatlog", chatlog_db))
 
     if not db_targets:
-        sys.exit("ERROR: no DBs found. Set M3_DATABASE / M3_CHATLOG_DATABASE or pass --core-db/--chatlog-db.")
+        sys.exit("ERROR: no DBs found. "
+                 "observed: tried core_db='" + str(_resolve_db(args.core_db, "M3_DATABASE", "agent_memory.db")) + "', "
+                 "chatlog_db='" + str(_resolve_db(args.chatlog_db, "M3_CHATLOG_DATABASE", "agent_chatlog.db")) + "'. "
+                 "inspect: M3_DATABASE, M3_CHATLOG_DATABASE env vars or --core-db/--chatlog-db arguments.")
 
     plan = {"types": type_filter or "ALL types", "min_chars": args.min_chars, "dbs": {}}
     for label, db_path in db_targets:

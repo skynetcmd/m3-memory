@@ -212,7 +212,12 @@ def _custom():
             _custom_mod = m
             log.info("custom_tool_bridge imported OK")
         except Exception as exc:
-            log.error(f"Failed to import custom_tool_bridge: {type(exc).__name__}: {exc}")
+            log.error(
+                "Failed to import custom_tool_bridge; protocol tools will be unavailable. "
+                f"observed: {type(exc).__name__} during import: {exc}. "
+                "possible: module not found, syntax error in module, or circular dependency. "
+                "inspect: check that custom_tool_bridge.py exists in the same directory, has no syntax errors, and can be imported standalone."
+            )
             raise
     return _custom_mod
 
@@ -225,7 +230,12 @@ def _memory():
             _memory_mod = m
             log.info("memory_bridge imported OK")
         except Exception as exc:
-            log.error(f"Failed to import memory_bridge: {type(exc).__name__}: {exc}")
+            log.error(
+                "Failed to import memory_bridge; m3 memory tools will be unavailable. "
+                f"observed: {type(exc).__name__} during import: {exc}. "
+                "possible: module not found, syntax error, missing dependencies, or database initialization failed. "
+                "inspect: check that memory_bridge.py exists and is importable, verify database is reachable (M3_ENGINE_ROOT, M3_CONFIG_ROOT are set correctly)."
+            )
             raise
     return _memory_mod
 
@@ -238,7 +248,12 @@ def _debug():
             _debug_mod = m
             log.info("debug_agent_bridge imported OK")
         except Exception as exc:
-            log.error(f"Failed to import debug_agent_bridge: {type(exc).__name__}: {exc}")
+            log.error(
+                "Failed to import debug_agent_bridge; debug tools will be unavailable. "
+                f"observed: {type(exc).__name__} during import: {exc}. "
+                "possible: module not found, syntax error, or missing dependencies. "
+                "inspect: check that debug_agent_bridge.py exists and is importable, review the exception above for missing modules or import errors."
+            )
             raise
     return _debug_mod
 
@@ -714,7 +729,12 @@ async def _call_anthropic(
 ) -> dict:
     api_key = _anthropic_key()
     if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not found in env or Keychain")
+        raise ValueError(
+            "ANTHROPIC_API_KEY is required but not found. "
+            "observed: no API key in environment or system keyring. "
+            "possible: ANTHROPIC_API_KEY env var unset or cleared, keyring not accessible, or credentials were removed. "
+            "inspect: (1) check env: `env | grep ANTHROPIC_API_KEY`; (2) check keyring: `keyring get system ANTHROPIC_API_KEY` (Linux/macOS) or Credential Manager (Windows); (3) if missing, run `m3 configure` to set the key."
+        )
 
     system, converted = _messages_oai_to_anthropic(messages)
     anthropic_tools = _tools_oai_to_anthropic(tools) if tools else []

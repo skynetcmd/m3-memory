@@ -138,7 +138,9 @@ async def _launch_worker_with_offset(
 async def _run_async(args) -> int:
     in_path = Path(args.source_conv_list).resolve()
     if not in_path.exists():
-        sys.exit(f"ERROR: --source-conv-list not found: {in_path}")
+        sys.exit(f"ERROR: --source-conv-list not found. "
+                 f"observed: {in_path} does not exist. "
+                 f"inspect: --source-conv-list argument.")
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     base = args.log_base or f"gemini_parallel_{ts}"

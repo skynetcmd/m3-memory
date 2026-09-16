@@ -476,9 +476,16 @@ async def _poll_fetch_ingest_one_batch(
         if status.state == "ended":
             break
         if status.state in ("canceled", "failed"):
-            raise RuntimeError(f"{label} ended in state {status.state!r}")
+            raise RuntimeError(f"{label} ended in terminal state. "
+                               f"observed: {label} batch state={status.state!r}. "
+                               f"possible: provider canceled the batch or reported failure. "
+                               f"inspect: batch_id in provider dashboard, provider logs.")
         if time.monotonic() >= deadline:
-            raise TimeoutError(f"{label} did not complete within {max_wait_s}s")
+            raise TimeoutError(f"{label} timeout. "
+                               f"observed: elapsed={time.monotonic() - (deadline - max_wait_s):.0f}s, "
+                               f"max_wait_s={max_wait_s}s, state={status.state}. "
+                               f"possible: provider is slow, or batch is stuck in 'processing'. "
+                               f"inspect: batch_id in provider dashboard; increase --max-wait-s or check provider status.")
         await asyncio.sleep(poll_interval_s)
 
     # Fetch + ingest
@@ -558,7 +565,9 @@ async def _resume_run(args, *, profile, token: str, db_path: Path) -> int:
         (run_id,),
     ).fetchone()
     if row is None:
-        sys.exit(f"ERROR: enrichment_runs row not found: id={run_id}")
+        sys.exit(f"ERROR: enrichment_runs row not found. "
+                 f"observed: enrichment_runs.id={run_id} missing from database. "
+                 f"inspect: enrichment_runs table in {db_path}; verify --resume-run argument.")
     _, prior_status, src_v, tgt_v, prior_profile, prior_model = row
     print(f"[resume] run_id={run_id} prior_status={prior_status!r} "
           f"profile={prior_profile!r} target_variant={tgt_v!r}", flush=True)
@@ -570,7 +579,9 @@ async def _resume_run(args, *, profile, token: str, db_path: Path) -> int:
     notes = _read_run_notes(state_conn, run_id)
     batches = notes.get("batches", [])
     if not batches:
-        sys.exit("ERROR: no batches recorded in run notes; nothing to resume")
+        sys.exit("ERROR: no batches recorded in run notes; nothing to resume. "
+                 "observed: enrichment_runs.id=" + run_id + " has no 'batches' array in notes JSON. "
+                 "inspect: enrichment_runs.notes for run_id; verify it was submitted (batches array should exist).")
 
     not_ingested = [b for b in batches if not b.get("ingested")]
     print(f"[resume] {len(batches)} batches recorded, "
@@ -598,9 +609,10 @@ async def _resume_run(args, *, profile, token: str, db_path: Path) -> int:
         (run_id,),
     ).fetchall()
     if not rows:
-        sys.exit(f"ERROR: no in_progress claims under run_id={run_id}; "
-                 f"can't resume (run was either fully ingested or claims "
-                 f"were already released).")
+        sys.exit(f"ERROR: no in_progress claims under run_id={run_id}. "
+                 f"observed: enrichment_groups.status='in_progress' AND enrich_run_id={run_id} returned 0 rows. "
+                 f"possible: run was fully ingested in a prior worker invocation, or claims were released. "
+                 f"inspect: enrichment_groups table; verify --resume-run corresponds to a still-pending run.")
 
     # Load full turn lists for these convos via _query_eligible_groups path
     conv_filter = {r[2] for r in rows}
@@ -708,15 +720,22 @@ async def _run_async(args) -> int:
         # validates backend support. Real token resolved below from vault.
         _check_runner(profile, token="placeholder")  # nosec B106
     except NotImplementedError as e:
-        sys.exit(f"ERROR: {e}")
+        sys.exit(f"ERROR: unsupported batch backend. "
+                 f"observed: make_runner raised NotImplementedError. "
+                 f"possible: {str(e)}. "
+                 f"inspect: --profile argument; batch API only supports anthropic and gemini-OAI-shim.")
 
     token = get_api_key(profile.api_key_service) or ""
     if not token:
-        sys.exit(f"ERROR: {profile.api_key_service} not found in vault/env")
+        sys.exit(f"ERROR: API key not found. "
+                 f"observed: {profile.api_key_service} service returned no token. "
+                 f"inspect: vault (m3 admin store_secret), M3_VAULT_ADDR, or env var {profile.api_key_service}.")
 
     db_path = Path(args.core_db).resolve()
     if not db_path.exists():
-        sys.exit(f"ERROR: --core-db not found: {db_path}")
+        sys.exit(f"ERROR: --core-db not found. "
+                 f"observed: resolved to {db_path}. "
+                 f"inspect: --core-db argument or M3_DATABASE env var.")
 
     # Set M3_DATABASE so memory_core.write picks the right DB
     os.environ["M3_DATABASE"] = str(db_path)

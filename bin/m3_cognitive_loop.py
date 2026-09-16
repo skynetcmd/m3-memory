@@ -619,9 +619,12 @@ def has_entity_work(core_db: Optional[str], chatlog_db: Optional[str]) -> bool:
         # debug-level also made it invisible (§3: never silent) -- this is a
         # store that would not answer, not routine noise.
         logger.warning(
-            "observed: entity work-gate probe failed (%s: %s); "
-            "assuming NO entity work this cycle -- a real backlog will be seen "
-            "once the store answers. inspect: store reachability / migrations",
+            "observed: entity work-gate probe failed (%s: %s). "
+            "possible: store is locked (a concurrent writer), offline, or a "
+            "migration is in progress. inspect: verify store reachability with "
+            "`m3 doctor`; if migrations are pending, wait or run them manually. "
+            "Assuming NO entity work this cycle; a real backlog will be seen once "
+            "the store answers.",
             type(e).__name__, e,
         )
         return False  # conservative: no work unless we can confirm some
@@ -641,9 +644,12 @@ def has_enrich_work(core_db: Optional[str]) -> bool:
         # has_entity_work: returning True here pins the idle-backlog drain to
         # its short floor on work that was never confirmed.
         logger.warning(
-            "observed: enrich work-gate probe failed (%s: %s); "
-            "assuming NO enrich work this cycle. inspect: observation_queue / "
-            "reflector_queue reachability",
+            "observed: enrich work-gate probe failed (%s: %s) against "
+            "observation_queue/reflector_queue. "
+            "possible: store is locked, offline, or migrations are "
+            "in progress. inspect: verify store reachability with `m3 doctor`; "
+            "check observation_queue and reflector_queue table existence and "
+            "permissions. Assuming NO enrich work this cycle.",
             type(e).__name__, e,
         )
         return False  # conservative: no LLM work unless we can confirm some
@@ -1106,8 +1112,13 @@ async def run_embed_pass(args):
                 )
         except Exception as e:
             logger.error(
-                f"Embed-backfill pass error on {os.path.basename(db_path)}: "
-                f"{type(e).__name__}: {e}"
+                f"observed: embed-backfill pass failed on {os.path.basename(db_path)} "
+                f"({type(e).__name__}: {e}). "
+                f"possible: embedder is down, "
+                f"store query failed, or an oversized row was skipped. inspect: "
+                f"check the full exception trace; run `m3 doctor --embed` to probe "
+                f"the embedder; check store reachability. Will retry this database "
+                f"next cycle."
             )
 
 
@@ -1125,9 +1136,12 @@ def has_classify_work(core_db: Optional[str]) -> bool:
         # will not answer is visible rather than looking like a healthy idle
         # loop (§3: never silent).
         logger.warning(
-            "observed: classify work-gate probe failed (%s: %s); "
-            "assuming NO classify work this cycle. inspect: core store "
-            "reachability / memory_items migrations",
+            "observed: classify work-gate probe failed (%s: %s) against "
+            "memory_items. "
+            "possible: store is locked, offline, or the memory_items table does not "
+            "exist yet. inspect: verify store reachability with `m3 doctor`; ensure "
+            "memory_items table exists and migrations are current. Assuming NO "
+            "classify work this cycle.",
             type(e).__name__, e,
         )
         return False

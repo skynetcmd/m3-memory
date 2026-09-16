@@ -221,11 +221,20 @@ def _reject_forbidden_host(url: str) -> None:
             continue
         hit = (parsed_host == host.lower()) if parsed_host else (host in url)
         if hit:
+            # Extract scheme and host only — NEVER echo the full DSN (contains password)
+            scheme = ""
+            try:
+                from urllib.parse import urlparse
+                scheme = urlparse(url.strip()).scheme or "postgres"
+            except Exception:
+                scheme = "postgres"
             raise RuntimeError(
-                f"PostgreSQL PRIMARY-store DSN targets a forbidden host {host!r} "
-                f"(M3_PG_FORBIDDEN_HOSTS). This host is the data-warehouse/CDW "
-                f"mirror, not a primary store — refusing to connect. Point "
-                f"M3_PRIMARY_PG_URL at a dedicated primary database."
+                f"observed: PostgreSQL PRIMARY-store DSN targets host {host!r} "
+                f"(from M3_PG_FORBIDDEN_HOSTS). cause: the DSN is configured to "
+                f"connect to the data-warehouse/CDW mirror instead of the primary "
+                f"store. inspect: M3_PRIMARY_PG_URL (current: {scheme}://..., "
+                f"host={host}) should point to a dedicated primary database, not "
+                f"a warehouse mirror. Point M3_PRIMARY_PG_URL at a different host."
             )
 
 
@@ -259,11 +268,15 @@ def _resolve_dsn() -> str:
             pass
     if not url:
         raise RuntimeError(
-            "PostgreSQL backend selected (M3_DB_BACKEND=postgres) but no DSN found. "
-            "Set M3_PRIMARY_PG_URL (or M3_PG_URL) to a postgresql:// URL, or store "
-            "it in the encrypted vault as M3_PRIMARY_PG_URL. Refusing to fall back "
-            "to SQLite silently. NOTE: the primary store does not read PG_URL — "
-            "that is the data-warehouse DSN (now M3_CDW_PG_URL)."
+            "observed: PostgreSQL backend selected (M3_DB_BACKEND=postgres) but no "
+            "DSN was found. cause: M3_PRIMARY_PG_URL is not set in the environment "
+            "or the encrypted vault. inspect: set M3_PRIMARY_PG_URL to a "
+            "postgresql:// connection URL (e.g., "
+            "postgresql://user:pass@host:5432/dbname), or store it in the vault "
+            "with `m3 secrets set M3_PRIMARY_PG_URL <url>`. Note: PG_URL is the "
+            "data-warehouse DSN (now M3_CDW_PG_URL); the primary store reads only "
+            "M3_PRIMARY_PG_URL (or M3_PG_URL as a fallback). Will not silently fall "
+            "back to SQLite."
         )
     _reject_forbidden_host(url)
     _reject_same_as_warehouse(url)
@@ -336,13 +349,19 @@ def _reject_same_as_warehouse(primary_url: str) -> None:
     primary_id = _dsn_identity(primary_url)
     cdw_id = _dsn_identity(cdw)
     if primary_id is not None and primary_id == cdw_id:
+        # Extract host/port/dbname for observability — safe, no credentials
+        p_id = primary_id if primary_id else ("?", "?", "?")
         raise RuntimeError(
-            "The PostgreSQL PRIMARY-store DSN names the SAME database as the "
-            "data-warehouse DSN (same host/port/dbname). The warehouse is a shared "
-            "pg_sync fan-in mirror; the primary is this instance's authoritative "
-            "store — they must be different databases (a different dbname on the "
-            "same host is fine). Point M3_PRIMARY_PG_URL and M3_CDW_PG_URL at "
-            "distinct databases."
+            f"observed: PostgreSQL PRIMARY-store DSN names the SAME database as "
+            f"the warehouse DSN (host={p_id[0]}, port={p_id[1]}, "
+            f"dbname={p_id[2]}). cause: M3_PRIMARY_PG_URL and "
+            f"M3_CDW_PG_URL (or PG_URL) both resolve to the same database. "
+            f"The warehouse is a shared pg_sync fan-in mirror; the primary is "
+            f"this instance's authoritative store — they must be different "
+            f"databases. inspect: set M3_CDW_PG_URL to a different dbname "
+            f"(different database on the same host is fine, or a different host "
+            f"entirely). A different dbname on the same {p_id[0]}:{p_id[1]} is "
+            f"sufficient."
         )
 
 
@@ -681,8 +700,12 @@ class PostgresBackend:
             )
             if not os.path.exists(sql_path):
                 raise RuntimeError(
-                    f"PG schema file not found at {sql_path}. Cannot initialize the "
-                    f"PostgreSQL primary schema."
+                    f"observed: PostgreSQL schema file not found at {sql_path}. "
+                    f"possible: an incomplete install, a packaging error, or a "
+                    f"BASE_DIR pointing at the wrong tree. "
+                    f"inspect: verify the file exists in the m3-memory installation; "
+                    f"reinstall with `pip install m3-memory` if the file is missing. "
+                    f"Cannot initialize the PostgreSQL primary schema."
                 )
             with open(sql_path, encoding="utf-8") as f:
                 schema_sql = f.read()
@@ -727,8 +750,11 @@ class PostgresBackend:
                 from psycopg2.pool import ThreadedConnectionPool
             except ImportError as e:  # fail loud, actionable
                 raise RuntimeError(
-                    "psycopg2 is required for the PostgreSQL backend. "
-                    "Install it: pip install 'psycopg2-binary'."
+                    "observed: psycopg2 module is not available. "
+                    "cause: the PostgreSQL driver was not installed. "
+                    "inspect: install it with `pip install 'psycopg2-binary'` or "
+                    "`pip install 'm3-memory[postgres]'`. The PostgreSQL backend "
+                    "requires psycopg2 to connect to the database."
                 ) from e
             minconn = int(getenv_compat("M3_PG_POOL_MIN", "", str(_DEFAULT_MINCONN)) or _DEFAULT_MINCONN)
             maxconn = int(getenv_compat("M3_PG_POOL_MAX", "", str(_DEFAULT_MAXCONN)) or _DEFAULT_MAXCONN)

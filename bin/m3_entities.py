@@ -638,7 +638,10 @@ async def _smoke_profile(profile: Profile, token: str, valid_types, valid_predic
                 "It runs on primary-host at 192.0.2.10."
             )
         except Exception as e:
-            sys.exit(f"ERROR: profile smoke failed: {type(e).__name__}: {e}")
+            sys.exit(f"ERROR: profile smoke test failed. "
+                     f"observed: {type(e).__name__}: {str(e)[:150]}. "
+                     f"possible: profile misconfigured, model unreachable, or prompt invalid. "
+                     f"inspect: --profile argument, model in slm_profiles.yaml, API connectivity.")
     n_ents = len(out.get("entities", []))
     n_rels = len(out.get("relationships", []))
     print(f"[m3-entities] smoke OK: {n_ents} entities, {n_rels} relationships", flush=True)
@@ -835,7 +838,10 @@ async def _run_db(
                         # re-enabled in bulk.
                         counters["ctx_error"] += 1
                         _enqueue_ctx_error(memory_id, e)
-                        print(f"[m3-entities] CTX-ERROR {memory_id[:8]}: context exceeded (marked, no retry)", flush=True)
+                        print(f"[m3-entities] CTX-ERROR {memory_id[:8]}: context exceeded. "
+                              f"observed: content length exceeds model context window. "
+                              f"possible: input_max_chars insufficient for this memory_item. "
+                              f"marked for manual intervention; inspect: input_max_chars profile setting.", flush=True)
                         return
                     except Exception as e:
                         last_err = e
@@ -942,7 +948,9 @@ async def _main_async(args: argparse.Namespace) -> int:
     # onto the seam and verified on PG, so the gate was removed.)
     profile = load_profile(args.profile)
     if profile is None:
-        sys.exit(f"ERROR: profile {args.profile!r} not found")
+        sys.exit(f"ERROR: profile not found. "
+                 f"observed: load_profile({args.profile!r}) returned None. "
+                 f"inspect: --profile argument, slm_profiles.yaml.")
 
     # CLI flag wins. Otherwise honor M3_ENTITY_VOCAB_YAML env var (matches
     # memory_core.load_entity_vocab's contract). Final fallback: m3 default.
@@ -953,7 +961,9 @@ async def _main_async(args: argparse.Namespace) -> int:
     else:
         vocab_path = DEFAULT_VOCAB_YAML
     if not vocab_path.exists():
-        sys.exit(f"ERROR: vocab YAML not found: {vocab_path}")
+        sys.exit(f"ERROR: vocab YAML not found. "
+                 f"observed: {vocab_path} does not exist. "
+                 f"inspect: --entity-vocab-yaml argument or M3_ENTITY_VOCAB_YAML env var.")
     valid_types, valid_predicates = _load_vocab(vocab_path)
     print(f"[m3-entities] vocab: {vocab_path}", flush=True)
     print(f"[m3-entities]   types: {len(valid_types)} ({sorted(valid_types)[:6]}...)", flush=True)
@@ -988,7 +998,9 @@ async def _main_async(args: argparse.Namespace) -> int:
         if chatlog_db.exists():
             db_targets.append(("chatlog", chatlog_db))
     if not db_targets:
-        sys.exit("ERROR: no DBs found. Use --core-db / --chatlog-db or set M3_DATABASE.")
+        sys.exit("ERROR: no DBs found. "
+                 "observed: no core DB resolved and chatlog DB does not exist. "
+                 "inspect: --core-db argument, M3_DATABASE env var, or M3_CHATLOG_DATABASE.")
 
     # Build dry-run plan
     plan = {
@@ -1007,7 +1019,9 @@ async def _main_async(args: argparse.Namespace) -> int:
     if getattr(args, "source_conv_list", None):
         conv_path = Path(args.source_conv_list)
         if not conv_path.exists():
-            sys.exit(f"ERROR: --source-conv-list path not found: {conv_path}")
+            sys.exit(f"ERROR: --source-conv-list path not found. "
+                     f"observed: {conv_path} does not exist. "
+                     f"inspect: --source-conv-list argument.")
         conv_set = _load_conv_list(conv_path)
         print(f"[m3-entities] --source-conv-list: {len(conv_set)} conv_ids loaded", flush=True)
 
@@ -1036,7 +1050,9 @@ async def _main_async(args: argparse.Namespace) -> int:
     # Token + smoke
     token = get_api_key(profile.api_key_service) or ""
     if not token:
-        sys.exit(f"ERROR: no token resolved for service {profile.api_key_service!r}")
+        sys.exit(f"ERROR: API key not found. "
+                 f"observed: {profile.api_key_service!r} service returned no token. "
+                 f"inspect: vault (m3 admin store_secret), M3_VAULT_ADDR, or env var {profile.api_key_service}.")
 
     if not args.skip_preflight:
         await _smoke_profile(profile, token, valid_types, valid_predicates)

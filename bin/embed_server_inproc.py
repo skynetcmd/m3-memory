@@ -290,17 +290,22 @@ def _load_embedder() -> None:
 
         if config.m3_core_rs is None or not hasattr(config.m3_core_rs, "EmbeddedEmbedder"):
             logger.error(
-                "m3_core_rs.EmbeddedEmbedder unavailable (wheel missing or built "
-                "without --features embedded). Install with `m3 embedder install-gpu`. "
-                "This server has nothing to serve — exiting."
+                "observed: m3_core_rs.EmbeddedEmbedder not available. "
+                "cause: the m3-core-rs wheel is missing or was built without "
+                "--features embedded. inspect: run `m3 embedder install-gpu` to "
+                "install/rebuild the wheel; verify the installation with `m3 "
+                "doctor --embed`. This server has nothing to serve — exiting."
             )
             sys.exit(2)
 
         gguf = (os.environ.get("M3_EMBED_GGUF") or "").strip() or discover_bge_m3_gguf()
         if not gguf:
             logger.error(
-                "No bge-m3 GGUF found (set M3_EMBED_GGUF or place one in the model "
-                "dirs). Nothing to serve — exiting."
+                "observed: no bge-m3 GGUF model found. cause: either "
+                "M3_EMBED_GGUF is not set or no model file exists in the standard "
+                "model directories. inspect: set M3_EMBED_GGUF to the path to a "
+                "GGUF file, or place one in a discoverable model directory. Nothing "
+                "to serve — exiting."
             )
             sys.exit(2)
 
@@ -309,8 +314,13 @@ def _load_embedder() -> None:
         dim = emb.embedding_dim()
         if dim != config.EMBED_DIM:
             logger.error(
-                "GGUF dim %d != EMBED_DIM %d — vector-space mismatch would poison "
-                "the store. Exiting.", dim, config.EMBED_DIM
+                "observed: GGUF embedding dimension %d != EMBED_DIM %d. "
+                "cause: the GGUF model was built for a different embedding space. "
+                "possible: wrong model file specified (M3_EMBED_GGUF points to a "
+                "different model than expected). inspect: verify M3_EMBED_GGUF and "
+                "ensure it points to a bge-m3 model with dim=%d — a "
+                "dimension mismatch would poison the vector store. Exiting.",
+                dim, config.EMBED_DIM, config.EMBED_DIM
             )
             sys.exit(3)
         _embedder = emb
@@ -326,7 +336,14 @@ def _load_embedder() -> None:
     except SystemExit:
         raise
     except Exception as e:  # noqa: BLE001 — any load failure is fatal for a shared embedder
-        logger.error("Embedder load failed (fatal): %s", e)
+        logger.error(
+            "observed: embedder initialization raised an exception (%s: %s). "
+            "possible: corrupt GGUF file, insufficient VRAM, unsupported GPU, "
+            "or a dependency version conflict. inspect: check the full exception "
+            "trace above for specifics; run `m3 doctor --embed` to probe the "
+            "environment. Fatal — exiting without serving.",
+            type(e).__name__, e
+        )
         sys.exit(1)
 
 

@@ -42,7 +42,12 @@ def safe_keyring_get_password(service_name: str, username: str) -> str | None:
     # 2. Acquire lock to serialize keyring queries
     acquired = _KEYRING_LOCK.acquire(timeout=2.0)
     if not acquired:
-        logger.warning("Keyring lock contention. Keyring circuit breaker opened.")
+        logger.warning(
+            "Keyring lock contention detected; circuit breaker will open for 300s. "
+            "observed: lock acquisition timed out after 2s. "
+            "possible: another thread holds the keyring lock, or keyring itself is hanging. "
+            "inspect: verify keyring service availability with `python -c 'import keyring; print(keyring.backends.get_keyring())'`."
+        )
         _KEYRING_CB_OPEN_UNTIL = time.time() + 300.0
         return None
 
@@ -68,7 +73,12 @@ def safe_keyring_get_password(service_name: str, username: str) -> str | None:
                 logger.debug(f"Keyring lookup failed: {result}")
                 return None
         except queue.Empty:
-            logger.warning("Keyring lookup timed out after 2s. Opening circuit breaker for 300s.")
+            logger.warning(
+                "Keyring lookup timed out; circuit breaker will open for 300s. "
+                "observed: keyring thread did not return within 2s timeout. "
+                "possible: keyring service is busy, unresponsive, or blocked waiting on system resources. "
+                "inspect: check system keyring/credential manager for lock contention or resource issues (e.g., macOS Keychain, Windows Credential Manager, Linux secretservice/pass)."
+            )
             _KEYRING_CB_OPEN_UNTIL = time.time() + 300.0
             return None
     except Exception as e:
@@ -266,11 +276,18 @@ def _get_device_salt() -> bytes:
             if len(raw) == 16:
                 return raw
             logger.warning(
-                "M3_AGENT_OS_SALT_HEX must be 32 hex chars (16 bytes); got %d bytes — ignoring.",
-                len(raw),
+                f"M3_AGENT_OS_SALT_HEX wrong length; ignoring and will check file fallback. "
+                f"observed: hex string decoded to {len(raw)} bytes (not 16). "
+                "possible: M3_AGENT_OS_SALT_HEX was truncated or copied incompletely. "
+                "inspect: verify M3_AGENT_OS_SALT_HEX is exactly 32 hex characters."
             )
         except ValueError:
-            logger.warning("M3_AGENT_OS_SALT_HEX is not valid hex — ignoring.")
+            logger.warning(
+                "M3_AGENT_OS_SALT_HEX is not valid hex; will check file fallback. "
+                "observed: env var could not be decoded as 32-character hex string. "
+                "possible: typo or truncation in the M3_AGENT_OS_SALT_HEX value. "
+                "inspect: verify the value matches /^[0-9a-fA-F]{32}$/ (exactly 32 hex chars = 16 bytes)."
+            )
 
     from m3_sdk import get_m3_config_root, get_m3_root
     # Check config root first, fallback to legacy root
@@ -295,14 +312,10 @@ def _get_device_salt() -> bytes:
     # salt would orphan them — fail loud with an actionable message instead.
     if _vault_has_secrets():
         raise SaltMissingError(
-            f"Device salt missing at {salt_path} (and no M3_AGENT_OS_SALT_HEX), "
-            f"but the vault {_vault_db_path()} already holds encrypted secrets. "
-            "Minting a new salt would permanently orphan every existing secret "
-            "(they would never decrypt again). Restore the original "
-            ".agent_os_salt from a backup, or set M3_AGENT_OS_SALT_HEX to its "
-            "hex value. If the original salt is truly lost, the vault secrets "
-            "are unrecoverable — clear synchronized_secrets and re-enter the "
-            "keys from source, then a new salt will mint automatically."
+            f"Device salt is missing but the vault already holds encrypted secrets; refusing to mint a new salt. "
+            f"observed: salt file not found at {salt_path}, no M3_AGENT_OS_SALT_HEX env set, and vault {_vault_db_path()} contains encrypted_secrets rows. "
+            "possible: the salt file was deleted, the config/engine root was relocated without preserving .agent_os_salt, a backup restore was incomplete, or the file system is corrupted. "
+            "inspect: (1) check if .agent_os_salt exists in the config root or legacy root (get_m3_root() / get_m3_config_root()); (2) restore from backup if available; (3) if salt is unrecoverable and secrets can be re-entered, clear synchronized_secrets with `DELETE FROM synchronized_secrets` and retry — a fresh salt will mint automatically."
         )
 
     # Genuine fresh install (empty/absent vault): mint a new salt.
@@ -320,7 +333,12 @@ def _get_device_salt() -> bytes:
         if os.name != "nt":
             os.chmod(salt_path, 0o600)
     except Exception as e:
-        logger.warning(f"Could not save device salt to {salt_path}: {e}")
+        logger.warning(
+            f"Could not write device salt to file; will use in-memory salt for this process only. "
+            f"observed: write to {salt_path} failed with {type(e).__name__}. "
+            "possible: parent directory does not exist, insufficient permissions, or file system read-only. "
+            f"inspect: verify parent directory exists (`ls -d {os.path.dirname(salt_path)}`), has write permission (mode 700 preferred), and is not on a read-only mount."
+        )
     return salt
 
 
@@ -502,7 +520,12 @@ def get_api_key(service: str) -> str | None:
             if row and row[0]:
                 master_key = get_master_key()
                 if not master_key:
-                    logger.warning(f"Found encrypted secret for {service}, but AGENT_OS_MASTER_KEY is missing from keyring.")
+                    logger.warning(
+                        f"Encrypted secret exists for {service}, but master key is unavailable; returning None. "
+                        f"observed: synchronized_secrets row found for service={service}, but AGENT_OS_MASTER_KEY not in env or keyring. "
+                        "possible: AGENT_OS_MASTER_KEY was cleared from the keyring, the env var is unset, or the keyring is inaccessible. "
+                        "inspect: (1) check env vars: `env | grep AGENT_OS_MASTER_KEY`; (2) check keyring: `keyring get system AGENT_OS_MASTER_KEY` (Linux/macOS) or Credential Manager (Windows)."
+                    )
                     return None
 
                 # Try current iteration count first, fall back to legacy
@@ -514,7 +537,12 @@ def get_api_key(service: str) -> str | None:
                     # Try legacy PBKDF2 iterations
                     decrypted = _decrypt_token(row[0], master_key, iterations=_PBKDF2_LEGACY_ITERATIONS)
                     if decrypted:
-                        logger.warning(f"Secret '{service}' decrypted with legacy iterations. Auto-migrating.")
+                        logger.warning(
+                            f"Secret '{service}' will be auto-migrated to current PBKDF2 iteration count. "
+                            f"observed: decryption succeeded only with legacy iterations ({_PBKDF2_LEGACY_ITERATIONS:,}, not {_PBKDF2_ITERATIONS:,}). "
+                            "cause: secret was encrypted before the PBKDF2 iteration count was raised (pre-2026-08-xx). "
+                            "inspect: migration will run after this access; verify sync completes with `m3 memory memory_search --query synchronized_secrets`."
+                        )
                         needs_migration = True
                     else:
                         logger.debug(f"Failed to decrypt vault secret for {service}")
@@ -536,7 +564,12 @@ def get_api_key(service: str) -> str | None:
             # so EVERY vault read is now failing. Surface it once, prominently,
             # then return None so the caller falls through (env/keyring) rather
             # than crashing the server on a secret it can't decrypt anyway.
-            logger.error("Vault unreadable: %s", exc)
+            logger.error(
+                "Vault is unreadable and will remain so until the salt is restored. "
+                f"observed: SaltMissingError raised during vault access — {exc}. "
+                "cause: device salt file missing or inaccessible, preventing decryption of any secret in the vault. "
+                "inspect: review the SaltMissingError message above for recovery steps (restore salt file, set M3_AGENT_OS_SALT_HEX, or clear secrets and start fresh)."
+            )
         except Exception as exc:
             logger.debug(f"Failed to read from encrypted vault: {type(exc).__name__}")
         finally:

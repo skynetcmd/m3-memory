@@ -553,7 +553,7 @@ class TestSecureWolfsslDiscovery:
         lib.write_bytes(b"the-real-bytes")
         monkeypatch.setenv("M3_WOLFSSL_LIB", str(lib))
         monkeypatch.setenv("M3_WOLFSSL_SHA256", "00" * 32)  # wrong
-        with pytest.raises(RuntimeError, match="integrity pin"):
+        with pytest.raises(RuntimeError, match="integrity check failed"):
             cp._resolve_wolfssl_path()
 
     def test_integrity_pin_accepts_match(self, monkeypatch, tmp_path):

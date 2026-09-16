@@ -114,7 +114,10 @@ async def call_reflector(
         r = await client.post(profile.url, json=payload, headers=headers,
                               timeout=profile.timeout_s)
         if r.status_code != 200:
-            raise RuntimeError(f"reflector http {r.status_code}: {r.text[:200]}")
+            raise RuntimeError(f"reflector HTTP error. "
+                               f"observed: {r.status_code} from {profile.url}. "
+                               f"response: {r.text[:200]}. "
+                               f"inspect: profile.url, model availability, API connectivity.")
         data = r.json()
         blocks = data.get("content", [])
         text = "".join(
@@ -125,9 +128,10 @@ async def call_reflector(
         # recording an empty result as a successful one.
         if reply_ran_out_of_room(text, data.get("stop_reason")):
             raise RuntimeError(
-                f"reflector: {profile.model} hit max_tokens ({max_tokens}) with "
-                f"no text block — raise the profile's max_tokens, or thinking "
-                f"was not suppressed on a reasoning model")
+                f"reflector: truncated output. "
+                f"observed: {profile.model} returned no text block with stop_reason={data.get('stop_reason')!r}. "
+                f"possible: max_tokens={max_tokens} too small, or thinking/streaming not properly suppressed. "
+                f"inspect: profile.max_tokens, model reasoning mode, response format.")
     else:
         payload = {
             "model": profile.model,
@@ -148,15 +152,19 @@ async def call_reflector(
         r = await client.post(profile.url, json=payload, headers=headers,
                               timeout=profile.timeout_s)
         if r.status_code != 200:
-            raise RuntimeError(f"reflector http {r.status_code}: {r.text[:200]}")
+            raise RuntimeError(f"reflector HTTP error. "
+                               f"observed: {r.status_code} from {profile.url}. "
+                               f"response: {r.text[:200]}. "
+                               f"inspect: profile.url, model availability, API connectivity.")
         data = r.json()
         choice = (data.get("choices") or [{}])[0]
         text = (choice.get("message", {}).get("content") or "").strip()
         if reply_ran_out_of_room(text, choice.get("finish_reason")):
             raise RuntimeError(
-                f"reflector: {profile.model} hit max_tokens ({max_tokens}) with "
-                f"an empty content — raise the profile's max_tokens, or thinking "
-                f"was not suppressed on a reasoning model")
+                f"reflector: truncated output. "
+                f"observed: {profile.model} returned empty content with finish_reason={choice.get('finish_reason')!r}. "
+                f"possible: max_tokens={max_tokens} too small, or reasoning/streaming not properly suppressed. "
+                f"inspect: profile.max_tokens, model reasoning mode, response format.")
     return parse_reflector_output(text)
 
 
@@ -380,11 +388,14 @@ def main() -> None:
 
     profile = load_profile(PROFILE_NAME)
     if not profile:
-        sys.exit(f"ERROR: profile {PROFILE_NAME!r} not found. "
-                 f"Set REFLECTOR_PROFILE env var or create config/slm/{PROFILE_NAME}.yaml.")
+        sys.exit(f"ERROR: profile not found. "
+                 f"observed: load_profile({PROFILE_NAME!r}) returned None. "
+                 f"inspect: REFLECTOR_PROFILE env var or config/slm/{PROFILE_NAME}.yaml.")
     token = get_api_key(profile.api_key_service) or ""
     if not token:
-        sys.exit(f"ERROR: no token resolved for service {profile.api_key_service!r}")
+        sys.exit(f"ERROR: API key not found. "
+                 f"observed: {profile.api_key_service!r} service returned no token. "
+                 f"inspect: vault (m3 admin store_secret), M3_VAULT_ADDR, or env var {profile.api_key_service}.")
 
     if args.force_conversation:
         asyncio.run(force_mode(args, profile, token))
