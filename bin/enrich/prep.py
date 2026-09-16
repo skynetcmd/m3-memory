@@ -8,6 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from m3_core.paths import resolve_engine_file
 from m3_sdk import get_m3_root
 from slm_intent import (
     Profile,
@@ -40,7 +41,15 @@ def _resolve_db(arg_path: str | None, env_var: str, default_name: str) -> Path |
     if env_val:
         p = Path(env_val).expanduser().resolve()
         return p if p.exists() else None
-    p = REPO_ROOT / "memory" / default_name
+    # Resolve through the engine-root seam, which also honours the legacy
+    # <repo>/memory/ location for pre-Homecoming installs. Hardcoding REPO_ROOT
+    # here made the default depend on the CALLER'S CHECKOUT: from a scheduled
+    # task's working directory nothing matched, so every run exited "no DBs
+    # found to drain" (129/129 runs, 2026-09-16). Worse from a dev tree, where
+    # <repo>/memory/agent_memory.db exists as a 32 KB stub with no memory_items
+    # table at all — the drain would silently work an empty queue and report
+    # success while the real 316 MB store went untouched.
+    p = Path(resolve_engine_file(default_name))
     return p if p.exists() else None
 
 

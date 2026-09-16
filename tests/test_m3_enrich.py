@@ -497,3 +497,47 @@ def test_chatlog_ingest_auto_enrich_gated_by_env(monkeypatch):
     assert "observation_enqueue_impl" in src
     # Debounce guard
     assert "M3_AUTO_ENRICH_MIN_TURNS" in src
+
+
+def test_resolve_db_uses_engine_root_not_the_checkout(tmp_path, monkeypatch):
+    """The default DB must come from the engine root, not the caller's checkout.
+
+    Regression: _resolve_db built its default as ``REPO_ROOT / "memory" / name``,
+    a pre-Homecoming location. That made the answer depend on WHERE the process
+    was started. From a scheduled task's working directory nothing matched and
+    every run exited "no DBs found to drain" (measured 129/129 runs on
+    2026-09-16). From a dev checkout it was worse than an error: a leftover
+    ``memory/agent_memory.db`` stub resolves, has no ``memory_items`` table, and
+    the drain reports success against an empty queue while the real store is
+    never touched — a silent wrong-store, not a loud failure.
+    """
+    from enrich.prep import _resolve_db
+
+    engine = tmp_path / "engine"
+    engine.mkdir()
+    (engine / "agent_memory.db").write_bytes(b"")
+    monkeypatch.setenv("M3_ENGINE_ROOT", str(engine))
+    monkeypatch.delenv("M3_DATABASE", raising=False)
+    monkeypatch.delenv("M3_MEMORY_ROOT", raising=False)
+
+    resolved = _resolve_db(None, "M3_DATABASE", "agent_memory.db")
+
+    assert resolved is not None, "must resolve from the engine root, not return None"
+    assert Path(resolved).parent == engine, f"resolved outside the engine root: {resolved}"
+
+
+def test_resolve_db_still_honours_explicit_arg_and_env(tmp_path, monkeypatch):
+    """The seam change must not disturb the higher-precedence sources."""
+    from enrich.prep import _resolve_db
+
+    explicit = tmp_path / "explicit.db"
+    explicit.write_bytes(b"")
+    env_db = tmp_path / "from_env.db"
+    env_db.write_bytes(b"")
+
+    monkeypatch.setenv("M3_DATABASE", str(env_db))
+    assert Path(_resolve_db(str(explicit), "M3_DATABASE", "agent_memory.db")) == explicit
+    assert Path(_resolve_db(None, "M3_DATABASE", "agent_memory.db")) == env_db
+
+    # A path that does not exist resolves to None, so the caller can skip it.
+    assert _resolve_db(str(tmp_path / "absent.db"), "M3_DATABASE", "agent_memory.db") is None
