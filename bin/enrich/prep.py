@@ -111,8 +111,12 @@ def _ensure_migration_025(db_path: Path) -> None:
             ).fetchone()
             if not has_items:
                 print(
-                    f"[m3-enrich] {db_path.name}: no memory_items table — "
-                    f"skipping migration 025 (not a core store)",
+                    f"[m3-enrich] {db_path.name}: skipping migration 025. "
+                    f"observed: no memory_items table. "
+                    f"cause: 025 indexes memory_items, so executescript() "
+                    f"would abort on that statement after committing the "
+                    f"queues. inspect: this store's own migrations create the "
+                    f"queues it needs.",
                     flush=True,
                 )
                 return

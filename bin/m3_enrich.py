@@ -643,7 +643,27 @@ async def _drain_queue_mode(args, profile, token: str) -> int:
         if chatlog_db:
             db_targets.append(("chatlog", chatlog_db))
     if not db_targets:
-        sys.exit("ERROR: no DBs found to drain.")
+        # Name what was tried and where it looked. The bare form of this message
+        # fired 129 consecutive times without telling anyone which path failed.
+        from m3_core.paths import get_m3_engine_root
+
+        scope = (
+            "chatlog only" if args.chatlog_only
+            else "core only" if args.core_only
+            else "core + chatlog"
+        )
+        sys.exit(
+            f"ERROR: no DBs found to drain. "
+            f"observed: scope={scope}, engine_root={get_m3_engine_root()}, "
+            f"core_db={args.core_db or 'unset'}, "
+            f"chatlog_db={args.chatlog_db or 'unset'}, "
+            f"M3_DATABASE={os.environ.get('M3_DATABASE') or 'unset'}, "
+            f"M3_CHATLOG_DATABASE={os.environ.get('M3_CHATLOG_DATABASE') or 'unset'}. "
+            f"possible: the engine root is wrong, the databases have not been "
+            f"created yet, or an explicit --core-db/--chatlog-db points at a "
+            f"file that does not exist. "
+            f"inspect: M3_ENGINE_ROOT, and `m3 doctor` for the resolved roots."
+        )
 
     print(f"[m3-enrich] drain-queue mode  profile={profile.name}  "
           f"batch={args.drain_batch}", flush=True)

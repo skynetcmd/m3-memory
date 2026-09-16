@@ -525,12 +525,14 @@ def resolve_db_path(explicit: Optional[str] = None) -> str:
             else "the active_database() context"
         )
         raise ValueError(
-            f"resolve_db_path() got a {scheme}:// DSN from {source}, but it "
-            f"resolves a SQLite FILE path. A DSN here would be joined onto the "
-            f"working directory and silently become an empty database. "
-            f"To select a non-SQLite backend set M3_DB_BACKEND (and the "
-            f"backend's own DSN variable, e.g. M3_PRIMARY_PG_URL); leave "
-            f"M3_DATABASE unset or pointing at a SQLite file."
+            f"resolve_db_path() resolves a SQLite FILE path, but got a DSN. "
+            f"observed: {scheme}:// DSN from {source}. "
+            f"cause: a DSN here is joined onto the working directory by "
+            f"abspath(), producing a path SQLite will happily create as an "
+            f"empty database while the configured store goes untouched. "
+            f"inspect: M3_DB_BACKEND selects a non-SQLite backend (with that "
+            f"backend's own DSN variable, e.g. M3_PRIMARY_PG_URL); "
+            f"M3_DATABASE must be unset or point at a SQLite file."
         )
     return os.path.abspath(candidate)
 

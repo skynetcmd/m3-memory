@@ -28,11 +28,13 @@ running task; (2) the old check-then-write was NOT atomic, so two simultaneous
 fires (Boot+Logon) could both pass — a double secret_rotator / sync_all, etc.
 """
 
+import datetime
 import logging
 import os
 import pathlib
 import subprocess
 import sys
+import time
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -255,20 +257,69 @@ def _rotate_if_oversized(log_path: pathlib.Path) -> None:
         )
 
 
+class _TimestampedStream:
+    """Line-oriented stream wrapper that prefixes each line with a UTC stamp.
+
+    A scheduled task's log is read long after the run, often to decide WHICH
+    run a traceback belongs to. `logging` stamps its own records, but a bare
+    ``print()`` writes straight to the redirected stdout and lands undated —
+    and entrypoints here print far more than they log (m3_enrich.py: 45 prints,
+    zero logging calls). On 2026-09-16 that left observation_drain.log with no
+    way to order a traceback against the runs around it except by line number.
+
+    Only the FIRST write of a line is stamped, so a partial write followed by
+    its continuation does not gain a stamp mid-line.
+    """
+
+    def __init__(self, stream):
+        self._stream = stream
+        self._at_line_start = True
+
+    def write(self, text: str) -> int:
+        if not text:
+            return 0
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%S.%fZ"
+        )
+        out = []
+        for i, part in enumerate(text.split("\n")):
+            if i:
+                out.append("\n")
+                self._at_line_start = True
+            if part and self._at_line_start:
+                out.append(f"{stamp} ")
+                self._at_line_start = False
+            out.append(part)
+        self._stream.write("".join(out))
+        return len(text)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
 def _redirect_output(log_path: pathlib.Path, logger_name: str | None) -> None:
     """Point stdout/stderr at the logfile and configure logging onto it."""
     # Bound the log BEFORE opening the handle (see _rotate_if_oversized).
     _rotate_if_oversized(log_path)
     # Line-buffered, utf-8 so non-ASCII log output doesn't crash on cp1252.
     fh = open(log_path, "a", encoding="utf-8", buffering=1)
-    sys.stdout = fh
-    sys.stderr = fh
+    stamped = _TimestampedStream(fh)
+    sys.stdout = stamped
+    sys.stderr = stamped
+    # UTC, not local time: these logs are correlated against the Rust embed
+    # server (which emits ISO-8601 Z) and against a PostgreSQL warehouse on
+    # another host. A local stamp with no offset cannot be lined up with
+    # either, and silently shifts twice a year.
+    logging.Formatter.converter = time.gmtime
     # force=True overrides any module-level basicConfig() that ran at import
     # time in the entrypoint or its dependencies.
+    # Same ISO-8601 shape as the print stamps above and as the Rust embed
+    # server, so every line in the file sorts and parses identically.
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
+        format="%(asctime)s.%(msecs)03dZ [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+        handlers=[logging.StreamHandler(fh)],
         force=True,
     )
     if logger_name:

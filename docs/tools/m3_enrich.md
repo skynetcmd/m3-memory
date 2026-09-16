@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich.py
-sha1: cc7a010714c7
-mtime_utc: 2026-08-07T23:53:52.134759+00:00
-generated_utc: 2026-08-08T14:40:49.924949+00:00
+sha1: 9cd9512fbb5d
+mtime_utc: 2026-09-16T15:07:39.342773+00:00
+generated_utc: 2026-09-16T15:12:04.415226+00:00
 private: false
 ---
 
@@ -45,7 +45,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Entry points
 
-- `def main()` (line 976)
+- `def main()` (line 996)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -99,6 +99,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Environment variables read
 
+- `M3_CHATLOG_DATABASE`
 - `M3_DATABASE`
 - `M3_EMBED_MODEL`
 - `M3_EMBED_URL`
@@ -144,6 +145,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 - `enrich.prep (_backup_db, _ensure_migration_025, _load_profile_with_path, _resolve_db, _today)`
 - `enrich.rate_limit (_classify_observer_error, _estimate_cost_wall, _RateLimitCascade)`
 - `enrich.report (_print_dry_run, _print_run_summary)`
+- `m3_core.paths (get_m3_engine_root)`
 - `memory.backends (active_backend)`
 - `memory.backends.postgres_backend (_make_compat_cursor_factory)`
 
