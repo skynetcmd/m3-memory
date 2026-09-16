@@ -154,13 +154,27 @@ def generate_configs():
     # context (a per-process hang risk; see §3 "headless knob -> config file, not
     # env var"). Instead seed it into the SHARED config so the single :8082 server
     # owns the one CUDA context and all clients defer to it.
+    # Probe m3's OWN models root FIRST, via the get_m3_models_root() seam whose
+    # docstring states the rule: "the one model location that does not belong to
+    # a third party ... a user who drops LM Studio, Ollama, or llama.cpp keeps a
+    # working embedder." A GGUF under a third-party tree is only as durable as
+    # that application's install, and losing it breaks the embed server on its
+    # NEXT restart — a deferred failure that surfaces at a reboot, far from the
+    # cause. The LM Studio path stays as a fallback so existing boxes keep
+    # working; it is simply no longer preferred.
     embed_gguf = os.environ.get("M3_EMBED_GGUF", "")
     if not embed_gguf:
-        candidate = os.path.expanduser(
-            "~/.lmstudio/models/deepsweet/bge-m3-GGUF-Q4_K_M/bge-m3-GGUF-Q4_K_M.gguf"
-        )
-        if os.path.exists(candidate):
-            embed_gguf = candidate
+        from m3_core.paths import get_m3_models_root
+
+        for candidate in (
+            os.path.join(get_m3_models_root(), "bge-m3-Q4_K_M.gguf"),
+            os.path.expanduser(
+                "~/.lmstudio/models/deepsweet/bge-m3-GGUF-Q4_K_M/bge-m3-GGUF-Q4_K_M.gguf"
+            ),
+        ):
+            if os.path.exists(candidate):
+                embed_gguf = candidate
+                break
     try:
         from m3_memory.embedder_admin import seed_shared_config
         _cfg_path, _wrote = seed_shared_config(gguf_path=embed_gguf or None)
