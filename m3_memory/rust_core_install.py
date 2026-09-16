@@ -36,9 +36,37 @@ from m3_memory._platform import os_name as _os_name
 # PyPI install (by version) and the GitHub-release asset fetch (by tag).
 # 3.7.4 was the first release whose wheels bundle the m3-embed-server binary.
 #
-# 3.9.7 / v2026.9.7 (2026-09-08). Verify the Release is complete with:
-#   gh release view v2026.9.7 --repo skynetcmd/m3-core-rs
+# 3.9.16 / v2026.9.16 (2026-09-16). Verify the Release is complete with:
+#   gh release view v2026.9.16 --repo skynetcmd/m3-core-rs
 #   (expect 28 assets: 7 (os,backend) packages x cp311-314)
+#
+# ⚠ 3.9.16 CHANGES THE EMBED SERVER'S MEMORY FOOTPRINT PER WHEEL. Each worker
+# stream materialises its own llama.cpp compute graph on FIRST USE, sized for a
+# worst-case n_ctx batch, and holds it for the process lifetime — measured
+# ~3.85 GiB per stream (bge-m3, n_ctx=8192). The cost tracks n_ctx^2 x heads,
+# so it is a property of the MODEL, not the backend: a CPU-only box pays the
+# same ~4 GiB per stream as a GPU box.
+#
+# So the default now depends on the WHEEL, because the wheel implies the
+# hardware:
+#   GPU wheels (cuda / vulkan / metal) -> streams = 2
+#       A discrete GPU or Apple unified memory implies a machine with headroom,
+#       and the second context buys concurrency for bulk ingest.
+#   CPU-only wheels                    -> streams = 1
+#       A CPU-only deployment is the modest-hardware case almost by definition;
+#       a second graph is a large fraction of such a machine. Better to ship
+#       something that runs than something fast that will not fit.
+#
+# ⚠ THIS IS A MEMORY-FOR-THROUGHPUT TRADE, not a free win. One context serves
+# one embedding batch at a time, so on a CPU-only host concurrent callers now
+# QUEUE where they previously ran on two contexts — most visible during bulk
+# ingest. `queue_depth` on the server's /metrics shows whether callers are
+# waiting; if they are and the host has the memory, raise it.
+#
+# Total footprint is bounded: baseline + streams x graph. It is NOT a leak —
+# exactly `streams` requests pay, and every request after that is free whatever
+# its size. Overridable per host by M3_EMBED_STREAMS or [embed].streams in the
+# server's config.toml; the resolved value is logged at startup.
 #
 # WHERE EACH WHEEL LIVES — not every backend can go to PyPI. The CUDA wheels
 # exceed PyPI's per-file size limit (windows-cuda ~244 MiB, linux-cuda ~949 MiB
@@ -59,8 +87,8 @@ from m3_memory._platform import os_name as _os_name
 # because pip exits 0 — a stale success is worse than a clean miss. Fixing the
 # PyPI publishers (see docs) does not make PyPI-first correct again; leave the
 # Release first.
-M3_CORE_RS_VERSION = "3.9.7"
-M3_CORE_RS_GIT_TAG = "v2026.9.7"
+M3_CORE_RS_VERSION = "3.9.16"
+M3_CORE_RS_GIT_TAG = "v2026.9.16"
 
 # Cargo features per backend, mirroring build_wheel.py's _MATRIX (the source
 # fallback passes these to maturin via pip's config-settings).

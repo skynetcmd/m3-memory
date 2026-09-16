@@ -19,7 +19,28 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- The Rust core pin moves to 3.9.16 (`v2026.9.16`). Its embed server now sizes
+  its worker contexts by wheel: GPU wheels (cuda/vulkan/metal) keep two, CPU-only
+  wheels use one. Each context holds a compute graph of roughly 3.85 GiB for
+  bge-m3 at the default context length, so a CPU-only host uses about 4 GiB less
+  after this upgrade.
+
+  **This is a memory-for-throughput trade.** One context serves one embedding
+  batch at a time, so concurrent callers queue where they previously ran on two
+  contexts — most visible during bulk ingest. Raise it with `M3_EMBED_STREAMS`
+  or `[embed].streams` in the server's `config.toml` if the host has the memory;
+  `queue_depth` on the server's `/metrics` shows whether callers are waiting.
+  The resolved value is logged at startup.
+- The embed server logs its backend, model path, config file and every embed
+  parameter at startup, and reports oversized input as HTTP 413 with the token
+  and context counts rather than an opaque 500.
+
+### Fixed
+
+- Four advisories in the Rust core's transitive dependencies (`rustls`, `h2`,
+  `crossbeam-epoch`, `anyhow`).
 
 ---
 
