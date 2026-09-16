@@ -291,7 +291,9 @@ than confirming receipt one turn later.
 Detection is a few percent of any sane budget. What actually breaks delivery:
 
 - **nothing armed** — a session-scoped watcher dies with the session; a bounded
-  loop disarms after N iterations;
+  loop disarms after N iterations; a *single-shot* waiter disarms itself by
+  design on every delivery, so the read-and-re-arm must be one operation, not
+  two steps an agent is trusted to remember;
 - **the agent is mid-turn** — queued, not dropped, but the wait is a turn length;
 - **a silently dead watcher** — indistinguishable from a quiet inbox.
 
@@ -313,13 +315,27 @@ a second instance.
 
 ### If you build a watcher
 
-Two failure modes that look identical to healthy from outside:
+Three failure modes that look identical to healthy from outside:
 
 - **Unbuffered output is mandatory.** A long-running Python watcher with buffered
   stdout emits nothing for minutes. `python -u`, or you cannot tell a live
   supervisor from a dead one.
 - **Silence must not mean success.** A filter matching only the happy path stays
   quiet through a crash. Match the failure signatures too.
+- **Arm it so the runtime owns the process.** A single-shot waiter's contract is
+  that *process exit is the wake signal*. Background it inside a shell call
+  (`nohup … &`) and the process survives as an orphan the runtime has no handle
+  on: detection still works, receipts are still stamped, and the wake signal is
+  delivered to nobody. In Claude Code, launch it with the Bash tool's
+  `run_in_background` (the result confirms *"you will be notified when it
+  completes"*); anything else silently degrades to polling. **Check that the
+  task actually appears in the runtime's background-task list** — its absence
+  there is the only external symptom.
+
+That third one is the general shape worth naming: a mechanism can be complete
+and correct and still be severed at the boundary where its output would have
+mattered. Ask not "does it work" but "does its output reach the thing that
+needs it".
 
 ### What no adapter can do
 

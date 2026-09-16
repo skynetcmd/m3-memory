@@ -716,7 +716,21 @@ def notifications_ack_impl(notification_id: int) -> str:
     return f"Acked notification {notification_id}"
 
 def notifications_ack_all_impl(agent_id: str) -> str:
-    """Marks all unread notifications for an agent as read."""
+    """Marks all unread notifications for an agent as read.
+
+    ⚠ RACES WITH ARRIVAL. This acks everything unread AT THE MOMENT IT RUNS,
+    including messages that landed while the caller was composing a reply and
+    has therefore never seen. `notifications` carries one timestamp, `read_at`,
+    so that flag was the ONLY record the work was pending -- there is no second
+    field to recover from, and the lost message becomes indistinguishable from
+    one the agent read and declined to answer.
+
+    Prefer :func:`notifications_ack_impl` with a specific id. Reserve this for
+    deliberately clearing a backlog you have decided not to read; never chain it
+    after a reply. Receipt is a separate concern already handled by
+    `notifications_mark_received` (targets `received_at IS NULL`, idempotent,
+    never touches `read_at`).
+    """
     require_agent_id(agent_id, "notifications_ack_all")
     _d = dialect()
 

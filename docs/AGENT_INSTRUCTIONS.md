@@ -461,8 +461,31 @@ These work identically regardless of which model is on either side:
 | `memory_inbox_ack(memory_id)` | Acknowledge after processing. |
 | `notify(agent_id, kind, payload)` | Push a structured event to another agent. |
 | `notifications_poll(agent_id, unread_only, limit)` | Pull unacked notifications (including `refresh_due` from maintenance). |
-| `notifications_ack(notification_id)` / `notifications_ack_all(agent_id)` | Dismiss after addressing. |
+| `notifications_ack(notification_id)` | Dismiss ONE notification, by id, after addressing it. Prefer this. |
+| `notifications_ack_all(agent_id)` | Bulk-dismiss. ⚠ Races with arrival — see the warning below. |
 | `task_create` / `task_assign` / `task_update` / `task_delete` / `task_set_result` / `task_get` / `task_list` / `task_tree` | Shared task graph across the fleet — any agent can read or update. |
+
+#### ⚠ Never chain `notifications_ack_all` after replying
+
+`ack_all` dismisses **everything unread at the moment it runs** — including
+messages that arrived *while you were composing your reply*, which you have
+never seen. There is no second timestamp to recover from: the table carries only
+`read_at`, so that flag was the sole record the work was pending. The lost
+message is then indistinguishable from one you read and chose not to answer.
+
+Ack **what you actually read, by id**:
+
+```
+notifications_poll --agent_id me --unread_only   # read them
+notifications_ack --notification_id 1254         # ack each one you handled
+```
+
+Detection-time receipt is already handled separately: `notifications_mark_received`
+targets `received_at IS NULL`, is idempotent, and never touches `read_at`, so a
+message stays unread and still appears under `--unread_only`.
+
+Reserve `ack_all` for deliberately clearing a backlog you have decided not to
+read — never as a cleanup step after a reply.
 
 #### ⚠ Addressing is asymmetric — read this before wiring a poller
 

@@ -92,3 +92,67 @@ def test_fresh_install_no_data_returns_engine_path(tmp_path, monkeypatch):
     resolved = m3_sdk._default_db_path()
     expected = os.path.join(m3_sdk.get_m3_engine_root(), "agent_memory.db")
     assert os.path.abspath(resolved) == os.path.abspath(expected)
+
+
+# ── DSN-in-M3_DATABASE guard ──────────────────────────────────────────────────
+# Regression: resolve_db_path() ran os.path.abspath() on its candidate
+# unconditionally, so a DSN became a path rooted at the CWD. On Windows that
+# produced WinError 123 and wedged AgentOS_NotificationWaiter in a restart loop
+# (2026-09-12); on POSIX the mangled name is a LEGAL path, so SQLite would have
+# created an empty DB there and every read would have silently returned nothing.
+
+@pytest.mark.parametrize("dsn", [
+    "postgresql://user:pw@db.example.invalid:5432/agent_memory",
+    "postgres://u@h/db",
+    "mysql://u@h/db",
+    "mariadb://u@h/db",
+    "sqlite:///tmp/x.db",
+    "  POSTGRESQL://upper@h/db  ",  # whitespace + case must not evade the guard
+])
+def test_dsn_is_rejected_not_coerced(dsn, monkeypatch):
+    monkeypatch.setenv("M3_DATABASE", dsn)
+    with pytest.raises(ValueError) as exc:
+        m3_sdk.resolve_db_path(None)
+    assert "M3_DATABASE" in str(exc.value)
+    assert "M3_DB_BACKEND" in str(exc.value), "must point at the right knob"
+
+
+def test_dsn_error_does_not_leak_password(monkeypatch):
+    """A DSN carries credentials; the message must not echo them."""
+    monkeypatch.setenv("M3_DATABASE", "postgresql://dbuser:hunter2@h:5432/db")
+    with pytest.raises(ValueError) as exc:
+        m3_sdk.resolve_db_path(None)
+    assert "hunter2" not in str(exc.value)
+    assert "dbuser" not in str(exc.value)
+
+
+def test_explicit_dsn_argument_is_rejected(monkeypatch):
+    with pytest.raises(ValueError) as exc:
+        m3_sdk.resolve_db_path("postgresql://u@h/db")
+    assert "explicit argument" in str(exc.value)
+
+
+def test_windows_drive_path_is_not_mistaken_for_a_dsn(monkeypatch):
+    r"""`C:\...` parses as scheme 'c' under urlparse — must still be a PATH.
+
+    This is why the guard matches known DSN schemes instead of asking whether
+    the value merely has a scheme.
+    """
+    monkeypatch.setenv("M3_DATABASE", r"C:\Users\x\.m3\engine\agent_memory.db")
+    assert m3_sdk.resolve_db_path(None).lower().endswith("agent_memory.db")
+
+
+def test_ordinary_paths_still_resolve(tmp_path, monkeypatch):
+    """The guard must not disturb the normal path."""
+    p = tmp_path / "agent_memory.db"
+    monkeypatch.setenv("M3_DATABASE", str(p))
+    assert m3_sdk.resolve_db_path(None) == os.path.abspath(str(p))
+    # explicit arg wins over env, and is still absolutised
+    other = tmp_path / "other.db"
+    assert m3_sdk.resolve_db_path(str(other)) == os.path.abspath(str(other))
+
+
+def test_relative_path_is_still_absolutised(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("M3_DATABASE", "rel/agent_memory.db")
+    assert os.path.isabs(m3_sdk.resolve_db_path(None))

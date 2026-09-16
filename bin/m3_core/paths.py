@@ -471,14 +471,67 @@ def _default_db_path() -> str:
     return os.path.join(get_m3_engine_root(), "agent_memory.db")
 
 
+#: URL schemes that identify a DSN rather than a filesystem path. A DSN reaching
+#: this function is always a configuration error (see :func:`resolve_db_path`),
+#: never something to coerce. Kept broad on purpose: any scheme here is a
+#: connection string for SOME backend, and none of them is ever a SQLite file.
+_DSN_SCHEMES: tuple[str, ...] = (
+    "postgres://", "postgresql://", "mysql://", "mariadb://", "sqlite://",
+)
+
+
+def _looks_like_dsn(value: str) -> bool:
+    """True when ``value`` is a connection string, not a filesystem path.
+
+    Scheme-prefix match rather than ``urlparse``: a Windows path (``C:\\...``)
+    parses as scheme ``c``, so a generic "has a scheme" test would reject the
+    most common valid input on this platform.
+    """
+    return value.strip().lower().startswith(_DSN_SCHEMES)
+
+
 def resolve_db_path(explicit: Optional[str] = None) -> str:
     """Resolve an absolute SQLite DB path.
 
     Order: explicit arg > M3_DATABASE env > active_database ContextVar > default
     (memory/agent_memory.db). Returns an absolute path so pool-cache keys are
     consistent regardless of caller CWD.
+
+    Raises ``ValueError`` when the resolved candidate is a DSN. This function
+    answers "which SQLite FILE", so a connection string is a configuration
+    error, not an input to coerce — but ``os.path.abspath`` coerces it happily,
+    joining it onto the CWD (§3 fail loud, never silent)::
+
+        M3_DATABASE=postgresql://u:p@host:5432/agent_memory
+        -> C:\\Users\\bhaba\\.m3-dev\\m3-memory\\postgresql:\\u:p@host:5432\\agent_memory
+
+    Nothing rejects that path; SQLite simply creates an empty database at it.
+    The caller then reads and writes a real store that is silently EMPTY, while
+    the configured PostgreSQL store goes untouched. Measured 2026-09-12: this
+    wedged AgentOS_NotificationWaiter into a restart loop
+    (``WinError 123``), which was the mild outcome only because the mangled
+    name happened to be syntactically illegal on Windows. The same value on
+    Linux is a perfectly legal path, so it would have silently created the
+    stub and reported healthy — the far worse failure this guard prevents.
     """
     candidate = explicit or os.environ.get("M3_DATABASE") or _active_db.get() or _default_db_path()
+    if _looks_like_dsn(candidate):
+        # Name the source so the operator knows WHICH knob to fix; the value is
+        # echoed scheme-only because a DSN carries a password.
+        scheme = candidate.strip().split("://", 1)[0]
+        source = (
+            "the explicit argument" if explicit
+            else "M3_DATABASE" if os.environ.get("M3_DATABASE")
+            else "the active_database() context"
+        )
+        raise ValueError(
+            f"resolve_db_path() got a {scheme}:// DSN from {source}, but it "
+            f"resolves a SQLite FILE path. A DSN here would be joined onto the "
+            f"working directory and silently become an empty database. "
+            f"To select a non-SQLite backend set M3_DB_BACKEND (and the "
+            f"backend's own DSN variable, e.g. M3_PRIMARY_PG_URL); leave "
+            f"M3_DATABASE unset or pointing at a SQLite file."
+        )
     return os.path.abspath(candidate)
 
 

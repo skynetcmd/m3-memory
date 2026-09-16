@@ -77,6 +77,14 @@ interrupt you — see *Delivery* in [MULTI_AGENT.md](./MULTI_AGENT.md#-delivery-
 A poll loop that checks between tasks is a poll loop that checks when nothing
 is happening.
 
+Arm the waiter so **the runtime owns the process** — in Claude Code, the Bash
+tool's `run_in_background`, which re-invokes you on exit. Backgrounding it inside
+a shell call (`nohup … &`) leaves an orphan the runtime cannot notify: it detects
+mail correctly and wakes nobody, and the only visible symptom is that no
+background task appears in the status line. A single-shot waiter also disarms on
+every delivery, so **re-arm in the same step that reads the inbox** — a re-arm
+that depends on remembering is the defect, not the forgetting.
+
 ### 3. Put the decision in the payload
 
 Every message should be answerable without asking a follow-up. In practice that

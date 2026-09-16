@@ -990,6 +990,28 @@ _SELF_HEAL_TASKS = {
     # that DOES launch exit EXIT_ALREADY_RUNNING without binding, so it never
     # double-binds (supervisors treat that exit as clean, not a crash).
     "AgentOS_Dashboard": "PT5M",
+    # AgentOS_NotificationWaiter: PT10M. Omitted until 2026-09-15, which left it
+    # the ONE long-lived ONSTART task with no heal — and unlike the others it does
+    # not merely die on a crash, it exits CLEANLY every hour BY DESIGN
+    # (`--timeout 3600`, so a forgotten waiter cannot leak). With no re-fire that
+    # made the hourly exit terminal: the receipt SLA was dead until the next
+    # reboot, and `Next Run Time` read blank because a bare ONSTART trigger has
+    # no future occurrence. Measured 2026-09-15: last run 2026-09-14 22:32,
+    # result 1, no next run — ~30h of silently missed agent-to-agent receipts.
+    #
+    # PT10M, not PT5M: the SLA this task serves is a <30s ack AFTER it is running;
+    # the re-fire only bounds how long a DEAD waiter stays dead, and a 10-min
+    # worst-case gap on agent-to-agent receipts is well inside tolerance at a
+    # fifth of the dispatch churn. Deliberately coarser than the embedder's PT5M,
+    # whose death is a fleet-wide outage.
+    #
+    # Safe to re-fire despite the waiter having NO single-instance lock of its own
+    # (unlike CognitiveLoop/EmbedServer/Dashboard): MultipleInstancesPolicy=
+    # IgnoreNew is set on every task by _render_task_xml, so the SCHEDULER refuses
+    # the duplicate before a second process exists. Verified on the live task
+    # (MultipleInstances=IgnoreNew) — the guarantee comes from the OS here, not
+    # from the payload, so do not drop IgnoreNew from the template.
+    "AgentOS_NotificationWaiter": "PT10M",
 }
 
 
