@@ -541,3 +541,47 @@ def test_resolve_db_still_honours_explicit_arg_and_env(tmp_path, monkeypatch):
 
     # A path that does not exist resolves to None, so the caller can skip it.
     assert _resolve_db(str(tmp_path / "absent.db"), "M3_DATABASE", "agent_memory.db") is None
+
+
+def test_migration_025_skips_a_store_without_memory_items(tmp_path, capsys):
+    """025 indexes memory_items, so it must not run against a chatlog-only store.
+
+    Regression: the drain applies 025 whenever either queue is missing, but the
+    script's last statement indexes ``memory_items``. On a store without that
+    table ``executescript`` aborts PARTWAY THROUGH — the queues it already
+    created are committed, the index is not, and the run dies with
+    ``sqlite3.OperationalError: no such table: main.memory_items``. Observed
+    2026-09-16 on the first drain that got far enough to reach a real DB.
+    """
+    import sqlite3
+
+    from enrich.prep import _ensure_migration_025
+
+    chatlog = tmp_path / "agent_chatlog.db"
+    sqlite3.connect(str(chatlog)).close()
+
+    _ensure_migration_025(chatlog)  # must not raise
+
+    assert "skipping migration 025" in capsys.readouterr().out
+
+
+def test_migration_025_still_applies_to_a_core_store(tmp_path):
+    """The guard must not disable the migration where it belongs."""
+    import sqlite3
+
+    from enrich.prep import _ensure_migration_025
+
+    core = tmp_path / "agent_memory.db"
+    conn = sqlite3.connect(str(core))
+    conn.execute(
+        "CREATE TABLE memory_items (id TEXT, type TEXT, user_id TEXT, valid_from TEXT)"
+    )
+    conn.commit()
+    conn.close()
+
+    _ensure_migration_025(core)
+
+    conn = sqlite3.connect(str(core))
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert {"observation_queue", "reflector_queue"}.issubset(tables)

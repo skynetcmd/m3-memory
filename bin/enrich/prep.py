@@ -99,6 +99,23 @@ def _ensure_migration_025(db_path: Path) -> None:
 
         # Apply migration 025 if either queue is missing.
         if not {'observation_queue', 'reflector_queue'}.issubset(existing):
+            # 025 also indexes memory_items (an aid to the observation/raw split
+            # at retrieval time), so it only applies to a store that HAS that
+            # table. A chatlog-only store does not, and executescript() aborts
+            # partway through, leaving the migration half-applied and the next
+            # run to rediscover a missing queue. Skip rather than crash: the
+            # queues this drain needs are created by that store's own
+            # migrations, so there is nothing for 025 to do here.
+            has_items = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_items'"
+            ).fetchone()
+            if not has_items:
+                print(
+                    f"[m3-enrich] {db_path.name}: no memory_items table — "
+                    f"skipping migration 025 (not a core store)",
+                    flush=True,
+                )
+                return
             up_path = REPO_ROOT / "memory" / "migrations" / "025_observation_queue.up.sql"
             if up_path.exists():
                 conn.executescript(up_path.read_text(encoding="utf-8"))
