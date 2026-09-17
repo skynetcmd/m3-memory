@@ -38,6 +38,43 @@ def wal_fingerprint(wal: pathlib.Path) -> tuple:
         return ()
 
 
+def refresh_agent_ids(current: "list[str]") -> "list[str]":
+    """The live agent list, or ``current`` unchanged if it cannot be read.
+
+    ⚠ WHY A LONG-LIVED WAITER MUST RE-READ THIS. Agent ids are resolved at
+    INSTALL time. On Windows the PT10M re-fire restarts the task, so a newly
+    registered agent is picked up within ten minutes. launchd and systemd hold
+    ONE process for as long as it lives, so a baked-in list would go stale and
+    STAY stale -- a new agent would never be watched on macOS or Linux.
+
+    That is not hypothetical. Measured 2026-09-12: the waiter ran with
+    `antigravity-agent` (last seen in MAY) while the live agent `agy` went
+    unwatched -- 36 notifications to it, ZERO with receipt recorded, for hours.
+    Watching a dead inbox costs one poll; MISSING a live one is the failure this
+    whole feature exists to prevent.
+
+    Returns ``current`` on any error: a waiter watching a slightly stale list is
+    degraded, a waiter that dies watches nothing.
+    """
+    try:
+        import re as _re
+
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from memory.orchestration import agent_list_impl  # type: ignore
+
+        # "@" is in the class: an id may be "type@instance", and excluding it
+        # would silently truncate every instance-addressed inbox to its bare
+        # type -- re-creating the shared inbox the scheme exists to split.
+        ids = _re.findall(r"\[([A-Za-z0-9_.~@+-]+)\]", agent_list_impl("", "") or "")
+        return ids or current
+    except Exception as exc:  # noqa: BLE001 -- degraded beats dead
+        _warn(f"could not refresh the agent list, keeping the current one. "
+              f"observed: {type(exc).__name__}: {exc}. "
+              f"possible: the registry is unreadable from this interpreter. "
+              f"inspect: memory.orchestration.agent_list_impl")
+        return current
+
+
 def notification_wal_paths(engine_root: str) -> "list[pathlib.Path]":
     """The -wal file of EVERY store a notification can land in.
 
@@ -513,6 +550,10 @@ def main() -> int:
 
     if args.supervise:
         while True:
+            # Re-read the registry between iterations. A long-lived supervisor
+            # outlives the install that chose its agent list; see
+            # refresh_agent_ids for the incident this prevents.
+            args.agent_ids = refresh_agent_ids(args.agent_ids)
             rc = _wait_once(args)
             if rc not in (0, 2):          # 0 = delivered, 2 = idle timeout
                 return rc                 # a real failure must surface, not spin

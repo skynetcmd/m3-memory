@@ -246,6 +246,7 @@ def install_unix_cognitive_loop(m3_memory_root):
 
         _install_macos_loop_watchdog(m3_memory_root, python_exe)
         _install_embed_server_or_report(m3_memory_root, python_exe)
+        _install_unix_notification_waiter(m3_memory_root, python_exe)
 
     elif os_name == "Linux":
         template = os.path.join(bin_dir, "m3-cognitive-loop.service")
@@ -269,6 +270,7 @@ def install_unix_cognitive_loop(m3_memory_root):
 
         _install_linux_loop_watchdog(m3_memory_root, python_exe)
         _install_embed_server_or_report(m3_memory_root, python_exe)
+        _install_unix_notification_waiter(m3_memory_root, python_exe)
     else:
         _safe_print(f"{WARN} install_unix_cognitive_loop: unsupported OS {os_name}")
 
@@ -561,6 +563,80 @@ def _remove_linux_loop_watchdog() -> None:
                        capture_output=True)
     except (OSError, subprocess.SubprocessError) as e:
         _safe_print(f"{WARN} could not remove loop watchdog: {e}")
+
+
+def _install_unix_notification_waiter(m3_memory_root: str, python_exe: str) -> None:
+    """Install the notification waiter as a native user service.
+
+    launchd on macOS, systemd --user on Linux. Until this existed the waiter was
+    a Windows scheduled task with NO counterpart on the other two supported
+    OSes, so the <30s agent-to-agent receipt SLA held on Windows alone. §0.4 --
+    a green run on one platform proves nothing about the others.
+
+    Never raises. A failure here must not break an installer whose other steps
+    succeeded; the waiter is reported as missing rather than taking the install
+    down with it.
+    """
+    osn = _os_name()
+    try:
+        bin_dir = os.path.join(m3_memory_root, "bin")
+        os.makedirs(os.path.join(m3_memory_root, "logs"), exist_ok=True)
+
+        if osn == "Darwin":
+            template = os.path.join(bin_dir, "com.m3memory.notificationwaiter.plist")
+            if not os.path.exists(template):
+                _safe_print(f"{WARN} Missing waiter template: {template}")
+                return
+            dest_dir = os.path.expanduser("~/Library/LaunchAgents")
+            os.makedirs(dest_dir, exist_ok=True)
+            dest = os.path.join(dest_dir, "com.m3memory.notificationwaiter.plist")
+            with open(dest, "w", encoding="utf-8") as f:
+                f.write(_render_template(template, m3_memory_root, python_exe))
+            _run(["launchctl", "unload", dest], capture_output=True)
+            r = _run(["launchctl", "load", dest], capture_output=True, text=True)
+            if r.returncode == 0:
+                _safe_print(f"{OK} Installed + loaded launchd agent: {dest}")
+            else:
+                _safe_print(f"{WARN} launchctl load failed for the notification "
+                            f"waiter: {(r.stderr or '').strip()}")
+
+        elif osn == "Linux":
+            template = os.path.join(bin_dir, "m3-notification-waiter.service")
+            if not os.path.exists(template):
+                _safe_print(f"{WARN} Missing waiter template: {template}")
+                return
+            dest_dir = os.path.expanduser("~/.config/systemd/user")
+            os.makedirs(dest_dir, exist_ok=True)
+            dest = os.path.join(dest_dir, "m3-notification-waiter.service")
+            with open(dest, "w", encoding="utf-8") as f:
+                f.write(_render_template(template, m3_memory_root, python_exe))
+            _run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+            r = _run(["systemctl", "--user", "enable", "--now",
+                      "m3-notification-waiter.service"],
+                     capture_output=True, text=True)
+            if r.returncode == 0:
+                _safe_print(f"{OK} Installed + started systemd --user unit: {dest}")
+            else:
+                _safe_print(f"{WARN} systemctl enable --now failed for the "
+                            f"notification waiter: {(r.stderr or '').strip()}")
+            # A user unit stops at logout unless lingering is enabled, which
+            # would silently end the receipt SLA on a headless box.
+            lg = _run(["loginctl", "show-user", os.environ.get("USER", ""),
+                       "--property=Linger"], capture_output=True, text=True)
+            if "Linger=yes" not in (lg.stdout or ""):
+                _safe_print(
+                    f"{WARN} systemd --user services stop at logout on this host. "
+                    f"observed: Linger is not enabled. "
+                    f"possible: the receipt SLA ends when you log out. "
+                    f"inspect: loginctl enable-linger {os.environ.get('USER', '<user>')}"
+                )
+    except Exception as e:  # noqa: BLE001 -- see docstring
+        _safe_print(f"{WARN} Notification waiter service not installed. "
+                    f"observed: {type(e).__name__}: {e}. "
+                    f"possible: no launchctl/systemctl on this host, or the "
+                    f"template is missing. "
+                    f"inspect: bin/com.m3memory.notificationwaiter.plist, "
+                    f"bin/m3-notification-waiter.service")
 
 
 def _install_macos_loop_watchdog(m3_memory_root: str, python_exe: str) -> None:

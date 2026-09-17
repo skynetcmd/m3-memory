@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  m3-memory agent notification waiter — macOS launchd agent template.
+
+  Installed by bin/install_schedules.py, which substitutes [M3_MEMORY_ROOT] and
+  [M3_PYTHON] and writes the result to
+  ~/Library/LaunchAgents/com.m3memory.notificationwaiter.plist.
+
+  WHAT THIS SERVES: the agent-to-agent receipt SLA — a message acknowledged
+  within 30 seconds of arrival while the waiter is running. Until this existed,
+  that SLA held on WINDOWS ONLY: the waiter was registered as a scheduled task
+  there and had no launchd or systemd counterpart, so macOS and Linux agents
+  detected nothing. §0.4 — a green run on one OS proves nothing about the
+  others.
+
+  WHY --supervise. Without it the waiter exits 0 the moment mail arrives, which
+  is its wake signal for a single-shot caller. Under a KeepAlive supervisor that
+  would mean a restart per message. With it, one process serves every inbox for
+  an hour and the only routine exit is the --timeout below.
+
+  WHY --interval 5, not 1. Five seconds is 17% of the 30s budget at a fifth of
+  the stat() calls (720/hr vs 3,600/hr). Detection was never the scarce
+  resource; agent turns are.
+
+  WHY NO --agent-id HERE. The Windows task bakes the list in at install time and
+  its PT10M re-fire refreshes it. A launchd agent is ONE long-lived process, so
+  a baked-in list would go stale and STAY stale — a newly registered agent would
+  never be watched. The waiter re-reads the registry each supervise iteration
+  instead (see refresh_agent_ids); the single --agent-id below is only a
+  bootstrap seed for the first pass, because the flag is required.
+
+  KeepAlive is unconditional, matching com.m3memory.cognitiveloop: the waiter
+  exits CLEANLY every hour by design (--timeout 3600, so a forgotten waiter
+  cannot leak), and that exit must be restarted or the receipt SLA dies until
+  the next login. ThrottleInterval bounds a crash-on-startup loop.
+
+  ⚠ Windows gets single-instance from the scheduler (MultipleInstances=
+  IgnoreNew); the waiter has NO lock of its own. launchd gives the same property
+  by a different mechanism — it owns the process and will not start a second
+  copy of a loaded label — so the guarantee is re-established here rather than
+  inherited. Do not run this alongside a hand-started waiter.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.m3memory.notificationwaiter</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>[M3_PYTHON]</string>
+        <!-- -u is REQUIRED, not cosmetic: without it Python buffers stdout and
+             a live supervisor emits nothing for minutes, which is
+             indistinguishable from a dead one. -->
+        <string>-u</string>
+        <string>[M3_MEMORY_ROOT]/bin/m3_notification_waiter.py</string>
+        <string>--agent-id</string>
+        <string>claude-code</string>
+        <string>--interval</string>
+        <string>5</string>
+        <string>--supervise</string>
+        <string>--timeout</string>
+        <string>3600</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+    <key>StandardOutPath</key>
+    <string>[M3_MEMORY_ROOT]/logs/m3_notification_waiter.log</string>
+    <key>StandardErrorPath</key>
+    <string>[M3_MEMORY_ROOT]/logs/m3_notification_waiter.log</string>
+</dict>
+</plist>

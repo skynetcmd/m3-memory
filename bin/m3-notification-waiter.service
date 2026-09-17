@@ -1,0 +1,68 @@
+# m3-memory agent notification waiter — Linux systemd --user unit template.
+#
+# Installed by bin/install_schedules.py, which substitutes [M3_MEMORY_ROOT] and
+# [M3_PYTHON] and writes the result to
+# ~/.config/systemd/user/m3-notification-waiter.service, then runs
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now m3-notification-waiter.service
+#
+# WHAT THIS SERVES: the agent-to-agent receipt SLA — a message acknowledged
+# within 30 seconds of arrival while the waiter is running. Until this existed
+# that SLA held on WINDOWS ONLY: the waiter was a scheduled task there with no
+# launchd or systemd counterpart, so macOS and Linux agents detected nothing.
+# §0.4 — a green run on one OS proves nothing about the others.
+#
+# WHY --supervise. Without it the waiter exits 0 the moment mail arrives, which
+# is its wake signal for a single-shot caller. Under Restart=always that would
+# mean a restart per message. With it, one process serves every inbox for an
+# hour and the only routine exit is the --timeout below.
+#
+# WHY --interval 5, not 1. Five seconds is 17% of the 30s budget at a fifth of
+# the stat() calls (720/hr vs 3,600/hr). Detection was never the scarce
+# resource; agent turns are.
+#
+# WHY NO --agent-id LIST HERE. The Windows task bakes the list in at install
+# time and its PT10M re-fire refreshes it. A systemd unit is ONE long-lived
+# process, so a baked-in list would go stale and STAY stale — a newly registered
+# agent would never be watched. Measured 2026-09-12: a waiter running with a
+# dead identity while the live agent went unwatched lost receipt on 36
+# notifications. The waiter re-reads the registry each supervise iteration
+# instead (see refresh_agent_ids); the single --agent-id below is only a
+# bootstrap seed for the first pass, because the flag is required.
+#
+# Headless / server boxes where the user is not always logged in may want
+#   loginctl enable-linger <user>
+# so the waiter runs without an active login session. Without it, systemd --user
+# stops at logout and the receipt SLA stops with it.
+
+[Unit]
+Description=m3-memory agent notification waiter (<30s receipt SLA)
+After=network.target
+
+[Service]
+Type=simple
+# -u is REQUIRED, not cosmetic: without it Python buffers stdout and a live
+# supervisor emits nothing for minutes, which is indistinguishable from a dead
+# one. Cost a false "supervise is broken" diagnosis while this was built.
+ExecStart=[M3_PYTHON] -u [M3_MEMORY_ROOT]/bin/m3_notification_waiter.py --agent-id claude-code --interval 5 --supervise --timeout 3600
+# Unconditional, matching the cognitive loop and the embed server: the waiter
+# exits CLEANLY every hour by design (--timeout 3600, so a forgotten waiter
+# cannot leak), and that exit must be restarted or the receipt SLA dies until
+# the next login.
+Restart=always
+RestartSec=10
+# NOTE: deliberately NO StartLimitBurst/StartLimitIntervalSec override. systemd's
+# start-limit is a restart BUDGET, and an exhausted budget is the exact failure
+# the embed server hit on Windows (2026-09-13: SCM spent RESTART x3 on a sick
+# GPU driver, the driver was fixed the next day, and nothing ever retried — 30h
+# down). An hourly clean exit would consume such a budget within a day.
+#
+# ⚠ Windows gets single-instance from the scheduler (MultipleInstances=
+# IgnoreNew); the waiter has NO lock of its own. systemd gives the same property
+# by a different mechanism — one unit, one main process — so the guarantee is
+# re-established here rather than inherited. Do not run this alongside a
+# hand-started waiter.
+LimitNOFILE=4096
+
+[Install]
+WantedBy=default.target
