@@ -58,8 +58,35 @@ CREATE TABLE IF NOT EXISTS schema_versions (
     applied_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+--
+-- ── WHY IDS START AT 1,000,000,000 ───────────────────────────────────────────
+--
+-- `notifications` and `notification_dispatch` are different tables in
+-- different stores, and both would otherwise autoincrement from 1. Every id
+-- would then exist twice, and `notifications_ack_impl(id)` takes a BARE
+-- INTEGER -- so an ack could close the wrong message, and a waiter comparing a
+-- set of ids would treat two distinct messages as one. Measured while building
+-- the split: a cross-store read returned [1, 1] for two different rows.
+--
+-- The floor makes ids globally distinguishable without changing the tool
+-- surface: no "dispatch:1" parsing for callers, no UUID migration.
+--
+-- WHY THIS NUMBER. The main store is at max_id 1272 after five months and
+-- writes ~722 notifications/week on this box. A 1,001 offset collides
+-- IMMEDIATELY; a billion is ~26,000 years of headroom at that rate. The
+-- constant is deliberately far past any plausible volume rather than tuned
+-- close to it.
+--
+-- ⚠ THE CHECK IS THE POINT, not the seeded sequence. A gap someone must
+-- remember to preserve is not a guarantee -- the first hand-written INSERT with
+-- an explicit id breaks it silently. The constraint makes the database refuse
+-- a colliding id, so the property is enforced rather than hoped for (§3:
+-- prefer the mechanism that makes the lie impossible over the docstring that
+-- forbids it).
+
 CREATE TABLE IF NOT EXISTS notification_dispatch (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    id               INTEGER PRIMARY KEY AUTOINCREMENT
+                     CHECK (id >= 1000000000),
 
     -- `memory_id` is a soft reference into memory_items in the MAIN store (no
     -- FK -- it is a different database). The payload lives there because that
@@ -106,6 +133,13 @@ CREATE TABLE IF NOT EXISTS notification_dispatch (
     conversation_id  TEXT DEFAULT NULL,
     reply_to_id      INTEGER DEFAULT NULL
 );
+
+-- Seed the sequence so the FIRST generated id is already past the floor.
+-- AUTOINCREMENT reads sqlite_sequence; without this row the first insert would
+-- be id 1 and the CHECK above would reject it -- loudly, which is the right
+-- failure, but this makes the table usable rather than merely safe.
+INSERT OR IGNORE INTO sqlite_sequence (name, seq)
+    VALUES ('notification_dispatch', 1000000000);
 
 -- The waiter's hot path: unread mail for one agent, newest first. Runs per
 -- registered agent every few seconds, so it is the query that must not degrade
