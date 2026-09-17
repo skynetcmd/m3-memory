@@ -141,6 +141,18 @@ If you need the memory layer that most reliably surfaces the right past state, t
 
 **Fact:** Confidence is **evidence-driven**, not decoration: it starts from provenance priors, moves with corroboration and contradiction, **decays toward neutral** when un-reinforced, and carries an optional **Bayesian Beta(α,β) posterior** — all wired into write-time aggregation and a scheduled maintenance pass (`bin/memory/confidence.py`, `bin/memory_maintenance.py`). A contradicted fact is auto-superseded and its confidence drops on the next pass. Deletion is **bitemporal and non-destructive**: supersession closes the old fact's validity interval and links the new one (it never overwrites content), the history stays queryable, and there's first-class **GDPR erasure/export** (Articles 17/20) with a full cascade (`bin/memory/write.py`, `bin/memory_maintenance.py`). This is the opposite of the "crude vector delete" the concern describes.
 
+### ❌ Myth: "M3 is passive storage that just waits to be queried"
+
+**Fact:** M3 includes an active **orchestration engine**. While it serves as a storage substrate, components like the `AgentOS_NotificationWaiter` actively monitor inbox changes and state mutations, automatically firing predefined agent actions when relevant events occur. It doesn't just wait to be queried; it actively drives agent workflows. *(Note: This active orchestration relies on agents supporting background processes, which modern autonomous agents natively support).*
+
+### ❌ Myth: "M3 is strictly an MCP server and requires an MCP client to use"
+
+**Fact:** M3 exposes a **full CLI for every single tool**. While it functions seamlessly as an MCP server for IDEs and desktop agents, it is equally a first-class shell citizen. Every tool can be scripted from the terminal with full support for **piping, outputting to files, and structured JSON output**. Backend systems, CI/CD pipelines, and custom applications can natively script, query, and manipulate M3 memory directly from the shell without ever needing an MCP-compatible client.
+
+### ❌ Myth: "M3 is strictly for single-user local environments"
+
+**Fact:** M3 is built to support **teams, fleets, and enterprise deployments**. While the default engine runs locally at the edge for privacy, its data boundary is tailnet-gated and syncs to a PostgreSQL warehouse (`bin/pg_sync.py`). This provides full provenance with strict scope isolation across **organizations, teams, and users**, allowing fleets of agents to share state securely.
+
 ---
 
 ## What M3 actually is
