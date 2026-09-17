@@ -280,15 +280,21 @@ def expand_host_patterns(hosts: "list[str] | tuple[str, ...]") -> "list[str]":
 def build_transport_security(host: str, public_hosts: "list[str] | None" = None):
     """Build the Host/Origin allowlist for the streamable-HTTP transport.
 
-    FastMCP auto-enables DNS-rebinding protection when its CONSTRUCTION-time host
-    is loopback -- which it always is in memory_bridge, because the real bind
-    host is assigned to settings afterwards. The resulting allowlist is
-    loopback-only, so a tunnelled request carrying a public Host header is
-    rejected with 421 BEFORE auth ever runs.
+    On mcp 1.x, FastMCP auto-enables DNS-rebinding protection when its
+    CONSTRUCTION-time host is loopback -- which it always is in memory_bridge,
+    because the real bind host is assigned to settings afterwards. The resulting
+    allowlist is loopback-only, so a tunnelled request carrying a public Host
+    header is rejected with 421 BEFORE auth ever runs.
 
     Returning an explicit settings object replaces that implicit allowlist. The
     loopback entries are kept (local clients and health probes must keep
     working) and the operator's public hostnames are added.
+
+    ⚠ On mcp 2.x there IS no construction-time host -- host/port moved into
+    run(), so the implicit loopback default described above does not exist and
+    the explicit object below is the ONLY allowlist. That makes returning it
+    load-bearing rather than merely a replacement, which is why attach() reads
+    back that it landed instead of assuming it did.
     """
     from mcp.server.transport_security import TransportSecuritySettings
 
@@ -399,7 +405,19 @@ def attach(mcp, host: str, port: int, token: str, public_hosts: "list[str] | Non
     auth_settings, verifier = build_auth(host, port, token)
     settings.auth = auth_settings
     setattr(mcp, _VERIFIER_ATTR, verifier)
-    settings.transport_security = build_transport_security(host, public_hosts)
+
+    # Transport security: a Settings FIELD on mcp 1.x, a run() KEYWORD on 2.x
+    # (where assigning it raises ValueError, exactly like host/port). Stash it on
+    # the instance for run_http to pass through on 2.x rather than assigning into
+    # a Settings that would reject it.
+    #
+    # This one is security-relevant, not cosmetic: the object is the DNS-
+    # rebinding Host/Origin allowlist. Silently failing to apply it would leave
+    # the server accepting a tunnelled request with a forged Host header, so the
+    # read-back below covers it too.
+    ts = build_transport_security(host, public_hosts)
+    import mcp_compat
+    mcp_compat.set_transport_security(mcp, ts)
 
     # Read back: an assignment that did not stick is indistinguishable from one
     # that was never made, and both serve the catalog unauthenticated.
@@ -407,5 +425,12 @@ def attach(mcp, host: str, port: int, token: str, public_hosts: "list[str] | Non
         raise AuthConfigError(
             "auth wiring did not take effect on the FastMCP instance -- "
             "refusing to start unauthenticated"
+        )
+    # Same read-back for the rebinding allowlist, wherever it landed. An
+    # allowlist that did not stick is indistinguishable from one never built.
+    if mcp_compat.get_transport_security(mcp) is not ts:
+        raise AuthConfigError(
+            "DNS-rebinding allowlist did not take effect -- refusing to start "
+            "(a forged Host header would otherwise reach the transport)"
         )
     return verifier

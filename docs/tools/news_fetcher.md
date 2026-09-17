@@ -1,8 +1,8 @@
 ---
 tool: bin/news_fetcher.py
-sha1: c5112f2805f6
-mtime_utc: 2026-07-02T01:21:24.713175+00:00
-generated_utc: 2026-07-03T20:00:03.781715+00:00
+sha1: de8a471f7d37
+mtime_utc: 2026-09-17T16:09:13.613226+00:00
+generated_utc: 2026-09-17T16:21:39.870838+00:00
 private: false
 ---
 
@@ -34,7 +34,7 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `mcp_compat (FastMCP)`
 
 ---
 
@@ -42,14 +42,13 @@ _(none detected)_
 
 **http**
 
-- `requests.get()  → `NEWS_API_URL`` (line 55)
+- `requests.get()  → `NEWS_API_URL`` (line 53)
 
 
 ---
 
 ## Notable external imports
 
-- `mcp (FastMCP)`
 - `requests`
 
 ---

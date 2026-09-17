@@ -12,22 +12,29 @@
 # across Ollama, LM Studio, llama.cpp --server, vLLM, and LocalAI.
 
 # --- Core Engine & MCP ---
-# ⚠ mcp <2 and fastmcp <4 are DELIBERATE, not staleness. Both majors exist
-# (mcp 2.2.0, fastmcp 4.0.4) and both install cleanly -- the blocker is an API
-# rename, measured 2026-09-17 in a throwaway venv:
+# ⚠ mcp <2 and fastmcp <4 are a CONSERVATIVE DEFAULT, not a hard incompatibility.
+# The code runs on BOTH majors: bin/mcp_compat.py owns the differences, and the
+# full suite is green on each (mcp 1.30.0: 4980 passed; mcp 2.2.0: 4545 passed,
+# measured 2026-09-17).
 #
-#   from mcp.server.fastmcp import FastMCP
-#   -> ModuleNotFoundError: No module named 'mcp.server.fastmcp'.
-#      "This is mcp 2.x, where FastMCP was renamed to MCPServer."
+# What 2.x actually changed, and where it is handled:
+#   * FastMCP renamed to MCPServer          -> mcp_compat resolves the import
+#   * Settings lost host/port/streamable_http_path
+#                                            -> mcp_compat.run_http passes them
+#                                               to run() instead
+#   * Settings lost transport_security       -> mcp_compat.{set,get}_transport_
+#                                               security + http_app(). SECURITY-
+#                                               RELEVANT: building the ASGI app
+#                                               without passing it leaves DNS-
+#                                               rebinding protection silently OFF.
+# The auth surface (AccessToken, AuthSettings, TransportSecuritySettings) and
+# tool()/run()/add_tool()/remove_tool()/list_tools() were unchanged.
 #
-# That import is load-bearing in memory_bridge.py and five other bridges
-# (custom_tool_bridge, debug_agent_bridge, grok_bridge, web_research_bridge,
-# session_handoff), plus a `from mcp import FastMCP` fallback in
-# files_memory/tools.py. The auth/transport surface (AccessToken,
-# TransportSecuritySettings, AuthSettings) DID survive the major.
-#
-# Lifting the ceiling is a code migration to MCPServer, not a version bump.
-# Until that happens the ceiling is what keeps a fresh install working.
+# The ceiling stays because 2.x is not yet the version this project ships and
+# tests in CI -- keeping the shipped surface to one known-good major. Raising it
+# is now a pin change plus a CI matrix entry, NOT a code migration. Anything
+# importing an mcp server class outside mcp_compat is caught by
+# tests/test_serve_auth.py::TestMcpImportSeam.
 fastmcp>=3.4.7,<4
 mcp>=1.30.0,<2
 

@@ -8,18 +8,16 @@ from typing import Any, Dict, List
 
 import requests
 
-# Assuming MCP is a custom library in your system
-try:
-    from mcp import FastMCP
-except ImportError:
-    class FastMCP:
-        def __init__(self, name):
-            self.name = name
-
-        def tool(self):
-            def decorator(func):
-                return func
-            return decorator
+# ⚠ This file previously guarded `from mcp import FastMCP` with a fallback to a
+# hand-rolled stub whose `tool()` decorator returned the function unchanged.
+# That top-level import has NEVER resolved -- `FastMCP` is not exported from the
+# `mcp` package root on 1.x or 2.x -- so this module always ran on the stub and
+# registered ZERO tools while starting cleanly. A dead server that reports
+# healthy is exactly the §3 failure mode: the fault presents as a working
+# system. Verified 2026-09-17 against the installed mcp 1.30.0.
+#
+# mcp_compat owns the real import and raises if mcp is missing.
+from mcp_compat import FastMCP
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

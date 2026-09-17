@@ -964,10 +964,7 @@ def register(mcp) -> None:
 
 def _build_standalone_server():
     """Build a FastMCP server exposing only files_* tools."""
-    try:
-        from mcp.server.fastmcp import FastMCP
-    except ImportError:
-        from mcp import FastMCP  # type: ignore
+    from mcp_compat import FastMCP
 
     mcp = FastMCP("files-memory")
     register(mcp)

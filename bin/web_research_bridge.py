@@ -5,7 +5,7 @@ import os
 import sys
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp_compat import FastMCP
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 # All logs go to stderr. stdout is the MCP stdio transport channel.

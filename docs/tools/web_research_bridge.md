@@ -1,8 +1,8 @@
 ---
 tool: bin/web_research_bridge.py
-sha1: 0ec1146b2a82
-mtime_utc: 2026-07-02T01:21:24.725895+00:00
-generated_utc: 2026-07-03T20:00:04.114872+00:00
+sha1: 3673ab83e320
+mtime_utc: 2026-09-17T16:08:36.279464+00:00
+generated_utc: 2026-09-17T16:21:40.015286+00:00
 private: false
 ---
 
@@ -35,6 +35,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (M3Context)`
+- `mcp_compat (FastMCP)`
 
 ---
 
@@ -47,7 +48,6 @@ _(no subprocess / http / sqlite calls detected)_
 ## Notable external imports
 
 - `httpx`
-- `mcp.server.fastmcp (FastMCP)`
 
 ---
 

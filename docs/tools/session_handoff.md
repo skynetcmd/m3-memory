@@ -1,8 +1,8 @@
 ---
 tool: bin/session_handoff.py
-sha1: 8f16619e1e1e
-mtime_utc: 2026-07-19T03:04:59.631082+00:00
-generated_utc: 2026-07-19T19:29:22.868994+00:00
+sha1: 2dd3e37d9df0
+mtime_utc: 2026-09-17T16:08:36.280470+00:00
+generated_utc: 2026-09-17T16:21:39.933311+00:00
 private: false
 ---
 
@@ -35,6 +35,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (M3Context)`
+- `mcp_compat (FastMCP)`
 - `memory_core`
 
 ---
@@ -47,7 +48,6 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `mcp.server.fastmcp (FastMCP)`
 - `memory.backends (active_backend)`
 - `memory.backends (dialect)`
 

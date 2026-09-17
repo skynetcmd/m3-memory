@@ -1,8 +1,8 @@
 ---
 tool: bin/custom_tool_bridge.py
-sha1: 5a97efcf5846
-mtime_utc: 2026-07-26T18:57:32.823810+00:00
-generated_utc: 2026-08-31T03:18:26.566739+00:00
+sha1: bd6e93d71d3a
+mtime_utc: 2026-09-17T16:08:36.278462+00:00
+generated_utc: 2026-09-17T16:21:39.464963+00:00
 private: false
 ---
 
@@ -38,6 +38,7 @@ _(none detected)_
 - `llm_failover (clear_failover_caches)`
 - `llm_failover (get_best_llm)`
 - `m3_sdk (M3Context, StructuredLogger)`
+- `mcp_compat (FastMCP)`
 - `thermal_utils (get_thermal_status)`
 
 ---
@@ -51,7 +52,6 @@ _(no subprocess / http / sqlite calls detected)_
 ## Notable external imports
 
 - `httpx`
-- `mcp.server.fastmcp (FastMCP)`
 
 ---
 

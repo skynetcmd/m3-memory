@@ -1,8 +1,8 @@
 ---
 tool: bin/grok_bridge.py
-sha1: 979721cb01bb
-mtime_utc: 2026-07-02T01:21:24.687532+00:00
-generated_utc: 2026-07-03T20:00:03.414774+00:00
+sha1: 7bf0ad96b29e
+mtime_utc: 2026-09-17T16:08:36.279464+00:00
+generated_utc: 2026-09-17T16:21:39.588159+00:00
 private: false
 ---
 
@@ -35,6 +35,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (M3Context)`
+- `mcp_compat (FastMCP)`
 
 ---
 
@@ -47,7 +48,6 @@ _(no subprocess / http / sqlite calls detected)_
 ## Notable external imports
 
 - `httpx`
-- `mcp.server.fastmcp (FastMCP)`
 
 ---
 

@@ -18,6 +18,8 @@ import unittest
 _BIN = pathlib.Path(__file__).resolve().parents[1] / "bin"
 sys.path.insert(0, str(_BIN))
 
+import mcp_compat  # noqa: E402 — needs _BIN on sys.path
+
 import m3_http_auth as A  # noqa: E402
 
 
@@ -206,7 +208,7 @@ class TestAttachGuard(unittest.TestCase):
     """`attach` must refuse rather than half-wire a live instance."""
 
     def _fastmcp(self):
-        from mcp.server.fastmcp import FastMCP
+        from mcp_compat import FastMCP
 
         return FastMCP("test-attach")
 
@@ -242,7 +244,9 @@ class TestAttachGuard(unittest.TestCase):
     def test_public_host_reaches_transport_security(self):
         mcp = self._fastmcp()
         A.attach(mcp, "127.0.0.1", 8080, A.generate_token(), ["m3.example.com"])
-        hosts = mcp.settings.transport_security.allowed_hosts
+        # Read through the seam: the allowlist is a Settings field on mcp 1.x
+        # but lives on the instance on 2.x (Settings rejects the assignment).
+        hosts = mcp_compat.get_transport_security(mcp).allowed_hosts
         self.assertIn("m3.example.com", hosts)
         self.assertIn("m3.example.com:*", hosts)
 
@@ -278,7 +282,7 @@ class TestHttpEnforcement(unittest.TestCase):
     # app is built once and its lifespan entered once.
     @classmethod
     def setUpClass(cls):
-        from mcp.server.fastmcp import FastMCP
+        from mcp_compat import FastMCP
         from starlette.testclient import TestClient
 
         cls.token = A.generate_token()
@@ -287,7 +291,7 @@ class TestHttpEnforcement(unittest.TestCase):
         # DNS-rebinding guard 421s before auth is ever consulted -- which is the
         # tunnel footgun this allowlist exists to fix.
         A.attach(mcp, "127.0.0.1", 8080, cls.token, ["testserver"])
-        cls._ctx = TestClient(mcp.streamable_http_app())
+        cls._ctx = TestClient(mcp_compat.http_app(mcp))
         cls.client = cls._ctx.__enter__()
 
     @classmethod
@@ -329,13 +333,13 @@ class TestForeignHostRejection(unittest.TestCase):
     """
 
     def test_foreign_host_is_rejected_when_not_allowlisted(self):
-        from mcp.server.fastmcp import FastMCP
+        from mcp_compat import FastMCP
         from starlette.testclient import TestClient
 
         token = A.generate_token()
         mcp = FastMCP("test-host")
         A.attach(mcp, "127.0.0.1", 8080, token)  # no public_hosts -> loopback only
-        with TestClient(mcp.streamable_http_app()) as c:
+        with TestClient(mcp_compat.http_app(mcp)) as c:
             r = c.post(
                 "/mcp",
                 json=TestHttpEnforcement._INIT,
@@ -353,15 +357,15 @@ class TestFailOpenCanary(unittest.TestCase):
     """
 
     def test_app_without_attach_does_not_401(self):
-        from mcp.server.fastmcp import FastMCP
+        from mcp_compat import FastMCP
         from mcp.server.transport_security import TransportSecuritySettings
         from starlette.testclient import TestClient
 
         mcp = FastMCP("test-open")
-        mcp.settings.transport_security = TransportSecuritySettings(
+        mcp_compat.set_transport_security(mcp, TransportSecuritySettings(
             enable_dns_rebinding_protection=False
-        )
-        with TestClient(mcp.streamable_http_app()) as c:
+        ))
+        with TestClient(mcp_compat.http_app(mcp)) as c:
             r = c.post(
                 "/mcp",
                 json=TestHttpEnforcement._INIT,
@@ -463,7 +467,12 @@ class TestBridgeWiring(unittest.TestCase):
     def setUpClass(cls):
         cls.src = (_BIN / "memory_bridge.py").read_text(encoding="utf-8")
         start = cls.src.index('if transport in ("http"')
-        end = cls.src.index("        mcp.run(transport=", start)
+        # End at the transport handoff. That call is `mcp_compat.run_http(...)`
+        # since the mcp 1.x/2.x compat seam landed -- host/port/path are Settings
+        # fields on 1.x but run() keywords on 2.x, so the bridge no longer names
+        # a transport directly. Anchor on the seam, not on the spelling the
+        # bridge happened to use.
+        end = cls.src.index("        mcp_compat.run_http(", start)
         cls.http_block = cls.src[start:end]
 
     def test_http_branch_preflights_before_running(self):
@@ -646,3 +655,59 @@ class TestResolveTokenStates(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMcpImportSeam(unittest.TestCase):
+    """bin/mcp_compat.py is the ONLY place allowed to name an mcp server class.
+
+    mcp 2.0 renamed FastMCP to MCPServer and moved host/port/path/transport_
+    security out of Settings and into run(). mcp_compat owns both differences.
+    A direct `from mcp.server.fastmcp import ...` anywhere else reintroduces the
+    duplication the seam removed (§10a) and, on mcp 2.x, fails at import --
+    which is how four test sites kept working on 1.x while silently pinning the
+    whole suite to it.
+    """
+
+    #: Repo-relative paths permitted to import the mcp server class directly.
+    OWNERS = {"bin/mcp_compat.py"}
+
+    def test_no_direct_fastmcp_import_outside_the_seam(self):
+        import re
+
+        repo = _BIN.parent
+        pattern = re.compile(
+            r"^\s*from\s+mcp\.server\.fastmcp\s+import|"
+            r"^\s*from\s+mcp\.server\.mcpserver\s+import|"
+            r"^\s*from\s+mcp\s+import\s+FastMCP",
+            re.MULTILINE,
+        )
+        offenders = []
+        for sub in ("bin", "tests", "m3_memory"):
+            root = repo / sub
+            if not root.is_dir():
+                continue
+            for path in root.rglob("*.py"):
+                if "__pycache__" in path.parts:
+                    continue
+                rel = path.relative_to(repo).as_posix()
+                if rel in self.OWNERS:
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                # Strip comment lines so prose ABOUT the old import (e.g. the
+                # note in news_fetcher.py explaining why it was removed) is not
+                # mistaken for the import itself.
+                code = "\n".join(
+                    ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
+                )
+                if pattern.search(code):
+                    offenders.append(rel)
+
+        self.assertEqual(
+            offenders, [],
+            "these import an mcp server class directly instead of via "
+            "`from mcp_compat import FastMCP`; they will fail on mcp 2.x: "
+            + ", ".join(sorted(offenders)),
+        )

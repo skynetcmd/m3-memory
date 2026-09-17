@@ -5,7 +5,7 @@ import sys
 from datetime import datetime
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp_compat import FastMCP
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agent_protocol import _THINK_TAG_RE  # shared compiled regex

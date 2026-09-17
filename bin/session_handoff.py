@@ -14,7 +14,7 @@ DB_PATH = ctx.db_path
 logger = logging.getLogger("session_handoff")
 
 try:
-    from mcp.server.fastmcp import FastMCP
+    from mcp_compat import FastMCP
 except ImportError:
     logger.error("FastMCP not found. Ensure dependencies are installed in the venv.")
     sys.exit(1)

@@ -5,7 +5,8 @@ import os
 import sys
 
 from m3_sdk import active_database
-from mcp.server.fastmcp import FastMCP
+import mcp_compat
+from mcp_compat import FastMCP
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -477,11 +478,11 @@ if __name__ == "__main__":
             "Bearer auth ENABLED (token required on every request)"
             + (f"; public hosts: {', '.join(public_hosts)}" if public_hosts else "")
         )
-        # FastMCP exposes the host/port/path settings via its Settings object.
-        mcp.settings.host = host
-        mcp.settings.port = port
-        mcp.settings.streamable_http_path = path
-        mcp.run(transport="streamable-http")
+        # Host/port/path live in DIFFERENT places on mcp 1.x and 2.x (1.x: fields
+        # on Settings, assigned before run(); 2.x: keyword args TO run(), where
+        # assigning them to Settings raises ValueError). mcp_compat.run_http owns
+        # that difference so this call site states intent only.
+        mcp_compat.run_http(mcp, host=host, port=port, path=path)
     else:
         logger.info("Transport: stdio")
         mcp.run()

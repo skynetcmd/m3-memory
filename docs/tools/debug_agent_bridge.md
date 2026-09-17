@@ -1,8 +1,8 @@
 ---
 tool: bin/debug_agent_bridge.py
-sha1: f92ecf730f20
-mtime_utc: 2026-07-26T18:57:52.111524+00:00
-generated_utc: 2026-08-31T03:18:26.616819+00:00
+sha1: 337dc84c0e2e
+mtime_utc: 2026-09-17T16:08:36.279464+00:00
+generated_utc: 2026-09-17T16:21:39.516151+00:00
 private: false
 ---
 
@@ -50,6 +50,7 @@ _(no argparse arguments detected)_
 - `agent_protocol (_THINK_TAG_RE)`
 - `embedding_utils (parse_model_size)`
 - `m3_sdk (LM_STUDIO_BASE, M3Context, getenv_compat)`
+- `mcp_compat (FastMCP)`
 - `thermal_utils (get_thermal_status)`
 
 ---
@@ -62,7 +63,6 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `mcp.server.fastmcp (FastMCP)`
 - `platform`
 
 ---
