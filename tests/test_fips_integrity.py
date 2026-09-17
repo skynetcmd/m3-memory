@@ -116,6 +116,15 @@ def _run_fips_subprocess(body: str, env: dict) -> dict:
     return json.loads(line[len(marker):])
 
 
+# The crypto env as it was when this module was imported -- i.e. the state
+# every test in the session inherits. Captured at import because os.environ
+# is mid-restore during fixture finalizers and cannot be trusted there.
+_SESSION_CRYPTO_ENV = {
+    k: os.environ.get(k)
+    for k in ("M3_FIPS_MODE", "M3_FIPS_STRICT")
+}
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
@@ -137,15 +146,98 @@ def _restore_crypto_provider():
     class of module eviction). The failure blames the victim, so bisecting to
     the cause costs real time.
 
-    Reloading once more at teardown, under the pristine environment monkeypatch
-    has by then restored, returns the module to the state the next test expects.
+    ── WHY THIS FIXTURE BUILDS ITS OWN ENVIRONMENT ──────────────────────────
+
+    An earlier version reloaded "under the pristine environment monkeypatch has
+    by then restored". That premise was FALSE, and measuring it is what found
+    this: at the moment an autouse fixture's teardown runs, monkeypatch has NOT
+    yet undone the test's `setenv` calls. Probed directly --
+    `test_lib_dir_pin_outranks_config_root` enters teardown with M3_LIB_DIR
+    still pointing at its own empty tmp `pinned/` directory.
+
+    So the repair reload ran under the POLLUTED env, found no wolfSSL library,
+    and -- because the whole thing was wrapped in `except Exception: pass` --
+    failed silently, leaving exactly the broken module it existed to prevent:
+    `backend=DEFAULT, _initialized=False` while M3_FIPS_MODE=1 is still live.
+    Every later test that hits the crypto boundary then dies with "FIPS boundary
+    violation", blaming a victim with no connection to the cause. Measured
+    2026-09-17: a 2-test repro (this file, then
+    `test_langchain_store.py::test_search_returns_scored_items`) reproduces it.
+
+    The fix is to stop DEPENDING on teardown ordering and set the crypto env
+    explicitly, which is also what makes the repair deterministic:
+
+      * M3_CRYPTO_BACKEND is CLEARED, so the reload re-derives the real backend
+        rather than inheriting this file's DEFAULT.
+      * M3_LIB_DIR is re-pinned to the real installed library, mirroring what
+        the sandbox fixture in conftest.py does. That fixture uses
+        `if not os.environ.get("M3_LIB_DIR")`, so once a test has set the var
+        the sandbox will NOT re-pin it -- this fixture must.
+
+    ⚠ The reload is NOT wrapped in a bare `except: pass`. Under M3_FIPS_MODE=1
+    a failed reload is fail-closed by design, and swallowing it is the §3
+    violation that hid this bug: the alarm was silenced at precisely the point
+    it was supposed to fire. A repair that cannot repair must say so HERE,
+    where the cause is, not 40 tests later somewhere else.
     """
     yield
+
+    # Build the env the reload needs, rather than assuming teardown order.
+    #
+    # _RESTORE_KEYS is every env var that feeds crypto_provider's module-level
+    # init. All of them must be set to the state the NEXT test will see -- not
+    # the state this test left, and not whatever monkeypatch has restored so
+    # far, because at finalizer time that restore is still in progress.
+    # Derived from crypto_provider, not guessed -- these are every M3_* var the
+    # module reads at init. Grep to re-derive if that set changes:
+    #   grep -oE 'M3_[A-Z0-9_]+' bin/crypto_provider.py | sort -u
+    # (M3_CONFIG_ROOT / M3_MEMORY_ROOT are also read, but conftest's sandbox owns
+    # those and M3_LIB_DIR outranks both for library discovery.)
+    _RESTORE_KEYS = ("M3_CRYPTO_BACKEND", "M3_LIB_DIR",
+                     "M3_FIPS_MODE", "M3_FIPS_STRICT",
+                     "M3_WOLFSSL_LIB", "M3_WOLFSSL_SHA256")
+    _saved = {k: os.environ.get(k) for k in _RESTORE_KEYS}
+
+    # The reload must run under the SESSION's FIPS state, which is what the next
+    # test inherits. Measured: at finalizer time M3_FIPS_MODE reads None even on
+    # a box that exported M3_FIPS_MODE=1, because monkeypatch has not undone
+    # `_reload_provider`'s delenv yet. Reloading under that transient None built
+    # a legitimate DEFAULT provider -- then monkeypatch restored FIPS_MODE=1
+    # around it, leaving a DEFAULT/uninitialized provider live under FIPS. Every
+    # later crypto call then fails the boundary check. Read the session values
+    # captured at import, never os.environ, for exactly that reason.
+    for _k in ("M3_FIPS_MODE", "M3_FIPS_STRICT"):
+        _sess = _SESSION_CRYPTO_ENV.get(_k)
+        if _sess is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _sess
+
+    # Both wolfSSL pins must go. M3_WOLFSSL_LIB pins a full path verbatim, so a
+    # test's fake .dll would survive; M3_WOLFSSL_SHA256 pins an expected digest,
+    # and the integrity tests deliberately set a WRONG one ("00"*32). Leaving
+    # that behind makes the repair reload verify the REAL library against a bogus
+    # hash and fail closed -- which is correct behaviour reacting to leftover
+    # test state, i.e. the same class of bug this fixture exists to prevent.
+    os.environ.pop("M3_WOLFSSL_LIB", None)
+    os.environ.pop("M3_WOLFSSL_SHA256", None)
+    os.environ.pop("M3_CRYPTO_BACKEND", None)
+
+    # Re-pin the real library dir. conftest's sandbox only sets M3_LIB_DIR when
+    # it is unset, so once a test has set it the sandbox will not re-pin it.
+    _real_lib = os.path.join(os.path.expanduser("~"), ".m3", "lib")
+    if os.path.isdir(_real_lib):
+        os.environ["M3_LIB_DIR"] = _real_lib
     try:
         import crypto_provider
         importlib.reload(crypto_provider)
-    except Exception:  # noqa: BLE001 — teardown must never mask a test failure
-        pass
+    finally:
+        # Restore what we touched; monkeypatch owns everything else.
+        for _k, _v in _saved.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
 
 
 def _reload_provider(monkeypatch, backend=None, fips_mode=None, strict=None):

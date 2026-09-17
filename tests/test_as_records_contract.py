@@ -21,6 +21,7 @@ skip every tool and report a confident zero.
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import sys
@@ -123,19 +124,75 @@ def test_impl_accepts_what_the_spec_advertises(name):
     )
 
 
+# Placeholder values for REQUIRED params, so a contract test can call any tool
+# without needing per-tool knowledge.
+#
+# ⚠ DERIVED FROM THE SPEC, NEVER HARDCODED. An earlier version listed three arg
+# names by hand (agent_id / memory_id / root_task_id). `query` was not among
+# them, so memory_search and conversation_search were invoked with a missing
+# required argument, raised TypeError, and hit the `except Exception:
+# pytest.skip(...)` below -- which reported the two most heavily used search
+# tools in the catalog as "not callable in this environment" and passed. The
+# as_records contract went UNTESTED on them for as long as that list was stale,
+# and the skip line made it look deliberate (§3: a test that disables itself
+# when it cannot run is worse than one that fails, because it reports green).
+#
+# Reading `required` from the spec means adding a required param to any tool
+# cannot silently drop it out of coverage again.
+_PLACEHOLDERS = {
+    "query": "does-not-exist",
+    "agent_id": "does-not-exist",
+    "memory_id": "does-not-exist",
+    "root_task_id": "does-not-exist",
+}
+
+
+def _required_kwargs(spec):
+    """Safe placeholder values for every param the spec marks required.
+
+    The point of these tests is the RETURN SHAPE, so a not-found result is a
+    perfectly valid response -- the values just have to be present and safe.
+
+    A required param with no known placeholder is a hard FAILURE, not a skip:
+    it means this helper has gone stale exactly the way the hardcoded list did.
+    """
+    kwargs = {}
+    for arg in (spec.parameters or {}).get("required", []):
+        assert arg in _PLACEHOLDERS, (
+            f"{spec.name} requires '{arg}', which has no placeholder in "
+            f"_PLACEHOLDERS. Add one -- do not let this tool fall through to a "
+            f"skip, which is how memory_search and conversation_search silently "
+            f"lost as_records coverage."
+        )
+        kwargs[arg] = _PLACEHOLDERS[arg]
+    return kwargs
+
+
+def _call(spec, **kwargs):
+    """Invoke a tool impl and return its VALUE, awaiting it when async.
+
+    Several impls (memory_search, conversation_search) are coroutine functions.
+    Calling one returns a coroutine, and asserting on that object rather than on
+    its result silently tests nothing -- `.lstrip()` raises AttributeError, and
+    under the old blanket-except it became a skip instead of a failure.
+    """
+    out = spec.impl(**kwargs)
+    if inspect.isawaitable(out):
+        return asyncio.run(_await(out))
+    return out
+
+
+async def _await(aw):
+    return await aw
+
+
 @pytest.mark.parametrize("name", AS_RECORDS_TOOLS)
 def test_as_records_true_returns_parseable_json(name):
     """The param must actually do something -- advertising it is not enough."""
     spec = _BY_NAME[name]
-    kwargs = {"as_records": True}
-    # Supply required args with values that are safe to miss; the point is the
-    # RETURN SHAPE, and a not-found error is a valid structured response.
-    for arg, val in (("agent_id", "does-not-exist"), ("memory_id", "does-not-exist"),
-                     ("root_task_id", "does-not-exist")):
-        if arg in (spec.parameters or {}).get("required", []):
-            kwargs[arg] = val
+    kwargs = {"as_records": True, **_required_kwargs(spec)}
     try:
-        out = spec.impl(**kwargs)
+        out = _call(spec, **kwargs)
     except Exception as e:  # noqa: BLE001
         pytest.skip(f"{name} not callable in this environment: {type(e).__name__}: {e}")
     assert isinstance(out, str), "as_records changes the CONTENT, not the return type"
@@ -159,13 +216,9 @@ def test_default_is_not_json(name):
     """Byte-identity is proven elsewhere; here we only assert the default path
     still returns a DISPLAY string, so a caller parsing it is not handed JSON."""
     spec = _BY_NAME[name]
-    kwargs = {}
-    for arg, val in (("agent_id", "does-not-exist"), ("memory_id", "does-not-exist"),
-                     ("root_task_id", "does-not-exist")):
-        if arg in (spec.parameters or {}).get("required", []):
-            kwargs[arg] = val
+    kwargs = _required_kwargs(spec)
     try:
-        out = spec.impl(**kwargs)
+        out = _call(spec, **kwargs)
     except Exception as e:  # noqa: BLE001
         pytest.skip(f"{name} not callable: {type(e).__name__}: {e}")
     assert not out.lstrip().startswith("{"), (
