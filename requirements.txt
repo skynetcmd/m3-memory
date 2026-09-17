@@ -36,12 +36,20 @@ psutil>=7.2.2,<8
 pyobjc-framework-CoreWLAN; sys_platform == 'darwin'
 
 # --- Intelligence & Vector ---
-# Cap <2.5: numpy 2.5.0's bundled stub (numpy/__init__.pyi) uses the PEP 695
-# `type` statement, which mypy rejects when targeting python_version 3.11 (our
-# supported floor, set in pyproject [tool.mypy]). The error halts the whole
-# mypy CI job before any bin/ file is checked. Lift once we drop 3.11 support
-# or numpy ships a 3.11-compatible stub. See CI "Type Check (Mypy)".
-numpy>=2.4.4,<2.5
+# CAP LIFTED 2026-09-17. It read: numpy 2.5.0's bundled stub uses the PEP 695
+# `type` statement, which mypy rejects when targeting python_version 3.11, and
+# named its own trigger -- "lift once we drop 3.11 support". The floor is now
+# 3.12 (pyproject requires-python and [tool.mypy] python_version), where PEP 695
+# is valid syntax.
+#
+# Verified rather than assumed: a clean venv with numpy 2.5.3 runs mypy over
+# bin/ at --python-version 3.12 with ZERO errors across all 281 source files.
+#
+# That run did surface three real typing errors in memory/search_ranking.py --
+# 2.5's stubs type ndarray precisely enough that mypy narrowed a name shared by
+# the numpy and pure-Python branches. Runtime was always correct on both paths;
+# the branches now bind separate names. Fixed in the same change.
+numpy>=2.5.3
 scipy>=1.17.1,<2
 tqdm>=4.67.3,<5
 # Fast fuzzy string matching for entity coalescing (token-order-aware, ~3-4x

@@ -21,6 +21,7 @@ that script names the wheels this module installs.
 from __future__ import annotations
 
 import os
+import pathlib
 import shutil
 import subprocess
 import sys

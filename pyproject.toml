@@ -107,12 +107,11 @@ dependencies = [
     "psycopg2-binary>=2.9.12,<3",
     "cryptography>=50.0.0,<51",
     "keyring>=25.7.0,<26",
-    # Cap <2.5: numpy 2.5.0's stub uses PEP 695 `type` syntax, which mypy
-    # rejected under the OLD 3.11 floor. The floor is now 3.12, where PEP 695 is
-    # valid, so this cap is probably liftable -- but that is a dependency bump
-    # with its own blast radius, not a side effect of a floor change. Tracked
-    # separately; see requirements.txt for the full note.
-    "numpy>=2.4.4,<2.5",
+    # Cap lifted 2026-09-17: the <2.5 ceiling existed because numpy 2.5's stub
+    # uses PEP 695 `type` syntax, which mypy rejected under the OLD 3.11 floor.
+    # The floor is now 3.12, where it is valid. Verified: mypy over bin/ with
+    # numpy 2.5.3 reports zero errors across 281 files.
+    "numpy>=2.5.3",
     "python-dotenv>=1.2.2,<2",
     "PyYAML>=6.0.3,<7",
     "psutil>=7.2.2,<8",

@@ -204,8 +204,14 @@ def _hybrid_score_batch(
         raw = vec * vector_weight + bm25_norm * (1.0 - vector_weight)
         stt = float(max(1, short_turn_threshold))
         penalty = _np.where(lens < stt, _np.maximum(0.3, lens / stt), 1.0)
-        out = raw * penalty + title_match_boost * tit + importance_weight * imp
-        return out.tolist()
+        # Named separately from the fallback's `out`: from numpy 2.5 the stubs
+        # type this expression precisely as an ndarray, and reusing one name
+        # across the two branches makes mypy narrow to whichever it sees first
+        # and then reject the other. Both branches return a list at runtime --
+        # `.tolist()` genuinely produces one -- so this is stub precision, not a
+        # defect.
+        scores = raw * penalty + title_match_boost * tit + importance_weight * imp
+        return scores.tolist()
     # Pure-Python fallback
     stt = float(max(1, short_turn_threshold))
     out = []
