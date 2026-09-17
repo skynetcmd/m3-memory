@@ -120,7 +120,21 @@ def _current_payload_bin() -> "str | None":
         return None
 
 
-# m3-owned MCP server names generate_configs writes; only these are ours to judge.
+# m3-owned MCP server names; only these are ours to judge.
+#
+# ⚠ DELIBERATELY WIDER THAN WHAT generate_configs NOW WRITES. As of 2026-09-17
+# only "memory" is registered. The other four were never m3 servers at all --
+# they came from the author's pre-release workstation setup and rode along into
+# every install. But configs written BEFORE that change still carry them,
+# pointing at a payload bin an upgrade may have moved. Narrowing this set to
+# {"memory"} would hide those entries from the stale-payload scan precisely when
+# they are most likely to be stale, leaving them to run OLD bridge code with no
+# warning.
+#
+# So this stays a superset: names m3 writes today, plus names m3 wrote
+# historically. It is a "did m3 create this?" test, not a "does m3 create this?"
+# one. Removing a legacy name here is only safe once no install can still carry
+# it, which is not a condition this code can verify.
 _M3_SERVER_NAMES = frozenset(
     {"memory", "custom_pc_tool", "grok_intel", "web_research", "debug_agent"}
 )

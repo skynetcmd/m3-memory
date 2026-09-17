@@ -283,12 +283,32 @@ def generate_configs():
     # memory server defers to the single :8082 embedder instead of loading its own.
     memory_env: dict[str, str] = {}
 
+    # ── ONLY the memory server is registered ─────────────────────────────────
+    #
+    # `memory` is m3's product. The four names that used to sit alongside it --
+    # custom_pc_tool (host-machine control), grok_intel (a third-party LLM API),
+    # web_research (web fetching) and debug_agent (a debugging harness) -- were
+    # never part of m3. They came from the author's own pre-release workstation
+    # setup, ended up in this map before the first public release, and had been
+    # riding along into every user's client config ever since.
+    #
+    # The cost was real and per-user: four always-on stdio processes nobody asked
+    # for, four tool surfaces consuming context in EVERY session, and a wider
+    # double-registration hazard for `claude_mcp_probe` to police. Two of them
+    # also reach outside the machine (a third-party LLM API and a web fetcher),
+    # which is not something a memory tool should configure on a user's behalf.
+    #
+    # The bridge SCRIPTS are not deleted: they still ship in bin/, and
+    # mcp_proxy.py still imports custom_tool_bridge and debug_agent_bridge lazily
+    # for the Aider/OpenClaw path. They are simply no longer auto-registered.
+    # Anyone who actually wants one runs `claude mcp add` themselves -- the right
+    # consent boundary for a tool that talks to their machine or a paid API.
+    #
+    # Existing installs are cleaned up rather than left to rot: see
+    # _LEGACY_M3_SERVER_NAMES, which the Claude prune and the Gemini merge both
+    # use to remove these names from configs a previous version wrote.
     mcp_servers = {
-        "custom_pc_tool": mcp_server("custom_tool_bridge.py"),
-        "grok_intel":     mcp_server("grok_bridge.py"),
-        "web_research":   mcp_server("web_research_bridge.py"),
-        "memory":         mcp_server("memory_bridge.py", memory_env),
-        "debug_agent":    mcp_server("debug_agent_bridge.py"),
+        "memory": mcp_server("memory_bridge.py", memory_env),
     }
 
     # Respect the capture config: PreCompact + SessionStart are always wired, but
@@ -340,7 +360,24 @@ def generate_configs():
     else:
         gemini = {}
 
-    gemini["mcpServers"] = mcp_servers
+    # MERGE, never replace. This was `gemini["mcpServers"] = mcp_servers`, which
+    # overwrote the whole map -- so a user who had added their OWN MCP server to
+    # ~/.gemini/settings.json silently lost it on every `m3 setup`. That was
+    # already wrong; it became destructive once m3 stopped registering four of
+    # its own names (the assignment then pruned the config down to just
+    # "memory"). m3 owns its entries, not the file.
+    #
+    # The legacy names are dropped deliberately: m3 wrote them (by accident --
+    # they were never m3's servers), so m3 removes them. Anything else in the
+    # file is the user's and is preserved untouched.
+    _M3_OWNED = {"memory"} | _LEGACY_M3_SERVER_NAMES
+    _existing = gemini.get("mcpServers")
+    if not isinstance(_existing, dict):
+        _existing = {}
+    gemini["mcpServers"] = {
+        **{k: v for k, v in _existing.items() if k not in _M3_OWNED},
+        **mcp_servers,
+    }
     if "general" not in gemini:
         gemini["general"] = {
             "sessionRetention": {"enabled": True, "maxAge": "30d", "warningAcknowledged": True}
@@ -432,6 +469,16 @@ def _strip_m3_hook_entries(hook_list, repo_root_fwd):
             continue  # drop stale/previous m3 entry
         kept.append(entry)
     return kept
+
+
+# MCP server names m3 has EVER auto-registered. Only "memory" is m3's own; the
+# other four came from the author's pre-release personal setup and were shipped
+# to every user by accident. They are retired, but must stay listed so existing
+# installs get them cleaned out rather than carrying them forever. A user's own
+# servers are never in this set and are never touched.
+_LEGACY_M3_SERVER_NAMES = frozenset(
+    {"custom_pc_tool", "grok_intel", "web_research", "debug_agent"}
+)
 
 
 def install_claude_settings(settings_path=None, assume_yes=False, dry_run=False,
@@ -549,7 +596,13 @@ def install_claude_settings(settings_path=None, assume_yes=False, dry_run=False,
     #    the dead block doesn't linger and mislead (probes/users); never add them
     #    back. Foreign servers a user placed here are not ours to remove (they are
     #    equally inert, but hands-off). Drop the key entirely if nothing remains.
-    m3_owned = set(m3.get("mcpServers", {}))
+    # Current names PLUS the legacy ones. Deriving this from m3["mcpServers"]
+    # alone would strand every legacy entry the moment a name stops being
+    # written -- which is exactly what happened when registration shrank to
+    # "memory" only: custom_pc_tool / grok_intel / web_research / debug_agent
+    # would linger in every existing settings.json with nothing left to remove
+    # them. Prune what m3 EVER wrote, not merely what it writes today.
+    m3_owned = set(m3.get("mcpServers", {})) | _LEGACY_M3_SERVER_NAMES
     live_mcp = live.get("mcpServers") if isinstance(live.get("mcpServers"), dict) else None
     if live_mcp:
         for key in m3_owned:

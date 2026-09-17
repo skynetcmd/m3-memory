@@ -182,8 +182,9 @@ def _print_post_migration_checklist(config_root, engine_root):
     logger.info(f"\n{sep}\nPOST-MIGRATION CHECKLIST (do these or you get split-brain):\n{sep}")
     logger.info(
         "1. Add these to the `env` block of EVERY m3 MCP server in your client\n"
-        "   settings.json (e.g. ~/.claude/settings.json — memory, custom_pc_tool,\n"
-        "   grok_intel, web_research, debug_agent):\n"
+        "   settings.json (e.g. ~/.claude/settings.json). New installs register\n"
+        "   only `memory`; older installs may also have custom_pc_tool, grok_intel,\n"
+        "   web_research or debug_agent — pin every one you actually have:\n"
         f'       "M3_ENGINE_ROOT": "{engine_root}",\n'
         f'       "M3_CONFIG_ROOT": "{config_root}"\n'
         "   MCP servers do NOT source ~/.zshenv — without this the server derives\n"

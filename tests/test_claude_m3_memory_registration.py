@@ -186,3 +186,70 @@ def test_add_terminates_options_before_the_positionals(monkeypatch):
     for i, tok in enumerate(add):
         if tok == "--env":
             assert i < add.index("--"), "an --env landed after the terminator"
+
+
+# ── Only `memory` is auto-registered ─────────────────────────────────────────
+#
+# custom_pc_tool / grok_intel / web_research / debug_agent were never m3
+# servers: they came from the author's pre-release workstation setup, landed in
+# generate_configs before the first public release, and shipped into every
+# user's client config -- four always-on stdio processes and four tool surfaces
+# per session, two of them reaching a third-party API and the open web.
+#
+# These pin BOTH halves, because either alone is a silent failure:
+#   * new installs must register memory ONLY, and
+#   * existing installs must have the legacy names CLEANED OUT -- the prune set
+#     is deliberately a superset of what is written today, so shrinking the
+#     registration map cannot strand entries in configs already on disk.
+
+_LEGACY_NAMES = {"custom_pc_tool", "grok_intel", "web_research", "debug_agent"}
+
+
+def test_generate_configs_registers_only_memory():
+    import generate_configs as gc
+
+    gc.generate_configs()
+    claude = getattr(gc.generate_configs, "_last_claude", None)
+    assert claude is not None, "generate_configs did not publish _last_claude"
+    names = set(claude.get("mcpServers", {}))
+    assert names == {"memory"}, (
+        f"generate_configs must auto-register ONLY the memory server; got {sorted(names)}. "
+        "The other names were never m3's -- do not re-add them."
+    )
+
+
+def test_legacy_prune_set_covers_every_retired_name():
+    """The prune set must not be derived from what is registered TODAY."""
+    import generate_configs as gc
+
+    assert _LEGACY_NAMES <= set(gc._LEGACY_M3_SERVER_NAMES), (
+        "a retired server name is missing from _LEGACY_M3_SERVER_NAMES, so existing "
+        "installs would carry it forever with nothing left to remove it"
+    )
+    assert "memory" not in gc._LEGACY_M3_SERVER_NAMES, (
+        "memory is current, not legacy -- listing it here would prune the real server"
+    )
+
+
+def test_install_claude_settings_removes_legacy_and_keeps_foreign(tmp_path):
+    """A legacy config is cleaned; a server the USER added is untouched."""
+    import generate_configs as gc
+
+    settings = tmp_path / "settings.json"
+    live = {"mcpServers": {name: {"command": "old"} for name in _LEGACY_NAMES}}
+    live["mcpServers"]["memory"] = {"command": "old"}
+    live["mcpServers"]["users_own_thing"] = {"command": "mine"}
+    live["somethingElse"] = {"keep": True}
+    settings.write_text(json.dumps(live), encoding="utf-8")
+
+    gc.install_claude_settings(
+        settings_path=str(settings), assume_yes=True, keep_status_line=True)
+
+    after = json.loads(settings.read_text(encoding="utf-8"))
+    remaining = set(after.get("mcpServers", {}))
+    assert not (_LEGACY_NAMES & remaining), (
+        f"legacy servers survived the prune: {sorted(_LEGACY_NAMES & remaining)}")
+    assert "users_own_thing" in remaining, (
+        "a user's own MCP server was removed -- m3 prunes only what it wrote")
+    assert after.get("somethingElse") == {"keep": True}, (
+        "an unrelated settings key was lost")
