@@ -30,7 +30,6 @@ if _BIN not in sys.path:
 from memory.backends.sqlite_backend import SqliteDialect  # noqa: E402
 
 
-
 def _make_db(path: str, rows: int = 200) -> None:
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA journal_mode=WAL")

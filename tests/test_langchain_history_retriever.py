@@ -17,8 +17,9 @@ building:
 
 from __future__ import annotations
 
-import pytest
 import uuid
+
+import pytest
 
 pytest.importorskip("langchain_core", reason="needs the [langchain] extra")
 
