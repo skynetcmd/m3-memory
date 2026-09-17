@@ -382,6 +382,99 @@ def resolve_engine_file(filename: str) -> str:
     return new_path
 
 
+def dispatch_store_mode() -> str:
+    """``"separate"`` (default) or ``"integrated"`` for the dispatch store.
+
+    Mirrors the chatlog's storage modes, minus ``hybrid``: that exists there
+    because ``chatlog_promote`` copies rows into canonical memory, and a
+    delivery record has no equivalent promotion.
+
+    Set ``M3_DISPATCH_MODE=integrated`` to keep dispatch tables in the main
+    store -- reasonable for a single-agent install where a second file is
+    overhead. Anything else, including unset, means separate.
+    """
+    mode = (os.environ.get("M3_DISPATCH_MODE") or "").strip().lower()
+    return "integrated" if mode == "integrated" else "separate"
+
+
+def resolve_dispatch_db() -> str:
+    """Path to the agent DISPATCH store. The single owner of that question.
+
+    m3 keeps three kinds of state with three lifetimes, and each gets its own
+    store so it can be handled on its own terms:
+
+        agent_memory.db    permanent   durability, FTS, embeddings, GDPR
+                                       erasure, backup, warehouse sync
+        agent_chatlog.db   decaying    bulk ingest, decay, promotion
+        agent_dispatch.db  EPHEMERAL   write churn, lease reclaim, pruning
+
+    A delivery record is scaffolding: once the recipient acts, the row's only
+    remaining value is a short audit tail, and the thing worth keeping is the
+    payload in ``memory_items`` that it points at. Measured -- the rest of m3
+    already treats these rows this way: ``pg_sync`` replicates memory_items,
+    memory_embeddings and chat_log but has never replicated notifications, and
+    ``gdpr_forget`` does not touch them. The split makes that structural.
+
+    Secondary but real: SQLite takes one write lock for the WHOLE database, and
+    dispatch is the highest-frequency writer in the system. In a shared file
+    every claim/renew/complete/sweep contends with ingest and enrichment; in its
+    own store it contends only with itself.
+
+    Resolution order, matching ``chatlog_config.DEFAULT_DB_PATH``:
+      1. ``M3_DISPATCH_DB`` -- explicit override.
+      2. integrated mode -- the main store, so there is ONE file.
+      3. ``<engine_root>/agent_dispatch.db`` via :func:`resolve_engine_file`,
+         which carries the pre-Homecoming legacy fallback.
+
+    ⚠ This returns the DATA path. Migration DDL ships with the CODE and is
+    resolved separately (see :func:`dispatch_migrations_dir`); conflating the
+    two is a real bug the chatlog already hit, which left its store
+    unbootstrappable because ``<engine>/chatlog_migrations`` is never populated.
+    """
+    explicit = os.environ.get("M3_DISPATCH_DB")
+    if explicit:
+        return explicit
+    if dispatch_store_mode() == "integrated":
+        return os.environ.get("M3_DATABASE") or resolve_engine_file("agent_memory.db")
+    return resolve_engine_file("agent_dispatch.db")
+
+
+def dispatch_migrations_dir() -> str:
+    """Directory holding the dispatch store's migration DDL.
+
+    Ships WITH THE CODE, never under a relocatable data root. Two wrong
+    resolutions are possible here and BOTH have been made in this codebase:
+
+    * ``resolve_engine_file`` points at ``<engine>/dispatch_migrations``, which
+      nothing populates -- the bug ``chatlog_config`` documents at its
+      ``CHATLOG_MIGRATIONS_DIR``.
+    * ``get_m3_root()`` points at the relocatable ``M3_MEMORY_ROOT``
+      (``~/.m3-memory`` by default), which is the DATA root, not the code. Same
+      class of error one level out; caught here by a test asserting the
+      directory actually exists.
+
+    Derived from ``__file__`` instead, matching ``chatlog_config.BASE_DIR``: the
+    DDL sits beside the module that runs it, wherever the payload is installed.
+    """
+    # paths.py lives at <repo>/bin/m3_core/paths.py -> up three to <repo>.
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(repo_root, "memory", "dispatch_migrations")
+
+
+def dispatch_pg_schema() -> str:
+    """PostgreSQL schema holding the dispatch tables. Default ``m3_dispatch``.
+
+    On SQLite the dispatch store is a separate FILE, because the file is
+    SQLite's unit of write contention and of backup. PostgreSQL has neither
+    problem, and a schema is already its unit of permissions, ``search_path``
+    and selective dump -- so isolation there is a SCHEMA in the same database,
+    not a second database with a second URL and a second pool.
+
+    Several m3 fleets can share one server by giving each its own schema name.
+    """
+    return (os.environ.get("M3_DISPATCH_PG_SCHEMA") or "m3_dispatch").strip()
+
+
 def resolve_config_file(filename: str) -> str:
     """Resolve a path under the config root, honoring the legacy fallback.
 
