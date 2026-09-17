@@ -19,20 +19,59 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+### Added
+
+- The files subsystem reads **HTML, Word, PowerPoint, Excel, RTF, EPUB,
+  OpenDocument and Apple iWork** documents. `.html`/`.htm`/`.xhtml` split on
+  their own headings with scripts, styles and markup removed; `.docx`, `.doc`,
+  `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.rtf`, `.epub`, `.odt`, `.odp` and `.ods`
+  split on document structure; `.pages`, `.key` and `.numbers` split by page.
+
+  These extensions were recognised before but had no reader, so their contents
+  were indexed as raw file bytes. Re-ingest any such files already in a corpus
+  to replace the old entries.
+
+  Full-fidelity iWork extraction is available as the `iwork` extra; without it,
+  documents saved without a preview are skipped rather than indexed incorrectly.
+
 ### Changed
 
-- The Rust core pin moves to 3.9.16 (`v2026.9.16`). Its embed server now sizes
-  its worker contexts by wheel: GPU wheels (cuda/vulkan/metal) keep two, CPU-only
-  wheels use one. Each context holds a compute graph of roughly 3.85 GiB for
-  bge-m3 at the default context length, so a CPU-only host uses about 4 GiB less
-  after this upgrade.
+- **Installing m3 registers only the `memory` MCP server.** Previous versions
+  also registered `custom_pc_tool`, `grok_intel`, `web_research` and
+  `debug_agent`, which are not part of m3. Upgrading removes them from managed
+  configuration; MCP servers you added yourself are left untouched.
+- PDF reading no longer depends on a library that happened to be installed
+  alongside something else, so PDFs are read on every install rather than
+  silently indexed as plain text on some.
 
-  **This is a memory-for-throughput trade.** One context serves one embedding
-  batch at a time, so concurrent callers queue where they previously ran on two
-  contexts — most visible during bulk ingest. Raise it with `M3_EMBED_STREAMS`
-  or `[embed].streams` in the server's `config.toml` if the host has the memory;
-  `queue_depth` on the server's `/metrics` shows whether callers are waiting.
-  The resolved value is logged at startup.
+### Fixed
+
+- Updating Gemini configuration no longer discards MCP servers you added
+  yourself. It previously replaced the whole server list on every setup run.
+
+## [2026.9.16.0] — 2026-09-16 — downloaded Rust core wheels are verified before install
+
+### Changed
+
+- The Rust core pin moves to 3.9.16 (`v2026.9.16`). **The sovereign embedder now
+  runs one stream on CPU-only systems and two where a GPU (CUDA, Vulkan or Metal)
+  does the embedding.** The default previously was two everywhere.
+
+  Each stream holds its own compute graph — roughly 3.85 GiB for bge-m3 at the
+  default context length — so a CPU-only system now needs about 4 GiB less
+  memory to run the embedder.
+
+  **This is a deliberate trade: seconds of speed for several GiB of memory.** One
+  stream serves one embedding batch at a time, so concurrent callers queue rather
+  than run in parallel; the difference shows up during bulk ingest and is
+  measured in seconds. On a system without a GPU, where memory is usually the
+  scarcer resource, several gigabytes back is the better side of that trade, and
+  the embedder now fits comfortably on hardware where two graphs did not.
+
+  Nothing is capped: set `M3_EMBED_STREAMS` or `[embed].streams` in the server's
+  `config.toml` to run two (or more) streams on any system with the memory for
+  them. The resolved value is logged at startup, and `queue_depth` on the
+  server's `/metrics` shows whether callers are waiting on a stream.
 - The embed server logs its backend, model path, config file and every embed
   parameter at startup, and reports oversized input as HTTP 413 with the token
   and context counts rather than an opaque 500.
@@ -53,6 +92,50 @@ the policy is forward-going only.
   never fails an install.
 
 ### Fixed
+
+- The embedder's GGUF discovery probes m3's own models root before LM Studio's.
+  The LM Studio path was hardcoded, so removing or pruning that install left the
+  embed server unable to load its model on the next restart. The LM Studio
+  location is retained as a fallback.
+
+- `resolve_db_path()` rejects a DSN instead of turning it into a path. A DSN in
+  `M3_DATABASE` was passed through `abspath()` and became a path rooted at the
+  working directory: on Windows that raised WinError 123, and on POSIX the
+  mangled name is legal, so SQLite created an empty database and every read
+  returned nothing while the configured store went untouched. It now raises,
+  naming the source and the backend setting and echoing only the scheme.
+
+- `AgentOS_NotificationWaiter` re-fires every 10 minutes. The task exits cleanly
+  each hour by design but had no repetition, so that exit was terminal until the
+  next reboot.
+
+- The enrich drain resolves its default databases from the engine root. The
+  default was built relative to the repository, a pre-Homecoming location, so the
+  result depended on the working directory: a scheduled task matched nothing and
+  every run exited "no DBs found to drain", while a dev checkout could resolve a
+  leftover stub and report success against an empty queue while the real store
+  went untouched. The legacy location remains a fallback for pre-Homecoming
+  installs.
+
+- Migration 025 is skipped on a store with no `memory_items` table. The migration
+  creates the observation and reflector queues and then indexes `memory_items`,
+  so against a chatlog-only store it committed the queues and then failed the run
+  with "no such table: main.memory_items".
+
+- Scheduled-task logs carry an ISO-8601 UTC timestamp on every line. Print output
+  was previously unstamped and mixed with timestamped logging records, so a
+  traceback could only be attributed to a run by counting lines. UTC rather than
+  local: these logs are correlated against the embed server and a warehouse on
+  another host, and a local stamp with no offset repeats an hour during the
+  daylight-saving fold.
+
+- Diagnostic errors across the enrich, crypto/auth and server/backend subsystems
+  separate what was observed from what is inferred and name the setting to
+  inspect. `cause:` is reserved for a mechanism verified at the throw site; where
+  a broad exception was caught the explanation reads `possible:`. Contract
+  violations are unchanged — there the observed value is the argument and the
+  knob is the parameter name. A ratchet test pins the count of unlabelled
+  diagnostic sites so the debt can shrink but not grow.
 
 - Four advisories in the Rust core's transitive dependencies (`rustls`, `h2`,
   `crossbeam-epoch`, `anyhow`).
