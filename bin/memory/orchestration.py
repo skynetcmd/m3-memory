@@ -350,6 +350,44 @@ def _addressing_predicate(agent_id: str, param: str) -> "tuple[str, tuple]":
 MESSAGE_STATES = ("FAILED", "COMPLETED", "CLAIMED", "PENDING")
 
 
+def inbox_membership_sql(*, claimed: "bool | None" = None) -> str:
+    """Rows STILL IN THE INBOX -- i.e. not yet acked. The single owner.
+
+    ⚠ This is NOT ``message_state_sql("PENDING")`` and must never be unified
+    with it. PENDING additionally requires ``failed_at IS NULL``, which hides
+    dead-lettered rows because they are not work to hand out. Inbox membership
+    deliberately INCLUDES them: an operator must be able to clear a
+    dead-lettered message, and a row nobody can ack sits unread forever with no
+    way to remove it. The asymmetry is intended -- poll HIDES dead-lettered
+    rows, ack still CLEARS them.
+
+    ``claimed`` selects the three forms the callers actually need:
+
+    * ``None``  -- everything still in the inbox. What the WAITER counts, so
+      detection sees a claimed message arrive rather than waiting for it to be
+      released.
+    * ``False`` -- unclaimed only. What ack writes: a claimed row is in-flight
+      work and only its leaseholder may close it, through the fence.
+    * ``True``  -- claimed only. The exact complement of ``False``, used to
+      report how many rows were left behind. These two are complements in the
+      SAME function, so if their spellings ever diverge the count silently
+      misreports and "Acked 0" reads as an empty queue when it is not (§3).
+
+    One owner rather than four hand-written spellings, for the reason §10a
+    gives: the copies drift, and here two of them must stay exact complements
+    of each other to keep a user-visible count honest.
+
+    Backend-neutral -- pure IS NULL / IS NOT NULL, no dialect function -- so it
+    needs no Dialect method, and it lives beside ``message_state_sql`` because
+    the two are read together and confused for one another.
+    """
+    base = "read_at IS NULL"
+    if claimed is None:
+        return base
+    return base + (" AND claimed_by IS NOT NULL" if claimed
+                   else " AND claimed_by IS NULL")
+
+
 def message_state_sql(state: str) -> str:
     """SQL predicate selecting rows in ``state``. The single owner.
 
@@ -465,7 +503,7 @@ def notifications_unread_ids_impl(agent_id: str) -> list[int]:
     with _db() as db:
         rows = db.execute(
             f"SELECT id FROM notifications WHERE {pred} "
-            f"AND read_at IS NULL ORDER BY id ASC",
+            f"AND {inbox_membership_sql()} ORDER BY id ASC",
             params,
         ).fetchall()
     return [row[0] for row in rows]
@@ -687,7 +725,7 @@ def notifications_ack_impl(notification_id: int) -> str:
     with _db() as db:
         cur = db.execute(
             f"UPDATE notifications SET read_at = {_d.now()} "
-            f"WHERE id = {p} AND read_at IS NULL AND claimed_by IS NULL",
+            f"WHERE id = {p} AND {inbox_membership_sql(claimed=False)}",
             (notification_id,)
         )
         rowcount = cur.rowcount
@@ -755,7 +793,7 @@ def notifications_ack_all_impl(agent_id: str) -> str:
         # able to empty the queue). Do not "unify" these two predicates.
         cur = db.execute(
             f"UPDATE notifications SET read_at = {_d.now()} "
-            f"WHERE {pred} AND read_at IS NULL AND claimed_by IS NULL",
+            f"WHERE {pred} AND {inbox_membership_sql(claimed=False)}",
             tuple(addr)
         )
         rowcount = cur.rowcount
@@ -764,7 +802,7 @@ def notifications_ack_all_impl(agent_id: str) -> str:
         # claimed reads as an empty queue, which is the state it is NOT (§3).
         skipped = db.execute(
             f"SELECT COUNT(*) AS c FROM notifications "
-            f"WHERE {pred} AND read_at IS NULL AND claimed_by IS NOT NULL",
+            f"WHERE {pred} AND {inbox_membership_sql(claimed=True)}",
             tuple(addr)
         ).fetchone()["c"]
 

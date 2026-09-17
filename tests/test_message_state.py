@@ -27,6 +27,7 @@ if _BIN not in sys.path:
 
 from memory.orchestration import (  # noqa: E402
     MESSAGE_STATES,
+    inbox_membership_sql,
     message_state_of,
     message_state_sql,
 )
@@ -128,3 +129,66 @@ def test_an_unknown_state_is_refused_not_silently_empty(conn):
     empty result is indistinguishable from 'no rows in that state' (§3)."""
     with pytest.raises(ValueError, match="unknown message state"):
         message_state_sql("PENDNIG")
+
+
+# ---------------------------------------------------------------------------
+# inbox_membership_sql -- "still in the inbox", which is NOT `PENDING`.
+#
+# The two overlap, which is exactly why they get confused; the codebase already
+# carries two comments warning against unifying them. These give the warning a
+# test behind it.
+# ---------------------------------------------------------------------------
+
+def test_inbox_membership_is_not_pending():
+    """PENDING hides dead-lettered rows; inbox membership must not.
+
+    A dead-lettered row matched by no predicate is unackable -- it sits unread
+    forever with no way for an operator to clear it.
+    """
+    assert "failed_at" not in inbox_membership_sql()
+    assert "failed_at" in message_state_sql("PENDING")
+
+
+def test_claimed_and_unclaimed_forms_are_exact_complements():
+    """Ack writes one of these and counts the other, in the SAME function.
+
+    If the spellings diverge a row matches neither, the skipped-count
+    under-reports, and "Acked 0" reads as an empty queue while work sits
+    claimed.
+    """
+    base = inbox_membership_sql()
+    unclaimed = inbox_membership_sql(claimed=False)
+    claimed = inbox_membership_sql(claimed=True)
+    assert unclaimed.startswith(base)
+    assert claimed.startswith(base)
+    assert unclaimed.replace("claimed_by IS NULL", "claimed_by IS NOT NULL") == claimed, (
+        "the claimed/unclaimed forms are no longer complements.\n"
+        f"observed: unclaimed={unclaimed!r} claimed={claimed!r}\n"
+        "cause: one form was edited without the other\n"
+        "possible impact: a row matches neither, so the skipped-count "
+        "under-reports and an operator reads an empty queue that is not\n"
+        "inspect: inbox_membership_sql in bin/memory/orchestration.py"
+    )
+
+
+def test_the_two_forms_partition_the_inbox(conn):
+    """Every in-inbox row is in exactly one of claimed / unclaimed."""
+    conn.executemany(
+        "INSERT INTO notifications (id, read_at, claimed_by, failed_at) "
+        "VALUES (?,?,?,?)",
+        [(901, None, None, None),           # unclaimed, live
+         (902, None, "w", None),            # claimed
+         (903, None, None, _TS),            # dead-lettered, STILL in the inbox
+         (904, _TS, None, None)],           # acked -- out of the inbox
+    )
+
+    def n(where):
+        return conn.execute(
+            f"SELECT COUNT(*) FROM notifications WHERE id >= 901 AND {where}"
+        ).fetchone()[0]
+
+    assert n(inbox_membership_sql()) == 3, "an acked row must leave the inbox"
+    assert n(inbox_membership_sql(claimed=True)) == 1
+    assert (n(inbox_membership_sql(claimed=False))
+            + n(inbox_membership_sql(claimed=True))
+            == n(inbox_membership_sql())), "no row may fall into neither form"
