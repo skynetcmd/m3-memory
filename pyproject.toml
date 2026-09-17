@@ -182,6 +182,11 @@ postgres = ["psycopg[binary]>=3.3.5,<4"]
 # for a format they may never ingest is the wrong default; needing it is opt-in.
 iwork = [
     "keynote-parser>=1.14.5",
+    # keynote-parser declares `Pillow>=7.1.0` — a 2020 floor that resolves to a
+    # release carrying 14 known CVEs, one Critical (GHSA-3f63-hfp8-52jq). Pinned
+    # here because the extra is the only path that pulls Pillow into m3 at all:
+    # nothing in the codebase imports PIL.
+    "pillow>=12.3.0",
 ]
 # Web surfaces: the FastAPI dashboard (bin/dashboard_server.py) and the
 # OpenAI-compatible MCP proxy (bin/mcp_proxy.py). Optional by design — the core
