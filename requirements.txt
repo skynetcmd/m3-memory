@@ -12,24 +12,40 @@
 # across Ollama, LM Studio, llama.cpp --server, vLLM, and LocalAI.
 
 # --- Core Engine & MCP ---
-fastmcp>=3.2.4,<4
-mcp>=1.27.0,<2
+# ⚠ mcp <2 and fastmcp <4 are DELIBERATE, not staleness. Both majors exist
+# (mcp 2.2.0, fastmcp 4.0.4) and both install cleanly -- the blocker is an API
+# rename, measured 2026-09-17 in a throwaway venv:
+#
+#   from mcp.server.fastmcp import FastMCP
+#   -> ModuleNotFoundError: No module named 'mcp.server.fastmcp'.
+#      "This is mcp 2.x, where FastMCP was renamed to MCPServer."
+#
+# That import is load-bearing in memory_bridge.py and five other bridges
+# (custom_tool_bridge, debug_agent_bridge, grok_bridge, web_research_bridge,
+# session_handoff), plus a `from mcp import FastMCP` fallback in
+# files_memory/tools.py. The auth/transport surface (AccessToken,
+# TransportSecuritySettings, AuthSettings) DID survive the major.
+#
+# Lifting the ceiling is a code migration to MCPServer, not a version bump.
+# Until that happens the ceiling is what keeps a fresh install working.
+fastmcp>=3.4.7,<4
+mcp>=1.30.0,<2
 
 # --- Network & HTTP ---
 httpx[http2]>=0.28.1,<1
-h2>=4.3.0,<5
-requests>=2.33.1,<3
-urllib3>=2.7.0,<3  # 2.7.0 fixes PYSEC-2026-141/142
+h2>=4.4.1,<5
+requests>=2.34.2,<3
+urllib3>=2.8.0,<3  # 2.7.0 fixes PYSEC-2026-141/142
 
 # --- Database & Storage ---
-psycopg2-binary>=2.9.12,<3
-psycopg[binary]>=3.2.0,<4
-sqlglot>=30.6.0,<31
+psycopg2-binary>=2.9.13,<3
+psycopg[binary]>=3.3.5,<4
+sqlglot>=30.18.0,<31
 
 # --- Security & Auth ---
-cryptography>=50.0.0,<51
+cryptography>=50.0.1,<51
 keyring>=25.7.0,<26
-pywin32>=311; sys_platform == 'win32'
+pywin32>=312; sys_platform == 'win32'
 
 # --- System & Thermal ---
 psutil>=7.2.2,<8
@@ -50,16 +66,16 @@ pyobjc-framework-CoreWLAN; sys_platform == 'darwin'
 # the numpy and pure-Python branches. Runtime was always correct on both paths;
 # the branches now bind separate names. Fixed in the same change.
 numpy>=2.5.3
-scipy>=1.17.1,<2
-tqdm>=4.67.3,<5
+scipy>=1.18.1,<2
+tqdm>=4.70.1,<5
 # Fast fuzzy string matching for entity coalescing (token-order-aware, ~3-4x
 # faster than stdlib difflib). Clean MIT leaf wheel, no transitive deps. The
 # entity-coalesce pass falls back to difflib if absent, so this is a perf/quality
 # dep, not a hard requirement.
-rapidfuzz>=3.14,<4
+rapidfuzz>=3.14.6,<4
 
 # --- Embedding Server ---
-sentence-transformers>=5.4.1,<6
+sentence-transformers>=5.7.0,<6
 # transformers is transitive (sentence-transformers / peft) but pinned directly
 # so the floor is ours to set rather than whatever a resolver picks.
 #
@@ -100,25 +116,25 @@ transformers>=5.17.0,<6
 torch>=2.14.0,<3
 
 # --- Utilities ---
-python-dotenv>=1.2.2,<2
+python-dotenv>=1.2.3,<2
 PyYAML>=6.0.3,<7
-fpdf2>=2.8.7,<3
-beautifulsoup4>=4.14.3,<5
+fpdf2>=2.8.8,<3
+beautifulsoup4>=4.15.0,<5
 argparse>=1.4.0,<2
 
 # --- MCP Proxy & API ---
-fastapi>=0.136.1,<1
-uvicorn>=0.46.0,<1
+fastapi>=0.141.1,<1
+uvicorn>=0.53.0,<1
 
 # --- Development & Testing ---
 pytest>=9.0.3,<10
-pytest-asyncio>=1.3.0,<2
+pytest-asyncio>=1.4.0,<2
 ruff>=0.15.12,<1
 mypy>=1.20.2,<2
-types-requests>=2.33.0.20260408
+types-requests>=2.33.0.20260906
 # Tracks the setuptools floor below. The old <82 cap mirrored torch 2.11's
 # `setuptools<82`; torch 2.14 dropped that constraint entirely.
-types-setuptools>=83.0.0
+types-setuptools>=84.0.0
 
 # --- Build Tools ---
 # setuptools>=77 for the SPDX `license = "Apache-2.0"` form.
@@ -145,4 +161,4 @@ types-setuptools>=83.0.0
 # ran `find | head -1` and audited examples/mac-agent/requirements.txt ONLY, so
 # the root manifest was never scanned. Fixed in scan_repo.py (audits all three;
 # 261 packages, was ~8). See m3 memory 1c6429ef.
-setuptools>=83.0.0
+setuptools>=84.0.0
