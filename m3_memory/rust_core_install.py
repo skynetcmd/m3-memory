@@ -38,7 +38,10 @@ from m3_memory._platform import os_name as _os_name
 #
 # 3.9.16 / v2026.9.16 (2026-09-16). Verify the Release is complete with:
 #   gh release view v2026.9.16 --repo skynetcmd/m3-core-rs
-#   (expect 28 assets: 7 (os,backend) packages x cp311-314)
+#   (expect 29 assets: 7 (os,backend) packages x cp311-314, + SHA256SUMS)
+#   NOTE: 3.9.16 is the LAST release carrying cp311. m3-core-rs raised its
+#   requires-python to >=3.12 to match m3-memory's own floor, so releases
+#   after this one are 21 wheels (7 x cp312-314).
 #
 # ⚠ 3.9.16 CHANGES THE EMBED SERVER'S MEMORY FOOTPRINT PER WHEEL. Each worker
 # stream materialises its own llama.cpp compute graph on FIRST USE, sized for a
