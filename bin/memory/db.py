@@ -435,6 +435,32 @@ def _lazy_init(db_path: str | None = None) -> None:
             return
         _initialized_dbs.add(key)
         _initialized = True  # legacy flag — once true, stays true
+
+        # A DISPATCH store is never main-initialised. It is bootstrapped from
+        # its own migrations (memory/dispatch_migrations) and carries neither
+        # main nor chatlog schema, so every routine below is wrong for it:
+        # _ensure_sync_tables would hand it to the MAIN migration runner, which
+        # creates main tables in it, and _backfill_change_agent queries
+        # memory_items, which it does not have.
+        #
+        # Guarded HERE, at the convergence point, rather than in each routine
+        # (§2): N callers that must all satisfy a rule get ONE check where they
+        # meet, so a future routine added to this function inherits it instead
+        # of needing to remember.
+        #
+        # Measured while building the store split: without this, a bootstrapped
+        # agent_dispatch.db was classified "unknown", migrated as a main store,
+        # and its notification_dispatch table was replaced -- which surfaced as
+        # an EMPTY INBOX rather than an error.
+        try:
+            from migrate_memory import _classify_db as _classify
+            if _classify(key) == "dispatch":
+                return
+        except Exception:  # noqa: BLE001 — classifier unavailable during
+            # bootstrap; fall through to the historical behaviour rather than
+            # skipping initialisation of a store that may genuinely need it.
+            pass
+
         try:
             _ensure_sync_tables(key)
             _backfill_change_agent()

@@ -100,6 +100,17 @@ _CHATLOG_STORAGE_TABLES: frozenset[str] = frozenset({
     "memory_relationships",
 })
 
+# Tables that only a DISPATCH store has. Checked BEFORE the chatlog signature
+# because a dispatch store has neither main-only nor chatlog storage tables, so
+# without its own signature it classifies as "unknown" -- and an unknown store
+# is one the lazy initialiser will happily run MAIN migrations against,
+# replacing the dispatch schema. Measured while building the split: a
+# bootstrapped agent_dispatch.db came back "unknown", was migrated as a main
+# store, and its notification_dispatch table vanished.
+_DISPATCH_STORAGE_TABLES: frozenset[str] = frozenset({
+    "notification_dispatch",
+})
+
 
 def _classify_db(db_path: str) -> str:
     """Identify a SQLite file's schema kind from its tables.
@@ -108,6 +119,7 @@ def _classify_db(db_path: str) -> str:
         "empty"   — file does not exist OR has no user tables (fresh DB)
         "main"    — has main-only tables (agents / memory_history / tasks)
         "chatlog" — has chatlog storage tables but no main-only tables
+        "dispatch"— has the dispatch delivery table (its own ephemeral store)
         "unknown" — has tables but matches neither signature
 
     Path-equality alone is unreliable: a user can set CHATLOG_DB_PATH to a
@@ -141,8 +153,14 @@ def _classify_db(db_path: str) -> str:
         return "empty"
     has_main = bool(tables & _MAIN_SIGNATURE_TABLES)
     has_storage = bool(tables & _CHATLOG_STORAGE_TABLES)
+    has_dispatch = bool(tables & _DISPATCH_STORAGE_TABLES)
     if has_main:
         return "main"
+    # Before the chatlog check: a dispatch store carries none of the chatlog
+    # storage tables, but ordering this explicitly keeps the intent readable if
+    # a future store shares one.
+    if has_dispatch:
+        return "dispatch"
     if has_storage:
         return "chatlog"
     return "unknown"

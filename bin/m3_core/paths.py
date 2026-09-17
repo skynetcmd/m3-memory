@@ -475,6 +475,62 @@ def dispatch_pg_schema() -> str:
     return (os.environ.get("M3_DISPATCH_PG_SCHEMA") or "m3_dispatch").strip()
 
 
+def notification_store_paths() -> "list[str]":
+    """Every store an agent notification can land in, main first, de-duplicated.
+
+    THE TRAP THIS EXISTS TO CLOSE -- and it has already been sprung three times
+    for CHAT turns, which is why `chatlog_config.chat_store_paths` exists. This
+    is the same shape one store later.
+
+    On a SPLIT topology (the default) delivery records live in
+    `agent_dispatch.db` while `agent_memory.db` is a different FILE. A caller
+    that checks only the main store sees zero pending rows on a perfectly
+    healthy install, and the failure is SILENT: no error, no log, the receipt
+    SLA simply under-reports. For the waiter that is worse than an outage,
+    because an agent that trusts an empty inbox drops work addressed to it.
+
+    On an INTEGRATED deployment both resolve to the same file and this returns
+    ONE entry, so callers need no special case -- iterate and stop worrying
+    about the topology.
+
+    ⚠ Order matters: the MAIN store comes first, so a caller that stops at the
+    first hit stays correct on an integrated install.
+
+    ⚠ This is the DATA question ("which files hold notifications"), not the
+    schema question. A store that exists but has not been bootstrapped yet is
+    still returned; callers that query it must tolerate a missing table rather
+    than assume presence implies schema.
+    """
+    out: "list[str]" = []
+    seen: "set[str]" = set()
+
+    def _add(path: "str | None") -> None:
+        if not path:
+            return
+        key = os.path.abspath(path)
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+
+    # Main store first. Prefer the SDK resolver, which honours the active
+    # database ContextVar and a pinned db_path -- none of which a
+    # sibling-of-the-engine-root guess would see.
+    try:
+        from m3_sdk import resolve_db_path  # lazy: avoid an import cycle
+        _add(resolve_db_path(None))
+    except Exception:  # noqa: BLE001 -- fall through to the documented default
+        _add(os.environ.get("M3_DATABASE") or resolve_engine_file("agent_memory.db"))
+
+    # Dispatch store second. In integrated mode this resolves to the main store
+    # and de-duplicates away, which is exactly the "no special case" property.
+    try:
+        _add(resolve_dispatch_db())
+    except Exception:  # noqa: BLE001 -- a broken dispatch config must not hide
+        # the main store from a caller that only needs one path.
+        pass
+    return out
+
+
 def resolve_config_file(filename: str) -> str:
     """Resolve a path under the config root, honoring the legacy fallback.
 

@@ -492,6 +492,102 @@ def notify_impl(agent_id: str, kind: str, payload: dict = None,
     return f"Notified {agent_id}: {kind} (id={new_id})"
 
 
+def _notification_sources() -> "list[tuple[str | None, str]]":
+    """Every (store, table) pair a pending notification can live in.
+
+    ``store`` is a SQLite path to read directly, or ``None`` meaning "the
+    active store, via ``_db()``". ``table`` is written into the FROM clause,
+    schema-qualified where the backend needs it.
+
+    ⚠ THE SPLIT IS A DIFFERENT MECHANISM PER BACKEND, so this cannot be one
+    answer:
+
+    * **SQLite** -- a separate FILE, because the file is SQLite's unit of write
+      contention and of backup.
+    * **PostgreSQL** -- a separate SCHEMA in the SAME database. There is no
+      database-wide write lock to escape, and a schema is already PG's unit of
+      permissions and selective dump, so the second source is the SAME
+      connection with a qualified table name.
+
+    Gated on the backend's capability through the seam's own resolver, never on
+    a name comparison like ``!= "postgres"`` -- a future MariaDB must not
+    silently take the PostgreSQL path (§10a).
+    """
+    sources: "list[tuple[str | None, str]]" = [(None, "notifications")]
+    try:
+        from m3_core.paths import (
+            dispatch_pg_schema,
+            dispatch_store_mode,
+            resolve_dispatch_db,
+        )
+
+        from .backends import resolve_backend_name
+
+        if dispatch_store_mode() == "integrated":
+            sources.append((None, "notification_dispatch"))
+        elif resolve_backend_name() == "sqlite":
+            sources.append((resolve_dispatch_db(), "notification_dispatch"))
+        else:
+            schema = dispatch_pg_schema()
+            sources.append((None, f'"{schema}".notification_dispatch'))
+    except Exception:  # noqa: BLE001 -- a broken dispatch config must never
+        # hide the main store from a caller that only needs its mail.
+        pass
+    return sources
+
+
+def read_across_notification_stores(sql_template: str, params: "tuple") -> list:
+    """Run one read against EVERY store a notification can live in.
+
+    THE PRIMITIVE DOWNSTREAM CALLERS SHOULD USE. ``sql_template`` carries a
+    single ``{table}`` placeholder; this fills it per source, runs the read on
+    the right connection, and returns the concatenated rows.
+
+    ⚠ WHY A PRIMITIVE AND NOT `active_database(path)`. That was the obvious
+    call and it is WRONG here. ``resolve_db_path``'s documented precedence is
+    *explicit arg > M3_DATABASE env > active_database ContextVar > default*, so
+    with ``M3_DATABASE`` set -- which the cognitive loop ALWAYS sets -- the
+    ContextVar is overridden and the block silently reads the MAIN store again.
+    Measured while building this: a notification sitting in `agent_dispatch.db`
+    was invisible, and the query returned the main store's rows with no error.
+    That is the same trap `chat_store_paths` documents one layer up.
+
+    The backend-blind ``open_readonly(db_path)`` seam addresses a SPECIFIC store
+    and is not subject to that precedence. On PostgreSQL it ignores the path and
+    yields a pooled connection, which is correct: there is one store there and
+    the split is expressed in the qualified table name instead.
+
+    ⚠ A MISSING STORE MUST NOT EMPTY THE INBOX. A store that exists but has not
+    been bootstrapped has no such table, and a store held by another writer
+    raises too. Either is reported and SKIPPED, never propagated: returning
+    nothing would read as "no mail", which is the §3 false negative this whole
+    subsystem exists to remove. An agent that trusts an empty inbox drops work
+    addressed to it.
+    """
+    rows: list = []
+    for store, table in _notification_sources():
+        try:
+            if store is None:
+                with _db() as db:
+                    got = db.execute(sql_template.format(table=table), params).fetchall()
+            else:
+                from .backends import active_backend
+                with active_backend().open_readonly(store) as conn:
+                    got = conn.execute(sql_template.format(table=table), params).fetchall()
+        except Exception as exc:  # noqa: BLE001 -- see the warning above
+            logger.warning(
+                "notification store skipped. "
+                f"observed: store={store or '(active)'} table={table} "
+                f"{type(exc).__name__}: {exc}. "
+                "possible: the store has not been bootstrapped yet, or another "
+                "writer holds it. "
+                "inspect: memory/dispatch_migrations/001_bootstrap.up.sql"
+            )
+            continue
+        rows.extend(got)
+    return rows
+
+
 def notifications_unread_ids_impl(agent_id: str) -> list[int]:
     """
     Returns a list of unread notification IDs for the given agent.
@@ -500,12 +596,11 @@ def notifications_unread_ids_impl(agent_id: str) -> list[int]:
     require_agent_id(agent_id, "notifications_unread_ids")
     p = dialect().param()
     pred, params = _addressing_predicate(agent_id, p)
-    with _db() as db:
-        rows = db.execute(
-            f"SELECT id FROM notifications WHERE {pred} "
-            f"AND {inbox_membership_sql()} ORDER BY id ASC",
-            params,
-        ).fetchall()
+    rows = read_across_notification_stores(
+        f"SELECT id FROM {{table}} WHERE {pred} "
+        f"AND {inbox_membership_sql()} ORDER BY id ASC",
+        params,
+    )
     return [row[0] for row in rows]
 
 def _decode_payload_json(rows) -> list[dict]:

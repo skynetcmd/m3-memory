@@ -38,6 +38,50 @@ def wal_fingerprint(wal: pathlib.Path) -> tuple:
         return ()
 
 
+def notification_wal_paths(engine_root: str) -> "list[pathlib.Path]":
+    """The -wal file of EVERY store a notification can land in.
+
+    ⚠ WHY THIS IS NOT ONE FILE ANY MORE. Delivery records live in their own
+    store (`agent_dispatch.db`) by default, because notifications are ephemeral
+    and memories are not. Its WAL is a DIFFERENT FILE, so a waiter watching only
+    `agent_memory.db-wal` never sees a dispatch write land -- detection goes
+    blind and the failure is SILENT: no error, no log, the receipt SLA simply
+    stops being met. An agent that trusts an empty inbox drops work addressed
+    to it.
+
+    Store enumeration itself is NOT done here. `m3_core.paths
+    .notification_store_paths()` owns "which files hold notifications", exactly
+    as `chat_store_paths()` owns it for chat turns -- that question was
+    hand-rolled three times for chat and got the split topology wrong three
+    times. This maps those stores to their WAL siblings and nothing more.
+
+    Falls back to the historical single path if the seam cannot be imported: a
+    waiter that watches one store is degraded, but a waiter that crashes on
+    startup watches none.
+    """
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
+        from m3_core.paths import notification_store_paths
+        stores = notification_store_paths()
+    except Exception as exc:  # noqa: BLE001 -- degraded beats dead
+        _warn(f"could not enumerate notification stores, watching the main store "
+              f"only. observed: {type(exc).__name__}: {exc}. "
+              f"possible: m3_core is not importable from this interpreter. "
+              f"inspect: m3_core.paths.notification_store_paths")
+        stores = [os.path.join(engine_root, "agent_memory.db")]
+    return [pathlib.Path(str(s) + "-wal") for s in stores]
+
+
+def wal_fingerprints(wals: "list[pathlib.Path]") -> tuple:
+    """One comparable fingerprint across every watched WAL.
+
+    A tuple of per-file fingerprints rather than a merged value: a change in
+    ANY store must compare unequal, and a checkpoint shrinking one file must not
+    be able to cancel out growth in another.
+    """
+    return tuple(wal_fingerprint(w) for w in wals)
+
+
 def _no_window() -> dict:
     """Windows: hide the console window without detaching the child's stdio.
 
@@ -476,7 +520,7 @@ def main() -> int:
 
 
 def _wait_once(args) -> int:
-    wal = pathlib.Path(args.engine_root) / "agent_memory.db-wal"
+    wals = notification_wal_paths(args.engine_root)
     # STARTUP SWEEP -- stamp receipt on anything already waiting, BEFORE the
     # baseline is taken.
     #
@@ -497,12 +541,12 @@ def _wait_once(args) -> int:
         _m3_admin("notifications_mark_received", _a)
 
     baselines = {a: unread_ids(a) for a in args.agent_ids}
-    fp = wal_fingerprint(wal)
+    fp = wal_fingerprints(wals)
     deadline = time.time() + args.timeout
 
     while time.time() < deadline:
         time.sleep(args.interval)
-        cur_fp = wal_fingerprint(wal)
+        cur_fp = wal_fingerprints(wals)
         if cur_fp == fp:
             continue                      # nothing written at all
         fp = cur_fp
