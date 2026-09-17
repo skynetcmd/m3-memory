@@ -529,6 +529,47 @@ class Dialect:
         conn.commit()  # type: ignore[attr-defined]
         return bool(cur.rowcount)  # type: ignore[attr-defined]
 
+    def lease_expired_predicate(self) -> str:
+        """Rows whose lease has LAPSED and which are still live work.
+
+        The single owner of this predicate. It was previously inlined in
+        ``sweep_expired_leases`` and hand-copied into every backend that
+        overrides that method -- two copies with nothing forcing them to agree.
+        They were character-identical after rendering (``PostgresDialect.now()``
+        already returns ``NOW()``), so the copy carried no backend-varying
+        content: it was duplication, not specialisation. §10a -- a copied
+        predicate is the defect independent of correctness, because copies
+        drift.
+
+        Why that duplication mattered more than a style point: add a term to one
+        copy and the ">= lease_ttl retry interval" property holds on one backend
+        and not the other, with no error on either, so a security argument
+        silently stops applying to half the fleet.
+
+        The three terms, and what each one prevents:
+
+        * ``claim_expires_at IS NOT NULL`` -- an unclaimed row was never leased,
+          so there is nothing to reclaim.
+        * ``claim_expires_at <= now`` -- the lease actually lapsed. The bound is
+          rendered by :meth:`now` so the comparison is TEXT on SQLite and
+          TIMESTAMPTZ on PostgreSQL; both are correct, and that difference is
+          the reason this is a seam method rather than a constant.
+        * ``read_at IS NULL`` -- completed work is not reclaimable.
+        * ``failed_at IS NULL`` -- a dead-lettered row must stay terminal.
+          Without it ``fail_message`` stops being final and a poison message
+          re-enters the queue forever, which is the infinite retry loop
+          :meth:`sweep_expired_leases` exists to bound.
+
+        Backends that override ``sweep_expired_leases`` (PostgreSQL adds FOR
+        UPDATE SKIP LOCKED) MUST call this rather than re-spelling the
+        predicate. Covered by ``tests/test_lease_parity.py`` on every registered
+        backend.
+        """
+        return (
+            f"claim_expires_at IS NOT NULL AND claim_expires_at <= {self.now()} "
+            f"AND read_at IS NULL AND failed_at IS NULL"
+        )
+
     def sweep_expired_leases(
         self, conn: object, *, table: str, max_attempts: int = 5,
         limit: int = 100,
@@ -549,10 +590,7 @@ class Dialect:
         contend for them.
         """
         p = self.param()
-        expired = (
-            f"claim_expires_at IS NOT NULL AND claim_expires_at <= {self.now()} "
-            f"AND read_at IS NULL AND failed_at IS NULL"
-        )
+        expired = self.lease_expired_predicate()
         dead = conn.execute(  # type: ignore[attr-defined]
             f"UPDATE {table} SET failed_at = {self.now()}, claimed_by = NULL, "
             f"lease_token = NULL, claim_expires_at = NULL "

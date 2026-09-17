@@ -541,10 +541,11 @@ class PostgresDialect(Dialect):
         rather than in one long transaction holding locks across thousands of
         rows.
         """
-        expired = (
-            "claim_expires_at IS NOT NULL AND claim_expires_at <= NOW() "
-            "AND read_at IS NULL AND failed_at IS NULL"
-        )
+        # The predicate comes from the seam, NOT a local copy. This method
+        # overrides the base one only to add FOR UPDATE SKIP LOCKED; the
+        # definition of "expired" must stay identical across backends, and a
+        # second spelling here is how that silently stops being true (§10a).
+        expired = self.lease_expired_predicate()
         dead = conn.execute(  # type: ignore[attr-defined]
             f"UPDATE {table} SET failed_at = NOW(), claimed_by = NULL, "
             f"lease_token = NULL, claim_expires_at = NULL "

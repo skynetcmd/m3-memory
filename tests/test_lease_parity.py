@@ -35,7 +35,6 @@ portability wherever PG is reachable.
 """
 from __future__ import annotations
 
-import inspect
 import os
 import re
 import sqlite3
@@ -45,7 +44,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 
-from memory.backends.dialect import Dialect  # noqa: E402
 from memory.backends.postgres_backend import PostgresDialect  # noqa: E402
 from memory.backends.sqlite_backend import SqliteDialect  # noqa: E402
 
@@ -103,87 +101,103 @@ def _terms(sql: str) -> set:
     return out
 
 
-def _expired_sql(cls) -> str:
-    """The `expired` predicate READ FROM THE SOURCE of ``cls.sweep_expired_leases``.
+def _expired_sql(d) -> str:
+    """The `expired` predicate as dialect instance ``d`` renders it.
 
-    ⚠ Read, never transcribed. The first version of this file hand-copied the
-    predicate into the test, which made the guard BLIND: planting an extra term
-    in `postgres_backend.py` left all 15 assertions green, because the test was
-    comparing its own two copies rather than the code's. §12c -- a guard that
-    cannot demonstrate a catch reads as coverage while providing none.
+    Now a CALL, not a source scrape. The predicate used to be inlined in
+    ``sweep_expired_leases`` and hand-copied per backend, so the only way to
+    compare the copies was to read them out of the source. It has since been
+    collapsed into ``Dialect.lease_expired_predicate`` -- one owner, every
+    backend calling it -- which is what §10a asks for and what makes the copies
+    unable to drift.
 
-    The predicate is an inline local inside the method (that inlining IS the
-    defect under test), so there is nothing importable to assert against;
-    reading the source is what makes the assertion real.
+    The term assertions below therefore no longer compare two copies. They pin
+    the OWNER's terms, and prove every registered backend resolves to that one
+    owner rather than reintroducing a local spelling.
     """
-    src = inspect.getsource(cls.sweep_expired_leases)
-    m = re.search(r"expired\s*=\s*\((.*?)\)" + chr(10), src, re.S)
-    if not m:
-        raise AssertionError(
-            f"could not locate the `expired = (...)` literal in "
-            f"{cls.__name__}.sweep_expired_leases. If the predicate moved or was "
-            f"refactored into a shared owner, UPDATE THIS EXTRACTOR -- do not "
-            f"delete the guard: a silently unextractable predicate is exactly "
-            f"the blind spot this file exists to close."
-        )
-    return " ".join(re.findall(r'[fr]?"([^"]*)"', m.group(1))).strip()
+    return d.lease_expired_predicate()
 
 
-class TestExpiredPredicateTerms(unittest.TestCase):
+def _registered_dialects() -> "list[tuple[str, object]]":
+    """Every REGISTERED backend's dialect singleton, derived, never hardcoded.
+
+    §1 expects MariaDB. A hardcoded (sqlite, postgres) pair would leave a third
+    backend's override silently unguarded -- the same "they agree today" failure
+    this file exists to catch, one level up. The registry is the documented
+    single source of truth mapping a backend name to its dialect, so ask it.
+    """
+    from memory.backends import registry as _registry
+    from memory.backends.selector import _VALID
+
+    out = []
+    for name in _VALID:
+        _registry._ensure_registered(name)
+        out.append((name, _registry.dialect_singleton_for(name)))
+    return out
+
+
+class TestExpiredPredicateHasOneOwner(unittest.TestCase):
     """Pure-function contract -- no database required."""
 
-    def test_both_backends_constrain_the_same_columns(self):
-        sqlite_terms = _terms(_expired_sql(Dialect))
-        pg_terms = _terms(_expired_sql(PostgresDialect))
+    def test_every_registered_backend_resolves_to_the_same_owner(self):
+        """No backend may reintroduce a local spelling of `expired`.
+
+        This replaces a copy-vs-copy comparison. The copies are gone; what must
+        now hold is that nobody adds one back by overriding the owner.
+        """
+        owners = {
+            name: type(d).lease_expired_predicate.__qualname__
+            for name, d in _registered_dialects()
+        }
+        distinct = set(owners.values())
         self.assertEqual(
-            sqlite_terms, pg_terms,
-            "the `expired` predicate diverged between backends.\n"
-            f"observed: sqlite-only={sorted(sqlite_terms - pg_terms)} "
-            f"pg-only={sorted(pg_terms - sqlite_terms)}\n"
-            "cause: the predicate is maintained in two hand-edited copies and "
-            "they no longer carry identical terms\n"
+            len(distinct), 1,
+            "a backend overrode the lease `expired` predicate.\n"
+            f"observed: {owners}\n"
+            "cause: lease_expired_predicate is defined in more than one place, "
+            "so the definition of an expired lease can differ per backend\n"
             "possible impact: the >=lease_ttl retry gap, which the dispatch "
-            "SSRF argument rests on, now holds on one backend and not the "
-            "other -- with no error on either\n"
-            "inspect: bin/memory/backends/dialect.py sweep_expired_leases, "
-            "bin/memory/backends/postgres_backend.py sweep_expired_leases",
+            "SSRF argument rests on, holds on one backend and not another\n"
+            "inspect: lease_expired_predicate in bin/memory/backends/dialect.py "
+            "and any backend module that redefines it",
         )
 
-    def test_every_required_term_is_present(self):
-        """Pins the terms themselves, so DROPPING one from BOTH copies is caught.
+    def test_the_owner_keeps_every_required_term(self):
+        """Pins the terms so dropping one is caught even with a single owner.
 
-        Equality between the two copies is not sufficient: deleting
-        `failed_at IS NULL` from both keeps them equal and makes a dead-lettered
-        row eligible for reclaim again -- the infinite-retry loop the
-        implementation's own docstring warns about.
+        One owner removes DRIFT between backends; it does not stop someone
+        deleting a term from the owner itself.
         """
-        for d, name in ((Dialect, "sqlite/base"), (PostgresDialect, "postgres")):
+        for name, d in _registered_dialects():
             with self.subTest(backend=name):
+                got = _terms(_expired_sql(d))
+                missing = _REQUIRED_TERMS - got
                 self.assertEqual(
-                    _terms(_expired_sql(d)) & _REQUIRED_TERMS, _REQUIRED_TERMS,
+                    got & _REQUIRED_TERMS, _REQUIRED_TERMS,
                     f"`expired` lost a required term on {name}.\n"
-                    f"observed: missing={sorted(_REQUIRED_TERMS - _terms(_expired_sql(d)))}\n"
+                    f"observed: missing={sorted(missing)}\n"
                     "cause: a term required by the lease contract is absent "
-                    "from the predicate source\n"
+                    "from lease_expired_predicate\n"
                     "possible impact: dropping `failed_at IS NULL` makes a "
                     "dead-lettered row eligible for reclaim again -- the "
-                    "infinite retry loop the implementation docstring warns "
-                    "about; dropping `read_at IS NULL` reclaims completed work\n"
-                    f"inspect: {d.__module__}.{d.__name__}.sweep_expired_leases",
+                    "infinite retry loop sweep_expired_leases exists to bound; "
+                    "dropping `read_at IS NULL` reclaims completed work\n"
+                    "inspect: Dialect.lease_expired_predicate",
                 )
 
-    def test_the_renderings_are_allowed_to_differ(self):
-        """Guards the guard: a string compare here would fail on CORRECT code.
+    def test_the_renderings_still_differ_per_backend(self):
+        """The owner is a seam METHOD, not a constant -- prove it still varies.
 
-        If someone 'simplifies' this file into an equality check on the SQL
-        text, this test documents why that is wrong.
+        If these ever render identically the seam has stopped earning its place,
+        and `now()` has probably regressed on one backend.
         """
-        self.assertNotEqual(
-            _expired_sql(Dialect), _expired_sql(PostgresDialect),
-            "rendering is expected to differ (strftime vs NOW()); only TERMS "
-            "must match. If these ever render identically, this assertion is "
-            "safe to delete -- but do not replace the term comparison with a "
-            "string comparison.",
+        rendered = {name: _expired_sql(d) for name, d in _registered_dialects()}
+        self.assertEqual(
+            len(set(rendered.values())), len(rendered),
+            f"observed: {rendered}\n"
+            "cause: two backends rendered the same SQL for an expression that "
+            "must be backend-specific (TEXT compare vs TIMESTAMPTZ)\n"
+            "inspect: Dialect.now on each backend",
         )
 
 
