@@ -277,6 +277,60 @@ class TestLeaseFencePredicate(unittest.TestCase):
                 self.assertIn("claim_expires_at", live)
 
 
+class TestExpiryComparisonIsPortable(unittest.TestCase):
+    """The expiry bound compares TEXT on SQLite and TIMESTAMPTZ on PostgreSQL.
+
+    On SQLite the whole correctness of `claim_expires_at <= now` rests on
+    lexicographic order matching chronological order, which holds only while
+    every timestamp is the SAME FIXED WIDTH. An unpadded month would sort after
+    a padded one and a lapsed lease would read as live -- silently, on one
+    backend only, which is the §0.4 hermeticity trap this file exists to close.
+
+    Measured: `strftime('%Y-%m-%dT%H:%M:%SZ', ...)` always zero-pads, and
+    `renew_lease` is the ONLY writer of the column (via `now_plus_seconds`), so
+    nothing can introduce the unpadded form today. These pin that.
+    """
+
+    def test_sqlite_now_is_fixed_width_utc(self):
+        """No `localtime` modifier: the same instant renders identically on
+        Windows, macOS and Linux."""
+        rendered = SqliteDialect().now()
+        self.assertIn("%Y-%m-%dT%H:%M:%SZ", rendered)
+        self.assertNotIn("localtime", rendered)
+
+    def test_text_ordering_matches_time_ordering(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE t (id INTEGER, claim_expires_at TEXT, "
+                     "read_at TEXT, failed_at TEXT)")
+        conn.executemany(
+            "INSERT INTO t (id, claim_expires_at) VALUES (?,?)",
+            [(1, "2025-12-31T23:59:59Z"),   # last year, lapsed
+             (2, "2026-09-16T00:00:00Z"),   # lapsed
+             (3, "2099-01-01T00:00:00Z")],  # live
+        )
+        pred = SqliteDialect().lease_expired_predicate()
+        got = [r[0] for r in conn.execute(
+            f"SELECT id FROM t WHERE {pred} ORDER BY id").fetchall()]
+        self.assertEqual(
+            got, [1, 2],
+            "lexicographic order no longer matches chronological order.\n"
+            f"observed: expired={got} expected=[1, 2]\n"
+            "possible: the timestamp format changed width, so a lapsed lease "
+            "can sort as live\n"
+            "inspect: Dialect.now on the SQLite backend",
+        )
+        conn.close()
+
+    def test_strftime_zero_pads_so_the_unpadded_form_cannot_be_written(self):
+        """The invariant above holds because the only writer cannot break it."""
+        conn = sqlite3.connect(":memory:")
+        got = conn.execute(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%SZ','2026-01-05 00:00:00')"
+        ).fetchone()[0]
+        self.assertEqual(got, "2026-01-05T00:00:00Z")
+        conn.close()
+
+
 class TestSweepExpiredLeasesSqlite(unittest.TestCase):
     """Behaviour, not text: run the real sweeper against a real table."""
 
