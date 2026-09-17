@@ -14,7 +14,7 @@
 -- is transport receipt and is equally silent on ownership -- its own test file
 -- says so: it records that *an* instance received the message, not which one.
 --
---   claimed_by -- the qualified agent id that won the row ("claude-code@4a87f9").
+--   claimed_by -- the qualified agent id that won the row ("claude-code@a1b2c3").
 --                 NULL means unclaimed and available to any sister.
 --   claimed_at -- when the claim was taken. Diagnostic today; the input a
 --                 fencing/expiry scheme would need later. No sweeper reads it

@@ -1509,7 +1509,7 @@ def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20,
     # FAN-OUT read (the type and every instance of it), a qualified id is a
     # DIRECT read. This used to be a bare `agent_id = ?`, so a sister addressed
     # by its qualified id saw NONE of its type's handoffs -- measured on this
-    # box: bare `claude-code` returned 15, `claude-code@4a87f9` returned 0.
+    # box: bare `claude-code` returned 15, `claude-code@a1b2c3` returned 0.
     # Importing the single owner rather than re-deriving the predicate: a copied
     # predicate is the defect independent of correctness (§10a), and this is the
     # copy that drifted out of #170's fix.

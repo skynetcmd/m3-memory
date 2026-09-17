@@ -182,7 +182,7 @@ def test_qualified_reads_use_equality_not_like():
 # memory_inbox used a bare `agent_id = ?` long after #170 fixed notifications,
 # so the handoff half of the same feature silently kept the old behaviour.
 # Measured on a live box before the fix: bare `claude-code` returned 15
-# handoffs, `claude-code@4a87f9` returned 0.
+# handoffs, `claude-code@a1b2c3` returned 0.
 
 
 @pytest.fixture

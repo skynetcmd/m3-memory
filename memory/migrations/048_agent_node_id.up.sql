@@ -20,7 +20,7 @@
 -- the decision fails toward Postgres when the evidence is ambiguous.
 --
 -- Making it evidence-based needs one fact the registry did not record: the node.
--- `agent_id` carries a SESSION instance ("claude-code@4a87f9") but never a host,
+-- `agent_id` carries a SESSION instance ("claude-code@a1b2c3") but never a host,
 -- so two agents could not be told apart by machine.
 --
 -- ── WHY ON THE HEARTBEAT ─────────────────────────────────────────────────────
