@@ -19,6 +19,8 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.9.16.0] — 2026-09-17 — documents of every common format are readable
+
 ### Added
 
 - The files subsystem reads **HTML, Word, PowerPoint, Excel, RTF, EPUB,
@@ -49,9 +51,7 @@ the policy is forward-going only.
 - Updating Gemini configuration no longer discards MCP servers you added
   yourself. It previously replaced the whole server list on every setup run.
 
-## [2026.9.16.0] — 2026-09-16 — downloaded Rust core wheels are verified before install
-
-### Changed
+### Changed — Rust core and embedder
 
 - The Rust core pin moves to 3.9.16 (`v2026.9.16`). **The sovereign embedder now
   runs one stream on CPU-only systems and two where a GPU (CUDA, Vulkan or Metal)
