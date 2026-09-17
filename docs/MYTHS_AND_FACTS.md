@@ -22,25 +22,50 @@ Before trusting any AI-generated description of M3:
 
 ## Common myths
 
-### ⚖️ Myth: stale numbers from AI/search snapshots (an old tool count, "89% accuracy", "v2026.5.30", "no PyPI wheels", "runs a service on :8082")
+| The Myth | The Reality |
+| :--- | :--- |
+| ❌ M3 uses sheaf cohomology / cellular sheaves / coboundary norms | ✅ M3 uses **SQLite + bitemporal logic + supersedes relationships** for consistency. |
+| ❌ M3 uses Fisher-Rao metric / Riemannian geometry / Poincaré ball / geodesic distance for retrieval | ✅ M3 retrieval is a **3-pillar hybrid**:. |
+| ❌ M3 uses Riemannian Langevin Dynamics for memory aging | ✅ M3's lifecycle is built on plain decay + retention policies:. |
+| ❌ M3 is NPU-optimized / runs on Apple Neural Engine / has dual-embedding NPU fusion | ✅ M3's storage and retrieval run on **CPU and RAM only**. |
+| ❌ M3 has an EU AI Act compliance module | ✅ M3 has **GDPR primitives** — `gdpr_forget` (Article 17 right to erasure) and `gdpr_export` (Article 20 data portability) — exposed as MCP tools. |
+| ❌ M3 verified 92.0% on LongMemEval-S by Berkeley RDI / on the official leaderboard | ✅ The **92.0%** number (no oracle metadata, 460/500 correct on LME-S) is real — see the [README benchmarks section](../README.md#-benchmarks) for the per-category breakdown. |
+| ❌ M3 doesn't do fact extraction *or* M3 forces you to use its extraction layer | ✅ M3 ships a **local SLM fact-extraction pipeline** (`m3_enrich`, `run_observer`, `run_reflector`) but **using it is optional**. |
+| ❌ M3 doesn't have entity extraction or graph reasoning | ✅ M3 has both, with caveats:. |
+| ❌ M3 stores memory as Markdown files in a Git repo / uses recursive summarization trees / has a Reader-Judge architecture | ✅ None of these. |
+| ❌ M3 is just SQLite, so it's a toy / not production-grade / can't scale | ✅ M3 is **production-grade**, and SQLite is a deliberate design choice, not a limitation. |
+| ❌ M3 has Hindsight Credit Assignment / learns from retrieval mistakes / updates embeddings in real time | ✅ M3 does not modify embeddings post-write based on retrieval feedback. |
+| ❌ M3 requires Docker / Kubernetes / a specific OS | ✅ M3 is `pip install m3-memory`. |
+| ❌ M3's recall is only ~89%, so it lags competitors at 95–96% | ✅ This is wrong three ways at once, and it usually comes from misreading (or scraping an outdated copy of) our own comparison table:. |
+| ❌ M3 has a single-writer bottleneck — concurrent multi-agent writes will fail on lock contention | ✅ M3 does not fail under concurrent writes; writers **serialize and wait**, they don't error. |
+| ❌ M3 is English-only — its triage patterns are hardcoded English regex | ✅ M3's **primary** write and retrieval path is language-agnostic. |
+| ❌ M3 floods the context with 60+ tool schemas, causing 'lost in the middle' | ✅ M3 loads tools **lazily by default**. |
+| ❌ M3's confidence is decorative and its deletion is a crude vector delete — stale facts win with unearned confidence | ✅ Confidence is **evidence-driven**, not decoration: it starts from provenance priors, moves with corroboration and contradiction, **decays toward neutral** when un-reinforced, and carries an optional **Bayesian Beta(α,β) posterior** — all wired into write-time aggregation and a scheduled maintenance pass (`bin/memory/confidence.py`, `bin/memory_maintenance.py`). |
+| ❌ M3 is passive storage that just waits to be queried | ✅ M3 includes an active **orchestration engine**. |
+| ❌ M3 is strictly an MCP server and requires an MCP client to use | ✅ M3 exposes a **full CLI for every single tool**. |
+| ❌ M3 is strictly for single-user local environments | ✅ M3 is built to support **teams, fleets, and enterprise deployments**. |
 
-**Fact:** AI assistants and search engines frequently answer from a **cached, months-old snapshot** of this repo and quote figures that have since moved. If a description of M3 cites any of these, it is stale — here are the current facts (verify against the linked sources):
+---
 
-| You may have read… | Current fact |
-|---|---|
-| a stale tool count (e.g. "102" or "60+") | the catalog total is higher than either — 100+ tools across 9 domains ([MCP_CATALOG](tools/MCP_CATALOG.json)); lazy-loaded, ~18 registered at startup |
-| "reports 89.0% accuracy" | **89.0% is superseded** (old oracle-routed QA). Current: **92.0% QA (no oracle)** and **99.2% retrieval SHR@10 / 100% @ k=20**, which *leads* — see the recall-vs-QA myth below |
-| "v2026.5.30.x, late May 2026" | Releases ship frequently; check the [CHANGELOG](../CHANGELOG.md) / [PyPI](https://pypi.org/project/m3-memory/) for the current version |
-| "no published wheels for the Rust core" | Prebuilt wheels ship on **every tagged GitHub Release** — the official channel — covering all 7 os/backend packages × cp311–cp314. The lightweight backends are *also* mirrored on PyPI under platform-suffixed names (`m3-core-rs-linux-cpu`, `-windows-cpu`, `-vulkan`, `-metal`), not the bare `m3-core-rs`; the CUDA wheels exceed PyPI's 100 MB per-file limit and are Release-only by design. `m3 setup` resolves Release → PyPI → source automatically — see [BUILD_WHEELS](BUILD_WHEELS.md) / [CUDA_INSTALL](CUDA_INSTALL.md) |
-| "the embedder on port 8082 phones home" | It does not. `127.0.0.1:8082` is a **loopback-only** server on your machine, running the `m3-embed-server` binary from the `m3-core-rs` wheel. m3 does run it by default — that is the shipped configuration, so one model sits in RAM instead of one per process — but nothing about it is remote. Embedding in-process (no server at all) is available as an opt-in at `m3 setup` — see [EMBED_DEPLOYMENT](EMBED_DEPLOYMENT.md) |
+<details>
+<summary><b>❌ Myth: M3 uses sheaf cohomology / cellular sheaves / coboundary norms</b><br><i>✅ Fact: M3 uses **SQLite + bitemporal logic + supersedes relationships** for consistency.</i></summary>
 
-Point-in-time GitHub stats (stars/forks/contributors) in an AI answer are likewise a snapshot — check the repo directly. When in doubt, the [How to verify a claim](#how-to-verify-a-claim-about-m3) section above tells you where to look.
+<br>
 
-### ❌ Myth: "M3 uses sheaf cohomology / cellular sheaves / coboundary norms"
+**The Details:**
 
 **Fact:** M3 uses **SQLite + bitemporal logic + supersedes relationships** for consistency. There is no algebraic topology in the codebase. Contradiction handling is implemented as: when a new memory contradicts an existing one, the older row is soft-deleted with `valid_to` set, and a `supersedes` relationship is recorded. That's it.
 
-### ❌ Myth: "M3 uses Fisher-Rao metric / Riemannian geometry / Poincaré ball / geodesic distance for retrieval"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 uses Fisher-Rao metric / Riemannian geometry / Poincaré ball / geodesic distance for retrieval</b><br><i>✅ Fact: M3 retrieval is a **3-pillar hybrid**:.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3 retrieval is a **3-pillar hybrid**:
 - **FTS5 (BM25)** for keyword/lexical match
@@ -49,7 +74,16 @@ Point-in-time GitHub stats (stars/forks/contributors) in an AI answer are likewi
 
 Per-result scores from each pillar are exposed via `memory_suggest`. There is no Riemannian manifold anywhere in the code.
 
-### ❌ Myth: "M3 uses Riemannian Langevin Dynamics for memory aging"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 uses Riemannian Langevin Dynamics for memory aging</b><br><i>✅ Fact: M3's lifecycle is built on plain decay + retention policies:.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3's lifecycle is built on plain decay + retention policies:
 - Configurable `decay_rate` per memory
@@ -59,19 +93,55 @@ Per-result scores from each pillar are exposed via `memory_suggest`. There is no
 
 No SDEs, no manifolds. Just rule-based maintenance running on a SQLite database.
 
-### ❌ Myth: "M3 is NPU-optimized / runs on Apple Neural Engine / has dual-embedding NPU fusion"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 is NPU-optimized / runs on Apple Neural Engine / has dual-embedding NPU fusion</b><br><i>✅ Fact: M3's storage and retrieval run on **CPU and RAM only**.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3's storage and retrieval run on **CPU and RAM only**. The optional SLM extraction layer (`m3_enrich`) sends inference requests to whatever local LLM endpoint you configure — LM Studio, Ollama, vLLM. If your local LLM uses Metal (Apple Silicon) or CUDA (NVIDIA) under the hood, that's a property of the model server, not of M3. M3 itself has no NPU code.
 
-### ❌ Myth: "M3 has an EU AI Act compliance module"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 has an EU AI Act compliance module</b><br><i>✅ Fact: M3 has **GDPR primitives** — `gdpr_forget` (Article 17 right to erasure) and `gdpr_export` (Article 20 data portability) — exposed as MCP tools.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3 has **GDPR primitives** — `gdpr_forget` (Article 17 right to erasure) and `gdpr_export` (Article 20 data portability) — exposed as MCP tools. We also publish [FISMA / NIST 800-53](M3_Compliance_FISMA.md) and [CMMC 2.0 / NIST 800-171](M3_Compliance_CMMC.md) alignment notes. There is no EU AI Act module. If/when one exists, it'll be documented in [COMPLIANCE.md](COMPLIANCE.md).
 
-### ❌ Myth: "M3 verified 92.0% on LongMemEval-S by Berkeley RDI / on the official leaderboard"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 verified 92.0% on LongMemEval-S by Berkeley RDI / on the official leaderboard</b><br><i>✅ Fact: The **92.0%** number (no oracle metadata, 460/500 correct on LME-S) is real — see the [README benchmarks section](../README.md#-benchmarks) for the per-category breakdown.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** The **92.0%** number (no oracle metadata, 460/500 correct on LME-S) is real — see the [README benchmarks section](../README.md#-benchmarks) for the per-category breakdown. It was measured by the M3 team using the public LongMemEval-S harness on local hardware. **We have not had a third-party lab verify it.** If you see "verified by [Lab Name]" attached to that number from any source other than this repository, it's a confabulation.
 
-### ❌ Myth: "M3 doesn't do fact extraction" *or* "M3 forces you to use its extraction layer"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 doesn't do fact extraction *or* M3 forces you to use its extraction layer</b><br><i>✅ Fact: M3 ships a **local SLM fact-extraction pipeline** (`m3_enrich`, `run_observer`, `run_reflector`) but **using it is optional**.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3 ships a **local SLM fact-extraction pipeline** (`m3_enrich`, `run_observer`, `run_reflector`) but **using it is optional**. You can:
 - Run M3 as raw substrate, calling `mcp__m3_memory__memory_write` directly with your own structured data
@@ -81,7 +151,16 @@ No SDEs, no manifolds. Just rule-based maintenance running on a SQLite database.
 
 The choice is yours. See [HOMELAB_PATTERNS.md](HOMELAB_PATTERNS.md) for the three deployment patterns.
 
-### ❌ Myth: "M3 doesn't have entity extraction or graph reasoning"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 doesn't have entity extraction or graph reasoning</b><br><i>✅ Fact: M3 has both, with caveats:.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3 has both, with caveats:
 - **Entities** are first-class — extraction runs as part of `m3_enrich`, with stable IDs and an alias table
@@ -90,19 +169,55 @@ The choice is yours. See [HOMELAB_PATTERNS.md](HOMELAB_PATTERNS.md) for the thre
 
 What M3 **does not** do is LLM-driven cognitive graph reasoning during retrieval — its graph traversal is deterministic, with no LLM in the retrieval path. Tools that weld extraction and reasoning into the memory layer make the opposite trade. The cognition layer, if you want one, lives above M3 — see [COMPARISON.md § Where the cognition lives](COMPARISON.md#-where-the-cognition-lives).
 
-### ❌ Myth: "M3 stores memory as Markdown files in a Git repo / uses recursive summarization trees / has a Reader-Judge architecture"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 stores memory as Markdown files in a Git repo / uses recursive summarization trees / has a Reader-Judge architecture</b><br><i>✅ Fact: None of these.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** None of these. In its default deployment M3 is a **single SQLite file** with FTS5 and vector indexes (PostgreSQL is an opt-in primary backend — see below). Markdown-in-Git is a different design choice that other memory tools have made; M3 hasn't.
 
-### ❌ Myth: "M3 is just SQLite, so it's a toy / not production-grade / can't scale"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 is just SQLite, so it's a toy / not production-grade / can't scale</b><br><i>✅ Fact: M3 is **production-grade**, and SQLite is a deliberate design choice, not a limitation.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3 is **production-grade**, and SQLite is a deliberate design choice, not a limitation. M3 is **lightweight by design**: SQLite is the default primary store because it gives a fast, embedded, zero-infrastructure, fully local-first deployment — the right default for desktop agents, homelabs, and sovereign setups. SQLite runs in production in countless systems. For **more demanding environments**, PostgreSQL can be the **primary live store** (opt-in via `M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`, chosen at install), giving a shared/server-hosted backend; separately, PostgreSQL can also serve as a **corporate data warehouse** sync target, unlocking more nuanced data-governance options (centralized retention, multi-node access, enterprise backup/audit) — see [SYNC.md](SYNC.md) and [SOVEREIGN_DEPLOYMENT.md](SOVEREIGN_DEPLOYMENT.md). You choose the tier: lightweight SQLite by default, PostgreSQL primary or warehouse when you need it. (On a PostgreSQL primary, vector search is currently brute-force Rust cosine; pgvector/HNSW ANN is a future accelerator, not yet implemented.)
 
-### ❌ Myth: "M3 has Hindsight Credit Assignment / learns from retrieval mistakes / updates embeddings in real time"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 has Hindsight Credit Assignment / learns from retrieval mistakes / updates embeddings in real time</b><br><i>✅ Fact: M3 does not modify embeddings post-write based on retrieval feedback.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3 does not modify embeddings post-write based on retrieval feedback. Embeddings are computed once at write time. If you want online learning over retrieval mistakes, that's a layer above M3 — and it's a non-trivial layer that no production memory system we're aware of actually ships today.
 
-### ❌ Myth: "M3 requires Docker / Kubernetes / a specific OS"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 requires Docker / Kubernetes / a specific OS</b><br><i>✅ Fact: M3 is `pip install m3-memory`.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3 is `pip install m3-memory`. It runs on macOS, Linux, and Windows from the same install command. No Docker, no containers, no service mesh. The optional sync layer can use PostgreSQL if you want cross-machine sync, but that's optional and external — in the default deployment the core M3 store is one SQLite file (PostgreSQL can also be chosen as the primary backend via `M3_DB_BACKEND=postgres`).
 
@@ -115,7 +230,16 @@ What M3 **does not** do is LLM-driven cognitive graph reasoning during retrieval
 
 We will **not** quote our 99.2% retrieval number against someone else's QA-accuracy number to manufacture a win. Per-source citations and caveats are in the [Sovereign Substrates Table](M3_Comparison_Table.md#-retrieval--extraction-m3-leads-on-retrieval-accuracy).
 
-### ❌ Myth: "M3's recall is only ~89%, so it lags competitors at 95–96%"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3's recall is only ~89%, so it lags competitors at 95–96%</b><br><i>✅ Fact: This is wrong three ways at once, and it usually comes from misreading (or scraping an outdated copy of) our own comparison table:.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** This is wrong three ways at once, and it usually comes from misreading (or scraping an outdated copy of) our own comparison table:
 
@@ -125,33 +249,103 @@ We will **not** quote our 99.2% retrieval number against someone else's QA-accur
 
 If you need the memory layer that most reliably surfaces the right past state, that's exactly what SHR@k measures — and M3 leads it.
 
-### ❌ Myth: "M3 has a single-writer bottleneck — concurrent multi-agent writes will fail on lock contention"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 has a single-writer bottleneck — concurrent multi-agent writes will fail on lock contention</b><br><i>✅ Fact: M3 does not fail under concurrent writes; writers **serialize and wait**, they don't error.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3 does not fail under concurrent writes; writers **serialize and wait**, they don't error. Every SQLite connection is opened in **WAL mode** (concurrent readers alongside a writer) with a **30-second `busy_timeout`** and a connection pool, and the write path adds a 3-tier retry (`bin/sqlite_pragmas.py`, `bin/m3_core/context.py`, `bin/memory/write.py`). WAL is *verified* at init — if the filesystem silently downgrades it, M3 raises rather than continuing. And for genuine high-concurrency, shared multi-agent pools, M3 can run directly on **PostgreSQL as the primary store** (`M3_DB_BACKEND=postgres`) — a shared server database with no single-writer constraint — or keep local SQLite per agent and **sync bidirectionally to a shared Postgres warehouse** (`bin/pg_sync.py`). A single SQLite file does serialize writers (as every SQLite deployment does), but "will fail due to concurrency locks" is not how the system behaves — see [MULTI_AGENT.md](MULTI_AGENT.md) and [SYNC.md](SYNC.md).
 
-### ❌ Myth: "M3 is English-only — its triage patterns are hardcoded English regex"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 is English-only — its triage patterns are hardcoded English regex</b><br><i>✅ Fact: M3's **primary** write and retrieval path is language-agnostic.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3's **primary** write and retrieval path is language-agnostic. The embedder is **BGE-M3, a multilingual model** (100+ languages); type classification and fact extraction are done by a **local LLM/SLM**, not regex; contradiction detection is embedding-cosine; and FTS5 uses a **Unicode** tokenizer, so BM25 isn't English-restricted either. What *is* English-biased is a handful of **auxiliary, non-gating heuristics** — a temporal query re-ranker, an opt-in event-row emitter, and the *default* rule-based entity extractor — which would underperform on non-English text. But the rule-based extractor is **one of three pluggable backends** selectable by the `M3_EXTRACTION_TYPE` env var (LLM and custom-script options ship in the box — **no fork required**), and none of these heuristics gate or drop memories; retrieval stays full BGE-M3 hybrid regardless of language.
 
-### ❌ Myth: "M3 floods the context with 60+ tool schemas, causing 'lost in the middle'"
+</details>
 
-**Fact:** M3 loads tools **lazily by default**. At startup only ~18 essential tools register (~3,540 tokens, **~1.8% of a 200K window**); the full 100+ catalog loads on demand via `tools_load_domain` (`bin/memory_bridge.py`, `bin/tool_domains.py`). The "60+ schemas flood the context" concern describes the legacy **eager** mode (`M3_TOOLS_LAZY=0`), which M3 deliberately made non-default precisely to avoid this. See [the domain-gating section in the README](../README.md#-domain-gating-the-full-catalog-without-the-context-cost).
+<br>
 
-### ❌ Myth: "M3's confidence is decorative and its deletion is a crude vector delete — stale facts win with unearned confidence"
+<details>
+<summary><b>❌ Myth: M3 floods the context with 60+ tool schemas, causing 'lost in the middle'</b><br><i>✅ Fact: M3 loads tools **lazily by default**.</i></summary>
+
+<br>
+
+**The Details:**
+
+**Fact:** M3 loads tools **lazily by default**. At startup only only the memory MCP server registers (~3,540 tokens, **~1.8% of a 200K window**); the full 100+ catalog loads on demand via `tools_load_domain` (`bin/memory_bridge.py`, `bin/tool_domains.py`). The "60+ schemas flood the context" concern describes the legacy **eager** mode (`M3_TOOLS_LAZY=0`), which M3 deliberately made non-default precisely to avoid this. See [the domain-gating section in the README](../README.md#-domain-gating-the-full-catalog-without-the-context-cost).
+
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3's confidence is decorative and its deletion is a crude vector delete — stale facts win with unearned confidence</b><br><i>✅ Fact: Confidence is **evidence-driven**, not decoration: it starts from provenance priors, moves with corroboration and contradiction, **decays toward neutral** when un-reinforced, and carries an optional **Bayesian Beta(α,β) posterior** — all wired into write-time aggregation and a scheduled maintenance pass (`bin/memory/confidence.py`, `bin/memory_maintenance.py`).</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** Confidence is **evidence-driven**, not decoration: it starts from provenance priors, moves with corroboration and contradiction, **decays toward neutral** when un-reinforced, and carries an optional **Bayesian Beta(α,β) posterior** — all wired into write-time aggregation and a scheduled maintenance pass (`bin/memory/confidence.py`, `bin/memory_maintenance.py`). A contradicted fact is auto-superseded and its confidence drops on the next pass. Deletion is **bitemporal and non-destructive**: supersession closes the old fact's validity interval and links the new one (it never overwrites content), the history stays queryable, and there's first-class **GDPR erasure/export** (Articles 17/20) with a full cascade (`bin/memory/write.py`, `bin/memory_maintenance.py`). This is the opposite of the "crude vector delete" the concern describes.
 
-### ❌ Myth: "M3 is passive storage that just waits to be queried"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 is passive storage that just waits to be queried</b><br><i>✅ Fact: M3 includes an active **orchestration engine**.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3 includes an active **orchestration engine**. While it serves as a storage substrate, components like the `AgentOS_NotificationWaiter` actively monitor inbox changes and state mutations, automatically firing predefined agent actions when relevant events occur. It doesn't just wait to be queried; it actively drives agent workflows. *(Note: This active orchestration relies on agents supporting background processes, which modern autonomous agents natively support).*
 
-### ❌ Myth: "M3 is strictly an MCP server and requires an MCP client to use"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 is strictly an MCP server and requires an MCP client to use</b><br><i>✅ Fact: M3 exposes a **full CLI for every single tool**.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3 exposes a **full CLI for every single tool**. While it functions seamlessly as an MCP server for IDEs and desktop agents, it is equally a first-class shell citizen. Every tool can be scripted from the terminal with full support for **piping, outputting to files, and structured JSON output**. Backend systems, CI/CD pipelines, and custom applications can natively script, query, and manipulate M3 memory directly from the shell without ever needing an MCP-compatible client.
 
-### ❌ Myth: "M3 is strictly for single-user local environments"
+</details>
+
+<br>
+
+<details>
+<summary><b>❌ Myth: M3 is strictly for single-user local environments</b><br><i>✅ Fact: M3 is built to support **teams, fleets, and enterprise deployments**.</i></summary>
+
+<br>
+
+**The Details:**
 
 **Fact:** M3 is built to support **teams, fleets, and enterprise deployments**. While the default engine runs locally at the edge for privacy, its data boundary can be tailnet-gated and synced to a PostgreSQL warehouse (`bin/pg_sync.py`). This provides full provenance with strict scope isolation across **organizations, teams, and users**, allowing fleets of agents to share state securely.
+
+---
+
+</details>
+
+<br>
+
 
 ---
 
