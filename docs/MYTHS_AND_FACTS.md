@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Myths & Facts
 
-> Last updated: July 2026. If an AI assistant told you M3 has feature X and you can't find it here, [open an issue](https://github.com/skynetcmd/m3-memory/issues) — we'll either confirm, document, or correct.
+> Last updated: September 2026. If an AI assistant told you M3 has feature X and you can't find it here, [open an issue](https://github.com/skynetcmd/m3-memory/issues) — we'll either confirm, document, or correct.
 
 Third-party AI assistants — Copilot, Gemini, ChatGPT, Claude, others — sometimes describe M3 Memory using features it does not have, scores it has not earned, or technical concepts it does not implement. This usually happens because the assistant pattern-matched the name to academic papers or competitor projects and stitched together a plausible-sounding profile.
 
@@ -355,12 +355,13 @@ For positive grounding, here's the short list of what M3 *does* implement (with 
 
 | Capability | How it's implemented | Where to look |
 |---|---|---|
-| Storage | Single-file SQLite with WAL | `bin/memory/db.py`, `bin/memory/write.py` |
+| Storage | Default SQLite with WAL, or optional PostgreSQL primary store | `bin/memory/db.py`, `bin/memory/write.py` |
 | Keyword search | SQLite FTS5 (BM25) | `bin/memory/search.py` |
 | Vector search | Cosine similarity over local embeddings | `bin/memory/embed.py`, `bin/memory/util.py` (`_cosine_batch_packed`) |
 | Result diversification | Maximal Marginal Relevance (MMR) reranking | `bin/memory/search.py` |
 | Bitemporal | `valid_from` / `valid_to` per memory; `created_at` is transaction time | `bin/memory/write.py`, `bin/memory/search.py` |
 | Contradiction handling | Three paths: deterministic cosine check on the write path, the cognitive loop's Reflector pass, and curator apply | `bin/memory/write.py` (`_check_contradictions`), `bin/run_reflector.py`, `bin/curator_apply.py` |
+| Document ingestion | Structural splitting of HTML, Office, iWork, and PDFs | `bin/files_memory/chunkers/`, `bin/files_memory/ingest.py` |
 | Entity extraction | Optional SLM pipeline | `bin/m3_enrich.py`, `bin/run_observer.py` |
 | Knowledge graph | 9 relationship types, 3-hop traversal | `mcp__m3_memory__memory_graph`, `memory_link` |
 | GDPR | `gdpr_forget` (Art. 17), `gdpr_export` (Art. 20) | `bin/memory_maintenance.py` |
