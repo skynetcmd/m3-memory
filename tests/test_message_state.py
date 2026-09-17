@@ -164,7 +164,7 @@ def test_claimed_and_unclaimed_forms_are_exact_complements():
     assert unclaimed.replace("claimed_by IS NULL", "claimed_by IS NOT NULL") == claimed, (
         "the claimed/unclaimed forms are no longer complements.\n"
         f"observed: unclaimed={unclaimed!r} claimed={claimed!r}\n"
-        "cause: one form was edited without the other\n"
+        "possible: one form was edited without the other, or a column was renamed\n"
         "possible impact: a row matches neither, so the skipped-count "
         "under-reports and an operator reads an empty queue that is not\n"
         "inspect: inbox_membership_sql in bin/memory/orchestration.py"
@@ -187,8 +187,28 @@ def test_the_two_forms_partition_the_inbox(conn):
             f"SELECT COUNT(*) FROM notifications WHERE id >= 901 AND {where}"
         ).fetchone()[0]
 
-    assert n(inbox_membership_sql()) == 3, "an acked row must leave the inbox"
-    assert n(inbox_membership_sql(claimed=True)) == 1
-    assert (n(inbox_membership_sql(claimed=False))
-            + n(inbox_membership_sql(claimed=True))
-            == n(inbox_membership_sql())), "no row may fall into neither form"
+    in_inbox = n(inbox_membership_sql())
+    unclaimed = n(inbox_membership_sql(claimed=False))
+    claimed = n(inbox_membership_sql(claimed=True))
+
+    assert in_inbox == 3, (
+        "an acked row is still counted as in the inbox.\n"
+        f"observed: in_inbox={in_inbox} expected=3 (rows 901-903; 904 is acked)\n"
+        "possible: the membership predicate no longer excludes acked rows, or the addressing predicate widened\n"
+        "inspect: inbox_membership_sql in bin/memory/orchestration.py"
+    )
+    assert claimed == 1, (
+        "the claimed form counted the wrong rows.\n"
+        f"observed: claimed={claimed} expected=1 (only row 902 has claimed_by)\n"
+        "inspect: inbox_membership_sql in bin/memory/orchestration.py"
+    )
+    assert unclaimed + claimed == in_inbox, (
+        "the two forms do not partition the inbox.\n"
+        f"observed: unclaimed={unclaimed} + claimed={claimed} "
+        f"= {unclaimed + claimed}, in_inbox={in_inbox}\n"
+        "cause: a row matches neither form, so the two spellings have diverged\n"
+        "possible impact: ack writes one set and counts the other, so a row in "
+        "neither is acked-but-not-counted or counted-but-not-acked -- "
+        '"Acked 0" then reads as an empty queue while work sits claimed\n'
+        "inspect: inbox_membership_sql in bin/memory/orchestration.py"
+    )

@@ -270,7 +270,7 @@ class TestLeaseFencePredicate(unittest.TestCase):
                 self.assertNotIn(
                     "claim_expires_at", basic,
                     f"observed: the default fence carries an expiry bound on {name}\n"
-                    "cause: complete/fail would then refuse a row whose lease "
+                    "possible impact: complete/fail would then refuse a row whose lease "
                     "lapsed mid-work, even though the token still matches\n"
                     "inspect: Dialect.lease_fence_predicate",
                 )
