@@ -151,7 +151,7 @@ If you need the memory layer that most reliably surfaces the right past state, t
 
 ### ❌ Myth: "M3 is strictly for single-user local environments"
 
-**Fact:** M3 is built to support **teams, fleets, and enterprise deployments**. While the default engine runs locally at the edge for privacy, its data boundary is tailnet-gated and syncs to a PostgreSQL warehouse (`bin/pg_sync.py`). This provides full provenance with strict scope isolation across **organizations, teams, and users**, allowing fleets of agents to share state securely.
+**Fact:** M3 is built to support **teams, fleets, and enterprise deployments**. While the default engine runs locally at the edge for privacy, its data boundary can be tailnet-gated and synced to a PostgreSQL warehouse (`bin/pg_sync.py`). This provides full provenance with strict scope isolation across **organizations, teams, and users**, allowing fleets of agents to share state securely.
 
 ---
 
