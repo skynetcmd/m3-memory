@@ -24,6 +24,8 @@ import uuid
 
 import pytest
 
+from conftest import dispatch_conn_for_tests, dispatch_table_for_tests
+
 _HERE = os.path.dirname(__file__)
 _BIN = os.path.normpath(os.path.join(_HERE, "..", "bin"))
 if _BIN not in sys.path:
@@ -31,12 +33,15 @@ if _BIN not in sys.path:
 
 from memory.backends import dialect  # noqa: E402
 from memory.orchestration import (  # noqa: E402
-    _db,
     agent_register_impl,
     notifications_ack_all_impl,
     notifications_ack_impl,
     notify_impl,
 )
+
+# The store notify_impl writes to -- resolved by production's own
+# resolver so these tests cannot drift from the real routing.
+_T = dispatch_table_for_tests()
 
 
 @pytest.fixture
@@ -48,19 +53,19 @@ def agent():
 
 def _claim(agent_id: str, claimant: str = "worker-1"):
     D = dialect()
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p = D.param()
         return D.claim_message(
-            db, table="notifications", where_sql=f"agent_id = {p}",
+            db, table=dispatch_table_for_tests(), where_sql=f"agent_id = {p}",
             where_params=(agent_id,), claimant=claimant, lease_ttl=300,
         )
 
 
 def _row(row_id):
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p = dialect().param()
         return db.execute(
-            f"SELECT read_at, claimed_by FROM notifications WHERE id = {p}",
+            f"SELECT read_at, claimed_by FROM {_T} WHERE id = {p}",
             (row_id,),
         ).fetchone()
 
@@ -78,9 +83,9 @@ def test_ack_all_does_not_steal_a_claimed_message(agent):
         "ack_all completed a message another worker holds a live lease on"
     )
 
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         still_mine = dialect().complete_message(
-            db, table="notifications", row_id=row_id, lease_token=token,
+            db, table=dispatch_table_for_tests(), row_id=row_id, lease_token=token,
         )
     assert still_mine, (
         "the leaseholder could no longer complete its own work -- ack stole it"
@@ -99,9 +104,9 @@ def test_ack_by_id_does_not_steal_a_claimed_message(agent):
     assert _row(row_id)["read_at"] is None, (
         f"ack by id completed a claimed message: {out!r}"
     )
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         assert dialect().complete_message(
-            db, table="notifications", row_id=row_id, lease_token=token,
+            db, table=dispatch_table_for_tests(), row_id=row_id, lease_token=token,
         ), "the leaseholder lost its work to a by-id ack"
 
 
@@ -111,10 +116,10 @@ def test_ack_still_works_on_an_unclaimed_message(agent):
     notify_impl(agent, "ping", {"work": 1})
     notifications_ack_all_impl(agent)
 
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p = dialect().param()
         row = db.execute(
-            f"SELECT read_at FROM notifications WHERE agent_id = {p}", (agent,)
+            f"SELECT read_at FROM {_T} WHERE agent_id = {p}", (agent,)
         ).fetchone()
     assert row["read_at"] is not None, (
         "an UNCLAIMED message could no longer be acked -- the queue is now stuck"
@@ -123,10 +128,10 @@ def test_ack_still_works_on_an_unclaimed_message(agent):
 
 def test_ack_by_id_still_works_on_an_unclaimed_message(agent):
     notify_impl(agent, "ping", {"work": 1})
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p = dialect().param()
         rid = db.execute(
-            f"SELECT id FROM notifications WHERE agent_id = {p}", (agent,)
+            f"SELECT id FROM {_T} WHERE agent_id = {p}", (agent,)
         ).fetchone()["id"]
 
     out = notifications_ack_impl(rid)
@@ -144,10 +149,10 @@ def test_read_at_is_written_by_the_database_clock(agent):
     notify_impl(agent, "ping", {"work": 1})
     notifications_ack_all_impl(agent)
 
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p = dialect().param()
         stamped = db.execute(
-            f"SELECT read_at FROM notifications WHERE agent_id = {p}", (agent,)
+            f"SELECT read_at FROM {_T} WHERE agent_id = {p}", (agent,)
         ).fetchone()["read_at"]
 
     assert stamped.endswith("Z"), (
@@ -165,10 +170,10 @@ def test_both_ack_paths_agree_on_the_clock(agent):
     arose in the first place."""
     notify_impl(agent, "a", {})
     notify_impl(agent, "b", {})
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p = dialect().param()
         ids = [r["id"] for r in db.execute(
-            f"SELECT id FROM notifications WHERE agent_id = {p} ORDER BY id",
+            f"SELECT id FROM {_T} WHERE agent_id = {p} ORDER BY id",
             (agent,)).fetchall()]
 
     notifications_ack_impl(ids[0])
@@ -196,11 +201,11 @@ def test_a_dead_lettered_message_is_still_ackable(agent):
     row_id = got[0]
 
     D = dialect()
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p_ = D.param()
         # Exactly what sweep_expired_leases does at max_attempts.
         db.execute(
-            f"UPDATE notifications SET failed_at = {D.now()}, claimed_by = NULL, "
+            f"UPDATE {_T} SET failed_at = {D.now()}, claimed_by = NULL, "
             f"lease_token = NULL, claim_expires_at = NULL WHERE id = {p_}",
             (row_id,),
         )

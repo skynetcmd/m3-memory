@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from . import records
@@ -435,6 +436,68 @@ def message_state_of(row) -> str:
     return "PENDING"
 
 
+# Ids at or above this belong to the DISPATCH store. Mirrors the floor in
+# memory/dispatch_migrations/001_bootstrap.up.sql, which enforces it with a
+# CHECK constraint -- so this is a lookup of an invariant the database
+# guarantees, not an assumption this module is making.
+DISPATCH_ID_FLOOR = 1_000_000_000
+
+
+@contextmanager
+def _store_for_id(notification_id: "int | str"):
+    """Yield ``(conn, table)`` for the store that owns ``notification_id``.
+
+    Routing by the id floor is exact, not heuristic: dispatch ids start at
+    1,000,000,000 and a CHECK constraint refuses anything below it, so an id
+    cannot be ambiguous. That is what the floor was for -- it keeps a BARE
+    INTEGER a valid address across two stores, so the tool surface did not have
+    to grow a "dispatch:1" prefix or migrate to UUIDs.
+
+    Legacy ids (below the floor) route to `notifications` on the active
+    connection, exactly as before, so every row written before the split is
+    still addressable.
+    """
+    try:
+        numeric = int(notification_id)
+    except (TypeError, ValueError):
+        numeric = -1
+
+    if numeric >= DISPATCH_ID_FLOOR:
+        from m3_core.context import M3Context
+        from m3_core.paths import resolve_db_path
+        with M3Context.for_db(resolve_db_path(None)).get_dispatch_conn() as conn:
+            yield conn, _dispatch_write_table()
+        return
+
+    with _db() as conn:
+        yield conn, "notifications"
+
+
+def _dispatch_write_table() -> str:
+    """The table a NEW notification is written to.
+
+    The write counterpart of :func:`_notification_sources`, which answers the
+    same question for reads. Kept beside it deliberately: if these two ever
+    disagree, mail is written where nothing looks for it and the failure is
+    SILENT -- no error, an inbox that simply stays empty.
+
+    On a server backend the dispatch store is a SCHEMA, so the qualified name
+    selects it on the same connection. On SQLite the file is selected by
+    ``get_dispatch_conn`` and the bare name is right.
+    """
+    try:
+        from m3_core.paths import dispatch_pg_schema, dispatch_store_mode
+
+        from .backends import resolve_backend_name
+
+        if dispatch_store_mode() != "integrated" and resolve_backend_name() != "sqlite":
+            return f'"{dispatch_pg_schema()}".notification_dispatch'
+        return "notification_dispatch"
+    except Exception:  # noqa: BLE001 -- a broken dispatch config must not stop
+        # a send; the legacy table still has every reader.
+        return "notifications"
+
+
 def notify_impl(agent_id: str, kind: str, payload: dict = None,
                 from_agent: str = "", from_session: str = "") -> str:
     """Sends a notification to an agent.
@@ -477,17 +540,29 @@ def notify_impl(agent_id: str, kind: str, payload: dict = None,
             payload = {"value": payload, "_from": _addr}
     payload_json = json.dumps(payload if payload is not None else {})
 
-    with _db() as db:
-        _d = dialect()
-        ph = _d.placeholder(4)
-        # Backend-neutral generated-id read: RETURNING id on backends that support
-        # it (PG/MariaDB), cur.lastrowid on SQLite — via the dialect, not a name check.
-        cur = db.execute(
-            f"INSERT INTO notifications (agent_id, kind, payload_json, created_at) "
-            f"VALUES ({ph}){_d.returning_id_clause()}",
-            (agent_id, kind, payload_json, now)
-        )
+    _d = dialect()
+    ph = _d.placeholder(4)
+    # Backend-neutral generated-id read: RETURNING id on backends that support
+    # it (PG/MariaDB), cur.lastrowid on SQLite — via the dialect, not a name check.
+    _table = _dispatch_write_table()
+    _sql = (f"INSERT INTO {_table} (agent_id, kind, payload_json, created_at) "
+            f"VALUES ({ph}){_d.returning_id_clause()}")
+    _args = (agent_id, kind, payload_json, now)
+
+    # Delivery records go to the DISPATCH store, which is a separate file on
+    # SQLite and a separate schema on a server backend. `get_dispatch_conn`
+    # owns that routing; it reuses the main pool in integrated mode so this is
+    # correct on every topology without a branch here.
+    #
+    # ⚠ NOT `active_database(path)`. M3_DATABASE outranks that ContextVar by
+    # documented precedence and the cognitive loop always sets it, so the write
+    # would land in the MAIN store with no error.
+    from m3_core.context import M3Context
+    from m3_core.paths import resolve_db_path
+    with M3Context.for_db(resolve_db_path(None)).get_dispatch_conn() as db:
+        cur = db.execute(_sql, _args)
         new_id = _d.last_insert_id(cur)
+        db.commit()
 
     return f"Notified {agent_id}: {kind} (id={new_id})"
 
@@ -641,7 +716,7 @@ def _decode_payload_json(rows) -> list[dict]:
     return out
 
 
-def sweep_leases_opportunistically(table: str = "notifications") -> "tuple[int, int]":
+def sweep_leases_opportunistically(table: "str | None" = None) -> "tuple[int, int]":
     """Reclaim lapsed leases. Returns ``(reclaimed, dead_lettered)``.
 
     THE PRODUCTION CALL SITE. ``sweep_expired_leases`` shipped with a full
@@ -687,8 +762,29 @@ def sweep_leases_opportunistically(table: str = "notifications") -> "tuple[int, 
     construction.
     """
     try:
-        with _db() as db:
-            return dialect().sweep_expired_leases(db, table=table)
+        if table is not None:
+            # An explicit table: sweep just that one. Used by tests and by any
+            # caller that already knows which store it means.
+            with _db() as db:
+                return dialect().sweep_expired_leases(db, table=table)
+
+        # No table named: sweep EVERY store a lease can live in. Sweeping only
+        # the main one would leave a lapsed dispatch lease reclaimed by nobody
+        # -- the same "shipped mechanism, no production caller" defect this
+        # function was written to close, re-opened one store later.
+        reclaimed = dead = 0
+        for store, tbl in _notification_sources():
+            if store is None:
+                with _db() as db:
+                    r, d = dialect().sweep_expired_leases(db, table=tbl)
+            else:
+                from m3_core.context import M3Context
+                from m3_core.paths import resolve_db_path
+                with M3Context.for_db(resolve_db_path(None)).get_dispatch_conn() as db:
+                    r, d = dialect().sweep_expired_leases(db, table=tbl)
+            reclaimed += r
+            dead += d
+        return (reclaimed, dead)
     except Exception as exc:  # noqa: BLE001 -- see NEVER FAILS ITS CALLER above
         # logger, not print: this module's convention (see task_assigned /
         # task_completed below), and a poll's stdout is a records envelope the
@@ -780,11 +876,15 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
         )
         heartbeat_seen = bool(_hb.rowcount)
 
-        rows = db.execute(
-            f"SELECT id, kind, payload_json, created_at, read_at, received_at "
-            f"FROM notifications {where_clause} ORDER BY created_at DESC LIMIT {p}",
-            params + [limit]
-        ).fetchall()
+    # The heartbeat above belongs to the MAIN store (the agents table lives
+    # there); the mail does not. Reading it must span every notification store
+    # or a dispatched message is never offered -- silently, because an empty
+    # result is indistinguishable from an empty inbox.
+    rows = read_across_notification_stores(
+        f"SELECT id, kind, payload_json, created_at, read_at, received_at "
+        f"FROM {{table}} {where_clause} ORDER BY created_at DESC LIMIT {p}",
+        tuple(params + [limit]),
+    )
 
     # An UNREGISTERED poller gets its mail but leaves no liveness trace: the
     # heartbeat UPDATE matched no row, so nothing recorded that this agent is
@@ -887,9 +987,11 @@ def notifications_ack_impl(notification_id: int) -> str:
     _d = dialect()
     p = _d.param()
 
-    with _db() as db:
+    # Route by the id floor: ack must reach whichever store owns the row, or a
+    # dispatched message would be unackable and sit unread forever.
+    with _store_for_id(notification_id) as (db, _table):
         cur = db.execute(
-            f"UPDATE notifications SET read_at = {_d.now()} "
+            f"UPDATE {_table} SET read_at = {_d.now()} "
             f"WHERE id = {p} AND {inbox_membership_sql(claimed=False)}",
             (notification_id,)
         )
@@ -900,9 +1002,10 @@ def notifications_ack_impl(notification_id: int) -> str:
             # a row that is merely claimed would send the caller hunting for a
             # missing message instead of waiting for a lease to clear (§3).
             row = db.execute(
-                f"SELECT read_at, claimed_by FROM notifications WHERE id = {p}",
+                f"SELECT read_at, claimed_by FROM {_table} WHERE id = {p}",
                 (notification_id,)
             ).fetchone()
+        db.commit()
 
     if rowcount == 0:
         if row is None:
@@ -970,6 +1073,53 @@ def notifications_ack_all_impl(agent_id: str) -> str:
             f"WHERE {pred} AND {inbox_membership_sql(claimed=True)}",
             tuple(addr)
         ).fetchone()["c"]
+
+    # Ack the DISPATCH store too. "Ack all" means the whole inbox, and the
+    # inbox now spans two stores: clearing only the legacy one would leave
+    # dispatched mail unread forever while reporting a count that looks
+    # complete -- the §3 false negative in its most direct form.
+    #
+    # Separate connection scope on purpose: get_dispatch_conn commits its own
+    # work, and on SQLite holding the main store's write lock across it would
+    # serialise every other writer behind this bulk update.
+    for _store, _tbl in _notification_sources():
+        if _store is None and _tbl == "notifications":
+            continue                      # already done above
+        try:
+            if _store is None:
+                with _db() as db2:
+                    c2 = db2.execute(
+                        f"UPDATE {_tbl} SET read_at = {_d.now()} "
+                        f"WHERE {pred} AND {inbox_membership_sql(claimed=False)}",
+                        tuple(addr))
+                    rowcount += c2.rowcount
+                    skipped += db2.execute(
+                        f"SELECT COUNT(*) AS c FROM {_tbl} "
+                        f"WHERE {pred} AND {inbox_membership_sql(claimed=True)}",
+                        tuple(addr)).fetchone()["c"]
+            else:
+                from m3_core.context import M3Context
+                from m3_core.paths import resolve_db_path
+                with M3Context.for_db(resolve_db_path(None)).get_dispatch_conn() as db2:
+                    c2 = db2.execute(
+                        f"UPDATE {_tbl} SET read_at = {_d.now()} "
+                        f"WHERE {pred} AND {inbox_membership_sql(claimed=False)}",
+                        tuple(addr))
+                    rowcount += c2.rowcount
+                    skipped += db2.execute(
+                        f"SELECT COUNT(*) AS c FROM {_tbl} "
+                        f"WHERE {pred} AND {inbox_membership_sql(claimed=True)}",
+                        tuple(addr)).fetchone()["c"]
+                    db2.commit()
+        except Exception as exc:  # noqa: BLE001 -- one unreachable store must
+            # not abort an ack that cleared the others; the count reported below
+            # then under-states, which the warning makes visible.
+            logger.warning(
+                "notification store skipped during ack_all. "
+                f"observed: table={_tbl} {type(exc).__name__}: {exc}. "
+                "possible: the store has not been bootstrapped yet. "
+                "inspect: memory/dispatch_migrations/001_bootstrap.up.sql"
+            )
 
     note = ""
     if skipped:

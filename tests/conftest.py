@@ -932,3 +932,40 @@ def seed_embedding_row(conn, dialect, *, mid, embedding, dim, embed_model,
         (eid, mid, embedding, dim, embed_model),
     )
     return eid
+
+
+# ── Notification store routing for tests ─────────────────────────────────────
+#
+# Delivery records moved to their own store, so a test that hardcodes
+# `table="notifications"` while `notify_impl` writes to `notification_dispatch`
+# sets up a row in one place and asserts about another. It then fails for a
+# reason that looks like a product bug and is not.
+#
+# These resolve the store the SAME WAY production does, so a test exercises the
+# real routing rather than a copy of it that can drift.
+
+def dispatch_table_for_tests() -> str:
+    """The table `notify_impl` writes to, resolved by production's own code."""
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "bin"))
+    from memory.orchestration import _dispatch_write_table
+
+    return _dispatch_write_table()
+
+
+def dispatch_conn_for_tests():
+    """A read/write connection to the store `notify_impl` writes to.
+
+    Context manager. Mirrors `_store_for_id` for ids at or above the dispatch
+    floor, which is where every newly sent notification now lands.
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "bin"))
+    from m3_core.context import M3Context
+    from m3_core.paths import resolve_db_path
+
+    return M3Context.for_db(resolve_db_path(None)).get_dispatch_conn()

@@ -432,6 +432,102 @@ class M3Context:
             pool.put(conn)
 
     @contextmanager
+    def get_dispatch_conn(self) -> "Iterator[Any]":
+        """Yield a READ/WRITE connection for the agent dispatch store.
+
+        The write counterpart to ``read_across_notification_stores``, which is
+        read-only by construction (it uses ``open_readonly``). Modelled on
+        :meth:`get_chatlog_conn`, because dispatch is the same shape of problem:
+        a second store that is a separate FILE on SQLite and a separate SCHEMA
+        on a server backend.
+
+        Backend-neutral yield type (``Any`` -- a duck-typed DB connection): a
+        ``sqlite3.Connection`` on SQLite, a psycopg connection on PostgreSQL.
+        Annotating ``sqlite3.Connection`` would be a lie on PG.
+
+        On SQLite: the path comes from ``m3_core.paths.resolve_dispatch_db``
+        (M3_DISPATCH_DB > integrated mode > engine root). If it resolves to this
+        context's main path -- integrated mode, or an explicit override pointing
+        at the main file -- the main pool is reused rather than opening a second
+        handle to the same file, which would contend for the same write lock.
+
+        On PostgreSQL: there is ONE database. Dispatch lives in its own SCHEMA,
+        so the ACTIVE backend connection is correct and the qualified table name
+        separates the stores, not the connection -- exactly as chatlog does with
+        chat_log_* tables. The SQLite path-equality test is meaningless there
+        (no file path), so it is not attempted.
+
+        ⚠ DO NOT reach for ``active_database(path)`` to address this store.
+        ``resolve_db_path``'s documented precedence is
+        *explicit arg > M3_DATABASE env > ContextVar*, and the cognitive loop
+        always sets M3_DATABASE, so the ContextVar is overridden and the block
+        silently reads and writes the MAIN store. Measured while building the
+        split: a row written that way landed in the wrong file with no error.
+        """
+        # PG and other server backends: one database, dispatch is a schema.
+        try:
+            from memory.backends import active_backend as _ab
+
+            _backend = _ab()
+        except Exception:  # noqa: BLE001 -- no seam yet (bootstrap) => SQLite
+            _backend = None
+        if _backend is not None and _backend.name != "sqlite":
+            with _backend.connection() as conn:
+                yield conn
+            return
+
+        try:
+            from m3_core.paths import resolve_dispatch_db
+            target = resolve_dispatch_db()
+        except Exception:  # noqa: BLE001 -- a broken dispatch config must not
+            # take the caller down; the main store is the safe fallback.
+            with self.get_sqlite_conn() as conn:
+                yield conn
+            return
+
+        if os.path.abspath(target) == os.path.abspath(self.db_path):
+            # Integrated mode, or an override pointing at the main file. Reuse
+            # the pool: a second handle to one file contends for its write lock.
+            #
+            # Still bootstrap: integrated means the dispatch TABLES live in the
+            # main file, not that they already exist there. A fresh integrated
+            # install would otherwise fail its first send.
+            with self.get_sqlite_conn() as conn:
+                _ensure_dispatch_schema(conn)
+                yield conn
+            return
+
+        import sqlite3 as _sqlite3
+
+        conn = _sqlite3.connect(target, timeout=30.0)
+        conn.row_factory = _sqlite3.Row
+        try:
+            _ensure_dispatch_schema(conn)
+            # Same pragma discipline as every other m3 SQLite connection (§10);
+            # best-effort so a pragma helper that is unavailable during
+            # bootstrap cannot block a dispatch write.
+            try:
+                from sqlite_pragmas import apply_pragmas, profile_for_db
+
+                apply_pragmas(conn, profile_for_db(target))
+            except Exception:  # noqa: BLE001 -- see above
+                conn.execute("PRAGMA journal_mode=WAL")
+            yield conn
+            # Commit on clean exit, matching `_db()` and the seam's
+            # connection(). Without it this yields a RAW connection whose
+            # writes are silently rolled back on close -- so the same UPDATE
+            # persists through one helper and vanishes through the other,
+            # decided only by which the caller reached for. Found 2026-09-17:
+            # a test backdated a lease through this path and the change was
+            # discarded, which read as "the sweeper did not reclaim".
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @contextmanager
     def get_chatlog_conn(self) -> "Iterator[Any]":
         """Yield a connection for chat log writes/reads.
 
@@ -553,6 +649,55 @@ class M3Context:
                     logger.warning(f"PostgreSQL connect attempt {attempt + 1} failed: {e}. Retrying in 3s...")
                     time.sleep(3)
         raise RuntimeError(f"PostgreSQL connection failed after 2 attempts: {last_exc}")
+
+def _ensure_dispatch_schema(conn) -> None:
+    """Create the dispatch schema on first use, if it is not there yet.
+
+    The dispatch store is bootstrapped from its OWN migrations, and nothing
+    guarantees that has happened before the first send: a fresh install, a
+    restored engine root, or an operator who set M3_DISPATCH_DB to a new path
+    all arrive here with an empty file.
+
+    Without this a send raises "no such table: notification_dispatch". That is
+    loud, which is right, but it is also AVOIDABLE -- the store is ours to
+    create and the DDL ships with the code. Creating it is strictly better than
+    failing a send that could have succeeded.
+
+    Cheap to call: the bootstrap is `CREATE TABLE IF NOT EXISTS` throughout, and
+    the presence probe below short-circuits before reading the file at all on
+    every subsequent call.
+
+    ⚠ NOT a substitute for the migration runner. This applies exactly the
+    bootstrap, never a later migration -- a store that exists but is BEHIND is
+    the runner's problem, and silently patching it here would hide a real
+    version skew.
+    """
+    try:
+        present = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='notification_dispatch'"
+        ).fetchone()
+        if present:
+            return
+        from m3_core.paths import dispatch_migrations_dir
+
+        boot = os.path.join(dispatch_migrations_dir(), "001_bootstrap.up.sql")
+        with open(boot, "r", encoding="utf-8") as fh:
+            conn.executescript(fh.read())
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001 -- a send must not die because the
+        # bootstrap could not run; the caller's INSERT will raise a clear
+        # "no such table" immediately after, which is the honest error.
+        import logging
+
+        logging.getLogger("memory_core").warning(
+            "could not bootstrap the dispatch store. "
+            f"observed: {type(exc).__name__}: {exc}. "
+            "possible: the migrations directory is missing, or the store is "
+            "read-only. "
+            "inspect: memory/dispatch_migrations/001_bootstrap.up.sql"
+        )
+
 
 
 def _cleanup():

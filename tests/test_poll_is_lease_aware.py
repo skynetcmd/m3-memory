@@ -24,6 +24,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from conftest import dispatch_conn_for_tests, dispatch_table_for_tests
+
 _HERE = os.path.dirname(__file__)
 _BIN = os.path.normpath(os.path.join(_HERE, "..", "bin"))
 if _BIN not in sys.path:
@@ -31,11 +33,14 @@ if _BIN not in sys.path:
 
 from memory.backends import dialect  # noqa: E402
 from memory.orchestration import (  # noqa: E402
-    _db,
     agent_register_impl,
     notifications_poll_impl,
     notify_impl,
 )
+
+# The store notify_impl writes to -- resolved by production's own
+# resolver so these tests cannot drift from the real routing.
+_T = dispatch_table_for_tests()
 
 
 @pytest.fixture
@@ -47,10 +52,10 @@ def agent():
 
 def _claim(agent_id: str, claimant: str = "worker-1", ttl: int = 300):
     D = dialect()
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p = D.param()
         return D.claim_message(
-            db, table="notifications", where_sql=f"agent_id = {p}",
+            db, table=dispatch_table_for_tests(), where_sql=f"agent_id = {p}",
             where_params=(agent_id,), claimant=claimant, lease_ttl=ttl,
         )
 
@@ -113,17 +118,17 @@ def test_a_lapsed_claim_is_offered_again(agent):
     past = (datetime.now(timezone.utc) - timedelta(seconds=60)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p_ = dialect().param()
         db.execute(
-            f"UPDATE notifications SET claim_expires_at = {p_} "
+            f"UPDATE {_T} SET claim_expires_at = {p_} "
             f"WHERE id = {p_}",
             (past, row_id),
         )
 
     D = dialect()
-    with _db() as db:
-        reclaimed, dead = D.sweep_expired_leases(db, table="notifications")
+    with dispatch_conn_for_tests() as db:
+        reclaimed, dead = D.sweep_expired_leases(db, table=dispatch_table_for_tests())
     assert reclaimed >= 1, (
         f"the sweeper did not reclaim an expired lease (reclaimed={reclaimed}, "
         f"dead_lettered={dead})"
@@ -167,11 +172,11 @@ def test_a_dead_lettered_message_is_never_offered_again(agent):
     row_id = got[0]
 
     D = dialect()
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p_ = D.param()
         # Exactly what sweep_expired_leases does at max_attempts.
         db.execute(
-            f"UPDATE notifications SET failed_at = {D.now()}, claimed_by = NULL, "
+            f"UPDATE {_T} SET failed_at = {D.now()}, claimed_by = NULL, "
             f"lease_token = NULL, claim_expires_at = NULL WHERE id = {p_}",
             (row_id,),
         )
@@ -244,10 +249,10 @@ def test_polling_alone_reclaims_a_lapsed_lease(agent):
     past = (datetime.now(timezone.utc) - timedelta(seconds=60)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p_ = dialect().param()
         db.execute(
-            f"UPDATE notifications SET claim_expires_at = {p_} WHERE id = {p_}",
+            f"UPDATE {_T} SET claim_expires_at = {p_} WHERE id = {p_}",
             (past, row_id),
         )
 
@@ -264,10 +269,10 @@ def test_polling_alone_reclaims_a_lapsed_lease(agent):
         "inspect: sweep_leases_opportunistically in bin/memory/orchestration.py"
     )
 
-    with _db() as db:
+    with dispatch_conn_for_tests() as db:
         p_ = dialect().param()
         row = db.execute(
-            f"SELECT claimed_by, lease_token FROM notifications WHERE id = {p_}",
+            f"SELECT claimed_by, lease_token FROM {_T} WHERE id = {p_}",
             (row_id,),
         ).fetchone()
     assert row["claimed_by"] is None and row["lease_token"] is None, (

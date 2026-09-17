@@ -449,6 +449,14 @@ class SqliteBackend:
         @contextmanager
         def _ro():
             c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            # Same row factory as the pooled connection. Without it this yields
+            # plain tuples while `_db()` yields sqlite3.Row, so code that reads
+            # `row["id"]` works against one connection and raises
+            # "tuple indices must be integers" against the other -- for the
+            # same query, decided by which helper the caller happened to use.
+            # Found 2026-09-17 when a cross-store read swapped one for the
+            # other; PostgreSQL has no such split, so it is a SQLite-only trap.
+            c.row_factory = sqlite3.Row
             try:
                 yield c
             finally:
