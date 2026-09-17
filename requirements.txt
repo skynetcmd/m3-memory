@@ -52,39 +52,44 @@ rapidfuzz>=3.14,<4
 
 # --- Embedding Server ---
 sentence-transformers>=5.4.1,<6
-# transformers is transitive (sentence-transformers / FlagEmbedding / peft) but
-# pinned directly to floor out 18 of 20 known CVEs (all the <4.53.0 ones).
-# Ceiling is <5 (NOT <6): transformers 5.x removed `is_torch_fx_available`, which
-# FlagEmbedding imports — verified to break the embedder on 5.9.0; 4.57.x is the
-# latest working 4.x. Three CVEs remain and are ACCEPTED:
-#   - CVE-2026-1839 (Trainer torch.load RCE) — fix only in 5.x; m3 never uses Trainer.
-#   - PYSEC-2025-217 (X-CLIP checkpoint-conversion RCE) — no fixed version exists;
-#     m3 never converts X-CLIP checkpoints.
-#   - CVE-2026-5241 / GHSA-fgcw-684q-jj6r (LightGlue model-load RCE) — fix only in
-#     5.5.0 (above the <5 ceiling); m3 never loads LightGlue (a vision keypoint-
-#     matching model). m3's ONLY transformers surface is sentence-transformers'
-#     SentenceTransformer (embedder) + CrossEncoder (reranker) — no AutoModel /
-#     pipeline / arbitrary from_pretrained path, so the vulnerable code is
-#     unreachable. (Dependabot alert #12.)
-# Two more are reported by pip-audit under PYSEC ids and are the SAME issues:
-#   - PYSEC-2026-2288 = CVE-2026-1839 (Trainer._load_rng_state torch.load).
-#   - PYSEC-2026-2290 = CVE-2026-5241 (LightGlue model load).
-# Two further ones are distinct and are also ACCEPTED, assessed 2026-09-17:
-#   - PYSEC-2026-2289 (malicious config.json `_attn_implementation` RCE, fixed
-#     in 5.3.0 — above the <5 ceiling). Requires loading a model repo an
-#     ATTACKER controls. m3's three model-loading sites take their id from a
-#     default constant, a --model flag or M3_GLINER_MODEL (embed_server.py:117,
-#     search.py:292, m3_entities_gliner.py:124) — operator configuration, never
-#     untrusted input.
-#   - PYSEC-2026-3929 (save_pretrained() path traversal, fixed in 5.10.0).
-#     UNREACHABLE: m3 never calls save_pretrained — it only ever loads models,
-#     never writes them. Verified by grep across bin/ and m3_memory/.
-# All of them require loading a malicious checkpoint/model; m3 only runs embedding
-# inference on its own trusted local model, so none is reachable. Revisit when
-# FlagEmbedding supports transformers 5.x (would let us raise to the patched 5.5.0+
-# and clear #12 for real) — see the to-do memory.
-transformers>=4.53.0,<5
-torch>=2.11.0,<3
+# transformers is transitive (sentence-transformers / peft) but pinned directly
+# so the floor is ours to set rather than whatever a resolver picks.
+#
+# FLOOR RAISED TO 5.17.0 on 2026-09-17, clearing four of the five CVEs that the
+# previous `<5` ceiling forced us to accept:
+#   - PYSEC-2026-2288 (Trainer torch.load RCE)          fixed 5.0.0
+#   - PYSEC-2026-2289 (config.json _attn_implementation) fixed 5.3.0
+#   - PYSEC-2026-2290 (LightGlue model load RCE)         fixed 5.5.0
+#   - PYSEC-2026-3929 (save_pretrained path traversal)   fixed 5.10.0
+#
+# WHY THE OLD CEILING IS GONE. It said: "transformers 5.x removed
+# `is_torch_fx_available`, which FlagEmbedding imports". Re-checked 2026-09-17
+# and the premise no longer holds:
+#   * the symbol IS removed in 5.x (verified on 5.1.0), but
+#   * FlagEmbedding is NOT a dependency of m3 -- it appears in no requirements
+#     file, is imported by no module under bin/ or m3_memory/, and is not
+#     installed. It survived only in this comment.
+#   * m3 never imports transformers DIRECTLY at all. Its entire surface is
+#     sentence-transformers' SentenceTransformer (embed_server.py:117) and
+#     CrossEncoder (memory/search.py:292), plus GLiNER, none of which touch the
+#     removed symbol.
+#   * sentence-transformers itself declares `transformers<6.0.0,>=4.41.0` -- it
+#     never wanted <5.
+# Verified in clean venvs: both 5.10.4 and 5.17.0 install and import both m3
+# surfaces cleanly.
+#
+# ONE CVE REMAINS and is ACCEPTED:
+#   - PYSEC-2025-217 (X-CLIP checkpoint-conversion RCE) -- NO fixed version
+#     exists at any release. Requires converting an attacker-supplied X-CLIP
+#     checkpoint; m3 has no conversion path and only runs embedding inference on
+#     its own configured model.
+transformers>=5.17.0,<6
+# Floor raised to 2.14.0 on 2026-09-17. 2.11 declared `setuptools<82`, which
+# forced the setuptools ceiling below and with it CVE-2026-59890. 2.14 declares
+# `setuptools>=77.0.3` with no upper bound, so raising torch is what actually
+# unblocks the setuptools fix -- the CVE was a transitive consequence of an old
+# torch pin, not a setuptools problem.
+torch>=2.14.0,<3
 
 # --- Utilities ---
 python-dotenv>=1.2.2,<2
@@ -103,25 +108,33 @@ pytest-asyncio>=1.3.0,<2
 ruff>=0.15.12,<1
 mypy>=1.20.2,<2
 types-requests>=2.33.0.20260408
-# Capped <82 to track the setuptools cap below (torch 2.11 pins setuptools<82).
-types-setuptools>=77.0.0,<82
+# Tracks the setuptools floor below. The old <82 cap mirrored torch 2.11's
+# `setuptools<82`; torch 2.14 dropped that constraint entirely.
+types-setuptools>=83.0.0
 
 # --- Build Tools ---
-# setuptools>=77 for the SPDX `license = "Apache-2.0"` form; <82 stays within
-# torch 2.11's declared `setuptools<82` so pip doesn't warn about a conflict.
+# setuptools>=77 for the SPDX `license = "Apache-2.0"` form.
 # (Also pinned in pyproject.toml build-system.requires for isolated builds.)
 #
-# One CVE remains under this ceiling and is ACCEPTED:
-#   - CVE-2026-59890 / PYSEC-2026-3447 — fix only in 83.0.0 (above the <82
-#     ceiling). FileList matched MANIFEST.in exclude/prune globs without Unicode
-#     normalization, so on macOS APFS/HFS+ an NFD filename could bypass an NFC
-#     exclusion and get packed into an sdist. It affects what a package AUTHOR
-#     ships when building a source distribution on macOS; it is not a runtime
-#     path, and m3's releases are built in CI on ubuntu-latest. Revisit when
-#     torch's `setuptools<82` pin lifts (same trigger as types-setuptools above).
+# FLOOR RAISED TO 83.0.0 on 2026-09-17, clearing CVE-2026-59890 /
+# PYSEC-2026-3447. FileList matched MANIFEST.in exclude/prune globs without
+# Unicode normalization, so on macOS APFS/HFS+ an NFD filename could bypass an
+# NFC exclusion and get packed into an sdist.
+#
+# The previous `<82` ceiling existed ONLY to stay inside torch 2.11's declared
+# `setuptools<82`, and that comment named its own revisit trigger: "revisit when
+# torch's setuptools<82 pin lifts". It has. Verified 2026-09-17: torch 2.14.0
+# declares `setuptools>=77.0.3` with NO upper bound, and a clean venv resolves
+# torch 2.14.0 + setuptools 84.0.0 + transformers 5.17.0 together with
+# `pip check` reporting no broken requirements.
+#
+# Worth recording WHY torch capped it at all: torch imports setuptools in
+# exactly two modules -- utils/cpp_extension.py (compiling custom C++/CUDA ops)
+# and a dynamo backend registry. m3 uses neither; it only runs inference. So the
+# cap was never a constraint on m3's runtime, only on torch's build tooling.
 #
 # This CVE was invisible until 2026-09-12: the DefectDojo pipeline's pip-audit
 # ran `find | head -1` and audited examples/mac-agent/requirements.txt ONLY, so
 # the root manifest was never scanned. Fixed in scan_repo.py (audits all three;
 # 261 packages, was ~8). See m3 memory 1c6429ef.
-setuptools>=77,<82
+setuptools>=83.0.0

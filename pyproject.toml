@@ -1,13 +1,17 @@
 [build-system]
-# setuptools>=77 is required for the SPDX `license = "Apache-2.0"` form;
-# <82 keeps it within torch 2.11's declared `setuptools<82` pin so an isolated
-# build doesn't trigger a dependency-conflict warning.
-requires = ["setuptools>=77,<82", "wheel"]
+# setuptools>=77 is required for the SPDX `license = "Apache-2.0"` form.
+# Floor raised to 83.0.0 on 2026-09-17: that is the fix for CVE-2026-59890 /
+# PYSEC-2026-3447, and this is the pin that MATTERS for it -- the CVE is in
+# sdist packaging (MANIFEST.in globs vs Unicode-normalized filenames), so it
+# lives in the BUILD path, which is exactly what this block governs.
+# The old <82 ceiling only mirrored torch 2.11's `setuptools<82`; torch 2.14
+# declares `setuptools>=77.0.3` with no upper bound.
+requires = ["setuptools>=83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.9.14.4"
+version = "2026.9.16.0"
 description = "Give your AI agent a memory — local-first, private, easy to install. Guided setup wizard; works out of the box on your own machine, no cloud. For everyday agent users, homelabs, and developers alike · 99.2% LongMemEval-S retrieval @ k=10 · Works with Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · any MCP agent (native + one-command plugins) · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable"
 
 readme = "README.md"
@@ -183,11 +187,16 @@ dashboard = [
 # FlagEmbedding path). Heavy (pulls torch) and optional — the in-process Rust
 # tier-1 embedder or an external OpenAI-compatible embed endpoint cover the
 # common case. Kept OUT of core so a default install stays light. See
-# requirements.txt for the transformers<5 / torch pin rationale.
+# requirements.txt for the transformers / torch pin rationale.
 embed-server = [
     "sentence-transformers>=5.4.1,<6",
-    "transformers>=4.53.0,<5",
-    "torch>=2.11.0,<3",
+    # Floors raised 2026-09-17: transformers 5.17 clears four CVEs the old <5
+    # ceiling forced us to accept, and torch 2.14 drops the `setuptools<82`
+    # constraint that forced the setuptools ceiling. Full reasoning, including
+    # why the old FlagEmbedding blocker no longer applies, is in
+    # requirements.txt beside these same pins.
+    "transformers>=5.17.0,<6",
+    "torch>=2.14.0,<3",
     "scipy>=1.17.1,<2",
 ]
 # Local zero-shot NER for bin/m3_entities_gliner.py — a fast on-device
