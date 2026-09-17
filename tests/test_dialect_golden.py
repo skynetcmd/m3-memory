@@ -71,7 +71,11 @@ GOLDEN_SQLITE: dict[str, str] = {
     "on_conflict_ignore(target)": "",
     "on_conflict_update": "ON CONFLICT (id) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at",
     "now": "strftime('%Y-%m-%dT%H:%M:%SZ','now')",
-    "now_minus_days": "datetime('now', '-' || ? || ' days')",
+    # Updated 2026-09-17: was `datetime('now', ...)`, which renders a
+    # space-separated, Z-less string that cannot be compared against the
+    # "...T..Z" the columns store -- so the bound matched every same-day row.
+    # See tests/test_time_bound_format_parity.py.
+    "now_minus_days": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-' || ? || ' days')",
     "empty_json_default": "''",
     "returning_id_clause": "",
     "json_extract_text": "json_extract(metadata_json, '$.provider')",

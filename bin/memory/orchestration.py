@@ -28,6 +28,8 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+from m3_core.paths import node_id
+
 from . import records
 from .backends import dialect
 from .db import _db, _record_history
@@ -116,8 +118,9 @@ def agent_heartbeat_impl(agent_id: str) -> str:
     with _db() as db:
         p = dialect().param()
         cur = db.execute(
-            f"UPDATE agents SET last_seen = {p}, status = 'active' WHERE agent_id = {p}",
-            (now, agent_id)
+            f"UPDATE agents SET last_seen = {p}, status = 'active', "
+            f"node_id = {p} WHERE agent_id = {p}",
+            (now, node_id(), agent_id)
         )
         rowcount = cur.rowcount
 
@@ -567,6 +570,78 @@ def notify_impl(agent_id: str, kind: str, payload: dict = None,
     return f"Notified {agent_id}: {kind} (id={new_id})"
 
 
+# How recent a heartbeat must be for its agent to count as ACTIVE. Ten minutes
+# is deliberately generous: the poll cadence is seconds, so a live agent stamps
+# many times inside the window, while an agent that stopped hours ago falls out.
+# Measured 2026-09-12 -- a waiter watching an identity last seen in MAY missed 36
+# live notifications, which is what counting stale rows buys you.
+_NODE_ACTIVE_WINDOW_MINUTES = 10
+
+
+def detect_fleet_topology() -> "tuple[str, str]":
+    """``(verdict, evidence)`` -- is this fleet single-node or multi-node?
+
+    Verdict is ``"single-node"``, ``"multi-node"`` or ``"unknown"``. The second
+    element is a human-readable reason, so a caller logging the decision can say
+    WHY rather than just what.
+
+    ⚠ FAILS TOWARD MULTI-NODE, and the asymmetry is the whole point. The two
+    wrong answers do not cost the same:
+
+      * wrongly SINGLE-node on a real fleet -> agents on other hosts NEVER
+        RECEIVE MAIL, silently, because SQLite arrival detection watches a WAL
+        file's mtime and a filesystem signal cannot cross a machine boundary.
+        Nothing reports a boundary it cannot see.
+      * wrongly MULTI-node on one box -> some efficiency lost. Delivery still
+        works.
+
+    So "unknown" is not a coin flip; callers treat it as multi-node.
+
+    Counts DISTINCT node_id among agents whose heartbeat is inside the active
+    window. Stale rows are excluded deliberately: a registry row is forever, and
+    counting a machine that has been offline for months would report a fleet
+    that no longer exists.
+
+    NULL node_id means "has not checked in since the column existed" -- unknown,
+    never evidence of a single node. If every active agent is NULL the verdict
+    is "unknown" rather than "single-node", because absence of evidence is not
+    evidence of absence here.
+    """
+    try:
+        _d = dialect()
+        p = _d.param()
+        with _db() as db:
+            rows = db.execute(
+                f"SELECT node_id, COUNT(*) AS c FROM agents "
+                f"WHERE last_seen >= {_d.now_minus_minutes(p)} "
+                f"GROUP BY node_id",
+                (_NODE_ACTIVE_WINDOW_MINUTES,),
+            ).fetchall()
+    except Exception as exc:  # noqa: BLE001 -- an unreadable registry is the
+        # ambiguous case, and the ambiguous case fails toward multi-node.
+        return ("unknown", f"registry unreadable ({type(exc).__name__}: {exc})")
+
+    named = {r["node_id"]: r["c"] for r in rows if r["node_id"]}
+    unnamed = sum(r["c"] for r in rows if not r["node_id"])
+
+    if not named and not unnamed:
+        return ("unknown", "no agent has heartbeated inside the active window")
+    if not named:
+        return ("unknown",
+                f"{unnamed} active agent(s), none carrying a node_id yet -- "
+                f"they predate the column or have not re-registered")
+    if len(named) > 1:
+        return ("multi-node",
+                f"{len(named)} distinct nodes active: {sorted(named)}")
+    if unnamed:
+        # One known node plus agents of unknown provenance. Those could be on
+        # this node or another; assuming the former is the dangerous direction.
+        return ("unknown",
+                f"1 known node {sorted(named)} but {unnamed} active agent(s) "
+                f"carry no node_id, so a second node cannot be ruled out")
+    return ("single-node", f"all {sum(named.values())} active agent(s) on {sorted(named)[0]}")
+
+
 def _notification_sources() -> "list[tuple[str | None, str]]":
     """Every (store, table) pair a pending notification can live in.
 
@@ -870,9 +945,13 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
         # keeps ONE format in the column -- a Python isoformat() writes
         # microseconds and a +00:00 offset where the DB writes ...Z.
         _hb = db.execute(
-            f"UPDATE agents SET last_seen = {_d.now()}, status = 'active' "
-            f"WHERE agent_id = {p}",
-            (agent_id,)
+            # node_id rides the heartbeat so the fleet's TOPOLOGY ages out
+            # exactly as liveness does. A registry row is forever; a heartbeat
+            # is recent, and the dispatch-backend decision must count only
+            # agents that are actually active.
+            f"UPDATE agents SET last_seen = {_d.now()}, status = 'active', "
+            f"node_id = {p} WHERE agent_id = {p}",
+            (node_id(), agent_id)
         )
         heartbeat_seen = bool(_hb.rowcount)
 
@@ -950,15 +1029,38 @@ def notifications_mark_received_impl(agent_id: str) -> str:
     require_agent_id(agent_id, "notifications_mark_received")
     now = datetime.now(timezone.utc).isoformat()
 
-    with _db() as db:
-        p = dialect().param()
-        pred, addr = _addressing_predicate(agent_id, p)
-        cur = db.execute(
-            f"UPDATE notifications SET received_at = {p} "
-            f"WHERE {pred} AND received_at IS NULL",
-            (now, *addr)
-        )
-        rowcount = cur.rowcount
+    p = dialect().param()
+    pred, addr = _addressing_predicate(agent_id, p)
+    rowcount = 0
+
+    # Receipt must reach EVERY store. It is the timestamp the <30s SLA is
+    # measured against, so stamping only the legacy table would mean a
+    # dispatched message is detected, delivered, and never recorded as
+    # received -- the SLA would under-report without a single error.
+    for _store, _tbl in _notification_sources():
+        try:
+            if _store is None:
+                with _db() as db:
+                    rowcount += db.execute(
+                        f"UPDATE {_tbl} SET received_at = {p} "
+                        f"WHERE {pred} AND received_at IS NULL",
+                        (now, *addr)).rowcount
+            else:
+                from m3_core.context import M3Context
+                from m3_core.paths import resolve_db_path
+                with M3Context.for_db(resolve_db_path(None)).get_dispatch_conn() as db:
+                    rowcount += db.execute(
+                        f"UPDATE {_tbl} SET received_at = {p} "
+                        f"WHERE {pred} AND received_at IS NULL",
+                        (now, *addr)).rowcount
+        except Exception as exc:  # noqa: BLE001 -- one unreachable store must
+            # not lose the receipts the others recorded.
+            logger.warning(
+                "notification store skipped while stamping receipt. "
+                f"observed: table={_tbl} {type(exc).__name__}: {exc}. "
+                "possible: the store has not been bootstrapped yet. "
+                "inspect: memory/dispatch_migrations/001_bootstrap.up.sql"
+            )
 
     return f"Marked {rowcount} notifications received for {agent_id}"
 

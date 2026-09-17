@@ -35,7 +35,12 @@ except Exception:  # pragma: no cover
         return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
 
     def _now_minus_minutes(minutes_placeholder: str) -> str:
-        return f"datetime('now', '-' || {minutes_placeholder} || ' minutes')"
+        # strftime with the Z format the columns are WRITTEN in, matching the
+        # seam. A bare datetime() renders "2026-09-17 10:51:43" against stored
+        # "...T10:51:43Z", and 'T' sorts after ' ', so the bound matches every
+        # same-day row and the filter silently does nothing.
+        return (f"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', "
+                f"'-' || {minutes_placeholder} || ' minutes')")
 
 
 logger = logging.getLogger("chatlog_status")

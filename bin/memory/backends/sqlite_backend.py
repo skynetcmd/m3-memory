@@ -52,7 +52,10 @@ class SqliteDialect(Dialect):
 
     def now_minus_days(self, days_placeholder: str) -> str:
         # `?` binds an int; build the '-N days' modifier string in SQL.
-        return f"datetime('now', '-' || {days_placeholder} || ' days')"
+        # strftime, not datetime(): see now_minus_minutes for why a bare
+        # datetime() bound silently matches every same-day row.
+        return (f"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', "
+                f"'-' || {days_placeholder} || ' days')")
 
     def now_plus_seconds(self, seconds_placeholder: str) -> str:
         # strftime (not datetime) so the result matches the ISO-8601 'Z' shape
@@ -70,7 +73,22 @@ class SqliteDialect(Dialect):
                 f"{seconds_placeholder} || ' seconds')")
 
     def now_minus_minutes(self, minutes_placeholder: str) -> str:
-        return f"datetime('now', '-' || {minutes_placeholder} || ' minutes')"
+        # strftime with the SAME format `now()` writes, NOT bare datetime().
+        #
+        # ⚠ datetime() renders "2026-09-17 10:51:43" -- a SPACE separator and no
+        # Z -- while every timestamp column is written by now() as
+        # "2026-09-17T10:51:43Z". Comparing those as TEXT is meaningless: 'T'
+        # (0x54) sorts after ' ' (0x20), so `last_seen >= datetime(...)` is TRUE
+        # for any same-day row regardless of its time. The filter reads correct
+        # and does nothing.
+        #
+        # Measured 2026-09-17: a heartbeat stamped 120 minutes ago still passed
+        # a 10-minute window, so a node that had been offline for hours counted
+        # as active. Same failure class as the `until=<bare date>` bug that
+        # test_date_bound_parity.py exists for: same wrong query, a different
+        # wrong answer per backend, neither obviously broken in isolation.
+        return (f"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', "
+                f"'-' || {minutes_placeholder} || ' minutes')")
 
     def age_days_gt(self, ts_column: str, days_expr: str) -> str:
         return f"(julianday('now') - julianday({ts_column})) > {days_expr}"

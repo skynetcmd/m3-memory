@@ -499,6 +499,22 @@ class M3Context:
 
         import sqlite3 as _sqlite3
 
+        # The engine root may not exist yet: a fresh install, a test that points
+        # M3_ENGINE_ROOT at a temp path it never created, or an operator who set
+        # M3_DISPATCH_DB to a new directory. sqlite3.connect does NOT create
+        # parent directories -- it raises "unable to open database file", which
+        # names the file rather than the missing directory and reads like a
+        # permission problem. Create the directory instead of failing a send
+        # over it; the store itself is bootstrapped just below.
+        try:
+            parent = os.path.dirname(os.path.abspath(target))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+        except OSError:
+            # Genuinely unwritable: let connect() raise, which reports the real
+            # path and permission rather than masking it here.
+            pass
+
         conn = _sqlite3.connect(target, timeout=30.0)
         conn.row_factory = _sqlite3.Row
         try:

@@ -59,8 +59,8 @@ def _seed(db, table, cols, rows):
 def test_enrichment_filters_by_type(tmp_path):
     db = _make_db(tmp_path)
     conn = sqlite3.connect(db)
-    conn.execute("INSERT INTO memory_items (id,type,created_at) VALUES ('a','fact_enriched',datetime('now'))")
-    conn.execute("INSERT INTO memory_items (id,type,created_at) VALUES ('b','note',datetime('now'))")
+    conn.execute("INSERT INTO memory_items (id,type,created_at) VALUES ('a','fact_enriched',strftime('%Y-%m-%dT%H:%M:%SZ','now'))")
+    conn.execute("INSERT INTO memory_items (id,type,created_at) VALUES ('b','note',strftime('%Y-%m-%dT%H:%M:%SZ','now'))")
     conn.commit(); conn.close()
     stats = qs.collect_pipeline_stats(db)
     enrich = next(p for p in stats["pipelines"] if p["key"] == "enrich")

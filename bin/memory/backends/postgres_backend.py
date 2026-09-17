@@ -229,8 +229,9 @@ def _reject_forbidden_host(url: str) -> None:
             except Exception:
                 scheme = "postgres"
             raise RuntimeError(
-                f"observed: PostgreSQL PRIMARY-store DSN targets host {host!r} "
-                f"(from M3_PG_FORBIDDEN_HOSTS). cause: the DSN is configured to "
+                f"observed: PostgreSQL PRIMARY-store DSN targets forbidden "
+                f"host {host!r} (from M3_PG_FORBIDDEN_HOSTS). cause: the DSN "
+                f"is configured to "
                 f"connect to the data-warehouse/CDW mirror instead of the primary "
                 f"store. inspect: M3_PRIMARY_PG_URL (current: {scheme}://..., "
                 f"host={host}) should point to a dedicated primary database, not "
@@ -273,10 +274,10 @@ def _resolve_dsn() -> str:
             "or the encrypted vault. inspect: set M3_PRIMARY_PG_URL to a "
             "postgresql:// connection URL (e.g., "
             "postgresql://user:pass@host:5432/dbname), or store it in the vault "
-            "with `m3 secrets set M3_PRIMARY_PG_URL <url>`. Note: PG_URL is the "
-            "data-warehouse DSN (now M3_CDW_PG_URL); the primary store reads only "
-            "M3_PRIMARY_PG_URL (or M3_PG_URL as a fallback). Will not silently fall "
-            "back to SQLite."
+            "with `m3 secrets set M3_PRIMARY_PG_URL <url>`. Note: the primary "
+            "store does not read PG_URL -- that is the data-warehouse DSN "
+            "(now M3_CDW_PG_URL). It reads M3_PRIMARY_PG_URL, or M3_PG_URL as "
+            "a fallback. Will not silently fall back to SQLite."
         )
     _reject_forbidden_host(url)
     _reject_same_as_warehouse(url)

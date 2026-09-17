@@ -28,6 +28,8 @@ import sys
 
 import pytest
 
+from conftest import dispatch_conn_for_tests, dispatch_table_for_tests
+
 _HERE = os.path.dirname(__file__)
 _BIN = os.path.normpath(os.path.join(_HERE, "..", "bin"))
 if _BIN not in sys.path:
@@ -166,15 +168,17 @@ def live_notifications():
     throwaway cluster.
     """
     from memory.backends import dialect
-    from memory.orchestration import _db
 
     def _cleanup():
-        with _db() as db:
+        # The dispatch store, not the main one: notify_impl writes there, so a
+        # cleanup against `notifications` would leave the rows these tests
+        # assert about behind.
+        with dispatch_conn_for_tests() as db:
             p = dialect().param()
-            db.execute(f"DELETE FROM notifications WHERE agent_id = {p}", (_AGENT,))
+            db.execute(f"DELETE FROM {dispatch_table_for_tests()} WHERE agent_id = {p}", (_AGENT,))
 
     _cleanup()
-    yield _db
+    yield dispatch_conn_for_tests
     _cleanup()
 
 
@@ -192,7 +196,7 @@ def test_mark_received_sets_received_at_and_leaves_read_at_alone(live_notificati
     with live_notifications() as db:
         p = dialect().param()
         row = db.execute(
-            f"SELECT read_at, received_at FROM notifications WHERE agent_id = {p}",
+            f"SELECT read_at, received_at FROM {dispatch_table_for_tests()} WHERE agent_id = {p}",
             (_AGENT,),
         ).fetchall()[0]
 
@@ -235,7 +239,8 @@ def test_mark_received_is_idempotent_and_keeps_the_first_receipt(live_notificati
     with live_notifications() as db:
         p = dialect().param()
         first = db.execute(
-            f"SELECT received_at FROM notifications WHERE agent_id = {p}",
+            f"SELECT received_at FROM {dispatch_table_for_tests()} "
+            f"WHERE agent_id = {p}",
             (_AGENT,),
         ).fetchall()[0]["received_at"]
 
@@ -245,7 +250,8 @@ def test_mark_received_is_idempotent_and_keeps_the_first_receipt(live_notificati
     with live_notifications() as db:
         p = dialect().param()
         second = db.execute(
-            f"SELECT received_at FROM notifications WHERE agent_id = {p}",
+            f"SELECT received_at FROM {dispatch_table_for_tests()} "
+            f"WHERE agent_id = {p}",
             (_AGENT,),
         ).fetchall()[0]["received_at"]
 

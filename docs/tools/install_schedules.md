@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: ab3855ebd66d
-mtime_utc: 2026-09-16T14:46:32.116383+00:00
-generated_utc: 2026-09-16T14:46:40.777193+00:00
+sha1: 851366e03463
+mtime_utc: 2026-09-17T10:45:36.080211+00:00
+generated_utc: 2026-09-17T10:48:53.938612+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 2051)
+- `def main()` (line 2127)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -39,6 +39,7 @@ Uses project virtual environment paths and ensures log directories exist.
 ## Environment variables read
 
 - `M3_DASHBOARD_PORT`
+- `USER`
 - `USERDOMAIN`
 - `USERNAME`
 

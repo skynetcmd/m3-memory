@@ -33,6 +33,11 @@ def _payload_of(monkeypatch, **kw) -> dict:
             captured["params"] = params
             return _Cur()
 
+        def commit(self):
+            # The dispatch write path commits explicitly: get_dispatch_conn
+            # yields a raw connection, unlike `_db()` which commits on exit.
+            pass
+
     class _Ctx:
         def __enter__(self):
             return _DB()
@@ -40,7 +45,14 @@ def _payload_of(monkeypatch, **kw) -> dict:
         def __exit__(self, *a):
             return False
 
+    # notify_impl writes through M3Context.get_dispatch_conn, not `_db()`:
+    # delivery records live in their own store. Patch the connection the write
+    # path actually uses, or this harness captures nothing and the test fails
+    # for a reason that has nothing to do with the return address.
+    import m3_core.context as _ctx
     monkeypatch.setattr(orchestration, "_db", lambda: _Ctx())
+    monkeypatch.setattr(_ctx.M3Context, "get_dispatch_conn",
+                        lambda self: _Ctx(), raising=False)
     d = orchestration.dialect()
     monkeypatch.setattr(orchestration, "dialect", lambda: d)
     monkeypatch.setattr(d.__class__, "last_insert_id", lambda self, cur: 1,

@@ -318,7 +318,21 @@ class TestGeneratedIds:
 
 class TestNowMinusDays:
     def test_sqlite_builds_modifier_string(self):
-        assert SQLITE.now_minus_days("?") == "datetime('now', '-' || ? || ' days')"
+        """The bound must render the format the COLUMNS ARE WRITTEN IN.
+
+        Updated 2026-09-17. This previously pinned
+        `datetime('now', '-' || ? || ' days')`, which renders
+        "2026-09-17 10:51:43" -- a space separator and no Z -- against columns
+        that `now()` writes as "2026-09-17T10:51:43Z". Compared as TEXT those
+        are incommensurable ('T' sorts after ' '), so the bound matched every
+        same-day row and the filter silently did nothing.
+
+        The assertion pinned the defect, which is why it survived. See
+        tests/test_time_bound_format_parity.py for the behavioural proof.
+        """
+        assert SQLITE.now_minus_days("?") == (
+            "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-' || ? || ' days')"
+        )
 
     def test_postgres_multiplies_interval(self):
         assert POSTGRES.now_minus_days("%s") == "NOW() - (%s * INTERVAL '1 day')"

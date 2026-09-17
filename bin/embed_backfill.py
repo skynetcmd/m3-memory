@@ -96,7 +96,10 @@ except Exception:  # pragma: no cover
         return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
 
     def _now_minus_days(days_placeholder: str) -> str:
-        return f"datetime('now', '-' || {days_placeholder} || ' days')"
+        # strftime, not datetime(): the columns store "...T..Z" and a bare
+        # datetime() bound matches every same-day row. Matches the seam.
+        return (f"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', "
+                f"'-' || {days_placeholder} || ' days')")
 
 
 

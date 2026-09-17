@@ -3,6 +3,7 @@ import contextvars
 import logging
 import ntpath
 import os
+import platform
 import posixpath
 import sqlite3
 import sys
@@ -380,6 +381,40 @@ def resolve_engine_file(filename: str) -> str:
     if os.path.exists(legacy_path) and not os.path.exists(new_path):
         return legacy_path
     return new_path
+
+
+def node_id() -> str:
+    """This machine's stable identity. The single owner of that question.
+
+    Six call sites answered this independently (auth_utils, chatlog_ingest,
+    debug_agent_bridge, files_memory.ingest, memory.config, test_memory_bridge)
+    and only ONE of them normalised case. §10a -- a copied resolution is the
+    defect independent of correctness, and here the copies genuinely disagree.
+
+    ⚠ WHY CASE MATTERS, measured and documented at ``chatlog_ingest``:
+    Windows hostnames are case-insensitive and ``COMPUTERNAME`` is the canonical
+    UPPERCASE form, but a shell that does not inherit it (git-bash, WSL) falls
+    through to ``platform.node()``, which returns mixed case -- "HostPc" rather
+    than "HOSTPC". Un-normalised, ONE machine reports TWO identities depending
+    on which shell launched the agent.
+
+    That is not cosmetic for node detection: a single-node fleet whose agents
+    started from different shells would look like a multi-node fleet, and the
+    dispatch backend decision would follow the wrong branch.
+
+    POSIX hostnames ARE case-significant, so normalisation is Windows-only.
+
+    ``M3_NODE_ID`` overrides everything, for a deployment that needs an explicit
+    identity (containers sharing a hostname, or a fleet with a naming scheme).
+    """
+    explicit = os.environ.get("M3_NODE_ID")
+    if explicit:
+        return explicit.strip()
+    host = (os.environ.get("COMPUTERNAME")
+            or os.environ.get("HOSTNAME")
+            or platform.node()
+            or "unknown")
+    return host.upper() if os.name == "nt" else host
 
 
 def dispatch_store_mode() -> str:

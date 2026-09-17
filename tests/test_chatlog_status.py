@@ -268,7 +268,7 @@ def test_capture_healthy_when_rows_land_in_chatlog_db_not_main(status_test_env):
     for i in range(5):
         cur.execute(
             "INSERT INTO memory_items (id, type, created_at) "
-            "VALUES (?, 'chat_log', datetime('now'))",
+            "VALUES (?, 'chat_log', strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
             (f"recent-{i}",),
         )
     conn.commit()
@@ -301,7 +301,7 @@ def test_capture_recent_count_prefers_chatlog_over_main(status_test_env):
         for i in range(n):
             cur.execute(
                 "INSERT INTO memory_items (id, type, created_at) "
-                "VALUES (?, 'chat_log', datetime('now'))",
+                "VALUES (?, 'chat_log', strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
                 (f"{db.name}-{i}",),
             )
         conn.commit()
