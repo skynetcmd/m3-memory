@@ -455,6 +455,54 @@ class Dialect:
         """
         raise NotImplementedError("subclass must implement claim_message()")
 
+    def lease_fence_predicate(self, *, live_lease_only: bool = False) -> str:
+        """The FENCE: this row, this attempt, still live work.
+
+        The single owner. ``complete_message`` and ``fail_message`` spelled this
+        out identically and ``renew_lease`` spelled it out again with one extra
+        term -- three hand-maintained strings for one concept, each readable
+        only by executing the method that embedded it.
+
+        Two placeholders, bound in this order: ``(row_id, lease_token)``.
+
+        ⚠ The CALLER binds them, because the surrounding statement may consume
+        placeholders first: ``renew_lease``'s SET clause uses
+        ``now_plus_seconds(p)``, so its tuple is
+        ``(lease_ttl, row_id, lease_token)`` while the other two bind
+        ``(row_id, lease_token)``. Returning only the predicate keeps that
+        ordering visible at the call site instead of hiding it in the seam.
+
+        What each term prevents -- all four are load-bearing:
+
+        * ``id = ?`` -- the row.
+        * ``lease_token = ?`` -- the ATTEMPT. A worker whose lease lapsed and
+          was reclaimed must not act on the row: another agent owns that attempt
+          now, and a late write would report someone else's work as finished.
+        * ``read_at IS NULL`` -- not already completed.
+        * ``failed_at IS NULL`` -- not already dead-lettered; keeps ``fail`` and
+          the sweeper's dead-letter terminal.
+
+        ``live_lease_only=True`` appends ``claim_expires_at > now``, which
+        ``renew_lease`` needs and the other two must NOT have. Once the deadline
+        passes the row belongs to the sweeper; letting a straggler renew would
+        make expiry advisory. Expressed as a parameter rather than a second
+        predicate so the difference between the two forms is one named flag, not
+        a diff between two strings in different methods.
+
+        Backend-neutral -- pure equality and IS NULL, no dialect function --
+        except the ``live_lease_only`` bound, which renders through
+        :meth:`now`. Covered by ``tests/test_lease_parity.py`` on every
+        registered backend.
+        """
+        p = self.param()
+        fence = (
+            f"id = {p} AND lease_token = {p} AND read_at IS NULL "
+            f"AND failed_at IS NULL"
+        )
+        if live_lease_only:
+            fence += f" AND claim_expires_at > {self.now()}"
+        return fence
+
     def complete_message(
         self, conn: object, *, table: str, row_id: object, lease_token: str,
     ) -> bool:
@@ -470,11 +518,9 @@ class Dialect:
         distinguish "I lost my lease" from an error, which is the normal and
         expected outcome of a slow worker.
         """
-        p = self.param()
         cur = conn.execute(  # type: ignore[attr-defined]
             f"UPDATE {table} SET read_at = {self.now()} "
-            f"WHERE id = {p} AND lease_token = {p} AND read_at IS NULL "
-            f"AND failed_at IS NULL",
+            f"WHERE {self.lease_fence_predicate()}",
             (row_id, lease_token),
         )
         conn.commit()  # type: ignore[attr-defined]
@@ -490,11 +536,9 @@ class Dialect:
         genuinely broken message stops consuming attempts instead of cycling
         forever.
         """
-        p = self.param()
         cur = conn.execute(  # type: ignore[attr-defined]
             f"UPDATE {table} SET failed_at = {self.now()} "
-            f"WHERE id = {p} AND lease_token = {p} AND read_at IS NULL "
-            f"AND failed_at IS NULL",
+            f"WHERE {self.lease_fence_predicate()}",
             (row_id, lease_token),
         )
         conn.commit()  # type: ignore[attr-defined]
@@ -522,8 +566,7 @@ class Dialect:
         cur = conn.execute(  # type: ignore[attr-defined]
             f"UPDATE {table} SET claim_expires_at = "
             f"{self.now_plus_seconds(p)} "
-            f"WHERE id = {p} AND lease_token = {p} AND read_at IS NULL "
-            f"AND failed_at IS NULL AND claim_expires_at > {self.now()}",
+            f"WHERE {self.lease_fence_predicate(live_lease_only=True)}",
             (lease_ttl, row_id, lease_token),
         )
         conn.commit()  # type: ignore[attr-defined]

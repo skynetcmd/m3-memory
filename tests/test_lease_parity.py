@@ -81,6 +81,14 @@ _REQUIRED_TERMS = {
 }
 
 
+_REQUIRED_FENCE_TERMS = {
+    ("id", "="),
+    ("lease_token", "="),
+    ("read_at", "IS NULL"),
+    ("failed_at", "IS NULL"),
+}
+
+
 def _terms(sql: str) -> set:
     """The (column, operator) pairs in a predicate, ignoring rendering.
 
@@ -89,7 +97,7 @@ def _terms(sql: str) -> set:
     """
     out = set()
     for col in ("claim_expires_at", "read_at", "failed_at", "attempt_count",
-                "claimed_by", "lease_token"):
+                "claimed_by", "lease_token", "id"):
         for op in ("IS NOT NULL", "IS NULL", "<=", ">=", "<", ">", "="):
             # `IS NOT NULL` must win over `IS NULL`, and `<=` over `<`.
             if re.search(rf"\b{col}\s+{re.escape(op)}", sql):
@@ -199,6 +207,74 @@ class TestExpiredPredicateHasOneOwner(unittest.TestCase):
             "must be backend-specific (TEXT compare vs TIMESTAMPTZ)\n"
             "inspect: Dialect.now on each backend",
         )
+
+
+class TestLeaseFencePredicate(unittest.TestCase):
+    """The fence owner -- `complete`, `fail` and `renew` all render from it.
+
+    `tests/test_lease_fencing.py` already proves the fence BEHAVES on SQLite
+    (4 tests fail if the token check is removed). What it cannot show is that
+    the predicate is the same on PostgreSQL, or that the owner keeps its terms
+    -- it has no PG leg at all. These fill exactly that gap.
+    """
+
+    def test_every_registered_backend_resolves_to_the_same_owner(self):
+        owners = {
+            name: type(d).lease_fence_predicate.__qualname__
+            for name, d in _registered_dialects()
+        }
+        self.assertEqual(
+            len(set(owners.values())), 1,
+            "a backend overrode the lease fence predicate.\n"
+            f"observed: {owners}\n"
+            "cause: lease_fence_predicate is defined in more than one place, so "
+            "what counts as a valid attempt can differ per backend\n"
+            "possible impact: a worker whose lease lapsed could complete or fail "
+            "a row another agent now owns, which is the duplicate execution the "
+            "fence exists\n"
+            "inspect: lease_fence_predicate in bin/memory/backends/dialect.py",
+        )
+
+    def test_the_owner_keeps_every_fence_term(self):
+        for name, d in _registered_dialects():
+            with self.subTest(backend=name):
+                got = _terms(d.lease_fence_predicate())
+                self.assertEqual(
+                    got & _REQUIRED_FENCE_TERMS, _REQUIRED_FENCE_TERMS,
+                    f"the lease fence lost a required term on {name}.\n"
+                    f"observed: missing={sorted(_REQUIRED_FENCE_TERMS - got)}\n"
+                    "cause: a term required by the fence contract is absent from "
+                    "lease_fence_predicate\n"
+                    "possible impact: dropping `lease_token` lets a reclaimed "
+                    "worker act on someone else's attempt; dropping `read_at` or "
+                    "`failed_at` lets a terminal row be written again\n"
+                    "inspect: Dialect.lease_fence_predicate",
+                )
+
+    def test_live_lease_only_adds_the_expiry_bound_and_nothing_else(self):
+        """`renew_lease` needs the extra term; `complete`/`fail` must NOT have it.
+
+        Expressed as a flag on one owner rather than a second predicate, so the
+        difference is a named parameter instead of a diff between two strings in
+        two methods. This pins that the flag is purely additive.
+        """
+        for name, d in _registered_dialects():
+            with self.subTest(backend=name):
+                basic = d.lease_fence_predicate()
+                live = d.lease_fence_predicate(live_lease_only=True)
+                self.assertTrue(
+                    live.startswith(basic),
+                    f"observed: live_lease_only rewrote the base fence on {name}\n"
+                    "inspect: Dialect.lease_fence_predicate",
+                )
+                self.assertNotIn(
+                    "claim_expires_at", basic,
+                    f"observed: the default fence carries an expiry bound on {name}\n"
+                    "cause: complete/fail would then refuse a row whose lease "
+                    "lapsed mid-work, even though the token still matches\n"
+                    "inspect: Dialect.lease_fence_predicate",
+                )
+                self.assertIn("claim_expires_at", live)
 
 
 class TestSweepExpiredLeasesSqlite(unittest.TestCase):
