@@ -23,10 +23,22 @@ RUN npm install -g openclaw@2026.2.26
 RUN mkdir -p /home/clawuser/.openclaw /shared && chown -R clawuser:clawgroup /home/clawuser /shared
 
 # Drop root privileges immediately
+# DL3066 warns a non-numeric user-id 'may not be resolvable by the host
+# system', which applies to images that INHERIT a user they did not create.
+# This image creates clawuser/clawgroup itself, so the name always resolves,
+# and a name is far more auditable than a bare uid when reading what this
+# container runs as.
+# hadolint ignore=DL3066
 USER clawuser
 WORKDIR /shared
 
 # Expose the gateway on all interfaces so the macOS host can connect
+# hadolint ignore=DL3025 -- the SHELL form is required, not a lapse. DL3025
+# asks for JSON-array notation, which execs the command directly and therefore
+# cannot express the `|| exit 1` fallback this check depends on: the array form
+# has no shell to evaluate `||`, so a curl failure would surface curl's own
+# exit code and Docker would report unhealthy for the wrong reason.
+# hadolint ignore=DL3025
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://127.0.0.1:3000/healthz || exit 1
 

@@ -66,7 +66,20 @@ sentence-transformers>=5.4.1,<6
 #     SentenceTransformer (embedder) + CrossEncoder (reranker) — no AutoModel /
 #     pipeline / arbitrary from_pretrained path, so the vulnerable code is
 #     unreachable. (Dependabot alert #12.)
-# All three require loading a malicious checkpoint/model; m3 only runs embedding
+# Two more are reported by pip-audit under PYSEC ids and are the SAME issues:
+#   - PYSEC-2026-2288 = CVE-2026-1839 (Trainer._load_rng_state torch.load).
+#   - PYSEC-2026-2290 = CVE-2026-5241 (LightGlue model load).
+# Two further ones are distinct and are also ACCEPTED, assessed 2026-09-17:
+#   - PYSEC-2026-2289 (malicious config.json `_attn_implementation` RCE, fixed
+#     in 5.3.0 — above the <5 ceiling). Requires loading a model repo an
+#     ATTACKER controls. m3's three model-loading sites take their id from a
+#     default constant, a --model flag or M3_GLINER_MODEL (embed_server.py:117,
+#     search.py:292, m3_entities_gliner.py:124) — operator configuration, never
+#     untrusted input.
+#   - PYSEC-2026-3929 (save_pretrained() path traversal, fixed in 5.10.0).
+#     UNREACHABLE: m3 never calls save_pretrained — it only ever loads models,
+#     never writes them. Verified by grep across bin/ and m3_memory/.
+# All of them require loading a malicious checkpoint/model; m3 only runs embedding
 # inference on its own trusted local model, so none is reachable. Revisit when
 # FlagEmbedding supports transformers 5.x (would let us raise to the patched 5.5.0+
 # and clear #12 for real) — see the to-do memory.
