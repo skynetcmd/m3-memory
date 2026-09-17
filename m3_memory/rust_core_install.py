@@ -654,6 +654,153 @@ def _emit_download_progress(downloaded: int, total: int, *, tty: bool) -> None:
         pass
 
 
+def _install_log_path() -> "pathlib.Path | None":
+    """Where the rust-core install/upgrade history is appended, or None.
+
+    Same resolution the embed watchdog uses (`m3_embed_watchdog._log_path`):
+    the SDK config root when importable, else the documented
+    M3_CONFIG_ROOT > M3_MEMORY_ROOT/config > ~/.m3/config precedence, with
+    macOS logs under ~/Library/Logs by platform convention.
+    """
+    import pathlib
+    _Path = pathlib.Path
+    try:
+        try:
+            from m3_sdk import get_m3_config_root
+            config_root = _Path(get_m3_config_root())
+        except Exception:  # noqa: BLE001 - half-upgraded venv; fall back
+            master = os.environ.get("M3_MEMORY_ROOT")
+            config_root = _Path(
+                os.environ.get("M3_CONFIG_ROOT")
+                or (os.path.join(master, "config") if master else "")
+                or os.path.expanduser("~/.m3/config")
+            )
+        if _os_name() == "Darwin":
+            return _Path(os.path.expanduser("~/Library/Logs/m3_rust_core_install.log"))
+        return config_root.parent / "logs" / "m3_rust_core_install.log"
+    except Exception:  # noqa: BLE001 - logging must never break an install
+        return None
+
+
+def install_log(msg: str) -> None:
+    """Append one UTC-stamped line to the rust-core install log.
+
+    Why a file and not just the console: the console output of an upgrade is
+    gone by the time anyone asks "when did this host move to 3.9.16, and did
+    its wheel verify?". A digest mismatch in particular is an after-the-fact
+    investigation -- the terminal that showed it has long since scrolled away.
+
+    ⚠ Best-effort by construction. A read-only or missing log directory must
+    never fail an install that would otherwise succeed, so every error here is
+    swallowed. This is the one place in the module where silence is correct:
+    the same facts have already gone to stdout/stderr, so nothing is lost --
+    only the durable copy.
+    """
+    path = _install_log_path()
+    if path is None:
+        return
+    from datetime import datetime, timezone
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8", errors="replace") as fh:
+            fh.write(f"[{stamp}] {msg}\n")
+    except OSError:
+        pass
+
+
+def _fetch_release_sha256sums(assets: list, *, git_tag: str) -> "dict[str, str] | None":
+    """Digests from the Release's ``SHA256SUMS`` asset, or None if absent.
+
+    Returns ``{basename: hexdigest}``. None means the manifest is not published
+    for this release, which is NOT an error: releases before v2026.9.16 predate
+    it and a rollback to one must still install. The caller warns and continues;
+    only a MISMATCH is fatal.
+    """
+    import urllib.error
+    import urllib.request
+
+    entry = next((a for a in assets if str(a.get("name", "")) == "SHA256SUMS"), None)
+    if entry is None:
+        return None
+    url = str(entry.get("browser_download_url", ""))
+    # Same scheme pin as the wheel download: this URL is external data.
+    if not url.lower().startswith("https://"):
+        print(f"[rust-core] refusing non-https SHA256SUMS URL ({url!r}); "
+              f"skipping digest verification", file=sys.stderr)
+        return None
+    try:
+        with urllib.request.urlopen(url, timeout=60) as resp:  # nosec B310 - https validated
+            text = resp.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        print(f"[rust-core] could not fetch SHA256SUMS for {git_tag} "
+              f"({type(e).__name__}: {e}); skipping digest verification",
+              file=sys.stderr)
+        return None
+
+    out: "dict[str, str]" = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # GNU coreutils format: "<hex>  <name>" (text) or "<hex> *<name>"
+        # (binary). Our generator emits the binary marker; accept both, and key
+        # on the basename so a path prefix cannot confuse the lookup.
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        digest, name = parts[0].lower(), parts[1].lstrip("*").strip()
+        if len(digest) == 64 and all(c in "0123456789abcdef" for c in digest):
+            out[os.path.basename(name)] = digest
+    return out or None
+
+
+def _download_wheel_once(wheel_url: str, wheel_path: str) -> "tuple[int, str]":
+    """Stream ``wheel_url`` to ``wheel_path``; return (bytes_written, sha256).
+
+    The digest is computed from the same chunks that are written, so it costs
+    one pass rather than re-reading a file that can be ~980 MiB.
+
+    Raises urllib/OS errors to the caller, which decides whether to retry.
+    """
+    import hashlib
+    import urllib.request
+
+    h = hashlib.sha256()
+    downloaded = 0
+    resp = urllib.request.urlopen(wheel_url, timeout=300)  # nosec B310 - https validated by caller
+    with resp, open(wheel_path, "wb") as out:
+        chunk_size = 1024 * 1024            # 1 MiB
+        next_progress = 10 * 1024 * 1024    # heartbeat every 10 MiB
+        # getattr, not resp.headers: not every response object exposes headers
+        # (urllib's do; wrappers and test doubles may not), and a missing
+        # Content-Length is already a supported case. Progress reporting must
+        # never be able to fail the download it is describing.
+        try:
+            _hdrs = getattr(resp, "headers", None)
+            total_bytes = int((_hdrs.get("Content-Length") if _hdrs else 0) or 0)
+        except (AttributeError, TypeError, ValueError):
+            total_bytes = 0
+        try:
+            _tty = sys.stderr.isatty()
+        except Exception:  # noqa: BLE001 - an odd stream is "not a tty"
+            _tty = False
+        while True:
+            chunk = resp.read(chunk_size)
+            if not chunk:
+                break
+            out.write(chunk)
+            h.update(chunk)
+            downloaded += len(chunk)
+            if downloaded >= next_progress:
+                _emit_download_progress(downloaded, total_bytes, tty=_tty)
+                next_progress += 10 * 1024 * 1024
+        if _tty and downloaded:
+            # Close the in-place line so later output starts clean.
+            print(file=sys.stderr)
+    return downloaded, h.hexdigest()
+
+
 def install_from_github_release(
     choice: BackendChoice, *,
     version: str = M3_CORE_RS_VERSION,
@@ -753,47 +900,112 @@ def install_from_github_release(
     tmp_dir = tempfile.mkdtemp(prefix="m3-core-rs-")
     wheel_path = os.path.join(tmp_dir, wheel_name)
     try:
-        downloaded = 0
-        try:
-            resp = urllib.request.urlopen(wheel_url, timeout=300)  # nosec B310 - https scheme validated above
-            with resp, open(wheel_path, "wb") as out:
-                chunk_size = 1024 * 1024            # 1 MiB
-                next_progress = 10 * 1024 * 1024    # heartbeat every 10 MiB
-                # Total, when the server sends it — enables a percentage and a
-                # bar rather than a bare byte count.
-                # getattr, not resp.headers: not every response object exposes
-                # headers (urllib's do; wrappers and test doubles may not), and
-                # a missing Content-Length is already a supported case — we fall
-                # back to a byte count with no percentage. Progress reporting
-                # must never be able to fail the download it is describing.
-                try:
-                    _hdrs = getattr(resp, "headers", None)
-                    total_bytes = int((_hdrs.get("Content-Length") if _hdrs else 0) or 0)
-                except (AttributeError, TypeError, ValueError):
-                    total_bytes = 0
-                try:
-                    _tty = sys.stderr.isatty()
-                except Exception:  # noqa: BLE001 — an odd stream is "not a tty"
-                    _tty = False
-                while True:
-                    chunk = resp.read(chunk_size)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-                    downloaded += len(chunk)
-                    if downloaded >= next_progress:
-                        _emit_download_progress(downloaded, total_bytes, tty=_tty)
-                        next_progress += 10 * 1024 * 1024
-                if _tty and downloaded:
-                    # Close the in-place line so later output starts clean.
-                    print(file=sys.stderr)
-        except (urllib.error.URLError, OSError) as e:
-            print(f"[rust-core] wheel download failed "
-                  f"({type(e).__name__}: {e})", file=sys.stderr)
-            return 1
+        # Digests for this release, if it publishes them. Fetched ONCE, outside
+        # the retry loop: a re-download must be checked against the same
+        # manifest, or a retry could "pass" against a freshly-fetched bad one.
+        sums = _fetch_release_sha256sums(assets, git_tag=git_tag)
+        expected = (sums or {}).get(wheel_name)
+        if sums is None:
+            print(f"[rust-core] note: {git_tag} publishes no SHA256SUMS asset; "
+                  f"installing without digest verification (releases before "
+                  f"v2026.9.16 predate it)", file=sys.stderr)
+        elif expected is None:
+            print(f"[rust-core] note: SHA256SUMS for {git_tag} has no entry for "
+                  f"{wheel_name}; installing without digest verification",
+                  file=sys.stderr)
 
-        if downloaded == 0:
-            print("[rust-core] wheel download yielded 0 bytes", file=sys.stderr)
+        # Two attempts. The failures this guards against -- a truncated body or
+        # bits flipped in transit -- are transient, so a second fetch usually
+        # succeeds. A repeat failure means the published asset itself is bad,
+        # and no number of retries will fix that.
+        attempts = 2
+        downloaded = 0
+        for attempt in range(1, attempts + 1):
+            try:
+                downloaded, actual = _download_wheel_once(wheel_url, wheel_path)
+            except (urllib.error.URLError, OSError) as e:
+                print(f"[rust-core] wheel download failed "
+                      f"({type(e).__name__}: {e})", file=sys.stderr)
+                install_log(f"code=wheel_download_failed wheel={wheel_name} "
+                            f"tag={git_tag} error={type(e).__name__}: {e} "
+                            f"attempt={attempt} of {attempts}")
+                if attempt < attempts:
+                    print(f"[rust-core] retrying download "
+                          f"({attempt + 1} of {attempts})...", file=sys.stderr)
+                    continue
+                return 1
+
+            if downloaded == 0:
+                print("[rust-core] wheel download yielded 0 bytes", file=sys.stderr)
+                install_log(f"code=wheel_empty_download wheel={wheel_name} "
+                            f"tag={git_tag} attempt={attempt} of {attempts}")
+                if attempt < attempts:
+                    print(f"[rust-core] retrying download "
+                          f"({attempt + 1} of {attempts})...", file=sys.stderr)
+                    continue
+                return 1
+
+            # Size check before the digest: it is free, and it names the
+            # specific failure. pip would reject a truncated wheel anyway, but
+            # with an opaque "Wheel ... is invalid" that sends the operator
+            # looking at the wrong thing.
+            if wheel_size and downloaded != wheel_size:
+                print(f"[rust-core] size mismatch, download is incomplete: "
+                      f"code=wheel_size_mismatch wheel={wheel_name} "
+                      f"expected_bytes={wheel_size} actual_bytes={downloaded}",
+                      file=sys.stderr)
+                install_log(f"code=wheel_size_mismatch wheel={wheel_name} "
+                            f"tag={git_tag} expected_bytes={wheel_size} "
+                            f"actual_bytes={downloaded} attempt={attempt} of {attempts}")
+                if attempt < attempts:
+                    print(f"[rust-core] retrying download "
+                          f"({attempt + 1} of {attempts})...", file=sys.stderr)
+                    continue
+                return 1
+
+            if expected is None:
+                break  # nothing to compare against; size check already passed
+
+            if actual == expected:
+                # Report the SUCCESS too, not just failures: a silent pass is
+                # indistinguishable from a check that never ran, and this is
+                # the line that tells an operator the wheel they installed is
+                # byte-identical to the published one. Short digest prefix --
+                # enough to eyeball against SHA256SUMS, not a wall of hex.
+                print(f"[rust-core] sha256 OK: {wheel_name} matches the digest "
+                      f"published in {git_tag} SHA256SUMS "
+                      f"(sha256={actual[:16]}..., {downloaded} bytes)")
+                install_log(f"sha256 OK wheel={wheel_name} tag={git_tag} "
+                            f"sha256={actual} bytes={downloaded} attempt={attempt}")
+                break
+
+            # ⚠ A mismatch is NOT proof of tampering and must not be reported as
+            # one: in-flight corruption is far likelier, which is exactly why we
+            # retry. Say what was observed and let the repeat decide.
+            print(f"[rust-core] sha256 MISMATCH, the download does not match the "
+                  f"digest published for this release: "
+                  f"code=wheel_sha256_mismatch wheel={wheel_name} "
+                  f"expected={expected} actual={actual}", file=sys.stderr)
+            install_log(f"code=wheel_sha256_mismatch wheel={wheel_name} "
+                        f"tag={git_tag} expected={expected} actual={actual} "
+                        f"attempt={attempt} of {attempts}")
+            if attempt < attempts:
+                print(f"[rust-core] this usually means corruption in flight; "
+                      f"re-downloading ({attempt + 1} of {attempts})...",
+                      file=sys.stderr)
+                continue
+            print(f"[rust-core] digest still wrong after {attempts} downloads, "
+                  f"so the published asset is likely bad rather than the "
+                  f"transfer. NOT installing it. Verify by hand with:\n"
+                  f"    gh release download {git_tag} --repo {repo} "
+                  f"--pattern SHA256SUMS --pattern {wheel_name}\n"
+                  f"    sha256sum -c --ignore-missing SHA256SUMS",
+                  file=sys.stderr)
+            # Remove it so a corrupt wheel cannot be picked up by anything else.
+            try:
+                os.unlink(wheel_path)
+            except OSError:
+                pass
             return 1
 
         print(f"[rust-core] downloaded {downloaded / (1024*1024):.1f} MiB; "
@@ -933,10 +1145,20 @@ def install_rust_core(os_tok: Optional[str] = None, *,
     # This is not a workaround to unwind once PyPI is fixed: the Release is
     # complete by construction for all 7 backends, while PyPI can never carry
     # CUDA. Keep the Release first.
+    # Recorded BEFORE the cascade so the log line reads as a transition
+    # ("3.9.7 -> 3.9.16") rather than a bare end state. None means no native
+    # core was importable, i.e. this is a first install rather than an upgrade.
+    _before = installed_rust_core_version()
+    install_log(f"install start: package={choice.package} "
+                f"target={M3_CORE_RS_VERSION} tag={M3_CORE_RS_GIT_TAG} "
+                f"from_version={_before or '(none)'} reason={choice.reason}")
+
     rc_gh = install_from_github_release(choice)
     if rc_gh == 0:
         print(f"[rust-core] installed {choice.package} {M3_CORE_RS_VERSION} "
               f"(GitHub Release)")
+        install_log(f"install OK: {_before or '(none)'} -> {M3_CORE_RS_VERSION} "
+                    f"package={choice.package} channel=github-release")
         return 0
 
     print(f"[rust-core] GitHub Release unavailable for {choice.package} "
@@ -952,6 +1174,8 @@ def install_rust_core(os_tok: Optional[str] = None, *,
         # misleading claim in exactly the place someone debugs distribution.
         print(f"[rust-core] installed {choice.package} {M3_CORE_RS_VERSION} "
               f"(prebuilt wheel via pip)")
+        install_log(f"install OK: {_before or '(none)'} -> {M3_CORE_RS_VERSION} "
+                    f"package={choice.package} channel=pip-prebuilt")
         return 0
 
     if not allow_source_fallback:
@@ -966,4 +1190,11 @@ def install_rust_core(os_tok: Optional[str] = None, *,
         print(f"[rust-core] source build failed (exit {rc_src}). The CPU "
               f"embedder still serves embeddings; see docs/EMBED_DEPLOYMENT.md.",
               file=sys.stderr)
+        install_log(f"install FAILED: package={choice.package} "
+                    f"target={M3_CORE_RS_VERSION} release_rc={rc_gh} "
+                    f"pip_rc={rc} source_rc={rc_src} "
+                    f"still_at={_before or '(none)'}")
+    else:
+        install_log(f"install OK: {_before or '(none)'} -> {M3_CORE_RS_VERSION} "
+                    f"package={choice.package} channel=source-build")
     return rc_src

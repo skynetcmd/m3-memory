@@ -284,15 +284,23 @@ class _FakeRespCtx:
         return data
 
 
-def _gh_release_payload(asset_names: list[str]) -> bytes:
-    """Build a minimal GitHub release JSON with the named assets."""
+def _gh_release_payload(asset_names: list[str], *, size: int = 1024,
+                        sizes: "dict[str, int] | None" = None) -> bytes:
+    """Build a minimal GitHub release JSON with the named assets.
+
+    ``size`` must equal the byte length the fake download will actually
+    produce: the installer compares the API's declared size against what it
+    received and treats a difference as a truncated transfer. Pass ``sizes``
+    to override per asset (e.g. to simulate exactly that truncation).
+    """
     import json as _json
+    sizes = sizes or {}
     return _json.dumps({
         "tag_name": rci.M3_CORE_RS_GIT_TAG,
         "assets": [
             {
                 "name": name,
-                "size": 1024,
+                "size": sizes.get(name, size),
                 "browser_download_url": f"https://example.com/{name}",
             }
             for name in asset_names
@@ -307,14 +315,14 @@ def test_github_release_finds_and_installs_matching_asset(monkeypatch):
     py_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
     ver = rci.M3_CORE_RS_VERSION
     matching_name = f"m3_core_rs_macos_metal-{ver}-{py_tag}-{py_tag}-macosx_11_0_arm64.whl"
+    fake_wheel = b"PK\x03\x04" + b"fake wheel" * 100  # ZIP-ish header so it looks plausible
     payload = _gh_release_payload([
         f"m3_core_rs_macos_metal-{ver}-cp310-cp310-macosx_11_0_arm64.whl",  # wrong py
         matching_name,                                                       # match
         f"m3_core_rs_linux_cuda-{ver}-{py_tag}-{py_tag}-linux_x86_64.whl",   # wrong os
-    ])
+    ], size=len(fake_wheel))
 
     urlopen_calls = []
-    fake_wheel = b"PK\x03\x04" + b"fake wheel" * 100  # ZIP-ish header so it looks plausible
 
     def fake_urlopen(req, timeout=None):
         url = req.full_url if hasattr(req, "full_url") else req
@@ -551,3 +559,363 @@ def test_pip_success_is_not_labelled_a_pypi_install(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "PyPI prebuilt" not in out, f"unverifiable PyPI claim returned: {out!r}"
     assert "prebuilt wheel via pip" in out, out
+
+
+# ---------------------------------------------------------------------------
+# SHA256SUMS verification of a downloaded Release wheel
+#
+# The wheels are fetched by URL from a GitHub Release and handed to
+# `pip install --no-deps <path>.whl`. pip rejects a grossly truncated wheel
+# (the zip central directory lives at EOF) but does NOT verify member CRCs on a
+# direct install -- a bit-flip inside the compiled .pyd installs cleanly and
+# fails later as an import crash. Measured 2026-09-16: a 64-byte corruption
+# mid-payload left the file the same length, zipfile opened it, testzip() named
+# the bad member, and pip still reported "Would install".
+# ---------------------------------------------------------------------------
+
+def _sha256_hex(data: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
+def _release_with_sums(wheel_bytes_by_name, *, sums_text=None,
+                       include_sums=True, declared_sizes=None):
+    """(api_payload, sha256sums_body) for a release carrying these wheels.
+
+    Sizes default to the true body length: the installer compares the API's
+    declared size against what it received, so a fixture that lies about it
+    would trip the truncation check instead of the one under test.
+    """
+    import json as _json
+    declared = dict(declared_sizes or {})
+    names = list(wheel_bytes_by_name)
+    if sums_text is None:
+        sums_text = "".join(
+            "{} *{}\n".format(_sha256_hex(b), n)
+            for n, b in sorted(wheel_bytes_by_name.items())
+        )
+    assets = [
+        {
+            "name": n,
+            "size": declared.get(n, len(wheel_bytes_by_name[n])),
+            "browser_download_url": "https://example.com/{}".format(n),
+        }
+        for n in names
+    ]
+    if include_sums:
+        assets.append({
+            "name": "SHA256SUMS",
+            "size": len(sums_text.encode("utf-8")),
+            "browser_download_url": "https://example.com/SHA256SUMS",
+        })
+    payload = _json.dumps({
+        "tag_name": rci.M3_CORE_RS_GIT_TAG,
+        "assets": assets,
+    }).encode("utf-8")
+    return payload, sums_text
+
+
+def _wire_release(monkeypatch, payload, sums_text, wheel_bodies):
+    """Serve the API payload, SHA256SUMS, and one body per download attempt."""
+    import urllib.request as _ur
+    bodies = list(wheel_bodies)
+    calls = {"api": 0, "sums": 0, "wheel": 0}
+
+    def fake_urlopen(req, timeout=None):
+        url = req.full_url if hasattr(req, "full_url") else req
+        if "api.github.com" in url:
+            calls["api"] += 1
+            return _FakeRespCtx(payload)
+        if url.endswith("SHA256SUMS"):
+            calls["sums"] += 1
+            return _FakeRespCtx(sums_text.encode("utf-8"))
+        calls["wheel"] += 1
+        return _FakeRespCtx(bodies[min(calls["wheel"] - 1, len(bodies) - 1)])
+
+    monkeypatch.setattr(_ur, "urlopen", fake_urlopen)
+    return calls
+
+
+def _metal_target():
+    py_tag = "cp{}{}".format(sys.version_info.major, sys.version_info.minor)
+    name = "m3_core_rs_macos_metal-{}-{}-{}-macosx_11_0_arm64.whl".format(
+        rci.M3_CORE_RS_VERSION, py_tag, py_tag)
+    return rci.BackendChoice("macos", "metal", "test"), name
+
+
+GOOD_WHEEL = b"PK\x03\x04" + b"good wheel" * 200
+BAD_WHEEL = b"PK\x03\x04" + b"BAD! wheel" * 200      # same length, different bytes
+
+
+def test_wheel_sha256_match_installs_and_reports_success(monkeypatch, capsys):
+    """A matching digest installs AND says so on stdout.
+
+    A silent pass is indistinguishable from a check that never ran, so the
+    success line is part of the contract rather than decoration.
+    """
+    choice, name = _metal_target()
+    payload, sums = _release_with_sums({name: GOOD_WHEEL})
+    calls = _wire_release(monkeypatch, payload, sums, [GOOD_WHEEL])
+
+    pip_argv = []
+    monkeypatch.setattr(rci, "_pip_install_with_pep668_fallback",
+                        lambda *a: pip_argv.append(a) or 0)
+
+    assert rci.install_from_github_release(choice) == 0
+    assert len(pip_argv) == 1, "a verified wheel must reach pip"
+    assert calls["wheel"] == 1, "no retry when the first download verifies"
+
+    out = capsys.readouterr().out
+    assert "sha256 OK" in out
+    assert name in out
+
+
+def test_wheel_sha256_mismatch_retries_once_then_refuses(monkeypatch, capsys):
+    """A persistent mismatch downloads twice and never installs.
+
+    Two attempts: corruption in flight is transient and usually clears on a
+    refetch. A repeat failure means the published asset is bad, and further
+    retries cannot help.
+    """
+    choice, name = _metal_target()
+    assert len(BAD_WHEEL) == len(GOOD_WHEEL), "must defeat the size check"
+    payload, sums = _release_with_sums({name: GOOD_WHEEL})
+    calls = _wire_release(monkeypatch, payload, sums, [BAD_WHEEL, BAD_WHEEL])
+
+    pip_argv = []
+    monkeypatch.setattr(rci, "_pip_install_with_pep668_fallback",
+                        lambda *a: pip_argv.append(a) or 0)
+
+    assert rci.install_from_github_release(choice) == 1
+    assert pip_argv == [], "a wheel failing its digest must never reach pip"
+    assert calls["wheel"] == 2, "exactly two attempts"
+
+    err = capsys.readouterr().err
+    assert "code=wheel_sha256_mismatch" in err
+    assert "corruption in flight" in err, "first failure names the likely cause"
+
+
+def test_wheel_sha256_mismatch_recovers_on_retry(monkeypatch, capsys):
+    """First download corrupt, second clean -> installs.
+
+    This is the case the retry exists for: without it a single flipped bit
+    would push the user down the source-build path.
+    """
+    choice, name = _metal_target()
+    payload, sums = _release_with_sums({name: GOOD_WHEEL})
+    calls = _wire_release(monkeypatch, payload, sums, [BAD_WHEEL, GOOD_WHEEL])
+
+    pip_argv = []
+    monkeypatch.setattr(rci, "_pip_install_with_pep668_fallback",
+                        lambda *a: pip_argv.append(a) or 0)
+
+    assert rci.install_from_github_release(choice) == 0
+    assert calls["wheel"] == 2
+    assert len(pip_argv) == 1
+    assert calls["sums"] == 1, "the manifest is fetched once, not per attempt"
+
+    cap = capsys.readouterr()
+    assert "code=wheel_sha256_mismatch" in cap.err
+    assert "sha256 OK" in cap.out
+
+
+def test_truncated_download_is_caught_by_size_before_pip(monkeypatch, capsys):
+    """A short body fails on the declared size, with a message that names it.
+
+    pip would also reject this, but with an opaque "Wheel ... is invalid" that
+    sends the operator looking at the wrong thing.
+    """
+    choice, name = _metal_target()
+    short = GOOD_WHEEL[: len(GOOD_WHEEL) // 2]
+    payload, sums = _release_with_sums({name: GOOD_WHEEL})
+    calls = _wire_release(monkeypatch, payload, sums, [short, short])
+
+    pip_argv = []
+    monkeypatch.setattr(rci, "_pip_install_with_pep668_fallback",
+                        lambda *a: pip_argv.append(a) or 0)
+
+    assert rci.install_from_github_release(choice) == 1
+    assert pip_argv == []
+    assert calls["wheel"] == 2
+    err = capsys.readouterr().err
+    assert "code=wheel_size_mismatch" in err
+    assert "expected_bytes={}".format(len(GOOD_WHEEL)) in err
+
+
+def test_release_without_sha256sums_still_installs(monkeypatch, capsys):
+    """Releases before v2026.9.16 publish no manifest -- warn, do not block.
+
+    Hard-failing here would break every rollback to an older tag.
+    """
+    choice, name = _metal_target()
+    payload, sums = _release_with_sums({name: GOOD_WHEEL}, include_sums=False)
+    _wire_release(monkeypatch, payload, sums, [GOOD_WHEEL])
+
+    pip_argv = []
+    monkeypatch.setattr(rci, "_pip_install_with_pep668_fallback",
+                        lambda *a: pip_argv.append(a) or 0)
+
+    assert rci.install_from_github_release(choice) == 0
+    assert len(pip_argv) == 1
+    assert "no SHA256SUMS asset" in capsys.readouterr().err
+
+
+def test_sha256sums_without_an_entry_for_this_wheel_installs(monkeypatch, capsys):
+    """Manifest present but silent about our wheel -> warn, install.
+
+    Treating a missing line as a mismatch would block a legitimate install on
+    an incomplete manifest.
+    """
+    choice, name = _metal_target()
+    other = "0" * 64 + " *some_other_wheel.whl\n"
+    payload, sums = _release_with_sums({name: GOOD_WHEEL}, sums_text=other)
+    _wire_release(monkeypatch, payload, sums, [GOOD_WHEEL])
+
+    pip_argv = []
+    monkeypatch.setattr(rci, "_pip_install_with_pep668_fallback",
+                        lambda *a: pip_argv.append(a) or 0)
+
+    assert rci.install_from_github_release(choice) == 0
+    assert len(pip_argv) == 1
+    assert "has no entry for" in capsys.readouterr().err
+
+
+def test_sha256sums_parser_accepts_both_coreutils_forms(monkeypatch):
+    """`<hex>  name` (text) and `<hex> *name` (binary) are both valid.
+
+    Our generator runs under Git Bash and emits the binary marker; a Linux
+    generator would not. Keying on the basename also stops a path prefix from
+    hiding an entry.
+    """
+    body = (
+        "aa" * 32 + "  plain_text_form.whl\n"
+        + "bb" * 32 + " *binary_form.whl\n"
+        + "cc" * 32 + " *dist/with_a_path.whl\n"
+        + "not-a-digest  ignored.whl\n"
+        + "\n"
+    )
+    import urllib.request as _ur
+    monkeypatch.setattr(_ur, "urlopen",
+                        lambda url, timeout=None: _FakeRespCtx(body.encode()))
+
+    got = rci._fetch_release_sha256sums(
+        [{"name": "SHA256SUMS",
+          "browser_download_url": "https://example.com/SHA256SUMS"}],
+        git_tag="vtest",
+    )
+    assert got == {
+        "plain_text_form.whl": "aa" * 32,
+        "binary_form.whl": "bb" * 32,
+        "with_a_path.whl": "cc" * 32,
+    }
+
+
+def test_sha256sums_non_https_url_is_refused():
+    """The manifest URL is external data; pin the scheme as the wheel URL is."""
+    assert rci._fetch_release_sha256sums(
+        [{"name": "SHA256SUMS",
+          "browser_download_url": "http://example.com/SHA256SUMS"}],
+        git_tag="vtest",
+    ) is None
+
+
+# ---------------------------------------------------------------------------
+# Install/upgrade log
+#
+# The console output of an upgrade is gone by the time anyone asks "when did
+# this host move to 3.9.16, and did its wheel verify?". A digest mismatch in
+# particular is an after-the-fact investigation.
+# ---------------------------------------------------------------------------
+
+def test_install_log_records_digest_outcome(monkeypatch, tmp_path, capsys):
+    """A verified download leaves a durable record, not just a console line."""
+    monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "config"))
+    choice, name = _metal_target()
+    payload, sums = _release_with_sums({name: GOOD_WHEEL})
+    _wire_release(monkeypatch, payload, sums, [GOOD_WHEEL])
+    monkeypatch.setattr(rci, "_pip_install_with_pep668_fallback", lambda *a: 0)
+
+    assert rci.install_from_github_release(choice) == 0
+
+    log = tmp_path / "logs" / "m3_rust_core_install.log"
+    assert log.exists(), "a verified install must be recorded"
+    text = log.read_text(encoding="utf-8")
+    assert "sha256 OK" in text
+    assert _sha256_hex(GOOD_WHEEL) in text, "the full digest is the evidence"
+
+
+def test_install_log_records_a_mismatch_for_later_analysis(monkeypatch, tmp_path):
+    """The failure a user reports days later must still be on disk."""
+    monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "config"))
+    choice, name = _metal_target()
+    payload, sums = _release_with_sums({name: GOOD_WHEEL})
+    _wire_release(monkeypatch, payload, sums, [BAD_WHEEL, BAD_WHEEL])
+    monkeypatch.setattr(rci, "_pip_install_with_pep668_fallback", lambda *a: 0)
+
+    assert rci.install_from_github_release(choice) == 1
+
+    text = (tmp_path / "logs" / "m3_rust_core_install.log").read_text(encoding="utf-8")
+    assert text.count("code=wheel_sha256_mismatch") == 2, "both attempts recorded"
+    assert _sha256_hex(GOOD_WHEEL) in text, "expected digest"
+    assert _sha256_hex(BAD_WHEEL) in text, "what we actually received"
+
+
+def test_install_log_records_the_version_transition(monkeypatch, tmp_path):
+    """The log answers "when did this host move to X" -- as a transition."""
+    monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "config"))
+    monkeypatch.setattr(rci, "installed_rust_core_version", lambda: "3.9.7")
+    monkeypatch.setattr(rci, "is_rust_core_current", lambda: False)
+    monkeypatch.setattr(rci, "detect_backend",
+                        lambda os_tok=None: rci.BackendChoice("macos", "metal", "t"))
+    monkeypatch.setattr(rci, "install_from_github_release", lambda c, **k: 0)
+
+    assert rci.install_rust_core() == 0
+
+    text = (tmp_path / "logs" / "m3_rust_core_install.log").read_text(encoding="utf-8")
+    assert "install start:" in text
+    assert "3.9.7 -> {}".format(rci.M3_CORE_RS_VERSION) in text
+    assert "channel=github-release" in text
+
+
+def test_install_log_records_a_total_failure(monkeypatch, tmp_path):
+    """All three tiers failing is precisely what gets investigated later."""
+    monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "config"))
+    monkeypatch.setattr(rci, "installed_rust_core_version", lambda: None)
+    monkeypatch.setattr(rci, "is_rust_core_current", lambda: False)
+    monkeypatch.setattr(rci, "detect_backend",
+                        lambda os_tok=None: rci.BackendChoice("linux", "cuda", "t"))
+    monkeypatch.setattr(rci, "install_from_github_release", lambda c, **k: 1)
+    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: 1)
+    monkeypatch.setattr(rci, "install_from_source", lambda c, **k: 1)
+
+    assert rci.install_rust_core() != 0
+
+    text = (tmp_path / "logs" / "m3_rust_core_install.log").read_text(encoding="utf-8")
+    assert "install FAILED" in text
+    assert "still_at=(none)" in text, "records that nothing was installed"
+
+
+def test_install_log_failure_never_breaks_the_install(monkeypatch, tmp_path):
+    """A read-only or unwritable log directory must not fail a good install.
+
+    The same facts already went to stdout/stderr, so only the durable copy is
+    lost -- that is not worth failing an otherwise successful upgrade over.
+    """
+    monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "config"))
+
+    # _install_log_path imports Path locally, so patch pathlib itself -- the
+    # object the helper will actually resolve at call time.
+    import pathlib as _pathlib
+
+    def boom(*a, **k):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(_pathlib.Path, "mkdir", boom)
+
+    choice, name = _metal_target()
+    payload, sums = _release_with_sums({name: GOOD_WHEEL})
+    _wire_release(monkeypatch, payload, sums, [GOOD_WHEEL])
+    monkeypatch.setattr(rci, "_pip_install_with_pep668_fallback", lambda *a: 0)
+
+    assert rci.install_from_github_release(choice) == 0, \
+        "logging is best-effort; it must never fail the install"

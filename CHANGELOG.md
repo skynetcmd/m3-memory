@@ -37,6 +37,21 @@ the policy is forward-going only.
   parameter at startup, and reports oversized input as HTTP 413 with the token
   and context counts rather than an opaque 500.
 
+### Added
+
+- A Rust core wheel downloaded from a GitHub Release is verified against the
+  size the API reports and the digest in that release's `SHA256SUMS` before it
+  is installed, and the match is reported. A mismatch is retried once, then
+  refused and deleted. Releases published before `v2026.9.16` carry no
+  `SHA256SUMS` and still install, with a note. pip rejects a truncated wheel
+  but does not check member CRCs, so a wheel corrupted in transit previously
+  installed cleanly and failed later as an import crash.
+
+- Rust core installs and upgrades append the version transition, the channel
+  used, and any verification failure with its expected and actual values to
+  `~/.m3/logs/m3_rust_core_install.log` (`~/Library/Logs` on macOS). Writing it
+  never fails an install.
+
 ### Fixed
 
 - Four advisories in the Rust core's transitive dependencies (`rustls`, `h2`,
