@@ -546,6 +546,68 @@ def _decode_payload_json(rows) -> list[dict]:
     return out
 
 
+def sweep_leases_opportunistically(table: str = "notifications") -> "tuple[int, int]":
+    """Reclaim lapsed leases. Returns ``(reclaimed, dead_lettered)``.
+
+    THE PRODUCTION CALL SITE. ``sweep_expired_leases`` shipped with a full
+    implementation on both backends and 16 passing tests, and NOTHING in a
+    running process ever invoked it -- measured 2026-09-16: every caller was a
+    test. A lease therefore expired and was reclaimed by nobody, so a worker
+    that crashed mid-message stranded that row permanently: `claimed_by` stayed
+    set, poll skipped it as in-flight forever, and no error was raised anywhere.
+    §3 -- a declared limit with no enforcement site is a lie the tests cannot
+    see.
+
+    WHY OPPORTUNISTIC, NOT A DAEMON. A dedicated sweeper process is another
+    thing to install on three OSes, supervise, and notice the death of; when it
+    dies, leases stop lapsing and the failure is silent. The sweep is idempotent
+    and cheap -- two UPDATEs against an indexed predicate that match nothing on
+    a healthy queue -- so every agent that polls can run it. That makes the
+    sweeper as available as polling itself, with no new process, and it is the
+    resolution the design recorded for the "dead daemon stall" gap.
+
+    ⚠ ITS OWN CONNECTION SCOPE, DELIBERATELY -- AND THE REASON DIFFERS PER
+    BACKEND. ``sweep_expired_leases`` COMMITS internally on BOTH backends (the
+    CLAIM THEN RELEASE contract), so calling it inside a caller's
+    ``with _db()`` block is wrong everywhere, but it fails differently:
+
+    * **SQLite** -- the commit lands mid-block and the sweep then holds the
+      single database-wide write lock across the reads that follow. Measured on
+      the claim path: 8 concurrent writers holding 10ms inside the transaction
+      took p99 from 74.7ms to 1307ms.
+    * **PostgreSQL** -- there is no global write lock (the override uses FOR
+      UPDATE SKIP LOCKED precisely so concurrent sweepers divide the work), so
+      the cost is not contention. It is worse: the sweep's ``commit()`` ends the
+      CALLER's transaction. Poll's heartbeat UPDATE and its read would land in
+      two different transactions, and the pool's commit-on-exit would then be
+      committing a transaction the sweep already closed.
+
+    Sweeping BEFORE the caller opens its scope is correct on both, for both
+    reasons. Do not "optimise" it into the existing block to save a connection.
+
+    ⚠ NEVER FAILS ITS CALLER. Poll returning an agent's mail matters more than
+    reclaiming someone else's lapsed lease, and the next poll sweeps again
+    anyway. A sweep error is reported and swallowed rather than propagated --
+    this is the one place that is correct, because the work is redundant by
+    construction.
+    """
+    try:
+        with _db() as db:
+            return dialect().sweep_expired_leases(db, table=table)
+    except Exception as exc:  # noqa: BLE001 -- see NEVER FAILS ITS CALLER above
+        # logger, not print: this module's convention (see task_assigned /
+        # task_completed below), and a poll's stdout is a records envelope the
+        # caller parses -- a bare print would corrupt it.
+        logger.warning(
+            "lease sweep skipped this pass. "
+            f"observed: {type(exc).__name__}: {exc}. "
+            "possible: the store is locked by another writer, or the table "
+            "predates the lease columns. "
+            f"inspect: table={table!r}; migration 047_notification_lease"
+        )
+        return (0, 0)
+
+
 def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int = 20,
                             as_records: bool = False) -> str:
     """Retrieves notifications for an agent.
@@ -567,6 +629,14 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
     share a rendering.
     """
     require_agent_id(agent_id, "notifications_poll")
+
+    # Opportunistic sweep, BEFORE this function opens its own connection scope.
+    # Every poller reclaims lapsed leases, so the sweeper is exactly as
+    # available as polling and needs no separate process to keep alive. Must
+    # not move inside the `with _db()` below: sweep commits internally, and on
+    # SQLite that would hold the one write lock across the reads that follow.
+    sweep_leases_opportunistically()
+
     _d = dialect()
     p = _d.param()
     _pred, _addr = _addressing_predicate(agent_id, p)

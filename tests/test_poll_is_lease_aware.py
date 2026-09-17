@@ -222,3 +222,83 @@ def test_the_poll_predicate_has_exactly_one_owner():
         f"`failed_at IS NULL`). Offending: "
         f"{[s for s in code_strings if 'claimed_by' in s]}"
     )
+
+
+def test_polling_alone_reclaims_a_lapsed_lease(agent):
+    """POLL ITSELF must sweep -- no manual sweep, no daemon, no fixture help.
+
+    `test_a_lapsed_claim_is_offered_again` proves the SWEEPER works, but it
+    calls `sweep_expired_leases` by hand. That is exactly how the real defect
+    hid: the mechanism shipped with 16 green tests and, measured 2026-09-16,
+    ZERO production callers. A crashed worker stranded its row permanently --
+    claimed_by stayed set, poll skipped it as in-flight forever, nothing raised.
+
+    This test deliberately does NOT call the sweeper. If the opportunistic call
+    in notifications_poll_impl is removed, it fails.
+    """
+    notify_impl(agent, "ping", {"work": 1})
+    got = _claim(agent)
+    assert got is not None
+    row_id = got[0]
+
+    past = (datetime.now(timezone.utc) - timedelta(seconds=60)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    with _db() as db:
+        p_ = dialect().param()
+        db.execute(
+            f"UPDATE notifications SET claim_expires_at = {p_} WHERE id = {p_}",
+            (past, row_id),
+        )
+
+    # The ONLY call is poll. Nothing sweeps on this test's behalf.
+    out = notifications_poll_impl(agent, unread_only=True)
+
+    assert "(empty)" not in out, (
+        "a lapsed lease was not reclaimed by polling alone.\n"
+        f"observed: poll returned '(empty)' for row {row_id}, whose "
+        f"claim_expires_at was backdated to {past}\n"
+        "possible: the opportunistic sweep was removed from "
+        "notifications_poll_impl, or it no longer runs before the read"
+        "\n"
+        "inspect: sweep_leases_opportunistically in bin/memory/orchestration.py"
+    )
+
+    with _db() as db:
+        p_ = dialect().param()
+        row = db.execute(
+            f"SELECT claimed_by, lease_token FROM notifications WHERE id = {p_}",
+            (row_id,),
+        ).fetchone()
+    assert row["claimed_by"] is None and row["lease_token"] is None, (
+        "the row was offered again but its fence was not cleared.\n"
+        f"observed: claimed_by={row['claimed_by']!r} "
+        f"lease_token={row['lease_token']!r}\n"
+        "possible: the sweep reclaimed without clearing ownership, so the dead "
+        "worker's token would still match and it could complete the row\n"
+        "inspect: Dialect.sweep_expired_leases"
+    )
+
+
+def test_a_sweep_failure_never_fails_the_poll(agent, monkeypatch):
+    """Returning an agent's mail matters more than reclaiming a stale lease.
+
+    The next poll sweeps again, so the work is redundant by construction -- one
+    of the few places swallowing an error is correct rather than a §3
+    violation. If a sweep error could propagate, a single locked store would
+    make every agent's inbox unreadable.
+    """
+    notify_impl(agent, "ping", {"work": 1})
+
+    def boom(*a, **k):
+        raise RuntimeError("store locked by another writer")
+
+    monkeypatch.setattr(dialect().__class__, "sweep_expired_leases", boom)
+
+    out = notifications_poll_impl(agent, unread_only=True)
+    assert "(empty)" not in out, (
+        "a sweep failure suppressed the caller's mail.\n"
+        "observed: poll returned '(empty)' while a notification was pending\n"
+        "cause: the sweep exception propagated instead of being reported\n"
+        "inspect: sweep_leases_opportunistically in bin/memory/orchestration.py"
+    )
