@@ -183,26 +183,22 @@ py_path   = str(PY).replace("\\", "\\\\")
 base_path = str(BASE).replace("\\", "\\\\")
 
 config = {
+    # No `env` block. This carried LM_STUDIO_EMBED_URL pointing at a local LM
+    # Studio endpoint -- dead config on two counts: NOTHING in the codebase ever
+    # read that variable (m3 embeds via M3_EMBED_GGUF / M3_EMBED_URL, the
+    # sovereign embedder), and LM Studio is no longer the embedding path at all.
+    # It came in with the same pre-release workstation setup as the deleted
+    # bridges. Writing an unread var into a user's config is worse than noise:
+    # it reads as configuration and invites someone to "fix" the port.
     "memory": {
         "command": str(PY),
         "args": [str(BASE / "bin" / "memory_bridge.py")],
-        "env": {
-            "LM_STUDIO_EMBED_URL": "http://127.0.0.1:1234/v1/embeddings"
-        }
     },
-    "custom_pc_tool": {
-        "command": str(PY),
-        "args": [str(BASE / "bin" / "custom_tool_bridge.py")]
-    },
-    "grok_intel": {
-        "command": str(PY),
-        "args": [str(BASE / "bin" / "grok_bridge.py")]
-    },
-    "web_research": {
-        "command": str(PY),
-        "args": [str(BASE / "bin" / "web_research_bridge.py")]
-    }
 }
+# Only `memory` is registered. custom_pc_tool / grok_intel / web_research used to
+# be listed here too; they were never m3 servers (author's pre-release
+# workstation setup) and their bridges were deleted 2026-09-17. This was a SECOND
+# registration path alongside generate_configs -- both had to be cleaned.
 
 # 6. Detect a Claude Code install and offer the recommended hook install.
 #    This is the SAFE, re-runnable path: it merges m3's SessionStart capture-check

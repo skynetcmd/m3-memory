@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_proxy.py
-sha1: 69568838bb75
-mtime_utc: 2026-09-16T15:23:27.509871+00:00
-generated_utc: 2026-09-16T15:29:43.656483+00:00
+sha1: fb655bbe3faa
+mtime_utc: 2026-09-17T18:02:46.149959+00:00
+generated_utc: 2026-09-17T18:03:36.513102+00:00
 private: false
 ---
 
@@ -16,18 +16,20 @@ OpenAI-compatible server on localhost:9000.
 
 Purpose
 -------
-Aider and OpenClaw have no native MCP support. This proxy sits between them
-and the actual model, injecting MCP tools into every request and executing
-tool_calls by calling bridge functions directly — no MCP transport overhead.
+Older Aider / OpenClaw / Hermes builds have no native MCP support. This proxy
+sits between them and the actual model, injecting MCP tools into every request
+and executing tool_calls by calling m3 functions directly — no MCP transport
+overhead. (Newer builds of those clients speak MCP natively and do not need it.)
 
-Tool sources (v2)
------------------
-1. Operational Protocol tools from custom_tool_bridge (5):
-   log_activity, query_decisions, update_focus, retire_focus, check_thermal_load
-2. Debug Agent tools from debug_agent_bridge (6):
-   debug_analyze, debug_bisect, debug_trace, debug_correlate, debug_history, debug_report
-3. m3-memory catalog tools from mcp_tool_catalog.TOOLS (44):
+Tool source
+-----------
+m3-memory catalog tools from mcp_tool_catalog.TOOLS:
    memory_*, agent_*, task_*, conversation_*, notifications_*, etc.
+
+Two further sources existed until 2026-09-17: 5 "Operational Protocol" tools
+from custom_tool_bridge and 6 debug_* tools from debug_agent_bridge. Neither
+bridge was part of m3 — both came from the author's pre-release workstation
+setup — and both were deleted. The proxy now serves only m3's own catalog.
 
 Default allowlist excludes destructive catalog tools (memory_delete,
 gdpr_*, *_export, *_import, memory_maintenance, memory_set_retention, agent_offline).
@@ -108,8 +110,6 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `custom_tool_bridge`
-- `debug_agent_bridge`
 - `m3_sdk (M3Context)`
 - `m3_sdk (acquire_or_exit)`
 - `m3_sdk (ensure_utf8)`
@@ -123,7 +123,7 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 719)
+- `httpx.AsyncClient()` (line 515)
 
 
 ---

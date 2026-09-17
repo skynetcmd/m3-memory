@@ -52,7 +52,6 @@ sqlglot>=30.18.0,<31
 # --- Security & Auth ---
 cryptography>=50.0.1,<51
 keyring>=25.7.0,<26
-pywin32>=312; sys_platform == 'win32'
 
 # --- System & Thermal ---
 psutil>=7.2.2,<8
@@ -122,10 +121,49 @@ transformers>=5.17.0,<6
 # torch pin, not a setuptools problem.
 torch>=2.14.0,<3
 
+# REMOVED 2026-09-17 (unused, verified):
+#   pywin32 -- no module imports win32api/win32con/pythoncom/etc. The many
+#     `win32` hits in the tree are `sys.platform == "win32"` string compares,
+#     not the package. keyring (the plausible consumer) declares
+#     pywin32-ctypes, a DIFFERENT package it installs itself: verified in a
+#     clean venv that `pip install keyring` yields pywin32-ctypes only and
+#     WinVaultKeyring still resolves as the active backend.
+
 # --- Utilities ---
 python-dotenv>=1.2.3,<2
 PyYAML>=6.0.3,<7
 fpdf2>=2.8.8,<3
+# PDF ingestion backend for bin/files_memory/chunkers/pdf.py. UNDECLARED until
+# 2026-09-17: the chunker probes PyMuPDF then pypdf and sets available=False if
+# neither is importable, so on a clean install PDFs fell back to the TEXT
+# chunker -- binary-ish extracted junk instead of pages. It only worked here
+# because unstructured-client happens to pull pypdf transitively, which is not
+# a dependency m3 controls.
+#
+# pypdf (pure Python) is the declared floor; PyMuPDF is an OPTIONAL faster
+# path the chunker prefers when present, left undeclared because it ships
+# native wheels and an AGPL licence -- not something to force on every user.
+pypdf>=6.19.0,<7
+# Binary document ingestion for bin/files_memory/chunkers/office.py:
+# .docx .doc .pptx .ppt .xlsx .xls .rtf .epub .odt .odp .ods (35 MIME types).
+#
+# ONE library rather than six. The per-format set would be python-docx +
+# python-pptx + openpyxl + xlrd + striprtf + ebooklib -- which still leaves the
+# LEGACY binaries (.doc/.xls/.ppt) without a trustworthy pure-Python parser, and
+# drags ebooklib's AGPL-3.0 licence into a distributed tool. sharepoint2text is
+# Apache-2.0, covers the legacy formats, and ships zip-bomb / path-traversal /
+# encrypted-file handling this chunker would otherwise write itself.
+#
+# Heavier 'unified' options were rejected on footprint and privacy: docling
+# pulls torch and fetches model weights from HuggingFace at first run (runtime
+# network dependency); unstructured has 116 core deps and caps at <3.14;
+# markitdown pulls onnxruntime just to sniff file types.
+sharepoint-to-text>=2.0.0,<3
+# HTML ingestion: bin/files_memory/chunkers/html.py. Parsed with bs4 +
+# stdlib html.parser (no lxml/html5lib). Was declared but unimported until
+# 2026-09-17 -- .html/.htm resolved to filetype "html" with no registered
+# chunker, so HTML fell through to the text chunker and raw markup entered
+# the store as prose.
 beautifulsoup4>=4.15.0,<5
 argparse>=1.4.0,<2
 

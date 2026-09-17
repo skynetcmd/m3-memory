@@ -47,11 +47,7 @@ _HELPER = _HELPERS[0]
 # 400. These must NOT adopt the mitigation, so they are excluded by design
 # rather than listed as debt.
 _CLOUD_ONLY = {
-    "grok_bridge.py",
-    "web_research_bridge.py",
     "unified_ai.py",
-    "custom_tool_bridge.py",
-    "debug_agent_bridge.py",
     "mcp_proxy.py",
     "agent_protocol.py",
     "batch_runner.py",

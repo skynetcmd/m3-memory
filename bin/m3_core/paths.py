@@ -387,7 +387,7 @@ def node_id() -> str:
     """This machine's stable identity. The single owner of that question.
 
     Six call sites answered this independently (auth_utils, chatlog_ingest,
-    debug_agent_bridge, files_memory.ingest, memory.config, test_memory_bridge)
+    files_memory.ingest, memory.config, test_memory_bridge)
     and only ONE of them normalised case. §10a -- a copied resolution is the
     defect independent of correctness, and here the copies genuinely disagree.
 

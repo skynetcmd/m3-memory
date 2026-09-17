@@ -64,7 +64,10 @@ class ChunkerProtocol(Protocol):
 # ──────────────────────────────────────────────────────────────────────────────
 # Registry — populated by submodule imports below
 # ──────────────────────────────────────────────────────────────────────────────
+from . import html as _html_chunker  # noqa: E402
+from . import iwork as _iwork_chunker  # noqa: E402
 from . import markdown as _markdown_chunker  # noqa: E402
+from . import office as _office_chunker  # noqa: E402
 from . import pdf as _pdf_chunker  # noqa: E402
 from . import text as _text_chunker  # noqa: E402
 
@@ -72,10 +75,45 @@ CHUNKER_REGISTRY: dict[str, object] = {
     "markdown": _markdown_chunker,
     "rst": _markdown_chunker,  # close-enough; heading-tree split works
     "pdf": _pdf_chunker,
+    # identity.py has mapped .html/.htm to "html" all along, but this key was
+    # missing -- so HTML fell through to the text chunker and raw markup
+    # (tags, <script> bodies, <style> rules) entered the store as prose.
+    "html": _html_chunker,
+    # Binary documents. One chunker: it converts to markdown and delegates
+    # the heading split, so all of these share the markdown chunker's logic.
+    "docx": _office_chunker, "doc": _office_chunker,
+    "pptx": _office_chunker, "ppt": _office_chunker,
+    "xlsx": _office_chunker, "xls": _office_chunker,
+    "rtf": _office_chunker, "epub": _office_chunker,
+    "odt": _office_chunker, "odp": _office_chunker, "ods": _office_chunker,
+    # Apple iWork -- Pages, Keynote, Numbers share one container.
+    "iwork": _iwork_chunker,
     "text": _text_chunker,
     "log": _text_chunker,
     "unknown": _text_chunker,  # last-resort fallback
 }
+
+
+#: Filetypes deliberately served by the TEXT chunker. Source code, config and
+#: plain-text formats are all line-oriented UTF-8: splitting them on a sliding
+#: window is a reasonable answer, not a gap.
+#:
+#: ⚠ This set exists so the registry can tell "we chose text" apart from "we
+#: forgot". BINARY formats must NEVER be listed here -- text-chunking a .docx or
+#: .xlsx yields ZIP container bytes, and a .doc yields OLE garbage. That is not
+#: degraded extraction, it is nonsense entering FTS and the embedding space,
+#: which is exactly how .html shipped broken (identity.py mapped it, no chunker
+#: existed, the fallback swallowed it silently).
+TEXT_CHUNKED_FILETYPES = frozenset({
+    "text", "log", "unknown",
+    # Source code — a dedicated AST chunker is a future upgrade, not a defect.
+    "python", "typescript", "javascript", "rust", "go", "java", "ruby", "php",
+    "c", "cpp", "csharp", "swift", "kotlin", "scala", "shell", "powershell",
+    "sql", "r", "perl", "lua", "dart", "elixir", "haskell", "clojure",
+    # Structured text / config.
+    "json", "jsonl", "yaml", "toml", "ini", "xml", "csv", "tsv", "latex",
+    "notebook", "diff", "makefile", "dockerfile", "gradle", "properties",
+})
 
 
 def get_chunker(filetype: str):
@@ -83,9 +121,24 @@ def get_chunker(filetype: str):
 
     If the registered chunker's dependencies are missing (sets
     .available = False during import), falls back to text.
+
+    An UNREGISTERED filetype also falls back to text, but loudly: a filetype
+    identity.py knows by name yet no chunker claims is either a gap or a
+    deliberate text-chunk, and the two must not look alike from here.
     """
     mod = CHUNKER_REGISTRY.get(filetype)
     if mod is None:
+        if filetype not in TEXT_CHUNKED_FILETYPES:
+            logger.warning(
+                "no chunker registered for filetype %r; falling back to text. "
+                "observed: identity.py resolves this filetype but CHUNKER_REGISTRY "
+                "has no entry and it is not in TEXT_CHUNKED_FILETYPES. "
+                "possible: a binary format whose chunker was never written -- "
+                "text-chunking it will ingest container bytes, not content. "
+                "inspect: add a chunker, or add the filetype to "
+                "TEXT_CHUNKED_FILETYPES if plain-text splitting is correct for it.",
+                filetype,
+            )
         return _text_chunker
     if not getattr(mod, "available", True):
         logger.warning(

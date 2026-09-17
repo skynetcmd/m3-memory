@@ -140,9 +140,19 @@ dependencies = [
     # it's a perf/quality dep — but small, pure, and used on a common path, so
     # kept in core (requirements.txt had it; pyproject omitted it).
     "rapidfuzz>=3.14.6,<4",
-    # PDF + HTML parsing used by files-ingestion / report paths.
+    # PDF generation for report paths; HTML ingestion for the files subsystem
+    # (bin/files_memory/chunkers/html.py -- added 2026-09-17, when .html was
+    # found to be resolving to a filetype with no chunker).
     "fpdf2>=2.8.8,<3",
     "beautifulsoup4>=4.15.0,<5",
+    # PDF READING (distinct from fpdf2, which only writes). Undeclared until
+    # 2026-09-17, so chunkers/pdf.py silently fell back to the text chunker on
+    # any install that did not happen to get pypdf transitively. PyMuPDF stays
+    # optional: the chunker prefers it, but it is AGPL with native wheels.
+    "pypdf>=6.19.0,<7",
+    # Binary documents (.docx/.doc/.pptx/.ppt/.xlsx/.xls/.rtf/.epub/.od*).
+    # Apache-2.0, covers the legacy OLE formats, and avoids ebooklib (AGPL).
+    "sharepoint-to-text>=2.0.0,<3",
     # Hardened XML parsing (XXE / entity-expansion defense) for
     # bin/doctor/schedule_probe.py, which parses `schtasks` XML output. Was only
     # transitively present (via fpdf2) — pinned directly so the safe path is
@@ -156,13 +166,23 @@ dependencies = [
     "networkx>=3.6.1,<4",
     # Windows-only: keyring backend + hook process control. Marker-gated so it
     # installs only where relevant.
-    "pywin32>=312; sys_platform == 'win32'",
     # macOS-only: CoreWLAN for thermal/network probes.
     "pyobjc-framework-CoreWLAN; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.3.5,<4"]
+# Apple iWork full-fidelity extraction (.pages/.key/.numbers).
+#
+# OPTIONAL ON PURPOSE. bin/files_memory/chunkers/iwork.py reads the bundled
+# QuickLook/Preview.pdf with pypdf first -- already a core dependency, so the
+# common case costs nothing. This extra adds the Index/*.iwa path, which always
+# works but pulls protobuf + python-snappy + pillow and ~20 transitive packages
+# (measured 2026-09-17: a 14-package env became 36). Charging every m3 user that
+# for a format they may never ingest is the wrong default; needing it is opt-in.
+iwork = [
+    "keynote-parser>=1.14.5",
+]
 # Web surfaces: the FastAPI dashboard (bin/dashboard_server.py) and the
 # OpenAI-compatible MCP proxy (bin/mcp_proxy.py). Optional by design — the core
 # MCP server + CLI need neither. Were in requirements.txt but missing from
@@ -359,16 +379,12 @@ module = [
     "mission_control",
     "chatlog_redaction",
     "temporal_utils",
-    "debug_agent_bridge",
     "setup_secret",
     "migrate_flat_memory",
     "chatlog_ingest",
     "aider_patch",
     "test_mission_control",
-    "news_fetcher",
     "mcp_proxy",
-    "custom_tool_bridge",
-    "embed_agent_instructions",
     "dashboard_server",
 ]
 ignore_errors = true

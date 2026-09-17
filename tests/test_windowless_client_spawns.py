@@ -9,8 +9,8 @@ THE OBJECTION, and why it does not hold: "pythonw.exe has no stdout, and these
 are stdio transports." That is true only with NO pipe attached. Measured
 2026-09-13 with pipes -- which is always, here -- it is identical:
 
-    python.exe   grok_bridge.py  -> MCP handshake replied: True
-    pythonw.exe  grok_bridge.py  -> MCP handshake replied: True
+    python.exe   memory_bridge.py  -> MCP handshake replied: True
+    pythonw.exe  memory_bridge.py  -> MCP handshake replied: True
     python.exe   session_start_capture_check.py -> rc=0, 97B stdout
     pythonw.exe  session_start_capture_check.py -> rc=0, 97B stdout (identical)
 

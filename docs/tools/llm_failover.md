@@ -1,8 +1,8 @@
 ---
 tool: bin/llm_failover.py
-sha1: 812ad5ea720b
-mtime_utc: 2026-08-09T19:41:32.417028+00:00
-generated_utc: 2026-08-12T00:59:01.444114+00:00
+sha1: 7cb128d2f12b
+mtime_utc: 2026-09-17T18:03:22.583444+00:00
+generated_utc: 2026-09-17T18:03:36.380384+00:00
 private: false
 ---
 
@@ -14,7 +14,7 @@ LLM Failover Module
 
 Cross-machine failover strategy for selecting LLM and embedding models.
 Tries endpoints in order: LM Studio (local + remote), then Ollama.
-Used by custom_tool_bridge.py and memory_bridge.py.
+Used by memory_bridge.py.
 
 ---
 

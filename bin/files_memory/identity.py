@@ -79,6 +79,16 @@ FILETYPE_BY_EXT: dict[str, str] = {
     ".tsv": "tsv",
     ".html": "html",
     ".htm": "html",
+    ".xhtml": "html",
+    # Apple iWork. One ZIP+IWA container serves all three.
+    ".pages": "iwork",
+    ".key": "iwork",
+    ".numbers": "iwork",
+    # Rich text / OpenDocument -- handled by the office chunker.
+    ".rtf": "rtf",
+    ".odt": "odt",
+    ".odp": "odp",
+    ".ods": "ods",
     ".xml": "xml",
     ".epub": "epub",
     ".docx": "docx",

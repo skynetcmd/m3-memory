@@ -1,7 +1,7 @@
 """
 Shared embedding and vector-math utilities for MCP bridges.
 
-Consolidates duplicated code from memory_bridge.py and debug_agent_bridge.py:
+Consolidates embedding helpers used by memory_bridge.py:
   - Binary packing/unpacking for embedding storage
   - Cosine similarity (numpy-accelerated with pure-Python fallback)
   - Model size parsing for dynamic model selection

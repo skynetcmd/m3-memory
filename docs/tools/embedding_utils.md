@@ -1,8 +1,8 @@
 ---
 tool: bin/embedding_utils.py
-sha1: e267257743a3
-mtime_utc: 2026-05-16T19:21:14.236372+00:00
-generated_utc: 2026-05-17T15:50:17.591696+00:00
+sha1: 0ac74334850d
+mtime_utc: 2026-09-17T18:03:22.582444+00:00
+generated_utc: 2026-09-17T18:03:36.291768+00:00
 private: false
 ---
 
@@ -12,7 +12,7 @@ private: false
 
 Shared embedding and vector-math utilities for MCP bridges.
 
-Consolidates duplicated code from memory_bridge.py and debug_agent_bridge.py:
+Consolidates embedding helpers used by memory_bridge.py:
   - Binary packing/unpacking for embedding storage
   - Cosine similarity (numpy-accelerated with pure-Python fallback)
   - Model size parsing for dynamic model selection

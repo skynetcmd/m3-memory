@@ -252,7 +252,7 @@ def _backend_label_for_endpoint(url: str) -> str:
 def _llm_token() -> str:
     """The SAME token m3 itself sends to the local LLM, so the health probe sees
     exactly what the real call path sees (auth mismatch = false 401s otherwise).
-    Mirrors memory_core / custom_tool_bridge: `ctx.get_secret("LM_API_TOKEN")`
+    Mirrors memory_core: `ctx.get_secret("LM_API_TOKEN")`
     (→ auth_utils.get_api_key: env → keyring → macOS Keychain → encrypted vault)
     with LM Studio's conventional "lm-studio" placeholder as the fallback."""
     try:

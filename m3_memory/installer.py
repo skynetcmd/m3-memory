@@ -2608,8 +2608,10 @@ def _deprecated_env_config_section() -> None:
     print("        until you do).")
 
 
-_BRIDGE_SCRIPTS = ("memory_bridge.py", "grok_bridge.py", "web_research_bridge.py",
-                   "debug_agent_bridge.py", "custom_tool_bridge.py", "mcp_proxy.py")
+# m3's own long-running scripts. The four deleted bridges (grok/web_research/
+# debug_agent/custom_tool) are gone from here too -- a double-launch check for a
+# script that no longer ships can only produce a false negative.
+_BRIDGE_SCRIPTS = ("memory_bridge.py", "mcp_proxy.py")
 
 
 def _live_bridge_counts() -> "dict[str, int]":

@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-09-14T03:08:03.289918+00:00._
+_Generated 2026-09-17T18:16:47.676575+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -38,12 +38,9 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/cli_knowledge.py](cli_knowledge.md) | (no docstring) |  |
 | [bin/consolidate_beliefs.py](consolidate_beliefs.md) | Autonomous episodic->semantic belief consolidation (knowledge-maintenance P4). |  |
 | [bin/curator_apply.py](curator_apply.md) | Deterministic apply of a curator plan — one entry point, no LLM in the loop. |  |
-| [bin/custom_tool_bridge.py](custom_tool_bridge.md) | (no docstring) |  |
 | [bin/dashboard_server.py](dashboard_server.md) | M3 Cognitive & Observability Portal. |  |
-| [bin/debug_agent_bridge.py](debug_agent_bridge.md) | Debug Agent MCP Bridge — Autonomous debugging tools. |  |
 | [bin/deep_sync.py](deep_sync.md) | (no docstring) |  |
 | [bin/distill_procedures.py](distill_procedures.md) | Autonomous procedural distillation (tasks → reusable `procedure` memories). |  |
-| [bin/embed_agent_instructions.py](embed_agent_instructions.md) | One-shot script: embed AGENT_INSTRUCTIONS.md sections as searchable memory items. |  |
 | [bin/embed_backfill.py](embed_backfill.md) | embed_backfill.py — fill in missing embeddings for memory_items rows. |  |
 | [bin/embed_server.py](embed_server.md) | Local embedding server — OpenAI-compatible /v1/embeddings endpoint. |  |
 | bin/embed_server_gpu.py | AMD GPU Optimized Embedding Proxy — delegates to llama-server.exe. | yes |
@@ -61,7 +58,6 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/gen_wiki.py](gen_wiki.md) | gen_wiki.py — compile a browsable wiki from core memories + the files corpus. |  |
 | [bin/generate_configs.py](generate_configs.md) | (no docstring) |  |
 | [bin/governor_cli.py](governor_cli.md) | `m3 governor <status\|migrate>` — inspect and migrate legacy scheduled tasks |  |
-| [bin/grok_bridge.py](grok_bridge.md) | (no docstring) |  |
 | [bin/homecoming.py](homecoming.md) | bin/homecoming.py — "Homecoming" migration script for m3-memory. |  |
 | [bin/install_schedules.py](install_schedules.md) | M3 Memory: Cross-Platform Schedule Installer. |  |
 | [bin/install_wolfssl.py](install_wolfssl.md) | install_wolfssl.py — build the OPEN-SOURCE wolfSSL library from official |  |
@@ -85,6 +81,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/m3_sdk.py](m3_sdk.md) | m3_sdk — facade. Real implementations live in bin/m3_core/*. |  |
 | [bin/m3_upgrade.py](m3_upgrade.md) | Upgrade m3-memory end to end, using the right command for how it was installed. |  |
 | bin/macbook_status_server.py | MacBook network & LM Studio status server for Homepage dashboard. | yes |
+| [bin/mcp_compat.py](mcp_compat.md) | Single owner of the MCP server-class import, across mcp 1.x and 2.x. |  |
 | [bin/mcp_proxy.py](mcp_proxy.md) | MCP Tool Execution Proxy  v2.0 |  |
 | [bin/mcp_tool_catalog.py](mcp_tool_catalog.md) | mcp_tool_catalog.py — single source of truth for the m3-memory MCP tool catalog. |  |
 | [bin/measure_tool_tokens.py](measure_tool_tokens.md) | measure_tool_tokens.py — quantify token cost of MCP tool schemas. |  |
@@ -100,7 +97,6 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/migrate_pg.py](migrate_pg.md) | PostgreSQL PRIMARY-store migration runner — the PG analogue of migrate_memory.py. |  |
 | [bin/migrate_warehouse_to_schema.py](migrate_warehouse_to_schema.md) | migrate_warehouse_to_schema.py — consolidate a PostgreSQL warehouse's tables |  |
 | bin/mission_control.py | mission_control.py — Cross-platform pulse dashboard (macOS / Windows / Linux). | yes |
-| [bin/news_fetcher.py](news_fetcher.md) | (no docstring) |  |
 | [bin/pg_setup.py](pg_setup.md) | (no docstring) |  |
 | [bin/pg_sync.py](pg_sync.md) | (no docstring) |  |
 | [bin/pg_sync.sh](pg_sync_sh.md) | (no docstring) |  |
@@ -124,7 +120,6 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/sync_manifest_versions.py](sync_manifest_versions.md) | Sync every version-bearing manifest to the single source of truth: |  |
 | [bin/temporal_utils.py](temporal_utils.md) | Enhanced temporal resolution utility for m3-memory. |  |
 | [bin/test_bulk_parity.py](test_bulk_parity.md) | Real integration tests for memory_write_bulk_impl. |  |
-| [bin/test_debug_agent.py](test_debug_agent.md) | End-to-end test suite for debug_agent_bridge.py. |  |
 | [bin/test_fips_integrity.py](test_fips_integrity.md) | test_fips_integrity.py — Validation suite for FIPS-ready crypto abstraction. |  |
 | [bin/test_keychain.py](test_keychain.md) | (no docstring) |  |
 | [bin/test_mcp_proxy.py](test_mcp_proxy.md) | test_mcp_proxy.py — End-to-end proxy test suite |  |
@@ -134,7 +129,6 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/thermal_utils.py](thermal_utils.md) | (no docstring) |  |
 | [bin/unified_ai.py](unified_ai.md) | Unified chat client across Gemini, Claude, and LM Studio. |  |
 | [bin/watch_pr_checks.py](watch_pr_checks.md) | Watch CI checks on one or more PRs until every check is terminal, then print a |  |
-| [bin/web_research_bridge.py](web_research_bridge.md) | (no docstring) |  |
 | [bin/weekly_auditor.py](weekly_auditor.md) | Weekly Audit Report -- M3 Memory |  |
 | [install_os.py](install_os.md) | (no docstring) |  |
 | [run_tests.py](run_tests.md) | (no docstring) |  |

@@ -6,18 +6,20 @@ OpenAI-compatible server on localhost:9000.
 
 Purpose
 -------
-Aider and OpenClaw have no native MCP support. This proxy sits between them
-and the actual model, injecting MCP tools into every request and executing
-tool_calls by calling bridge functions directly — no MCP transport overhead.
+Older Aider / OpenClaw / Hermes builds have no native MCP support. This proxy
+sits between them and the actual model, injecting MCP tools into every request
+and executing tool_calls by calling m3 functions directly — no MCP transport
+overhead. (Newer builds of those clients speak MCP natively and do not need it.)
 
-Tool sources (v2)
------------------
-1. Operational Protocol tools from custom_tool_bridge (5):
-   log_activity, query_decisions, update_focus, retire_focus, check_thermal_load
-2. Debug Agent tools from debug_agent_bridge (6):
-   debug_analyze, debug_bisect, debug_trace, debug_correlate, debug_history, debug_report
-3. m3-memory catalog tools from mcp_tool_catalog.TOOLS (44):
+Tool source
+-----------
+m3-memory catalog tools from mcp_tool_catalog.TOOLS:
    memory_*, agent_*, task_*, conversation_*, notifications_*, etc.
+
+Two further sources existed until 2026-09-17: 5 "Operational Protocol" tools
+from custom_tool_bridge and 6 debug_* tools from debug_agent_bridge. Neither
+bridge was part of m3 — both came from the author's pre-release workstation
+setup — and both were deleted. The proxy now serves only m3's own catalog.
 
 Default allowlist excludes destructive catalog tools (memory_delete,
 gdpr_*, *_export, *_import, memory_maintenance, memory_set_retention, agent_offline).
@@ -128,8 +130,8 @@ LMSTUDIO_BASE = os.environ.get("LM_STUDIO_BASE", "http://localhost:1234/v1")
 MAX_TOOL_ROUNDS = 10
 CONNECT_TIMEOUT = 5.0
 # Canonical LM_READ_TIMEOUT default is 4800.0 (~80 min for 32k tokens at
-# 7.5 tok/s on an M3 Max) — matches m3_core.runtime, custom_tool_bridge, and
-# debug_agent_bridge. Previously this file alone defaulted to 300, so the same
+# 7.5 tok/s on an M3 Max) — matches m3_core.runtime. Previously this file alone
+# defaulted to 300, so the same
 # env var resolved to two different values depending on entry point (§3: one
 # default per var). Reconciled to the documented canonical value.
 READ_TIMEOUT = float(getenv_compat("M3_LM_READ_TIMEOUT", "LM_READ_TIMEOUT", "4800.0"))
@@ -199,27 +201,7 @@ def _openai_key() -> str:
 
 # ── Bridge imports (lazy — avoids side effects at module load) ─────────────────
 
-_custom_mod = None
 _memory_mod = None
-_debug_mod = None
-
-
-def _custom():
-    global _custom_mod
-    if _custom_mod is None:
-        try:
-            import custom_tool_bridge as m
-            _custom_mod = m
-            log.info("custom_tool_bridge imported OK")
-        except Exception as exc:
-            log.error(
-                "Failed to import custom_tool_bridge; protocol tools will be unavailable. "
-                f"observed: {type(exc).__name__} during import: {exc}. "
-                "possible: module not found, syntax error in module, or circular dependency. "
-                "inspect: check that custom_tool_bridge.py exists in the same directory, has no syntax errors, and can be imported standalone."
-            )
-            raise
-    return _custom_mod
 
 
 def _memory():
@@ -240,209 +222,33 @@ def _memory():
     return _memory_mod
 
 
-def _debug():
-    global _debug_mod
-    if _debug_mod is None:
-        try:
-            import debug_agent_bridge as m
-            _debug_mod = m
-            log.info("debug_agent_bridge imported OK")
-        except Exception as exc:
-            log.error(
-                "Failed to import debug_agent_bridge; debug tools will be unavailable. "
-                f"observed: {type(exc).__name__} during import: {exc}. "
-                "possible: module not found, syntax error, or missing dependencies. "
-                "inspect: check that debug_agent_bridge.py exists and is importable, review the exception above for missing modules or import errors."
-            )
-            raise
-    return _debug_mod
-
-# ── MCP tool definitions ──────────────────────────────────────────────────────
-#
-# Tools come from three sources:
-#   1. PROTOCOL_TOOLS — 5 Operational Protocol tools from custom_tool_bridge
-#   2. DEBUG_TOOLS — 6 debug agent tools from debug_agent_bridge
-#   3. mcp_tool_catalog.TOOLS — 44 m3-memory tools (the v2 single source of truth)
-#
-# Sources 1 and 2 are kept inline because their bridges aren't catalog-registered.
-# Source 3 is built dynamically each request from mcp_tool_catalog and respects
-# default_allowed (destructive tools opt-in via MCP_PROXY_ALLOW_DESTRUCTIVE) and
-# inject_agent_id (the orchestrator stamps agent_id; the LLM cannot spoof).
-
-PROTOCOL_TOOLS: list[dict] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "log_activity",
-            "description": (
-                "Archive activity to the agent log (Protocols #1-#3). "
-                "category=thought for complex reasoning, hardware after thermal check, "
-                "decision when user agrees to any code change, file move, or direction."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "category": {"type": "string", "enum": ["thought", "hardware", "decision"]},
-                    "detail_a": {"type": "string", "description": "Primary detail (<=500 chars)"},
-                    "detail_b": {"type": "string", "description": "Secondary detail (<=2000 chars)"},
-                    "detail_c": {"type": "string", "description": "Tertiary detail / root cause"},
-                },
-                "required": ["category", "detail_a"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "query_decisions",
-            "description": (
-                "Protocol #4 - MUST call before starting any new task. "
-                "Full-text search across project_decisions table for prior decisions."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keyword": {"type": "string", "description": "Topic keywords for the task"},
-                    "limit": {"type": "integer", "default": 10, "description": "Max results"},
-                },
-                "required": ["keyword"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_focus",
-            "description": "Protocol #5 - Call every 3 turns with a <=10-word trajectory summary.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "summary": {"type": "string", "description": "<=10-word current trajectory"},
-                },
-                "required": ["summary"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "retire_focus",
-            "description": "Protocol #5 - Clear dashboard focus when a task completes.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "check_thermal_load",
-            "description": "Protocol #2 - Check M3 Max thermal/RAM pressure. Returns Nominal|Fair|Serious|Critical.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-]
-
-DEBUG_TOOLS: list[dict] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "debug_analyze",
-            "description": "Root cause analysis with memory-augmented reasoning. Searches past issues, reads source, uses local LLM to diagnose.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "error_message": {"type": "string", "description": "The error message or symptom to analyze"},
-                    "context": {"type": "string", "description": "Additional context (stack trace, repro steps)"},
-                    "file_path": {"type": "string", "description": "Source file path for context"},
-                },
-                "required": ["error_message"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "debug_bisect",
-            "description": "Automated git bisect with LLM analysis of the offending commit.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "test_command": {"type": "string", "description": "Shell command that exits 0 on success"},
-                    "good_commit": {"type": "string", "description": "Known-good commit hash or ref"},
-                    "bad_commit": {"type": "string", "default": "HEAD", "description": "Known-bad commit"},
-                },
-                "required": ["test_command"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "debug_trace",
-            "description": "Execution flow analysis - reads source, finds callers, identifies failure points.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {"type": "string", "description": "Path to the source file"},
-                    "function_name": {"type": "string", "description": "Function to focus on"},
-                    "error_type": {"type": "string", "description": "Error type to look for"},
-                },
-                "required": ["file_path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "debug_correlate",
-            "description": "Cross-reference logs, git commits, and decisions to build a causal timeline.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "log_file": {"type": "string", "description": "Log file path to parse"},
-                    "time_range": {"type": "string", "default": "24h", "description": "Time window (e.g. 1h, 24h, 7d)"},
-                    "pattern": {"type": "string", "description": "Regex pattern to filter log entries"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "debug_history",
-            "description": "Search past debugging sessions and patterns. No LLM required.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keyword": {"type": "string", "description": "Search term"},
-                    "limit": {"type": "integer", "default": 10, "description": "Max results"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "debug_report",
-            "description": "Generate and persist a structured debugging report to memory.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "issue_id": {"type": "string", "description": "Issue/ticket ID"},
-                    "title": {"type": "string", "description": "Report title (required)"},
-                    "findings": {"type": "string", "description": "Debugging findings and resolution"},
-                },
-                "required": ["title"],
-            },
-        },
-    },
-]
-
-# Catalog import — done lazily to avoid pulling memory_core at module load
+# Catalog build cache (m3's own tools — the proxy's only tool source).
 _catalog_mod = None
 _catalog_specs_by_name: dict = {}
 _catalog_tool_schemas: list[dict] = []
 _catalog_built = False
 
+
+# ── MCP tool definitions ──────────────────────────────────────────────────────
+#
+# ONE source: mcp_tool_catalog.TOOLS, the single source of truth. Built
+# dynamically each request so it respects default_allowed (destructive tools
+# opt-in via MCP_PROXY_ALLOW_DESTRUCTIVE) and inject_agent_id (the orchestrator
+# stamps agent_id; the LLM cannot spoof it).
+
+# PROTOCOL_TOOLS and DEBUG_TOOLS are GONE, deliberately.
+#
+# They exposed 11 tools sourced from bin/custom_tool_bridge.py and
+# bin/debug_agent_bridge.py -- log_activity / query_decisions / update_focus /
+# retire_focus / check_thermal_load and the six debug_* tools. Neither bridge was
+# part of m3: both came from the author's pre-release workstation setup and were
+# deleted in the same change that stopped auto-registering them as MCP servers.
+#
+# The proxy itself stays -- older Aider / OpenClaw / Hermes builds have no native
+# MCP support and still need it -- but it now serves ONLY m3's own catalog, which
+# is the tool surface m3 actually owns and tests.
+PROTOCOL_TOOLS: list[dict] = []
+DEBUG_TOOLS: list[dict] = []
 
 def _build_catalog_tools() -> tuple[list[dict], dict]:
     """Lazy-load mcp_tool_catalog and build (openai_schemas, name->spec)."""
@@ -511,20 +317,10 @@ MCP_TOOLS = _LazyToolList()
 
 # ── Tool executor ─────────────────────────────────────────────────────────────
 
-# Map of protocol/debug tool name -> (bridge_loader, attr_name, is_async)
-_LEGACY_DISPATCH = {
-    "log_activity":       (lambda: _custom(), "log_activity",       True),
-    "query_decisions":    (lambda: _custom(), "query_decisions",    True),
-    "update_focus":       (lambda: _custom(), "update_focus",       True),
-    "retire_focus":       (lambda: _custom(), "retire_focus",       True),
-    "check_thermal_load": (lambda: _custom(), "check_thermal_load", True),
-    "debug_analyze":      (lambda: _debug(),  "debug_analyze",      True),
-    "debug_bisect":       (lambda: _debug(),  "debug_bisect",       True),
-    "debug_trace":        (lambda: _debug(),  "debug_trace",        True),
-    "debug_correlate":    (lambda: _debug(),  "debug_correlate",    True),
-    "debug_history":      (lambda: _debug(),  "debug_history",      False),
-    "debug_report":       (lambda: _debug(),  "debug_report",       False),
-}
+# Emptied with the bridges it dispatched to. Kept as a name (rather than deleted)
+# because _execute_tool still consults it, and an empty map is the honest way to
+# say "no legacy tools" -- the lookup simply never hits.
+_LEGACY_DISPATCH: dict = {}
 
 
 async def _execute_tool(name: str, args: dict, agent_id: str = "mcp-proxy-client") -> str:

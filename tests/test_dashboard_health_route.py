@@ -289,7 +289,7 @@ def test_llm_token_reuses_m3_key_resolution(monkeypatch):
     assert H._llm_token() == "sk-lm-secret"
 
     # When it doesn't resolve, fall back to LM Studio's conventional placeholder
-    # (the same 'lm-studio' default memory_core/custom_tool_bridge use).
+    # (the same 'lm-studio' default memory_core uses).
     monkeypatch.setattr(auth_utils, "get_api_key", lambda service: None)
     assert H._llm_token() == "lm-studio"
 

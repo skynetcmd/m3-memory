@@ -313,7 +313,10 @@ def main():
     # number when adding/removing tools as part of the regular tool-inventory
     # workflow. Per memory `feedback_tool_inventory`: every flag needs a default;
     # similarly every tool needs a category.
-    EXPECTED_TOOL_COUNT = 126
+    # 115 = 126 - the 11 PROTOCOL_TOOLS/DEBUG_TOOLS the mcp_proxy served from
+    # custom_tool_bridge and debug_agent_bridge, both deleted 2026-09-17 (never
+    # part of m3).
+    EXPECTED_TOOL_COUNT = 115
     if len(all_tools) != EXPECTED_TOOL_COUNT:
         import sys
         print(f"Error: Expected {EXPECTED_TOOL_COUNT} tools, found {len(all_tools)} — update EXPECTED_TOOL_COUNT in gen_mcp_inventory.py if a tool was added/removed.", file=sys.stderr)

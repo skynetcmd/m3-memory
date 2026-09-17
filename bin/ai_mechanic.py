@@ -36,7 +36,9 @@ def repair_database(db_path: str):
 
 def check_bridges():
     print("🛠️  Checking MCP Bridges...")
-    bridges = ["custom_tool_bridge.py", "memory_bridge.py", "web_research_bridge.py", "grok_bridge.py", "debug_agent_bridge.py"]
+    # memory_bridge is m3's only MCP server. The four others checked here were
+    # never part of m3 and were deleted 2026-09-17.
+    bridges = ["memory_bridge.py"]
     for bridge in bridges:
         path = os.path.join(BASE_DIR, "bin", bridge)
         if os.path.exists(path):

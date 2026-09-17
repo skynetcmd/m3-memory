@@ -238,7 +238,6 @@ class TestCallersDoNotHardcodeNames:
         [
             ("files_memory/summarize.py", "qwen3-4b-instruct"),
             ("files_memory/extract.py", "qwen3-4b-instruct"),
-            ("debug_agent_bridge.py", "text-embedding-nomic-embed-text-v1.5"),
         ],
     )
     def test_no_model_literal_survives_as_a_default(self, module, literal):

@@ -3,7 +3,7 @@ LLM Failover Module
 
 Cross-machine failover strategy for selecting LLM and embedding models.
 Tries endpoints in order: LM Studio (local + remote), then Ollama.
-Used by custom_tool_bridge.py and memory_bridge.py.
+Used by memory_bridge.py.
 """
 
 import logging

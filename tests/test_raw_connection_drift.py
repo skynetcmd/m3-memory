@@ -165,8 +165,6 @@ _EXEMPT = {
         "query a store. PG has no file to copy.",
 
     # --- Self-test harnesses that must NOT share the app's pool. ---
-    "bin/test_debug_agent.py":
-        "Self-test harness; isolates from the live pool like test_memory_bridge.",
     "bin/test_mcp_proxy.py":
         "Self-test harness for the MCP proxy.",
 
