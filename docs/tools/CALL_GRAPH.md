@@ -30,6 +30,7 @@ graph LR
   chatlog_decay --> m3_sdk
   chatlog_embed_sweeper --> _task_runtime
   chatlog_embed_sweeper --> chatlog_config
+  chatlog_embed_sweeper --> chatlog_core
   chatlog_embed_sweeper --> embed_sweep_lib
   chatlog_embed_sweeper --> embedding_utils
   chatlog_embed_sweeper --> m3_sdk
@@ -61,38 +62,31 @@ graph LR
   curator_apply --> chatlog_decay
   curator_apply --> m3_sdk
   curator_apply --> memory_core
-  custom_tool_bridge --> agent_protocol
-  custom_tool_bridge --> llm_failover
-  custom_tool_bridge --> m3_sdk
-  custom_tool_bridge --> thermal_utils
   dashboard_server --> _task_runtime
   dashboard_server --> chatlog_config
   dashboard_server --> m3_halt
+  dashboard_server --> m3_http_auth
   dashboard_server --> m3_sdk
   dashboard_server --> memory_core
   dashboard_server --> memory_maintenance
-  debug_agent_bridge --> agent_protocol
-  debug_agent_bridge --> embedding_utils
-  debug_agent_bridge --> m3_sdk
-  debug_agent_bridge --> thermal_utils
   distill_procedures --> _task_runtime
   distill_procedures --> m3_sdk
   distill_procedures --> memory_maintenance
-  embed_agent_instructions --> m3_sdk
-  embed_agent_instructions --> memory_bridge
   embed_backfill --> embed_sweep_lib
+  embed_backfill --> m3_sdk
   embed_backfill --> memory_core
   embed_server --> m3_sdk
+  embed_server_inproc --> _task_runtime
   embed_server_inproc --> m3_sdk
   fetch_sovereign_assets --> crypto_provider
   gen_mcp_inventory --> mcp_tool_catalog
+  gen_mcp_inventory --> tool_domains
   gen_tool_manifest --> mcp_tool_catalog
   gen_tool_manifest --> tool_domains
   generate_configs --> chatlog_config
   generate_configs --> m3_memory
   generate_configs --> m3_sdk
   governor_cli --> governor_migration
-  grok_bridge --> m3_sdk
   homecoming --> m3_sdk
   install_os --> m3_memory
   install_schedules --> m3_sdk
@@ -102,7 +96,9 @@ graph LR
   m3_chatlog_backfill_embed --> m3_sdk
   m3_chatlog_backfill_embed --> memory_core
   m3_chatlog_backfill_title --> m3_sdk
+  m3_cognitive_loop --> _task_runtime
   m3_cognitive_loop --> chatlog_config
+  m3_cognitive_loop --> chatlog_embed_sweeper
   m3_cognitive_loop --> chatlog_prune
   m3_cognitive_loop --> consolidate_beliefs
   m3_cognitive_loop --> distill_procedures
@@ -117,6 +113,8 @@ graph LR
   m3_cognitive_loop --> sqlite_pragmas
   m3_cognitive_loop --> sync_all
   m3_cognitive_loop --> weekly_auditor
+  m3_embed_watchdog --> _task_runtime
+  m3_embed_watchdog --> m3_sdk
   m3_enrich --> _task_runtime
   m3_enrich --> auth_utils
   m3_enrich --> enrichment_state
@@ -143,20 +141,27 @@ graph LR
   m3_entities_gliner --> memory_core
   m3_lifecycle_summary --> m3_sdk
   m3_lifecycle_summary --> memory_maintenance
+  m3_loop_watchdog --> _task_runtime
+  m3_loop_watchdog --> m3_embed_watchdog
+  m3_loop_watchdog --> m3_halt
+  m3_loop_watchdog --> m3_sdk
   m3_sdk --> auth_utils
   m3_sdk --> m3_halt
-  mcp_proxy --> custom_tool_bridge
-  mcp_proxy --> debug_agent_bridge
   mcp_proxy --> m3_sdk
   mcp_proxy --> mcp_tool_catalog
   mcp_proxy --> memory_bridge
   mcp_tool_catalog --> m3_sdk
   mcp_tool_catalog --> tool_loader
   measure_tool_tokens --> mcp_proxy
+  measure_tool_tokens --> mcp_tool_catalog
+  measure_tool_tokens --> memory_bridge
   measure_tool_tokens --> tool_domains
+  measure_tool_usage --> mcp_tool_catalog
   memory_bridge --> m3_halt
+  memory_bridge --> m3_http_auth
   memory_bridge --> m3_memory
   memory_bridge --> m3_sdk
+  memory_bridge --> mcp_compat
   memory_bridge --> mcp_tool_catalog
   memory_bridge --> memory_core
   memory_bridge --> tool_domains
@@ -170,6 +175,7 @@ graph LR
   memory_maintenance --> _task_runtime
   memory_maintenance --> agent_protocol
   memory_maintenance --> audit_trail
+  memory_maintenance --> llm_failover
   memory_maintenance --> m3_sdk
   memory_maintenance --> memory_core
   memory_maintenance --> run_reflector
@@ -188,17 +194,20 @@ graph LR
   promote_pipeline --> m3_sdk
   re_embed_all --> m3_sdk
   re_embed_all --> memory_core
+  reembed_space --> _task_runtime
   reembed_space --> sqlite_pragmas
   release_orphan_claims --> m3_sdk
   release_orphan_claims --> memory_core
   run_observer --> agent_protocol
   run_observer --> auth_utils
+  run_observer --> llm_failover
   run_observer --> m3_sdk
   run_observer --> memory_core
   run_observer --> slm_intent
   run_observer --> unified_ai
   run_reflector --> agent_protocol
   run_reflector --> auth_utils
+  run_reflector --> llm_failover
   run_reflector --> m3_sdk
   run_reflector --> memory_core
   run_reflector --> slm_intent
@@ -206,6 +215,7 @@ graph LR
   secret_rotator --> auth_utils
   secret_rotator --> m3_sdk
   session_handoff --> m3_sdk
+  session_handoff --> mcp_compat
   session_handoff --> memory_core
   setup_secret --> auth_utils
   setup_secret --> m3_sdk
@@ -219,9 +229,6 @@ graph LR
   sync_all --> pg_fdw_sync
   test_bulk_parity --> m3_sdk
   test_bulk_parity --> memory_core
-  test_debug_agent --> auth_utils
-  test_debug_agent --> debug_agent_bridge
-  test_debug_agent --> m3_sdk
   test_fips_integrity --> auth_utils
   test_fips_integrity --> crypto_provider
   test_focus_fix --> m3_sdk
@@ -233,9 +240,7 @@ graph LR
   test_memory_bridge --> m3_sdk
   test_memory_bridge --> memory_bridge
   test_memory_bridge --> memory_core
-  test_sqlite_pragmas --> sqlite_pragmas
   thermal_utils --> _task_runtime
-  web_research_bridge --> m3_sdk
   weekly_auditor --> _task_runtime
   weekly_auditor --> m3_sdk
   weekly_auditor --> memory_bridge
@@ -266,6 +271,7 @@ graph LR
   class chatlog_status lib
   class chatlog_status_line lib
   class chatlog_strip_framing_backfill lib
+  class chatlog_timing lib
   class check_control_chars lib
   class check_tool_catalog_drift lib
   class cleanup_logs lib
@@ -275,12 +281,9 @@ graph LR
   class consolidate_beliefs lib
   class crypto_provider lib
   class curator_apply lib
-  class custom_tool_bridge lib
   class dashboard_server lib
-  class debug_agent_bridge lib
   class deep_sync sync
   class distill_procedures lib
-  class embed_agent_instructions sync
   class embed_backfill lib
   class embed_server sync
   class embed_server_inproc lib
@@ -300,7 +303,6 @@ graph LR
   class generate_configs lib
   class governor_cli lib
   class governor_migration lib
-  class grok_bridge lib
   class homecoming lib
   class install_os lib
   class install_schedules cli
@@ -312,6 +314,7 @@ graph LR
   class m3_chatlog_backfill_title lib
   class m3_chatlog_enrich_backfill lib
   class m3_cognitive_loop lib
+  class m3_embed_watchdog lib
   class m3_enrich lib
   class m3_enrich_assign lib
   class m3_enrich_batch lib
@@ -320,12 +323,18 @@ graph LR
   class m3_entities lib
   class m3_entities_gliner lib
   class m3_halt lib
+  class m3_http_auth lib
   class m3_lifecycle_summary lib
+  class m3_loop_watchdog lib
   class m3_memory lib
+  class m3_notification_waiter lib
   class m3_sdk lib
+  class m3_upgrade lib
+  class mcp_compat lib
   class mcp_proxy lib
   class mcp_tool_catalog lib
   class measure_tool_tokens lib
+  class measure_tool_usage lib
   class mem0_scan lib
   class memory_bridge lib
   class memory_core lib
@@ -339,7 +348,6 @@ graph LR
   class migrate_memory cli
   class migrate_pg lib
   class migrate_warehouse_to_schema lib
-  class news_fetcher lib
   class pg_fdw_sync lib
   class pg_setup sync
   class pg_sync sync
@@ -352,6 +360,7 @@ graph LR
   class run_reflector lib
   class run_tests lib
   class scan_repo_v7 lib
+  class search_differential lib
   class secret_rotator sync
   class session_handoff lib
   class setup_hooks lib
@@ -368,15 +377,12 @@ graph LR
   class sync_manifest_versions sync
   class temporal_utils lib
   class test_bulk_parity test
-  class test_debug_agent test
   class test_fips_integrity test
   class test_focus_fix test
   class test_keychain test
-  class test_knowledge test
   class test_mcp_proxy test
   class test_mcp_proxy_unit test
   class test_memory_bridge test
-  class test_sqlite_pragmas test
   class test_unified_router test
   class thermal_utils lib
   class tool_domains lib
@@ -384,14 +390,14 @@ graph LR
   class unified_ai lib
   class validate_env lib
   class version_drift lib
-  class web_research_bridge lib
+  class watch_pr_checks lib
   class weekly_auditor sync
 ```
 
-**Stats:** 134 tools, 231 edges, 145 total nodes.
+**Stats:** 134 tools, 236 edges, 146 total nodes.
 
 ## Notes
 
 - Solid arrows = Python import; dotted `exec` = subprocess launch.
-- Library modules (imported but not themselves tools): `_task_runtime`, `audit_trail`, `crypto_provider`, `governor_migration`, `m3_halt`, `m3_memory`, `pg_fdw_sync`, `sqlite_pragmas`, `tool_domains`, `tool_loader`, `version_drift`.
-- Orphans (no edges to or from other tools in this graph): `ENV_VAR_RECONCILE_REPORT`, `README`, `ai-audit`, `ai-audit_sh`, `auto_route`, `check_control_chars`, `check_tool_catalog_drift`, `cleanup_logs`, `cleanup_logs_sh`, `deep_sync`, `entity_extraction`, `files_memory`, `gen_capability_matrix`, `gen_download_badges`, `gen_features_json`, `gen_star_history`, `gen_wiki`, `install_wolfssl`, `inventory_graph`, `m3_autoenrich`, `m3_chatlog_enrich_backfill`, `m3_enrich_batch_parallel`, `m3_enrich_report`, `mem0_scan`, `memory_embed`, `memory_search`, `metadata_filler`, `migrate_warehouse_to_schema`, `news_fetcher`, `pg_sync_sh`, `run_tests`, `scan_repo_v7`, `setup_hooks`, `start_mcp_proxy`, `start_mcp_proxy_sh`, `statusline-command`, `statusline-command_sh`, `sync_manifest_versions`, `temporal_utils`, `test_knowledge`, `test_unified_router`, `validate_env`. Either stdlib-only or they shell out without naming a sibling `bin/*.py`.
+- Library modules (imported but not themselves tools): `_task_runtime`, `audit_trail`, `crypto_provider`, `governor_migration`, `m3_halt`, `m3_http_auth`, `m3_memory`, `pg_fdw_sync`, `sqlite_pragmas`, `tool_domains`, `tool_loader`, `version_drift`.
+- Orphans (no edges to or from other tools in this graph): `ENV_VAR_RECONCILE_REPORT`, `README`, `ai-audit`, `ai-audit_sh`, `auto_route`, `chatlog_timing`, `check_control_chars`, `check_tool_catalog_drift`, `cleanup_logs`, `cleanup_logs_sh`, `deep_sync`, `entity_extraction`, `files_memory`, `gen_capability_matrix`, `gen_download_badges`, `gen_features_json`, `gen_star_history`, `gen_wiki`, `install_wolfssl`, `inventory_graph`, `m3_autoenrich`, `m3_chatlog_enrich_backfill`, `m3_enrich_batch_parallel`, `m3_enrich_report`, `m3_notification_waiter`, `m3_upgrade`, `mem0_scan`, `memory_embed`, `memory_search`, `metadata_filler`, `migrate_warehouse_to_schema`, `pg_sync_sh`, `run_tests`, `scan_repo_v7`, `search_differential`, `setup_hooks`, `start_mcp_proxy`, `start_mcp_proxy_sh`, `statusline-command`, `statusline-command_sh`, `sync_manifest_versions`, `temporal_utils`, `test_unified_router`, `validate_env`, `watch_pr_checks`. Either stdlib-only or they shell out without naming a sibling `bin/*.py`.
