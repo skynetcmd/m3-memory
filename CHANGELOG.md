@@ -19,6 +19,8 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.9.17.0] — 2026-09-17 — a lighter startup surface
+
 ### Changed
 
 - **Startup registers 10 tool schemas instead of 20** — about 2% of a 200K
