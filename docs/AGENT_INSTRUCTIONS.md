@@ -1,6 +1,6 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Agent Instructions
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory — Agent Instructions
 
-> **For AI agents only.** This file tells your agent how to use M3 Memory effectively.
+> **For AI agents only.** This file tells your agent how to use m3 Memory effectively.
 > For human-readable docs, see [README.md](../README.md), [QUICKSTART.md](./QUICKSTART.md), or [CORE_FEATURES.md](./CORE_FEATURES.md).
 
 > For technical implementation details, see [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md).
@@ -19,7 +19,9 @@ All persistent state goes through the `memory` MCP server: `memory_search` befor
 
 **Why:** Built-in flat-file memory is per-host and invisible to other agents on the fleet. m3-memory is the shared, contradiction-aware, bitemporal store that every participating agent reads from — using two systems in parallel fragments context and defeats the point of the project.
 
-**If the m3-memory MCP server is not registered in your client**, stop and tell the user. Do not fall back to a built-in memory system silently. Registration steps for each client (Claude Code, Gemini CLI, Aider, OpenCode, etc.) are in [QUICKSTART.md](./QUICKSTART.md). Quick fix for Claude Code: `claude mcp add --scope user memory m3` (the `--scope user` flag is required — without it the MCP only activates in the directory where the command was run, since `claude mcp add` defaults to `local` scope).
+**If the m3-memory MCP server is not registered in your client**, stop and tell the user. Do not fall back to a built-in memory system silently.
+
+Distinguish that from a server that is registered but momentarily **unreachable** — a dropped MCP session is not an outage. Tell the user and ask them to reconnect the m3 MCP server in their client (`/mcp` in Claude Code); only the client can respawn a stdio server. Then check `m3 --version`: if the CLI answers, use it to keep working in the meantime (see "If the MCP server is down, use the CLI" below). Only when the CLI fails too is m3 genuinely down — and even then the answer is to fix it, never to start writing flat files. Registration steps for each client (Claude Code, Gemini CLI, Aider, OpenCode, etc.) are in [QUICKSTART.md](./QUICKSTART.md). Quick fix for Claude Code: `claude mcp add --scope user memory m3` (the `--scope user` flag is required — without it the MCP only activates in the directory where the command was run, since `claude mcp add` defaults to `local` scope).
 
 ## 🚨 Silent Failure Detection — Mandatory Session Start Check
 
@@ -39,11 +41,28 @@ All persistent state goes through the `memory` MCP server: `memory_search` befor
 > process never restarted; only the client's view of it lapsed.
 
 1. **Verify MCP tools are reachable.** If `memory_search`, `chatlog_search`, or
-   equivalent tools return errors or are absent, **say so** — you cannot
-   search or write memory until it returns. But say only that:
-   > "m3's MCP tools are unreachable, so I can't search or write memory right
-   > now. Chatlog capture is unaffected (it writes to the DB directly).
-   > Reconnect with `/mcp`."
+   equivalent tools return errors or are absent, **tell the user immediately and
+   ask them to reconnect** — only they can do it. Reconnecting is the fix; the
+   CLI is how you keep working until they do.
+   > "m3's MCP tools are unreachable — please reconnect the m3 MCP server in
+   > your client (`/mcp` in Claude Code). Meanwhile I'll use the `m3` CLI, which
+   > reaches the same database, so nothing is blocked. Chatlog capture is
+   > unaffected either way: it writes to the DB directly, not through this
+   > connection."
+
+   **Why the user has to do it:** under stdio the *client* spawns the server and
+   holds the pipe, so a client-side teardown kills it and only the client can
+   respawn it. No agent-side retry can bring it back — `/mcp` is a one-keystroke,
+   idempotent fix that cannot lose data (the bridge is a stateless adapter in
+   front of the DB), so asking costs the user almost nothing. **Do not silently
+   run the whole session on the CLI without mentioning it**: the MCP surface is
+   the one the user configured and expects, and staying quiet hides a broken
+   client from the person who can repair it.
+
+   ⚠ Do **not** say you cannot search or write memory — that is false while the
+   CLI works, and it leads agents to abandon memory or fall back to flat files
+   for an outage that isn't one. Memory is genuinely unavailable only when
+   **both** routes fail; `m3 --version` tells you which case you are in.
    A **transient** drop that reconnects immediately is worth one line, not an
    alarm. If it recurs, the usual cause is a long-running tool call starving
    the transport, not m3 — check whether a build or test run was in flight.
@@ -166,7 +185,7 @@ the hook and CI both call it, so the logic can never fork.
 
 ## 🧠 Core Behavioral Rules
 
-You have full access to **M3 Memory** — a persistent, local-first agentic memory layer via MCP tools. This gives you long-term continuity across sessions, projects, and conversations.
+You have full access to **m3 Memory** — a persistent, local-first agentic memory layer via MCP tools. This gives you long-term continuity across sessions, projects, and conversations.
 
 ### 1. Search First
 Before answering any question involving project details, past decisions, user preferences, code patterns, APIs, requirements, or facts you might have seen before:
@@ -180,14 +199,14 @@ Be concise yet self-contained. Include good tags and categories when possible.
 ### 3. Update Instead of Duplicating
 If information changes or conflicts with existing memory:
 → Use `memory_update` (or `memory_write` with clear context).
-M3 automatically detects contradictions, creates superseding relationships, and preserves history via bitemporal versioning.
+m3 automatically detects contradictions, creates superseding relationships, and preserves history via bitemporal versioning.
 
 ### 4. Leverage the Knowledge Graph
 When you retrieve memories, explore connections using `memory_graph` (1–3 hop traversal with the 9 supported relationship types).
 
-### 5. Treat M3 Memory as Your Long-Term Brain
+### 5. Treat m3 Memory as Your Long-Term Brain
 - Use it relentlessly for continuity.
-- Let M3 handle automatic deduplication, decay, summarization, and self-maintenance.
+- Let m3 handle automatic deduplication, decay, summarization, and self-maintenance.
 - Everything stays 100% local and private.
 
 ### 6. Review the Refresh Queue Periodically
@@ -221,7 +240,7 @@ every memory. Free-text `memory_search` is still right for thematic or
 fuzzy queries; entity tools are right for "who/what/where" lookups.
 
 ### 8. Collaborate with the Cognitive Loop
-M3 includes an **Autonomous Cognitive Loop** (`m3_cognitive_loop.py`) that
+m3 includes an **Autonomous Cognitive Loop** (`m3_cognitive_loop.py`) that
 runs in the background to refine facts, resolve contradictions, and link
 entities.
 
@@ -425,11 +444,68 @@ args → `m3_index` first, then `m3_call`**; **about to use many tools from one
 domain → `tools_load_domain`**. Destructive tools still require
 `MCP_PROXY_ALLOW_DESTRUCTIVE=1` whether reached directly or via `m3_call`.
 
+### If the MCP server is down, use the CLI — it is not a degraded mode
+
+**An MCP disconnect does not mean m3 is unavailable.** The `m3` CLI and the MCP
+server are two front doors to the *same database*, so everything you could do
+over MCP you can do from a shell:
+
+```bash
+m3 memory memory_search --query "..." --k 5
+m3 memory memory_write --content "..." --type belief --title "..."
+m3 chatlog status
+m3 <group> --help          # exact argument names for that group
+```
+
+Every tool in the catalog is reachable both ways. Verified: 111 of the 115
+catalog tools have a CLI subcommand; the only four without one are `m3_call`,
+`m3_index`, `tools_list_domains` and `tools_load_domain` — the MCP meta-tools,
+which exist *to work around MCP startup gating* and have nothing to do on a CLI
+where no tool is gated in the first place.
+
+Two things to know:
+
+- **Argument names differ slightly** from the MCP schema (`--k`, not `--limit`).
+  Run `m3 <group> --help` rather than guessing.
+- **Group names are not identical to domain names** — chatlog tools live under
+  `m3 chat`, for instance. `m3 --help` lists the groups.
+
+**The CLI is a stopgap, not the destination.** When the `mcp__m3_memory__*` tools
+go missing, the order is:
+
+1. **Tell the user and ask them to reconnect** the m3 MCP server in their
+   client. Only the client can respawn a stdio server, so this is not something
+   you can fix from inside the session.
+2. **Use the CLI meanwhile** so nothing is blocked.
+3. **Return to the MCP tools** once they are back.
+
+**How the user reconnects is their client's business, not m3's.** In Claude Code,
+Gemini CLI and Antigravity it is `/mcp`; elsewhere it is a button in an MCP panel,
+a CLI subcommand, or an app restart. m3 deliberately does not enumerate this:
+there are a dozen clients, each free to change its UI between versions, and a
+stale instruction here would be worse than none.
+
+So ask for the outcome, not a keystroke — "please reconnect the m3 MCP server in
+your client" — and name `/mcp` only if you know that is what this client uses. If
+you are unsure, say so and point at the client's own docs rather than guessing.
+
+Do **not** report memory as unreachable (it isn't), do **not** fall back to flat
+files, and equally do **not** quietly spend the whole session on the CLI without
+saying so — that hides a broken client from the only person who can repair it,
+and the user configured the MCP surface expecting to use it. Memory is genuinely
+unavailable only when **both** routes fail; `m3 --version` is the one-second
+check that tells you which situation you are in.
+
+⚠ This is also the right route for **programmatic** use. Scripts and code should
+call the CLI (or import the impl) rather than routing through `m3_call`: there is
+no token budget to economise on outside an MCP session and no gating to work
+around, so the dispatcher buys nothing there.
+
 ---
 
 ## 👥 Multi-Agent / Mixed-Fleet Collaboration
 
-M3 is provider-agnostic. A single session can include Claude agents, Gemini
+m3 is provider-agnostic. A single session can include Claude agents, Gemini
 agents, Aider or other local-LLM agents, and anything else that speaks MCP —
 they all share one memory store and coordinate through the same orchestration
 primitives. Nothing in the API is tied to a specific model family.
@@ -517,7 +593,7 @@ Practical rules:
 
 ### Chat Log System
 
-M3 automatically captures chat turns from host agents (Claude Code, Gemini CLI, Aider, OpenCode) into a dedicated high-fidelity store.
+m3 automatically captures chat turns from host agents (Claude Code, Gemini CLI, Aider, OpenCode) into a dedicated high-fidelity store.
 
 | Tool | Use |
 |------|-----|
@@ -535,7 +611,7 @@ When running through `bin/mcp_proxy.py`, additional tools are available for syst
 |------|-----|
 | `log_activity`, `query_decisions` | Protocol-mandated activity logging and decision lookups. |
 | `update_focus`, `retire_focus` | Protocol-mandated trajectory tracking. |
-| `check_thermal_load` | Hardware pressure check (M3 Max optimization). |
+| `check_thermal_load` | Hardware pressure check (m3 Max optimization). |
 | `debug_analyze`, `debug_bisect`, `debug_trace` | Advanced root-cause analysis and automated debugging. |
 | `debug_correlate`, `debug_history`, `debug_report` | Log correlation and debugging reporting. |
 
@@ -590,7 +666,7 @@ See [M3_HEALTH_FAQ.md](M3_HEALTH_FAQ.md) for how to read and act on `/m3:health`
 
 ## SQLite WAL discipline
 
-All M3 databases run in WAL (Write-Ahead Log) mode. The WAL file (`<db>-wal`)
+All m3 databases run in WAL (Write-Ahead Log) mode. The WAL file (`<db>-wal`)
 and shared-memory file (`<db>-shm`) are **part of the live database**; they
 must never be deleted manually.
 

@@ -1,4 +1,4 @@
-# M3-v3: Governor, sqlite-vec, and Ingestion Oxidation
+# m3-v3: Governor, sqlite-vec, and Ingestion Oxidation
 
 This document explains a set of Milestone-4/5 changes to m3-memory and what they
 mean for how the system behaves. Three are user-visible capabilities (an adaptive
@@ -147,7 +147,7 @@ optimization (the governor runs once per decision, not per row).
 m3-memory's semantic search already detects and uses the
 [`sqlite-vec`](https://github.com/asg017/sqlite-vec) extension when it is present
 (`bin/sqlite_pragmas.py` loads it; `bin/memory/search.py` has a `vec0` query
-path), falling back to the Python/NumPy cosine path when it is absent. The M3-v3
+path), falling back to the Python/NumPy cosine path when it is absent. The m3-v3
 change makes this a **declared, installable capability**:
 
 ```

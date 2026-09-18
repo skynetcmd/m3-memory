@@ -1,6 +1,6 @@
-# Extending M3 Memory
+# Extending m3 Memory
 
-M3 has **two orthogonal extension seams**. Most of the codebase — the `*_impl`
+m3 has **two orthogonal extension seams**. Most of the codebase — the `*_impl`
 business logic (write, search, entity resolution, GDPR, …) — is *shared* between
 them and is single-sourced: you extend at a seam, you do not fork the core.
 

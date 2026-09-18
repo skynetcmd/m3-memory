@@ -1,6 +1,6 @@
 # Decisions & Architecture Decision Records
 
-This directory is the home for **design decisions** in M3 core. It holds two kinds of file,
+This directory is the home for **design decisions** in m3 core. It holds two kinds of file,
 both first-class:
 
 1. **ADR files** — `ADR-NNNN-kebab-title.md`. Formal Architecture Decision Records: a

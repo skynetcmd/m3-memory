@@ -1,6 +1,6 @@
-# Contributing to M3 Memory
+# Contributing to m3 Memory
 
-Thank you for your interest in contributing! M3 Memory is a local-first agentic memory layer for MCP agents. This guide covers how to get set up, run the tests, and submit changes.
+Thank you for your interest in contributing! m3 Memory is a local-first agentic memory layer for MCP agents. This guide covers how to get set up, run the tests, and submit changes.
 
 > 💡 Hit a "wait, how do I…?" while working on the code? Check the
 > **[FAQ for Developers](FAQ_FOR_DEVELOPERS.md)** — a thin index into the deep docs
@@ -132,7 +132,7 @@ Open an issue on GitHub with:
 
 ## Database hygiene
 
-All M3 databases run in WAL (Write-Ahead Log) mode. The WAL file (`<db>-wal`)
+All m3 databases run in WAL (Write-Ahead Log) mode. The WAL file (`<db>-wal`)
 and shared-memory file (`<db>-shm`) are **part of the live database** and must
 never be deleted manually.
 
@@ -157,4 +157,4 @@ never be deleted manually.
 
 ---
 
-*M3 Memory: the industrial-strength foundation for agents that remember.*
+*m3 Memory: the industrial-strength foundation for agents that remember.*

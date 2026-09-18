@@ -1,9 +1,9 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory: Troubleshooting
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory: Troubleshooting
 
 ## Installation & Upgrade Issues
 
 ### "I ran `pipx upgrade m3-memory` and nothing changed"
-- **Cause**: M3 was installed via standard `pip`, `pip --user`, or virtualenv rather than `pipx`. `pipx upgrade` exits with status 0 without modifying environments it does not manage.
+- **Cause**: m3 was installed via standard `pip`, `pip --user`, or virtualenv rather than `pipx`. `pipx upgrade` exits with status 0 without modifying environments it does not manage.
 - **Solution**: Run `m3 upgrade` (or `m3 upgrade --dry-run` to inspect first). It detects the active installation method (`pip`, `pipx`, `pip --user`, or a host plugin) and executes the correct upgrade steps, identically on Windows, macOS and Linux. A host-plugin install is **refused** rather than guessed at, pointing you to the host's own update flow.
 - **From a git checkout** you can also invoke it directly: `python bin/m3_upgrade.py`.
 
@@ -13,14 +13,14 @@
 
 ### "database is locked" (SQLite)
 - **Cause**: Multiple agents writing simultaneously.
-- **Solution**: M3 uses WAL mode and busy timeouts. If the error persists, check for orphaned Python processes:
+- **Solution**: m3 uses WAL mode and busy timeouts. If the error persists, check for orphaned Python processes:
   - `ps aux | grep python` (Linux/Mac)
   - `tasklist | findstr python` (Windows)
 
 ### PostgreSQL sync failures
 - **Check**: Verify `M3_CDW_PG_URL` is set correctly (environment variable or OS keyring). `PG_URL` still works but is deprecated. If your *local* store is PostgreSQL too, `M3_PRIMARY_PG_URL` must point at the primary, not the warehouse — see [SYNC_PG_TO_PG.md](SYNC_PG_TO_PG.md).
 - **Check**: Confirm the PostgreSQL server is reachable from this machine.
-- **Note**: Sync is optional. M3 Memory works fully without PostgreSQL.
+- **Note**: Sync is optional. m3 Memory works fully without PostgreSQL.
 
 ---
 

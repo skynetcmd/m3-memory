@@ -1,8 +1,8 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Multi-Agent Orchestration
 
-M3 Memory provides the persistent memory and coordination substrate for multi-agent workflows. Agents share knowledge through scoped memory, pass context through handoffs and inboxes, and coordinate work through tasks, notifications, and a recursive task tree.
+m3 Memory provides the persistent memory and coordination substrate for multi-agent workflows. Agents share knowledge through scoped memory, pass context through handoffs and inboxes, and coordinate work through tasks, notifications, and a recursive task tree.
 
-M3 Memory is not an agent runtime — it does not schedule or execute agents. It is the memory layer underneath your orchestrator, whether that is the bundled `m3-team` CLI, a LangGraph pipeline, or your own polling loop.
+m3 Memory is not an agent runtime — it does not schedule or execute agents. It is the memory layer underneath your orchestrator, whether that is the bundled `m3-team` CLI, a LangGraph pipeline, or your own polling loop.
 
 > **Looking for a wire-up guide for Claude Code + Gemini CLI + OpenCode sharing one m3-memory store?** See the practical setup notes — subscription vs API token tradeoffs, unified tag schema across agents, per-agent install steps — at [Multi-Agent Subscription Models with m3-Memory](./multi_agent_subscription_models.htm) (saved page; covers the day-to-day workflow underneath the primitives below).
 
@@ -37,7 +37,7 @@ All scopes support the same `memory_search`, `memory_write`, and `memory_update`
 
 ### 🔐 Governance / Enforcement
 
-M3 supports **true SQL-layer agent isolation** — access control injected into the query itself (`WHERE (scope != 'agent' OR agent_id = ?)`), never a post-fetch filter that can leak. It's opt-in, so trusted single-operator setups keep full visibility by default and gain a hard boundary the moment they need one.
+m3 supports **true SQL-layer agent isolation** — access control injected into the query itself (`WHERE (scope != 'agent' OR agent_id = ?)`), never a post-fetch filter that can leak. It's opt-in, so trusted single-operator setups keep full visibility by default and gain a hard boundary the moment they need one.
 
 By default, scope filtering is **caller-applied / advisory**: a search that supplies no `scope` or agent filter sees every agent's memories, including other agents' private `scope="agent"` notes. This is intentional — it fits a trusted, single-operator multi-agent setup where the operator (or the orchestrator itself) is allowed full visibility, and it keeps `memory_search` byte-identical to prior behavior for every existing caller.
 
@@ -167,7 +167,7 @@ All agents contribute facts and observations to `scope="org"` asynchronously, wi
 
 #### Concurrency & scale
 
-Concurrent writes from multiple agents do **not** fail on lock contention. Every SQLite connection runs in **WAL mode** (concurrent readers alongside a writer) with a **30-second `busy_timeout`**, a connection pool, and a write-path retry — so simultaneous writers serialize and wait rather than erroring. WAL is verified at init; M3 raises rather than silently running in a slower journal mode.
+Concurrent writes from multiple agents do **not** fail on lock contention. Every SQLite connection runs in **WAL mode** (concurrent readers alongside a writer) with a **30-second `busy_timeout`**, a connection pool, and a write-path retry — so simultaneous writers serialize and wait rather than erroring. WAL is verified at init; m3 raises rather than silently running in a slower journal mode.
 
 For **high-concurrency fleets** where many agents write to one shared pool continuously, there are two paths:
 
@@ -216,7 +216,7 @@ See [`examples/multi-agent-team/README.md`](../examples/multi-agent-team/README.
 
 **Scope is the access control.** Private scratch work stays in `scope="agent"`. Shared decisions go to `scope="org"`. User data goes to `scope="user"` with GDPR primitives (`gdpr_export`, `gdpr_forget`) attached.
 
-**The orchestrator is pluggable.** M3 Memory exposes primitives, not opinions about scheduling. The bundled `m3-team` is one orchestrator; you can build your own with the same tool catalog.
+**The orchestrator is pluggable.** m3 Memory exposes primitives, not opinions about scheduling. The bundled `m3-team` is one orchestrator; you can build your own with the same tool catalog.
 
 ---
 

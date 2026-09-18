@@ -1,4 +1,4 @@
-# M3 Health FAQ — Understanding `/m3:health` and `m3 doctor`
+# m3 Health FAQ — Understanding `/m3:health` and `m3 doctor`
 
 ## What is `/m3:health`?
 
@@ -18,7 +18,7 @@ Output is the doctor's diagnostic text plus one interpretation line at the end. 
 ### Package version and config file
 
 ```
-m3-memory package version: 2026.4.24.12
+m3-memory package version: 2026.9.16.0
 config file:               <home>/.m3-memory/config.json
   (no config - system not installed via `m3 setup`)
 ```

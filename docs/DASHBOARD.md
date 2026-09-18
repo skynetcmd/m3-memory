@@ -1,6 +1,6 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Web Dashboard
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Web Dashboard
 
-A built-in, local web control panel for M3 — browse memory, explore the
+A built-in, local web control panel for m3 — browse memory, explore the
 interactive knowledge graph, audit conflicts, and watch system health and load.
 It is **backend-agnostic** (works on SQLite and PostgreSQL, and any future
 storage backend) and runs as a **windowless background service** on
@@ -92,7 +92,7 @@ A curated, card-based view of memories and entities for browsing and curation.
 
 ### Conflict & Audit Log
 The memory history timeline: overrides, resolutions, contradictions, and
-soft/hard-delete — plus GDPR export/forget. All actions go through M3's
+soft/hard-delete — plus GDPR export/forget. All actions go through m3's
 backend-agnostic core, so they behave identically on any storage backend.
 
 ### System Health
@@ -136,7 +136,7 @@ case. An ⓘ info box in the UI documents this inline.
 
 ## Backends
 
-The dashboard reads and writes through M3's storage-backend seam, so it works
+The dashboard reads and writes through m3's storage-backend seam, so it works
 unchanged on **SQLite** (the default) and **PostgreSQL** (`M3_DB_BACKEND=postgres`).
 A future SQL backend (e.g. MariaDB) is picked up automatically — the dashboard
 never hardcodes an engine.

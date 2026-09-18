@@ -1,4 +1,4 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory: Architecture
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory: Architecture
 
 > Human-facing system design overview. For implementation specifics (schema, sync protocol, search internals), see [TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md).
 
@@ -6,7 +6,7 @@
 
 ## 👁️ System Overview
 
-M3 Memory is a local-first persistent memory system for MCP agents. An agent calls MCP tools to write, search, link, and manage memories. The primary store is pluggable — a local SQLite file by default, or PostgreSQL as a first-class primary backend (`M3_DB_BACKEND=postgres`; see Storage Hierarchy). A separate optional PostgreSQL sync layer enables cross-device search.
+m3 Memory is a local-first persistent memory system for MCP agents. An agent calls MCP tools to write, search, link, and manage memories. The primary store is pluggable — a local SQLite file by default, or PostgreSQL as a first-class primary backend (`M3_DB_BACKEND=postgres`; see Storage Hierarchy). A separate optional PostgreSQL sync layer enables cross-device search.
 
 ```
 Agent (Claude Code / Gemini CLI / Aider)
@@ -95,7 +95,7 @@ which is not optional there but the *only* supported path (see
 
 ## 🧩 Extension Seams
 
-M3 has **two orthogonal extension seams**. The shared `*_impl` business logic
+m3 has **two orthogonal extension seams**. The shared `*_impl` business logic
 (write, search, entity resolution, GDPR, …) is single-sourced between them — you
 extend at a seam, you don't fork the core. Full recipes in [EXTENDING.md](EXTENDING.md).
 
@@ -506,7 +506,7 @@ via the `curate_memory_apply` / `curate_chatlog_apply` MCP tools.
 
 ## 🧠 Intelligence Features
 
-M3 uses a local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works.
+m3 uses a local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works.
 
 - **Auto-classification** — pass `type="auto"` and the LLM categorizes the memory into one of 30+ types
 - **Conversation summarization** — compress long threads into key points

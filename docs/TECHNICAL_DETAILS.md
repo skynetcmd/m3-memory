@@ -11,7 +11,7 @@
 
 ## 📡 LLM Server Requirements
 
-M3 Memory is **server-agnostic**. It communicates with local LLMs via the OpenAI-compatible API. Any server that exposes these two endpoints will work:
+m3 Memory is **server-agnostic**. It communicates with local LLMs via the OpenAI-compatible API. Any server that exposes these two endpoints will work:
 
 | Endpoint | Used For |
 |----------|----------|
@@ -411,7 +411,7 @@ Seeds 20 diverse test memories, runs 10 labeled queries, cleans up after. Gracef
 
 ## 🛠️ Developer Tooling
 
-### M3 SDK (`bin/m3_sdk.py`)
+### m3 SDK (`bin/m3_sdk.py`)
 
 - `M3Context` — manages SQLite connection pool, PostgreSQL connections (circuit breaker, 2-attempt retry, 10s connect timeout), and secret resolution
 - `resolve_venv_python()` — cross-platform venv Python path resolution (Windows/macOS/Linux)

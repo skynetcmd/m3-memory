@@ -759,19 +759,6 @@
     {
       "args": [
         {
-          "name": "timeout",
-          "required": false,
-          "type": "number"
-        }
-      ],
-      "destructive": false,
-      "domain": "chatlog",
-      "name": "chatlog_status",
-      "summary": "One-call health summary of the chat log subsystem: mode, DB paths, row counts, queue depth, spill f\u2026"
-    },
-    {
-      "args": [
-        {
           "name": "content",
           "required": true,
           "type": "string"
@@ -1035,8 +1022,39 @@
       ],
       "destructive": false,
       "domain": "diagnostics",
+      "name": "chatlog_status",
+      "summary": "One-call health summary of the chat log subsystem: mode, DB paths, row counts, queue depth, spill f\u2026"
+    },
+    {
+      "args": [
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "destructive": false,
+      "domain": "diagnostics",
       "name": "embedder_status",
       "summary": "Check the status of the local sovereign embedder server (default port 8082, override via M3_EMBED_F\u2026"
+    },
+    {
+      "args": [
+        {
+          "name": "rebuild",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "destructive": false,
+      "domain": "diagnostics",
+      "name": "files_health",
+      "summary": "DB integrity + FTS5 sync check."
     },
     {
       "args": [
@@ -1562,24 +1580,6 @@
       "domain": "files",
       "name": "files_get",
       "summary": "Fetch one record by UUID."
-    },
-    {
-      "args": [
-        {
-          "name": "rebuild",
-          "required": false,
-          "type": "boolean"
-        },
-        {
-          "name": "timeout",
-          "required": false,
-          "type": "number"
-        }
-      ],
-      "destructive": false,
-      "domain": "files",
-      "name": "files_health",
-      "summary": "DB integrity + FTS5 sync check."
     },
     {
       "args": [

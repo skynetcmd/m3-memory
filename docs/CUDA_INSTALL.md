@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Installing the CUDA-accelerated Rust core
 
-M3's native core (`m3-core-rs`) — installed by default, with a
+m3's native core (`m3-core-rs`) — installed by default, with a
 results-equivalent pure-Python fallback — ships as prebuilt wheels, one per
 `(os, backend)` pair. The lightweight backends (CPU, Vulkan, Metal) are on
 **PyPI**. The **CUDA** wheels are currently **too large for PyPI** — they bundle
@@ -32,7 +32,7 @@ environment is restricted to a PyPI index and can't reach GitHub automatically.
 > time" wheel that could break on your machine. GPU users get the most complete,
 > most reliable build — it just installs from a different place.
 
-> M3 also works **without** the native core at all — it falls back to a
+> m3 also works **without** the native core at all — it falls back to a
 > pure-Python path. CUDA only accelerates the in-process embedder and a few hot
 > paths. If installing CUDA is inconvenient, you lose speed, not function.
 
@@ -140,12 +140,12 @@ exception request and still tops out well below a ~1 GB wheel). The CUDA wheels
 statically bundle the CUDA runtime libraries to stay self-contained, which puts
 them at ~256 MB (Windows) to ~970 MB (Linux) — an order of magnitude over the
 limit. Rather than ship a fragile "download the runtime separately at import
-time" hack, M3 keeps the fully-bundled CUDA wheels on the GitHub Release, where
+time" hack, m3 keeps the fully-bundled CUDA wheels on the GitHub Release, where
 there's no size limit — every backend, large or small, ships there — and also
 mirrors the smaller backends to PyPI. This is a
 deliberate choice to give GPU users the **most complete and most reliable**
 build — a self-contained wheel that just works — not a sign that CUDA is an
-afterthought. It's the highest-performance backend M3 ships; it simply lives
+afterthought. It's the highest-performance backend m3 ships; it simply lives
 where a ~1 GB artifact is allowed to.
 
 The release pipeline still *attempts* the CUDA PyPI upload on every release —

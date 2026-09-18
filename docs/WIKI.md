@@ -1,4 +1,4 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Wiki — an auto-generated knowledge base from your memories
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Wiki — an auto-generated knowledge base from your memories
 
 `m3 wiki generate` compiles your **canonical memories** and your **indexed files**
 into a browsable, interlinked Markdown vault. It is a *projection*, not a new
@@ -35,7 +35,7 @@ Then open that folder in Obsidian (**Open folder as vault**).
 
 ## What gets included
 
-A memory becomes a wiki entry when it is **canonical** — M3's three overlapping
+A memory becomes a wiki entry when it is **canonical** — m3's three overlapping
 signals for "this matters":
 
 - **pinned** — explicitly marked as canon (never aged out)
@@ -50,12 +50,12 @@ m3 wiki generate --importance-threshold 0.8
 ```
 
 Your **files corpus** contributes a second layer: each indexed document becomes a
-`sources/` page (from its summary), and — via M3's promotion bridge — a memory can
+`sources/` page (from its summary), and — via m3's promotion bridge — a memory can
 link *down* to the exact file a fact came from, while a source page links *up* to
 every memory it fed. Skip the files layer with `--no-files`.
 
-> **Backend note.** The wiki's *memory* layer works on both M3 backends (SQLite and
-> PostgreSQL) — it reads through M3's core database seam. The files corpus
+> **Backend note.** The wiki's *memory* layer works on both m3 backends (SQLite and
+> PostgreSQL) — it reads through m3's core database seam. The files corpus
 > is currently a local **SQLite** sidecar (`files_database.db`) on every backend, so
 > the `sources/` pages are read from SQLite even on a PostgreSQL deployment.
 > PostgreSQL support for the files corpus is planned (see the CHANGELOG). If you run
@@ -66,7 +66,7 @@ every memory it fed. Skip the files layer with `--no-files`.
 ## How pages are organized
 
 - **Topics** (`topics/*.md`) — related memories are clustered into one page per
-  topic. Clustering uses M3's relationship graph *and* shared extracted entities,
+  topic. Clustering uses m3's relationship graph *and* shared extracted entities,
   so memories that talk about the same thing land together even without a
   hand-authored link. Each page carries real frontmatter (`confidence`,
   `valid_from`, the source `memory_ids`), a member list, an **Evidence** section
@@ -81,13 +81,13 @@ every memory it fed. Skip the files layer with `--no-files`.
   that disagree are kept on one page and reported here, never silently dropped).
 
 Superseded and contradicted memories are shown as history, not hidden — the wiki
-reflects what M3 actually knows, including where it changed its mind.
+reflects what m3 actually knows, including where it changed its mind.
 
 ---
 
 ## Prose summaries (optional)
 
-By default a topic page lists its member memories. With `--synthesize`, M3 asks a
+By default a topic page lists its member memories. With `--synthesize`, m3 asks a
 **local chat model** to write a short prose lede at the top of each topic:
 
 ```bash
@@ -188,7 +188,7 @@ clusters the gate would demote, so you can calibrate before a real run.
 ## Keeping it fresh
 
 The generator is **deterministic**: the same memories produce a byte-identical
-vault, so a diff always reflects a real change in what M3 knows. Check whether the
+vault, so a diff always reflects a real change in what m3 knows. Check whether the
 on-disk vault is stale (useful in a scheduled job):
 
 ```bash

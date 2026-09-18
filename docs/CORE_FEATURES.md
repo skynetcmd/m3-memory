@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
-> 100+ MCP tools, lazy-loaded to just ~1.8% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20 on LongMemEval-S). 4,903 collected tests (3,377 test functions) across 369 files. Pluggable storage backend (SQLite default / PostgreSQL primary). Framework adapters for LangChain, CrewAI, and PydanticAI. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Multi-agent orchestration. Zero cloud dependency.
+> 100+ MCP tools, lazy-loaded to just ~3.1% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20 on LongMemEval-S). 4,903 collected tests (3,377 test functions) across 369 files. Pluggable storage backend (SQLite default / PostgreSQL primary). Framework adapters for LangChain, CrewAI, and PydanticAI. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Multi-agent orchestration. Zero cloud dependency.
 
 For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
@@ -9,10 +9,10 @@ For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.
 ## 👁️ Overview
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/overview_diagram.svg" alt="M3 Memory architecture overview" width="100%">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/overview_diagram.svg" alt="m3 Memory architecture overview" width="100%">
 </p>
 
-M3 Memory combines persistent storage, hybrid search, contradiction detection, knowledge graph, and cross-device sync in a single local-first package. It runs entirely on your hardware — no cloud dependency, no API costs.
+m3 Memory combines persistent storage, hybrid search, contradiction detection, knowledge graph, and cross-device sync in a single local-first package. It runs entirely on your hardware — no cloud dependency, no API costs.
 
 **How this plays out in practice:** You tell your agent "Our API runs on port 8080." A week later, you correct it: "We moved the API to port 9000." The next time you ask "What port is the API on?" — the agent responds: "Port 9000. Updated from 8080 — change recorded March 12th." The contradiction was detected and resolved automatically. The full history is preserved. You did nothing.
 
@@ -22,25 +22,25 @@ M3 Memory combines persistent storage, hybrid search, contradiction detection, k
 
 ### 🔍 Intelligent Search
 
-Memory is only useful if you can find what you need. M3 uses a **three-stage hybrid pipeline**:
+Memory is only useful if you can find what you need. m3 uses a **three-stage hybrid pipeline**:
 
 - **Stage 1 — Keyword (FTS5):** BM25-ranked full-text search with injection-safe query sanitization
 - **Stage 2 — Semantic (Vector):** Cosine similarity against 1024-dim embeddings via numpy batch operations
-- **Stage 3 — Diversity (MMR):** Maximal Marginal Relevance re-ranking keeps the top-k diverse so the right answer surfaces early and near-duplicates don't crowd it out — the mechanism behind M3's **99.2% session-hit-rate at k=10** (correct memory in the top 10, not the top 50). Accurate retrieval at low top-K means less noise fed to the model and the answer found on the first search, not the fifth.
+- **Stage 3 — Diversity (MMR):** Maximal Marginal Relevance re-ranking keeps the top-k diverse so the right answer surfaces early and near-duplicates don't crowd it out — the mechanism behind m3's **99.2% session-hit-rate at k=10** (correct memory in the top 10, not the top 50). Accurate retrieval at low top-K means less noise fed to the model and the answer found on the first search, not the fifth.
 
 **Explainable results.** Every search can return a full score breakdown (vector component, BM25 weight, MMR penalty) so you or your agent can understand *why* a memory was retrieved.
 
 ### ⏳ Bitemporal History
 
-M3's **bitemporal model** tracks two independent time axes — when a fact was *true* (valid time) and when M3 *recorded* it (transaction time) — so M3 can answer "what did we believe last Tuesday, and when was that corrected?" Most memory stores only know "now." Query with `as_of="2026-01-15"` to see the world as your agent knew it on that date — essential for debugging, compliance, and historical reasoning.
+m3's **bitemporal model** tracks two independent time axes — when a fact was *true* (valid time) and when m3 *recorded* it (transaction time) — so m3 can answer "what did we believe last Tuesday, and when was that corrected?" Most memory stores only know "now." Query with `as_of="2026-01-15"` to see the world as your agent knew it on that date — essential for debugging, compliance, and historical reasoning.
 
 ### ⚠️ Contradiction Detection
 
-Write a fact that conflicts with an existing one? M3 detects it automatically. The old memory is soft-deleted, a `supersedes` relationship is recorded, and the full history is preserved in the audit trail. No manual cleanup. No stale data.
+Write a fact that conflicts with an existing one? m3 detects it automatically. The old memory is soft-deleted, a `supersedes` relationship is recorded, and the full history is preserved in the audit trail. No manual cleanup. No stale data.
 
 ### 🕸️ Knowledge Graph
 
-Memories aren't isolated — they form a web. M3 automatically links related memories on write (cosine >0.7) and supports 11 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `precedes`, `follows`, `message`, `handoff`. Traverse the graph up to 3 hops with a single tool call.
+Memories aren't isolated — they form a web. m3 automatically links related memories on write (cosine >0.7) and supports 11 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `precedes`, `follows`, `message`, `handoff`. Traverse the graph up to 3 hops with a single tool call.
 
 ### 📖 Auto-Generated Wiki
 
@@ -48,7 +48,7 @@ Memories aren't isolated — they form a web. M3 automatically links related mem
 
 ### 🧹 Self-Maintaining
 
-Left alone, memory systems accumulate noise. M3 fights entropy:
+Left alone, memory systems accumulate noise. m3 fights entropy:
 
 - **Importance decay** — memories fade at 0.5%/day after 7 days unless reinforced by access or feedback
 - **Auto-archival** — low-importance items (< 0.05) older than 30 days are moved to cold storage
@@ -58,7 +58,7 @@ Left alone, memory systems accumulate noise. M3 fights entropy:
 
 ### 📋 Procedural Memory
 
-Beyond facts, M3 remembers **how to do things** — a first-class `procedure` type (skill / runbook / how-to / checklist):
+Beyond facts, m3 remembers **how to do things** — a first-class `procedure` type (skill / runbook / how-to / checklist):
 
 - **Auto-distilled from experience** — the background loop rolls up a completed task run and its step/result memories into a reusable, step-by-step procedure. Successful work becomes a repeatable playbook without anyone writing it up.
 - **Provenance preserved** — each procedure links back to its source memories via `distills_from` edges (sources are kept, never deleted), so you can always trace *why* a procedure says what it does.
@@ -69,7 +69,7 @@ Few memory systems distill procedures automatically — most only store manually
 
 ### 🔄 Refresh Lifecycle
 
-Not all knowledge ages the same way. Some facts have **planned obsolescence** — a quarterly policy review, a config valid until the next release, a customer preference you want to re-verify in 90 days. M3 lets you flag these on write:
+Not all knowledge ages the same way. Some facts have **planned obsolescence** — a quarterly policy review, a config valid until the next release, a customer preference you want to re-verify in 90 days. m3 lets you flag these on write:
 
 - Set `refresh_on` (ISO-8601) + `refresh_reason` when calling `memory_write`
 - Query `memory_refresh_queue` any time to see memories whose date has arrived (read-only; no mutation)
@@ -89,7 +89,7 @@ Memories written inside a multi-turn or multi-agent session can be tagged with a
 
 ### 🧠 LLM-Powered Intelligence
 
-M3 uses your local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works (e.g., LM Studio, Ollama, vLLM, LocalAI, `llama.cpp --server`):
+m3 uses your local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works (e.g., LM Studio, Ollama, vLLM, LocalAI, `llama.cpp --server`):
 
 - **Auto-classification** — pass `type="auto"` and the LLM categorizes your memory into one of 30+ types
 - **Conversation summarization** — compress long conversation threads into 3-5 key points
@@ -153,7 +153,7 @@ Hourly automated sync.
 - **LangChain / LangGraph** — five drop-in surfaces: a **Mem0 replacement** (one-line import swap), LangMem-compatible `M3Store`, the `M3Saver` LangGraph checkpointer (pause/resume/time-travel), chat-message history, and a RAG retriever — plus LCEL-native `MemoryWrite`/`MemoryRetrieve`. `pip install m3-memory[langchain]`; see [docs/integrations/LANGCHAIN.md](integrations/LANGCHAIN.md)
 - **CrewAI (v1.x)** — a native `StorageBackend`: `Memory(storage=M3StorageBackend(user_id=…))`. `pip install m3-memory[crewai]`; a CrewAI-written memory stays searchable by your other m3 agents. See [the CrewAI guide](../m3_memory/integrations/crewai/README.md)
 - **PydanticAI** — two tiers: `register_m3_tools` + `m3_recall_processor()` for drop-in tools and auto-recall, and a formal `M3MemoryToolset` (a real PydanticAI `AbstractToolset`). `pip install m3-memory[pydantic-ai]`; runs on Python 3.14. See [the PydanticAI guide](../m3_memory/integrations/pydantic_ai/README.md)
-- **Export/Import** — full memory dump as JSON (with base64 embeddings) for backup, migration, or sharing between M3 instances
+- **Export/Import** — full memory dump as JSON (with base64 embeddings) for backup, migration, or sharing between m3 instances
 - **Cross-platform** — Windows 11, macOS (Apple Silicon), Linux. Native scheduling via cron or Task Scheduler.
 - **Model-agnostic** — any embedding model via any OpenAI-compatible server. Dimension-validated at runtime.
 
@@ -188,7 +188,7 @@ Headline benchmark on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval)
 core engine — the retrieval-only metric memory systems publish as their headline.
 Under the harder no-oracle-metadata condition (no ground-truth session hints),
 end-to-end QA accuracy is **92.0%** (460/500) — and with retrieval SHR at 100% @ k=20,
-the ceiling here is the answer model, not M3's memory layer.
+the ceiling here is the answer model, not m3's memory layer.
 Per-category breakdown, ablations, and full methodology live in
 the [README's Benchmarks section](../README.md#-benchmarks) and the
 [LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
@@ -202,7 +202,7 @@ quality claim. Skips gracefully when the local LLM server is offline.
 
 ## 🧰 100+ MCP Tools at a Glance
 
-The full catalog spans 9 domains, but it costs near-zero context: **lazy tool-loading** registers only the ~18 essential tools at startup (~3,540 tokens, ~1.8% of a 200K window; full catalog loads on demand) and pulls the rest in on demand via `tools_load_domain`. Most MCP servers load their entire surface up front — M3 doesn't.
+The full catalog spans 9 domains, but it costs near-zero context: **lazy tool-loading** registers only the 20 essential tools at startup (~6,151 tokens, ~3.1% of a 200K window; full catalog loads on demand) and pulls the rest in on demand via `tools_load_domain`. Most MCP servers load their entire surface up front — m3 doesn't.
 
 | Category | Tools |
 |----------|-------|

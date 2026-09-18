@@ -1,14 +1,14 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Welcome to M3 Memory!
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Welcome to m3 Memory!
 
 If you've ever felt like your AI agent is a "stranger" every time you start a new session—forgetting your architectural preferences, your naming conventions, or that specific bug you fixed yesterday—**you're in the right place.**
 
-M3 Memory is designed to be your agent's "long-term brain." It’s local, it’s private, and it’s built to grow with you — and it leads on the numbers: **99.2% retrieval @ k=10 and 92% end-to-end QA** on the LongMemEval-S long-context benchmark, with an embedder that runs entirely on your CPU, offline.
+m3 Memory is designed to be your agent's "long-term brain." It’s local, it’s private, and it’s built to grow with you — and it leads on the numbers: **99.2% retrieval @ k=10 and 92% end-to-end QA** on the LongMemEval-S long-context benchmark, with an embedder that runs entirely on your CPU, offline.
 
 ---
 
 ## 🕒 Your First 5 Minutes (The "Magic Moment")
 
-The best way to understand M3 is to see it "wake up." Let’s skip the technical jargon and get straight to the payoff.
+The best way to understand m3 is to see it "wake up." Let’s skip the technical jargon and get straight to the payoff.
 
 ### 1. The Setup
 **One-line installer (Linux + macOS):**
@@ -55,8 +55,8 @@ That installs all 15 `/m3:*` slash commands as native agent Skills and auto-wire
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, diagnostics, admin). Only the ~18 essentials load at MCP startup
-> (~3,540 tokens, ~1.8% of a 200K window; the full catalog loads on demand). The
+> conversations, diagnostics, admin). Only the 20 essentials load at MCP startup
+> (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The
 > agent pulls in a domain on demand — just say "load the files tools" and it does.
 
 ### 2. The "Cat Test" (Our Favorite Ritual)
@@ -69,7 +69,7 @@ Open your favorite agent and try this simple experiment:
 
 **The Moment:** Instead of saying "I don't have information about your pet," your agent will call `memory_search` and respond: *"You need to buy expensive tuna for your cat, Binary."*
 
-**That’s the M3 experience: No more re-explaining. Just working.**
+**That’s the m3 experience: No more re-explaining. Just working.**
 
 ---
 
@@ -89,7 +89,7 @@ Once you've had your first "Magic Moment," you might want to dive deeper:
 
 - **[Core Features](./CORE_FEATURES.md)** — Learn about contradiction detection and the knowledge graph.
 - **[Multi-Agent Teams](./MULTI_AGENT.md)** — How to let two different agents (like Claude and Gemini) share the same brain.
-- **[Framework Integrations](../README.md#-installation)** — Use M3 as a drop-in memory backend for LangChain/LangGraph, CrewAI, or PydanticAI.
+- **[Framework Integrations](../README.md#-installation)** — Use m3 as a drop-in memory backend for LangChain/LangGraph, CrewAI, or PydanticAI.
 - **[Technical Details](./TECHNICAL_DETAILS.md)** — For the curious: schemas, search weights, and bitemporal logic.
 
 **Welcome to the fleet. We're glad to have you building with us.** 🤝

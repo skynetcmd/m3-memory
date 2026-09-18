@@ -1,4 +1,4 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Quick Start
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory — Quick Start
 
 Get persistent memory running with your MCP agent in under five minutes. Under the hood you're getting a benchmark-leading hybrid retriever (FTS5 + BGE-M3 vector + MMR) — **99.2% retrieval @ k=10 on LongMemEval-S**, SOTA-class recall running entirely on your CPU.
 
@@ -9,7 +9,7 @@ This is the generic quick start. For OS-specific walkthroughs see
 
 ---
 
-## 1️⃣ Install M3 Memory
+## 1️⃣ Install m3 Memory
 
 ### Easiest path — one-line installer (Linux + macOS)
 
@@ -122,8 +122,8 @@ to list a domain's tools.
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, diagnostics, admin). Only the ~18 essentials load at MCP startup
-> (~3,540 tokens, ~1.8% of a 200K window; the full catalog loads on demand). The
+> conversations, diagnostics, admin). Only the 20 essentials load at MCP startup
+> (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The
 > agent pulls in a domain on demand — just say "load the files tools" and it does.
 > Set `M3_TOOLS_LAZY=0` to disable.
 
@@ -161,7 +161,7 @@ For ~10–50× faster embeddings, the wizard offers an opt-in GPU build
 ### Optional: load a small chat model for enrichment
 
 Some features — `auto_classify`, conversation summaries, write-time
-enrichment — call your local LLM with short prompts. M3 picks up any
+enrichment — call your local LLM with short prompts. m3 picks up any
 OpenAI-compatible endpoint via `LLM_ENDPOINTS_CSV`; no extra config
 needed once a server is running.
 
@@ -174,7 +174,7 @@ Pick whichever fits your hardware and runtime:
 | **llama.cpp** | `llama-server -m qwen2.5-0.5b-instruct-q8_0.gguf` | ~500 MB |
 | **vLLM / LocalAI** | Any HF-compatible 0.5B–1B instruct model | varies |
 
-> **Pointing M3 at your runtime:** endpoint discovery probes LM Studio (`:1234`) by
+> **Pointing m3 at your runtime:** endpoint discovery probes LM Studio (`:1234`) by
 > default only. Adjust for your setup:
 > - **Ollama** — `export M3_ENABLE_OLLAMA_FAILOVER=1` (add `M3_ENABLE_LMSTUDIO_FAILOVER=0`
 >   if you don't also run LM Studio).
@@ -184,7 +184,7 @@ Pick whichever fits your hardware and runtime:
 >
 > See [ENVIRONMENT_VARIABLES → Endpoint discovery & failover](ENVIRONMENT_VARIABLES.md#endpoint-discovery--failover).
 
-M3 picks the largest loaded chat model for enrichment. If you only want
+m3 picks the largest loaded chat model for enrichment. If you only want
 embedding-based memory, skip this — those features simply become no-ops.
 
 ---
@@ -392,7 +392,7 @@ python3 bin/migrate_flat_memory.py --include-rules              # also import CL
 In your agent session, write a test memory:
 
 ```
-Write a memory: "M3 Memory installed successfully"
+Write a memory: "m3 Memory installed successfully"
 ```
 
 Your agent should call `memory_write` and return a UUID. That confirms
@@ -402,7 +402,7 @@ generated.
 Now open a **new session** and search for it:
 
 ```
-Search for: "M3 install"
+Search for: "m3 install"
 ```
 
 If the memory you wrote comes back, everything is working.
@@ -426,7 +426,7 @@ If the memory you wrote comes back, everything is working.
 
 ## 5️⃣ Optional: cross-device sync
 
-M3 Memory works standalone with local SQLite — no additional
+m3 Memory works standalone with local SQLite — no additional
 infrastructure needed. For multi-device sync, you can optionally connect:
 
 - **PostgreSQL** — bi-directional delta sync across machines, via
@@ -436,7 +436,7 @@ See [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) for warehouse-sync
 configuration.
 
 **PostgreSQL as primary store (not just sync).** Separately from the warehouse
-role above, PostgreSQL can be M3's *primary* live backend instead of SQLite —
+role above, PostgreSQL can be m3's *primary* live backend instead of SQLite —
 opt in with `M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`, chosen at install
 (the installer prompts) or non-interactively with
 `mcp-memory install-m3 --db-backend postgres`. SQLite remains the recommended
@@ -449,7 +449,7 @@ vector search.
 
 ## ▶️ Next steps
 
-- [CORE_FEATURES.md](./CORE_FEATURES.md) — what M3 Memory can do
+- [CORE_FEATURES.md](./CORE_FEATURES.md) — what m3 Memory can do
 - [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — all MCP tools and agent behavioral rules
 - [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) — search internals, schema, sync, security
 - [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) — credentials and runtime config

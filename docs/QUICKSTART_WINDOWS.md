@@ -1,4 +1,4 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Windows Quick Start
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory — Windows Quick Start
 
 Get persistent memory + directory ingestion running on Windows in under five minutes. Works with Claude Code, Cursor, Cline, Gemini CLI, OpenCode, Antigravity, and OpenClaw.
 
@@ -68,11 +68,11 @@ Restart your agent and you're done. The rest of this doc covers the features.
 
 > **Have a GPU?** The wizard asks once whether to add GPU acceleration on top of the default embedder for ~10-50× faster embeddings (needs CUDA Toolkit + nvcc on PATH, or Vulkan SDK). You can also add it later with `m3 embedder install-gpu`.
 
-> **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but groups them into 9 domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin). Only the ~18 essentials load at MCP startup (~3,540 tokens, ~1.8% of a 200K window; the full catalog loads on demand). The agent pulls in a domain on demand — just say "load the files tools" and it does. Set `M3_TOOLS_LAZY=0` to disable.
+> **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but groups them into 9 domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin). Only the 20 essentials load at MCP startup (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The agent pulls in a domain on demand — just say "load the files tools" and it does. Set `M3_TOOLS_LAZY=0` to disable.
 
 ---
 
-## 2. Connect M3 to your agent
+## 2. Connect m3 to your agent
 
 If you ran `m3 setup` (step 1), every agent it detected on PATH is **already wired**. Restart the agent and the m3 MCP server is there. Skip to step 3.
 
@@ -254,7 +254,7 @@ The agent returns the matching paragraphs with their source file and section hea
 
 ## 6. Backfilling old conversations (optional)
 
-If you had conversations before installing M3, ingest them in one shot per format. The cursor (`memory\.chatlog_ingest_cursor.json`) tracks what's already in so re-running is safe.
+If you had conversations before installing m3, ingest them in one shot per format. The cursor (`memory\.chatlog_ingest_cursor.json`) tracks what's already in so re-running is safe.
 
 ```powershell
 # Claude Code

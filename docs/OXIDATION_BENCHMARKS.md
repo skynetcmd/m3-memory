@@ -126,7 +126,7 @@ non-equivalent stub.
 
 ## Milestone-4 additions — ingestion hashing & governor (2026-06-27)
 
-These cover the M3-v3 Milestone-4 oxidations (`m3-ingest`, `m3-governor`),
+These cover the m3-v3 Milestone-4 oxidations (`m3-ingest`, `m3-governor`),
 measured on the freshly built CUDA wheel (3.6.22, cp314). See
 [`M3V3_OXIDATION.md`](M3V3_OXIDATION.md) for what each one means in the system.
 

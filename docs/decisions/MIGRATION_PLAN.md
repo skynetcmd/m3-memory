@@ -1,4 +1,4 @@
-# M3 Memory: "Homecoming" Migration Plan
+# m3 Memory: "Homecoming" Migration Plan
 
 This plan outlines the process for consolidating existing m3-memory installations into a unified, cross-platform default root directory: `~/.m3-memory`.
 
@@ -26,7 +26,7 @@ This plan outlines the process for consolidating existing m3-memory installation
 
 ## 🏗️ Phase 2: The Interactive Migration Offer
 Present the user with a cross-platform data-driven choice:
-> *M3 is moving to a unified home: `~/.m3-memory`.*
+> *m3 is moving to a unified home: `~/.m3-memory`.*
 > 
 > **Impact Summary:**
 > - Core Data: [Size] MB found at [Path]

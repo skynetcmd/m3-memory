@@ -1,10 +1,10 @@
-# M3 Memory — FIPS 140-3 Module Boundary & Operating Guide
+# m3 Memory — FIPS 140-3 Module Boundary & Operating Guide
 
 > **Status: FIPS 140-3 *deployment-ready*, not FIPS-validated.**
-> M3 Memory implements no cryptography of its own and is **not itself a
+> m3 Memory implements no cryptography of its own and is **not itself a
 > validated cryptographic module** — no application is. FIPS 140-3 validates a
 > *cryptographic module* (e.g. wolfCrypt, OpenSSL FIPS, AWS-LC FIPS), not the
-> application that calls it. This document states precisely what M3 does, where
+> application that calls it. This document states precisely what m3 does, where
 > the cryptographic boundary is, and what each mode requires — so a security
 > reviewer or federal customer can evaluate the deployment, not marketing.
 
@@ -12,7 +12,7 @@
 
 ## 1. What "deployment-ready" means here
 
-M3 is FIPS-deployment-ready because it:
+m3 is FIPS-deployment-ready because it:
 
 1. **Implements no custom cryptography.** All crypto is delegated to a provider.
 2. **Uses only FIPS-approved algorithms:** AES-256-GCM (authenticated
@@ -26,14 +26,14 @@ M3 is FIPS-deployment-ready because it:
 
 It is **not** "FIPS 140-3 compliant / certified / validated" — those terms have
 specific NIST/CMVP regulatory meaning and apply to a validated module + its
-certificate, which M3 (an application) cannot hold.
+certificate, which m3 (an application) cannot hold.
 
 ---
 
 ## 2. The cryptographic boundary
 
 ```
-            ┌─────────────────────────── M3 application (OUTSIDE the boundary) ──┐
+            ┌─────────────────────────── m3 application (OUTSIDE the boundary) ──┐
             │  memory store · search · chatlog · sync · audit-trail · vault API  │
             │                              │                                     │
             │                   crypto_provider.py  ◄── the only crypto entry    │
@@ -49,15 +49,15 @@ certificate, which M3 (an application) cannot hold.
 
 **Inside the boundary:** the crypto module (wolfCrypt or the Python
 `cryptography`/OpenSSL stack) and the thin `crypto_provider.py` dispatch that
-calls it. **Outside:** all M3 application logic, which only ever reaches crypto
+calls it. **Outside:** all m3 application logic, which only ever reaches crypto
 through `crypto_provider`'s services.
 
-**Services** (the crypto operations M3 exposes): `sha256`, `encrypt` /
+**Services** (the crypto operations m3 exposes): `sha256`, `encrypt` /
 `decrypt` (AES-256-GCM), `pbkdf2_sha256`, and `get_ssl_context` (TLS 1.3). These
 are used by exactly three things: the encrypted secrets vault (`auth_utils.py`),
 key derivation, and the tamper-evident audit hash chain (`audit_trail.py`).
 
-**Roles:** M3 has no privileged crypto-operator role of its own — it is a
+**Roles:** m3 has no privileged crypto-operator role of its own — it is a
 *crypto user*. The operator configures the mode (below) via environment; the
 validated module enforces its own role separation per its CMVP certificate.
 
@@ -93,7 +93,7 @@ So:
 
 ## 4. Power-up self-tests (KATs)
 
-When the wolfCrypt backend initializes, M3 runs in-process **Known-Answer-Tests**
+When the wolfCrypt backend initializes, m3 runs in-process **Known-Answer-Tests**
 against canonical vectors before serving any crypto:
 
 - **SHA-256** — NIST FIPS 180-4 example, `SHA256("abc")`.
@@ -110,16 +110,16 @@ process's bindings invoke it correctly*.
 
 ## 5. Getting wolfSSL: download, build, place
 
-> M3 does **not** bundle or redistribute wolfSSL — it is GPLv2 / commercial, and
-> M3 is Apache-2.0. You build it **yourself, from the official source**, on your
-> own machine. M3 only automates (or documents) the steps; it never ships or
+> m3 does **not** bundle or redistribute wolfSSL — it is GPLv2 / commercial, and
+> m3 is Apache-2.0. You build it **yourself, from the official source**, on your
+> own machine. m3 only automates (or documents) the steps; it never ships or
 > hosts the binary.
 
 ### Option A — the helper (recommended)
 
-M3 ships a build-from-source helper that clones the **official** wolfSSL repo,
-builds the shared library with exactly the features M3 uses (AES-GCM, SHA-256,
-PBKDF2), installs it to `~/.m3/lib/` (where M3's secure loader finds it — §below),
+m3 ships a build-from-source helper that clones the **official** wolfSSL repo,
+builds the shared library with exactly the features m3 uses (AES-GCM, SHA-256,
+PBKDF2), installs it to `~/.m3/lib/` (where m3's secure loader finds it — §below),
 and prints the SHA-256 to self-pin:
 
 ```bash
@@ -172,7 +172,7 @@ cmake -G "Visual Studio 17 2022" -A x64 -DBUILD_SHARED_LIBS=ON \
 
 ### Where to place it
 
-Copy the built library to **`~/.m3/lib/`** (M3's loader checks there
+Copy the built library to **`~/.m3/lib/`** (m3's loader checks there
 automatically), or to any path and point `M3_WOLFSSL_LIB` at it:
 
 ```bash
@@ -185,20 +185,20 @@ cp src/.libs/libwolfssl.dylib ~/.m3/lib/         # macOS
 Then enable FIPS mode and verify with `m3 doctor` (the **crypto (FIPS)** section
 shows the loaded path + SHA-256 to self-pin).
 
-**Where M3 looks (secure, search-order-hardened).** M3 NEVER loads the crypto
+**Where m3 looks (secure, search-order-hardened).** m3 NEVER loads the crypto
 library by bare name — that would delegate to the OS loader search order
 (Windows: app dir + **CWD** + `%PATH%`; Linux: `LD_LIBRARY_PATH` + runpath),
 a DLL-hijack vector where an attacker drops a weaker/backdoored `wolfssl.dll`
-earlier in the path. Instead M3 resolves a **trusted absolute path** from this
+earlier in the path. Instead m3 resolves a **trusted absolute path** from this
 precedence and loads exactly that file:
 
 1. **`M3_WOLFSSL_LIB`** — an explicit absolute path you pin (strongest). Used
    **verbatim**, filename and all.
-2. **`M3_LIB_DIR`/** — a directory you pin. M3 still appends the **per-OS
+2. **`M3_LIB_DIR`/** — a directory you pin. m3 still appends the **per-OS
    filename** (`wolfssl.dll` / `libwolfssl.so` / `libwolfssl.dylib`), so unlike
    the pin above it stays correct across the three OSes. Use it when you only
    need to *relocate* the search.
-3. **`~/.m3/lib/`** (M3's own lib dir; honours the decoupled roots — it is
+3. **`~/.m3/lib/`** (m3's own lib dir; honours the decoupled roots — it is
    derived from `M3_CONFIG_ROOT`'s parent).
 4. **Trusted system dirs only** — `/usr/local/lib`, `/usr/lib`, `/lib`,
    `/opt/homebrew/lib` (Unix) or `%SystemRoot%\System32` (Windows). The **CWD
@@ -212,11 +212,11 @@ precedence and loads exactly that file:
 > `m3 fips install-wolfssl` follows the same precedence, so the installer and
 > the loader always agree on the location.
 
-**Integrity pin (optional, strongest) — you pin *your own* build.** Because M3
+**Integrity pin (optional, strongest) — you pin *your own* build.** Because m3
 does **not** bundle wolfSSL, you build it yourself (§5). So the pin is a
 **self-pin / trust-on-first-use** model, not a check against some vendor hash:
 right after you build (or obtain) and *trust* the library, compute ITS SHA-256
-and pin that value. M3 then verifies the file against your pin on every load and
+and pin that value. m3 then verifies the file against your pin on every load and
 **refuses a mismatch** — catching any later tampering or in-place swap, even at
 a trusted path. There is no canonical hash to compare to; the trust anchor is
 the build you produced.
@@ -234,7 +234,7 @@ Re-pin whenever you intentionally rebuild/upgrade wolfSSL (the new build has a
 new hash — expected). A mismatch you did *not* expect means the library
 changed underneath you: investigate before proceeding.
 
-M3 also verifies the loaded library exposes the core crypto symbols
+m3 also verifies the loaded library exposes the core crypto symbols
 (`wc_AesGcmSetKey/Encrypt/Decrypt`, `wc_Sha256Hash`, `wc_PBKDF2`).
 Run `m3 doctor` — the **crypto (FIPS)** section prints the exact absolute path
 the library was loaded from, so you can confirm it's the trusted one.
@@ -247,22 +247,22 @@ service symbols + certificate). Build/configure it per wolfSSL's FIPS guidance.
 
 ## 6. Known limitations (stated plainly, not papered over)
 
-FIPS-readiness in a Python application has real boundaries. M3 does not pretend
+FIPS-readiness in a Python application has real boundaries. m3 does not pretend
 otherwise:
 
 - **Key zeroization is best-effort.** CPython `bytes`/`str` are immutable and
   garbage-collected; key material in Python objects cannot be reliably wiped
   from memory. True zeroization requires keys to remain resident in the
   cryptographic module and never materialize in Python — a deeper redesign than
-  M3 currently does. M3 minimizes key lifetime but **does not claim guaranteed
+  m3 currently does. m3 minimizes key lifetime but **does not claim guaranteed
   zeroization** of Python-side key buffers.
-- **Random-number generation scope.** M3's security-critical randomness (nonces,
+- **Random-number generation scope.** m3's security-critical randomness (nonces,
   salts, tokens) uses the OS CSPRNG (`os.urandom` via `secrets`), which is a
   FIPS-grade *entropy source* but is the OS DRBG, not necessarily wolfCrypt's
   CTR-DRBG. Non-security identifiers (`uuid4` row/session IDs) are not routed
   through a FIPS DRBG by design. Strict deployments needing wolfCrypt-DRBG-only
   randomness should treat this as an open item.
-- **The validation is wolfCrypt's, not M3's.** M3 uses a validated module "in an
+- **The validation is wolfCrypt's, not m3's.** m3 uses a validated module "in an
   approved manner"; it carries no certificate of its own. Your deployment's
   assessor evaluates the combined system.
 

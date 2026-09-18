@@ -4,7 +4,7 @@
 > consensus provenance, reinforcement, autonomous belief consolidation, and flag-gated
 > confidence ranking are all in place. See `docs/CONFIDENCE_AND_TRUST.md`.
 > **Branch:** `feature/m3v3-m5-sqlite-vec-dep`.
-> **Goal:** Move M3 from *memory retrieval* to *knowledge maintenance* by adding first-class
+> **Goal:** Move m3 from *memory retrieval* to *knowledge maintenance* by adding first-class
 > **confidence**, **trust-weighted provenance**, **reinforcement**, and **autonomous
 > episodic→semantic consolidation** — additively, behind flags, with zero regression to today's behavior.
 

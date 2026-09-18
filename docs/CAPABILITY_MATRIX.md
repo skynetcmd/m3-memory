@@ -9,13 +9,13 @@
 ## Capability groups
 
 - [🧠 Memory](#memory) — Write, retrieve, version, and reconcile long-term agent memory. (39 tools)
-- [💬 Chat Log](#chat-log) — Capture verbatim conversation turns before compaction; audit and replay. (11 tools)
-- [📁 Files Memory](#files-memory) — Index, search, and recall project files as memory. (26 tools)
+- [💬 Chat Log](#chat-log) — Capture verbatim conversation turns before compaction; audit and replay. (10 tools)
+- [📁 Files Memory](#files-memory) — Index, search, and recall project files as memory. (25 tools)
 - [🕸️ Entity Graph](#entity-graph) — Extract and query entities and their relationships across sessions. (3 tools)
 - [🗂️ Conversations](#conversations) — Group and inspect turns by conversation / team session. (4 tools)
 - [👥 Agents](#agents) — Register agents, hand off tasks, and route multi-agent work. (6 tools)
 - [✅ Tasks](#tasks) — Track and coordinate agent tasks and their state. (8 tools)
-- [🩺 Diagnostics](#diagnostics) — Health, cost, and integrity checks for the memory store. (3 tools)
+- [🩺 Diagnostics](#diagnostics) — Health, cost, and integrity checks for the memory store. (5 tools)
 - [⚙️ Admin & Sync](#admin--sync) — Maintenance, cross-store sync, import/export, and lifecycle ops. (15 tools)
 
 ## 🧠 Memory
@@ -77,7 +77,6 @@ _Capture verbatim conversation turns before compaction; audit and replay._
 | `chatlog_search` | Search chat_log rows. | default-allowed |
 | `chatlog_search_slim` | Search captured chat turns (FTS5 keyword; filter-only when query is empty). | default-allowed |
 | `chatlog_set_redaction` | Flip redaction on/off and update patterns. | default-allowed |
-| `chatlog_status` | One-call health summary of the chat log subsystem: mode, DB paths, row counts, queue depth, spill f… | default-allowed |
 | `chatlog_write` | Append one chat turn to the chat log DB. | default-allowed |
 | `chatlog_write_bulk` | Bulk-append N chat turns. | default-allowed |
 | `curate_chatlog_apply` | Deterministically apply a chatlog.db curator plan in ONE call. | ⚠️ opt-in required |
@@ -103,7 +102,6 @@ _Index, search, and recall project files as memory._
 | `files_entity_coalesce_unapply` | Reverse one coalescence cluster (drop edges, clear flags, strip aliases, tombstone the candidate so… | default-allowed |
 | `files_extract_pending` | Drain leaves with extraction_status='pending' through the LLM fact extractor. | default-allowed |
 | `files_get` | Fetch one record by UUID. | default-allowed |
-| `files_health` | DB integrity + FTS5 sync check. | default-allowed |
 | `files_index` | Return file-level summaries for triage (wiki-index primitive). | default-allowed |
 | `files_ingest` | Walk a directory and ingest supported files into files.db. | default-allowed |
 | `files_link_rename` | Re-point an existing file_node at a new path (rename / move). | default-allowed |
@@ -170,7 +168,9 @@ _Health, cost, and integrity checks for the memory store._
 
 | Tool | Description | Consent |
 |---|---|---|
+| `chatlog_status` | One-call health summary of the chat log subsystem: mode, DB paths, row counts, queue depth, spill f… | default-allowed |
 | `embedder_status` | Check the status of the local sovereign embedder server (default port 8082, override via M3_EMBED_F… | default-allowed |
+| `files_health` | DB integrity + FTS5 sync check. | default-allowed |
 | `memory_doctor` | Self-service diagnostic for the m3-memory embedding cascade. | default-allowed |
 | `memory_doctor_fix` | Run the m3-memory self-repair mode (m3 doctor --fix). | default-allowed |
 

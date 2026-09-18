@@ -278,9 +278,17 @@ def _register_one(spec):
 def _register_initial_tools():
     """Initial registration set, called once at startup.
 
-    Lazy mode: meta-tools + essentials only (~9 tools — 2 meta + 7
-    essentials per tool_domains.ESSENTIAL_TOOL_NAMES — ~3.2 K tokens).
-    Eager mode: every ToolSpec (~85 tools, ~15.8 K tokens — pre-2026-05 behavior).
+    Lazy mode (the default): meta-tools + essentials only — 10 tools, 2 meta +
+    8 per tool_domains.ESSENTIAL_TOOL_NAMES, 3,929 tokens on the MCP wire
+    (~2% of a 200K context). Chosen by measurement, not judgement: they absorb
+    95.4% of observed direct calls. files_search is the one exception, kept on
+    principle to preserve search for all three primary stores. See the
+    rationale block above ESSENTIAL_TOOL_NAMES.
+    Eager mode: every ToolSpec — 115 tools, 29,658 tokens (14.8% of 200K),
+    the pre-2026-05 behavior, restored with M3_TOOLS_LAZY=0.
+
+    Re-derive both figures with `python bin/measure_tool_tokens.py`; the
+    counts here are a snapshot and the script is the source of truth.
     """
     _META_TOOLS = {"tools_list_domains", "tools_load_domain"}
     for spec in mcp_tool_catalog.TOOLS:

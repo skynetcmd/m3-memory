@@ -1,6 +1,6 @@
-# Using M3 Memory as Root When Another User Owns the Install
+# Using m3 Memory as Root When Another User Owns the Install
 
-M3's installer refuses to run as root by design — `pipx install` as root
+m3's installer refuses to run as root by design — `pipx install` as root
 puts all state under `/root/`, which agents running as normal users can't
 reach, and vice versa. The correct pattern is:
 
@@ -158,7 +158,7 @@ paths with absolute paths pointing at bob's install:
 ## Concurrent use
 
 Bob and root can both run Claude sessions simultaneously against the same
-store. M3 uses SQLite WAL mode with a `busy_timeout`, so concurrent writers
+store. m3 uses SQLite WAL mode with a `busy_timeout`, so concurrent writers
 queue safely. In practice, the only contention is between root's and bob's
 sessions writing to the same DB — this is handled automatically.
 

@@ -1,6 +1,6 @@
 # <a href="../../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Security Scan — 2026-05-01
 
-> Snapshot of M3 Memory's security posture run by the maintainers. Reproducible — run the same tools yourself and compare. See [`docs/SECURITY.md`](../SECURITY.md) for the disclosure policy and [`docs/audits/`](.) for the full audit history.
+> Snapshot of m3 Memory's security posture run by the maintainers. Reproducible — run the same tools yourself and compare. See [`docs/SECURITY.md`](../SECURITY.md) for the disclosure policy and [`docs/audits/`](.) for the full audit history.
 
 ---
 
@@ -66,13 +66,13 @@ git ls-files | xargs grep -lE "AIza[0-9A-Za-z_-]{30,}|sk-ant-api[0-9]{2}-[A-Za-z
 
 14 CVEs across 3 packages. **Crucial scope context:**
 
-| Package | Version | CVEs | Pulled in by | Affects shipped M3? |
+| Package | Version | CVEs | Pulled in by | Affects shipped m3? |
 |---|---|---|---|---|
 | `transformers` | 4.49.0 | 12 | `sentence-transformers`, `FlagEmbedding`, `peft` | ❌ No — opt-in cross-encoder rerank only |
 | `lxml` | 6.0.4 | 1 | `inscriptis`, `ir_datasets` | ❌ No — bench-only deps |
 | `pip` | 26.0.1 | 1 | (build tooling) | ❌ No — not a runtime dependency |
 
-**None of these packages appear in M3's core `dependencies` list in `pyproject.toml`.** They are transitive from optional or development extras only.
+**None of these packages appear in m3's core `dependencies` list in `pyproject.toml`.** They are transitive from optional or development extras only.
 
 The CVEs only matter for:
 - Developers who install dev extras (`m3-memory[dev]`) and use the bench harness
@@ -80,7 +80,7 @@ The CVEs only matter for:
 
 ### Recommended actions (none urgent)
 
-1. **`pip` 26.0.1 → 26.1** — trivial venv bump: `python -m pip install --upgrade pip`. Doesn't affect M3 itself.
+1. **`pip` 26.0.1 → 26.1** — trivial venv bump: `python -m pip install --upgrade pip`. Doesn't affect m3 itself.
 2. **`lxml` 6.0.4 → 6.1.0** — bench-only impact. Bump in `benchmarks/` extras when we next pin them.
 3. **`transformers` 4.49.0 → 4.53.0+** — bench/rerank-only impact. Bump the rerank optional-dependency floor when we next touch it.
 

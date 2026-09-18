@@ -751,7 +751,7 @@ $action = New-ScheduledTaskAction `
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
     -RepetitionInterval (New-TimeSpan -Minutes 30)
 
-Register-ScheduledTask -TaskName "M3 Enrich Drain" `
+Register-ScheduledTask -TaskName "m3 Enrich Drain" `
     -Action $action -Trigger $trigger
 ```
 

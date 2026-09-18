@@ -1,4 +1,4 @@
-# M3 Memory: Operations Playbook
+# m3 Memory: Operations Playbook
 
 Operator-focused workflows for running the memory brain day to day — not
 installing it. Every command below maps to a real tool (MCP tool name or CLI

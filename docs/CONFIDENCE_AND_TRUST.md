@@ -1,6 +1,6 @@
 # Confidence, Trust & Knowledge Maintenance
 
-M3 treats stored memories not as a flat retrieval index but as a body of
+m3 treats stored memories not as a flat retrieval index but as a body of
 knowledge that is *maintained*: facts carry a **confidence**, sources carry a
 **trust**, agreement and disagreement are recorded, confidence **reinforces and
 decays** over time, and large clusters of episodic memories **consolidate** into

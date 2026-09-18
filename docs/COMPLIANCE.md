@@ -1,16 +1,16 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Compliance & Assurance
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory — Compliance & Assurance
 
 > Last updated: May 2026. Corrections welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
 
-This page is the entry point to M3 Memory's compliance documentation. The detailed control-family mappings live as standalone HTML pages so they print cleanly and copy easily into agency packages.
+This page is the entry point to m3 Memory's compliance documentation. The detailed control-family mappings live as standalone HTML pages so they print cleanly and copy easily into agency packages.
 
 ---
 
-## What M3 helps with
+## What m3 helps with
 
-M3 ships compliance-relevant primitives natively — built-in GDPR erasure/export MCP tools, a bitemporal audit log capturing what was known and when, full air-gap operability, and zero telemetry by default. Combined with the local-first design (SQLite single-file store, local SLM extraction), this materially reduces the technical-controls portion of compliance work in regulated environments. It does **not** replace a compliance program; physical security, personnel screening, supply-chain controls, and most program-level requirements remain with the deploying organization.
+m3 ships compliance-relevant primitives natively — built-in GDPR erasure/export MCP tools, a bitemporal audit log capturing what was known and when, full air-gap operability, and zero telemetry by default. Combined with the local-first design (SQLite single-file store, local SLM extraction), this materially reduces the technical-controls portion of compliance work in regulated environments. It does **not** replace a compliance program; physical security, personnel screening, supply-chain controls, and most program-level requirements remain with the deploying organization.
 
-What M3 ships natively that's relevant here:
+What m3 ships natively that's relevant here:
 
 - **GDPR primitives.** `gdpr_forget` (Article 17 — right to erasure) and `gdpr_export` (Article 20 — data portability) are built-in MCP tools. No custom code, no third-party services. What m3 does vs. what remains the operator's responsibility is spelled out in **[GDPR_COMPLIANCE.md](GDPR_COMPLIANCE.md)**.
 - **Bitemporal audit log.** Every write captures valid-time and transaction-time. Native undo via supersedes relationships preserves the full history of what was known, when.
@@ -32,17 +32,17 @@ What M3 ships natively that's relevant here:
 
 ### What about FedRAMP?
 
-Because M3 has no cloud component, it keeps the data path entirely on agency-controlled hardware — eliminating the shared-responsibility surface that a FedRAMP authorization exists to evaluate. FedRAMP authorizes cloud service providers, so it simply does not apply. This is *not* a substitute for FedRAMP where a cloud service is genuinely required; it's the better answer for the workloads that don't need one.
+Because m3 has no cloud component, it keeps the data path entirely on agency-controlled hardware — eliminating the shared-responsibility surface that a FedRAMP authorization exists to evaluate. FedRAMP authorizes cloud service providers, so it simply does not apply. This is *not* a substitute for FedRAMP where a cloud service is genuinely required; it's the better answer for the workloads that don't need one.
 
 ---
 
 ## Honest scope
 
-These compliance documents are written by the M3 team, not by accredited assessors. They map M3's behavior to control language; they don't substitute for an actual audit. Specifically:
+These compliance documents are written by the m3 team, not by accredited assessors. They map m3's behavior to control language; they don't substitute for an actual audit. Specifically:
 
-- M3 itself is not "FISMA certified" or "CMMC certified" — those certifications apply to systems and organizations, not standalone software components.
-- The control-by-control assessments reflect M3's design intent and observed behavior. Your assessor will evaluate the deployment, not the library.
-- Where M3 inherits a control from the host OS (e.g. authentication), that's called out explicitly. Don't assume M3 carries those controls on its own.
+- m3 itself is not "FISMA certified" or "CMMC certified" — those certifications apply to systems and organizations, not standalone software components.
+- The control-by-control assessments reflect m3's design intent and observed behavior. Your assessor will evaluate the deployment, not the library.
+- Where m3 inherits a control from the host OS (e.g. authentication), that's called out explicitly. Don't assume m3 carries those controls on its own.
 
 If you're preparing an authorization package and have specific control questions, [open an issue](https://github.com/skynetcmd/m3-memory/issues) — we'll engage substantively.
 
@@ -50,8 +50,8 @@ If you're preparing an authorization package and have specific control questions
 
 ## See also
 
-- [M3 vs alternatives — sovereign substrates table](M3_Comparison_Table.md) — where M3 fits in the broader sovereign-memory landscape ([interactive version](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html))
-- [M3 vs alternatives — developer-tool guide](COMPARISON.md) — Mem0, Letta, Zep, LangChain Memory
+- [m3 vs alternatives — sovereign substrates table](M3_Comparison_Table.md) — where m3 fits in the broader sovereign-memory landscape ([interactive version](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html))
+- [m3 vs alternatives — developer-tool guide](COMPARISON.md) — Mem0, Letta, Zep, LangChain Memory
 - [Homelab patterns](HOMELAB_PATTERNS.md) — small-deployment guidance with similar local-first / sovereign requirements
 - [Architecture](ARCHITECTURE.md) — system design that underlies the compliance posture
 - [Technical details](TECHNICAL_DETAILS.md) — implementation specifics for assessors

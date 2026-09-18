@@ -1,8 +1,8 @@
 ---
 tool: bin/measure_tool_tokens.py
-sha1: b573eced6363
-mtime_utc: 2026-06-28T12:28:55.199645+00:00
-generated_utc: 2026-06-30T22:19:18.423402+00:00
+sha1: be2ccbaef779
+mtime_utc: 2026-09-18T01:57:03.991572+00:00
+generated_utc: 2026-09-18T01:58:28.933282+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ in CLAUDE.md / GEMINI.md / README.md / docs/* stay honest.
 
 ## Entry points
 
-- `def main()` (line 53)
+- `def main()` (line 78)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -51,6 +51,8 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `mcp_proxy`
+- `mcp_tool_catalog`
+- `memory_bridge`
 - `tool_domains`
 
 ---

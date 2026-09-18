@@ -1,4 +1,4 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — MCP Client Install Guide
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory — MCP Client Install Guide
 
 > Per-client registration for m3-memory across all supported MCP-speaking
 > environments. The MCP tool surface is identical everywhere; only the
@@ -278,7 +278,7 @@ Auto-wired to `~/.cursor/mcp.json` (only when `~/.cursor` exists). Manual config
 ```
 
 > **Cursor's ~40-tool cap.** Cursor limits the active tool surface across all
-> MCP servers. m3 exposes 100+ tools but lazy-loads only the ~18 essentials at
+> MCP servers. m3 exposes 100+ tools but lazy-loads only the 20 essentials at
 > startup (the rest via `tools_load_domain`), so it stays well under the ceiling.
 
 ### Cline (VS Code extension)

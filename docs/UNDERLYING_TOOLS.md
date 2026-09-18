@@ -1,6 +1,6 @@
-# M3 Memory: Underlying Tools
+# m3 Memory: Underlying Tools
 
-This document details the core services, frameworks, and engines that power the M3 Memory system.
+This document details the core services, frameworks, and engines that power the m3 Memory system.
 
 ## Storage & Databases
 

@@ -1,18 +1,18 @@
 <p align="center">
   <a href="https://github.com/skynetcmd/m3-memory">
-    <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/M3-banner.jpg" alt="M3 Memory Banner" width="100%">
+    <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3-banner.jpg" alt="m3 Memory Banner" width="100%">
   </a>
 </p>
 
-# 🧠 M3 Memory
+# 🧠 m3 Memory
 
 **A memory layer that outlives your agents.** You switch from Claude Code to Cursor, upgrade your model, start fresh next week — and everything your tools learned about your project is gone. You re-explain the same decisions, the same preferences, the same hard-won context, over and over.
 
-**M3 fixes that.** It's a private, local-first memory your agents share and build on — so your project's knowledge accumulates instead of resetting every time the agent does. One memory store, on your machine, that your tools and agents read from and write to — whether that's Claude Code, Cursor, Gemini CLI, or any MCP-compatible agent.
+**m3 fixes that.** It's a private, local-first memory your agents share and build on — so your project's knowledge accumulates instead of resetting every time the agent does. One memory store, on your machine, that your tools and agents read from and write to — whether that's Claude Code, Cursor, Gemini CLI, or any MCP-compatible agent.
 
-Under the hood, M3 treats agent memory as a **distributed-systems infrastructure problem**, not a simple retrieval feature — a **shared, evolving, bitemporal, contradiction-aware knowledge base** that multiple heterogeneous agents and machines read and write, built to stay consistent over months and years.
+Under the hood, m3 treats agent memory as a **distributed-systems infrastructure problem**, not a simple retrieval feature — a **shared, evolving, bitemporal, contradiction-aware knowledge base** that multiple heterogeneous agents and machines read and write, built to stay consistent over months and years.
 
-**The memory improves without being asked.** M3 is not only a store you write to and read back. An **autonomous Cognitive Loop** (`m3_cognitive_loop.py`) runs in the background and keeps working on what you already saved: **deferred enrichment** — classification, embedding, and entity extraction — runs off the hot path, so a write stays fast while the understanding of it deepens afterwards, and the loop builds an **entity relationship graph** from memories that arrived as plain text. **Curation is m3's own work, not an LLM's.** Near-duplicate detection is cosine similarity over embeddings against a threshold; decay and pruning are age-and-signal rules; and applying a curation plan — bulk deletes, merges, supersessions — is one deterministic function issuing direct SQL, with **no model in the loop**. That is deliberate: the apply step *used* to be an LLM agent, and it failed by looping single-row deletes across hundreds of IDs until it ran out of budget. An agent's judgement is still welcome for the genuinely subjective calls ("is this worth keeping?"), but it emits a *plan* and m3 executes it — one round-trip instead of N, and no model needed for the mechanical part.
+**The memory improves without being asked.** m3 is not only a store you write to and read back. An **autonomous Cognitive Loop** (`m3_cognitive_loop.py`) runs in the background and keeps working on what you already saved: **deferred enrichment** — classification, embedding, and entity extraction — runs off the hot path, so a write stays fast while the understanding of it deepens afterwards, and the loop builds an **entity relationship graph** from memories that arrived as plain text. **Curation is m3's own work, not an LLM's.** Near-duplicate detection is cosine similarity over embeddings against a threshold; decay and pruning are age-and-signal rules; and applying a curation plan — bulk deletes, merges, supersessions — is one deterministic function issuing direct SQL, with **no model in the loop**. That is deliberate: the apply step *used* to be an LLM agent, and it failed by looping single-row deletes across hundreds of IDs until it ran out of budget. An agent's judgement is still welcome for the genuinely subjective calls ("is this worth keeping?"), but it emits a *plan* and m3 executes it — one round-trip instead of N, and no model needed for the mechanical part.
 
 **Contradictions are caught on three paths**, not one: deterministically on the write path (cosine similarity against a threshold, no model), by the loop's **Reflector pass** during enrichment (which writes `supersedes` edges), and by an explicit curation plan. Promotion of chat turns into long-term memory is the one thing that stays deliberate — nothing promotes on your behalf.
 
@@ -23,7 +23,7 @@ via a **shared local embed server** — one model in RAM that every m3 process
 reuses, rather than a copy per process — the store is a file you own, and
 installation works with no internet at all.
 On the metric that isolates the memory layer — **retrieval accuracy, no answer model
-or judge involved** — M3 reaches **99.2% session-hit-rate @ k=10 and 100% @ k=20** on
+or judge involved** — m3 reaches **99.2% session-hit-rate @ k=10 and 100% @ k=20** on
 LongMemEval-S.
 
 ---
@@ -94,11 +94,11 @@ The Quickstart above is the whole product for most people: shared memory, wired 
 
 ---
 
-## ⚖️ How M3 Compares
+## ⚖️ How m3 Compares
 
-A full, feature-by-feature **comparison table** — M3 vs **Mem0, Letta, Zep, Graphiti, LangChain Memory / LangMem, agentmemory, Chronos, Hindsight, Mastra OM, Memento**, and more — with sourced benchmarks and honest "when to choose the other tool" guidance, lives in **[COMPARISON.md](docs/COMPARISON.md)**.
+A full, feature-by-feature **comparison table** — m3 vs **Mem0, Letta, Zep, Graphiti, LangChain Memory / LangMem, agentmemory, Chronos, Hindsight, Mastra OM, Memento**, and more — with sourced benchmarks and honest "when to choose the other tool" guidance, lives in **[COMPARISON.md](docs/COMPARISON.md)**.
 
-Short version: M3 is the **local-first, MCP-native** option that stays *yours* and works across every agent — where cloud services (Mem0), full agent runtimes (Letta), and graph-database systems (Zep, Graphiti) each ask you to adopt their infrastructure. See the [comparison guide](docs/COMPARISON.md) for the row-by-row detail.
+Short version: m3 is the **local-first, MCP-native** option that stays *yours* and works across every agent — where cloud services (Mem0), full agent runtimes (Letta), and graph-database systems (Zep, Graphiti) each ask you to adopt their infrastructure. See the [comparison guide](docs/COMPARISON.md) for the row-by-row detail.
 
 ---
 
@@ -158,26 +158,26 @@ Short version: M3 is the **local-first, MCP-native** option that stays *yours* a
 
 ---
 
-## ⚡ M3 at a Glance
+## ⚡ m3 at a Glance
 
 | Feature | Details |
 | :--- | :--- |
 | **Works With** | Claude Code · Cursor · Cline · Gemini CLI · Aider · Google Antigravity · OpenCode · OpenClaw · Hermes · LangChain/LangGraph · CrewAI · PydanticAI · Any MCP Agent |
-| **M3 Is** | A persistent memory layer · An MCP server · A hybrid retrieval engine · A bitemporal knowledge base |
-| **M3 Is Not** | An LLM · A chatbot · A plain vector database · A RAG framework · An IDE |
+| **m3 Is** | A persistent memory layer · An MCP server · A hybrid retrieval engine · A bitemporal knowledge base |
+| **m3 Is Not** | An LLM · A chatbot · A plain vector database · A RAG framework · An IDE |
 | **Core Promise** | Private, offline-capable, locally owned memory shared securely across all your developer tools — with FIPS 140-3-ready crypto and atomic multi-agent writes for regulated and multi-agent environments. |
 | **Deploys In** | Homelabs and self-hosted stacks · corporate and government networks · **air-gapped and classified environments** · regulated industries (FIPS 140-3-ready, GDPR tooling, audit logs). No account, no API key, no outbound calls. See [Sovereign & Air-Gapped Deployments](#-sovereign--air-gapped-deployments). |
-| **Speed** | A write that defers embedding returns in **~2 ms** (vs ~31 ms embedding inline) — the [Cognitive Loop](docs/ARCHITECTURE.md#-the-cognitive-loop) does the expensive work off your critical path. Warehouse sync upserts 3,000 rows in **25 ms** where a row-at-a-time bridge takes 615 ms. Measured on a stock Windows desktop; see [Performance](docs/PERFORMANCE.md) for the hardware, the CPU-only numbers, and the caveats. |
+| **Speed** | A deferred write — which includes validation, bitemporal logic, contradiction checking, hashing, and storing to SQLite with WAL — takes just **~2.16 ms** (p50) / **3.66 ms** (p95). To ensure the caller never waits, m3 intentionally defers the heavy vector embedding to a background cognitive loop. The memory is immediately full-text searchable (hybrid search takes **~45 ms** p50 / **~48 ms** p95), and vector search picks it up as soon as the background pass completes. Warehouse sync upserts 3,000 rows in **25 ms**. Measured on a stock Windows desktop; see [Performance](docs/PERFORMANCE.md) for the hardware, the CPU-only numbers, and the caveats. |
 | **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10, 100% @ k=20** on LongMemEval-S (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. SHR measures the memory layer alone — no answer model, no judge — which is why it, not end-to-end QA, is the like-for-like comparison between memory systems. See [Benchmarks](#-benchmarks). |
 | **Entity & Relationship Enrichment** | **Yes.** m3 includes LLM-based entity extraction and relationship enrichment (Observer + Reflector), running as background cognitive passes over raw text — automatic once a local or cloud LLM endpoint is configured. Observer emits entities, facts and typed relationships from unstructured text; Reflector resolves contradictions and writes `supersedes` edges. Any OpenAI-compatible endpoint (LM Studio / Ollama / llama.cpp auto-probed locally, or a cloud model). See [Enrichment Guide](docs/M3_ENRICH_GUIDE.md). |
-| **Context Efficiency** | Exposes 100+ tools but occupies just **~1.8% of a 200K context window** at startup — lazy domain-gating loads the rest on demand. |
+| **Context Efficiency** | Exposes 100+ tools but occupies just **~2% of a 200K context window** at startup — the 10 registered schemas absorb 95% of real tool calls; lazy domain-gating loads the rest on demand. |
 | **Maturity** | Stable, battle-tested core engine (3,250+ tests) that's safe to build on today; new features and integrations are added actively. **SQLite by default; PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam. (See [features.json](docs/features.json)) |
 
 ---
 
 ## 🧠 Memory Model at a Glance
 
-M3 is a **typed, bitemporal, confidence-scored, self-maintaining knowledge base**. Every feature listed below is implemented natively (see [Memory Model Details](docs/MEMORY_MODEL.md)):
+m3 is a **typed, bitemporal, confidence-scored, self-maintaining knowledge base**. Every feature listed below is implemented natively (see [Memory Model Details](docs/MEMORY_MODEL.md)):
 
 *   **Structured Metadata:** Every memory contains a `type`, `source`, `confidence`, `scope`, provenance (`change_agent`), and salience (`importance`, `decay_rate`).
 *   **Verbatim, Non-Destructive Storage:** Memory content is stored exactly as written and **never altered in place** — the raw text is always retrievable byte-for-byte. Corrections don't overwrite: a superseded fact is *closed* (its validity interval ends) and the new fact is linked to it, so both the original wording and its full edit history stay queryable. You get true verbatim recall *and* an audit trail, not one or the other.
@@ -187,7 +187,7 @@ M3 is a **typed, bitemporal, confidence-scored, self-maintaining knowledge base*
 *   **Procedural Memory:** A first-class `procedure` type (skill / runbook / how-to / checklist) that is **auto-distilled from successful task runs** — the background loop rolls up a completed task and its step/result memories into a reusable, step-by-step procedure, preserved with `distills_from` provenance back to its sources. A "how do I…" query surfaces it via a procedural retrieval boost.
 *   **Write-Gating & Content Safety:** Filters out low-signal noise via an enrichment queue and content safety guardrails before storage.
 *   **Explainable Retrieval:** Hybrid engine combining vector similarity, BM25 (FTS5), MMR diversity, and reranking. `memory_suggest` returns the exact score breakdown per result. (See [Confidence and Trust Guide](docs/CONFIDENCE_AND_TRUST.md)).
-*   **Proven Accuracy:** On LongMemEval-S, M3 delivers **state-of-the-art retrieval for a local-first substrate — 99.2% session-hit-rate @ k=10 and 100% @ k=20** (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. End-to-end QA accuracy is **92.0%** with no oracle metadata (see [Benchmarking Report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md)).
+*   **Proven Accuracy:** On LongMemEval-S, m3 delivers **state-of-the-art retrieval for a local-first substrate — 99.2% session-hit-rate @ k=10 and 100% @ k=20** (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. End-to-end QA accuracy is **92.0%** with no oracle metadata (see [Benchmarking Report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md)).
 
 ---
 
@@ -201,19 +201,19 @@ M3 is a **typed, bitemporal, confidence-scored, self-maintaining knowledge base*
 > release instead of upgrading.
 >
 > **On Python 3.11?** Check with `python --version`. To upgrade:
-> * **macOS:** `brew install python@3.13 && brew link --overwrite python@3.13`
-> * **Windows:** `winget install -e --id Python.Python.3.13`
-> * **Debian/Ubuntu:** use [deadsnakes](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa) or a distro release shipping 3.12+
+> * **macOS:** `brew install python@3.14 && brew link --overwrite python@3.14`
+> * **Windows:** `winget install -e --id Python.Python.3.14`
+> * **Debian/Ubuntu:** use [deadsnakes](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa) or a distro release shipping 3.14.
 >
 > After a Python minor-version bump, **recreate your virtualenv**
 > (`rm -rf .venv && python3 -m venv .venv`) — see
 > [HOW-TO-UPGRADE.md](docs/HOW-TO-UPGRADE.md). Your memories are unaffected:
 > the databases live outside the venv under `~/.m3/engine`.
 >
-> We recommend **3.13 or newer** for new installs. Python 3.12 is in
-> security-fix-only maintenance upstream (no further bug fixes; security
-> support until 2028-10-31), so a future m3 release will raise the floor
-> again — announced at least one minor release in advance.
+> We recommend **3.14 or newer** for new installs. Python 3.13 enters
+> security-fix-only maintenance upstream on October 1st (no further bug fixes),
+> so a future m3 release will raise the floor again — announced at least one
+> minor release in advance.
 
 *The [Quickstart](#-quickstart) above covers the common path (`pip install m3-memory` → `m3 setup`). This section adds the alternatives: the shell installer, per-agent wiring, and manual MCP configuration.*
 
@@ -271,7 +271,7 @@ m3 setup
 *See [Hermes Plugin Integration Guide](docs/HERMES.md).*
 
 #### 🐍 Python / LangChain & LangGraph
-Use M3 as a drop-in Mem0 replacement or LangMem backend:
+Use m3 as a drop-in Mem0 replacement or LangMem backend:
 ```bash
 pip install m3-memory[langchain]
 ```
@@ -280,7 +280,7 @@ pip install m3-memory[langchain]
 #### 👥 CrewAI (v1.x)
 A drop-in `StorageBackend` for CrewAI's unified memory:
 ```bash
-pip install m3-memory[crewai]   # crewai>=1.10,<2 · Python 3.10–3.13 (a 3.14 escape hatch is documented)
+pip install m3-memory[crewai]   # crewai>=1.10,<2 · Python 3.12–3.13 (a 3.14 escape hatch is documented)
 ```
 *See [CrewAI Integration Guide](m3_memory/integrations/crewai/README.md).*
 
@@ -294,7 +294,7 @@ pip install m3-memory[pydantic-ai]   # pydantic-ai-slim>=2,<3
 ---
 
 ### Manual MCP Server Configuration
-To expose M3 to any Model Context Protocol host, add it to your configuration file:
+To expose m3 to any Model Context Protocol host, add it to your configuration file:
 
 ```json
 {
@@ -310,15 +310,15 @@ To expose M3 to any Model Context Protocol host, add it to your configuration fi
 
 ## 🎚️ Domain Gating: the Full Catalog Without the Context Cost
 
-M3 gives you the full 100+ tool surface while occupying just **1.8% of a 200K context window** at startup — most MCP servers make you pay for every tool in every prompt. Tools are grouped into **9 domains** (`memory`, `chatlog`, `files`, `entity`, `agent`, `tasks`, `conversations`, `diagnostics`, `admin`) and loaded lazily.
+m3 gives you the full 100+ tool surface while occupying just **2% of a 200K context window** at startup — most MCP servers make you pay for every tool in every prompt. Tools are grouped into **9 domains** (`memory`, `chatlog`, `files`, `entity`, `agent`, `tasks`, `conversations`, `diagnostics`, `admin`) and loaded lazily.
 
-Only the essential core set (~18, ~3,540 tokens) registers at startup. When your agent needs advanced functionality, it calls `tools_load_domain(domain="...")` to fetch the rest on demand — so a large catalog costs near-zero context until you actually use a domain.
+Only 10 schemas register at startup (~3,929 tokens). That set is chosen by measurement rather than judgement: across real-world multi-agent development sessions it absorbed **95% of all observed tool calls**, so gating the rest costs almost nothing in practice. When your agent needs more, it calls `tools_load_domain(domain="...")` to fetch a domain on demand — or invokes any single tool by name through `m3_call`, with no domain load at all.
 
 | Gating Mode | Registered Tools | Tokens in Schema | % of 200K Window |
 | :--- | :---: | :---: | :---: |
-| **Lazy (Default)** | **~18** | **~3,540** | **1.8%** |
-| Typical Active Session | 64 | ~17,975 | 9.0% |
-| Eager Mode (`M3_TOOLS_LAZY=0`) | 110 | ~24,918 | 12.5% |
+| **Lazy (Default)** | **10** | **~3,929** | **2.0%** |
+| Typical Active Session (+`memory` +`admin`) | 56 | ~17,548 | 8.8% |
+| Eager Mode (`M3_TOOLS_LAZY=0`) | 115 | ~29,658 | 14.8% |
 
 > 🛠️ *Note: If your client does not support dynamic tool registration, set the environment variable `M3_TOOLS_LAZY=0` to register all tools eagerly.*
 
@@ -326,7 +326,7 @@ Only the essential core set (~18, ~3,540 tokens) registers at startup. When your
 
 ## 🛡️ Sovereign & Air-Gapped Deployments
 
-M3 operates completely offline by default.
+m3 operates completely offline by default.
 
 ### Sovereign Local Embedder
 A high-performance BGE-M3 embedder runs locally after installation.
@@ -336,7 +336,7 @@ A high-performance BGE-M3 embedder runs locally after installation.
 *   **External Provider Fallback:** Set `M3_EMBED_URL` to point at any OpenAI-compatible `/v1/embeddings` endpoint (Ollama, LM Studio, vLLM, or another machine's m3 embed server), and `M3_EMBED_FALLBACK_URL` for a second endpoint to try if the first is unreachable.
 
 ### Rust-Oxidized Performance Core
-M3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch cosine distance calculations, and FTS compilations by **90× to 800×**. It is installed **by default** (the installer's `--no-native-wheel` is the opt-*out*), not an optional add-on. A pure-Python fallback covers every code path and is **results-equivalent** — exact for FTS compilation and graph traversal, and within float tolerance for vector math, enforced by `tests/test_oxidation_parity.py`, `test_fts_parity.py` and `test_graph_neighbor_parity.py`. So the core changes speed, never answers: if the wheel is absent, or you set `M3_CORE_RS_DISABLE=1`, M3 falls back automatically and returns the same results more slowly. (See [Oxidation Benchmarks](docs/OXIDATION_BENCHMARKS.md)).
+m3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch cosine distance calculations, and FTS compilations by **90× to 800×**. It is installed **by default** (the installer's `--no-native-wheel` is the opt-*out*), not an optional add-on. A pure-Python fallback covers every code path and is **results-equivalent** — exact for FTS compilation and graph traversal, and within float tolerance for vector math, enforced by `tests/test_oxidation_parity.py`, `test_fts_parity.py` and `test_graph_neighbor_parity.py`. So the core changes speed, never answers: if the wheel is absent, or you set `M3_CORE_RS_DISABLE=1`, m3 falls back automatically and returns the same results more slowly. (See [Oxidation Benchmarks](docs/OXIDATION_BENCHMARKS.md)).
 
 ### Enterprise Security & Compliance
 *   **FIPS 140-3 Ready:** Standardized encryption pathways allow routing through validated cryptographic modules (e.g., wolfSSL via `M3_FIPS_MODE=1`).
@@ -353,7 +353,7 @@ M3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch
 
 ---
 
-## 🔮 What M3 Does
+## 🔮 What m3 Does
 
 *   **Memory Persistence:** Saves system architecture, project decisions, and preferences across tool boundaries using a local SQLite database.
 *   **Autonomous Cognitive Loop:** Background worker (`m3_cognitive_loop.py`) that periodically sweeps chat logs to extract facts, reconcile contradictions, and construct an entity relationship graph.
@@ -396,8 +396,8 @@ M3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch
 
 ## 🎯 Who This Is For
 
-### M3 is a great fit if...
-*   **You run a homelab or self-hosted stack:** M3 is a single `pip install` with no
+### m3 is a great fit if...
+*   **You run a homelab or self-hosted stack:** m3 is a single `pip install` with no
     account, no API key, and no outbound calls — it runs on the hardware you already
     own, alongside your other self-hosted services. SQLite by default (zero
     infrastructure); PostgreSQL when you want a shared store across machines.
@@ -415,9 +415,9 @@ M3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch
 *   **You need security and compliance:** Built-in `gdpr_forget` and `gdpr_export` tools, air-gapped support, and audit logs.
 *   **You value privacy:** Zero external cloud requests or subscriptions required.
 
-### M3 is NOT a fit if...
+### m3 is NOT a fit if...
 *   You need a hosted SaaS dashboard with managed infrastructure (use [Letta](https://letta.ai)).
-*   **You don't want persistent memory:** you want each session to start fresh, with no ability to retrieve prior sessions' knowledge — M3 exists to do the opposite, so your agent's built-in defaults are the simpler fit.
+*   **You don't want persistent memory:** you want each session to start fresh, with no ability to retrieve prior sessions' knowledge — m3 exists to do the opposite, so your agent's built-in defaults are the simpler fit.
 
 ---
 
@@ -459,7 +459,7 @@ Evaluated on the 500-question [LongMemEval-S](https://github.com/xiaowu0162/Long
 | 10 (Default) | **99.2%** | 496 / 500 | +2.4pp |
 | 20 | **100.0%** | 500 / 500 | First Report ‡ |
 
-> † **SHR@1** is the strictest cut — a gold session as the single top-ranked result. M3 operates at **k=10** (its default), where a gold session is present for 99.2% of questions; k=1 is reported here for completeness, not as the headline. Cross-system SHR/recall figures are usually quoted at k=5, k=10, k=20, or k=50, so comparing another system's k=10+ number against this k=1 figure is not a like-for-like comparison.
+> † **SHR@1** is the strictest cut — a gold session as the single top-ranked result. m3 operates at **k=10** (its default), where a gold session is present for 99.2% of questions; k=1 is reported here for completeness, not as the headline. Cross-system SHR/recall figures are usually quoted at k=5, k=10, k=20, or k=50, so comparing another system's k=10+ number against this k=1 figure is not a like-for-like comparison.
 
 > ⁂ **Which aggregation.** These are binary per-question `recall_any@k` values — the convention adjacent LongMemEval submissions report. The benchmarking report's per-question-type table aggregates slightly differently and reads marginally higher at shallow depth (98.8% at k=5, 99.4% at k=10); k=20 is 100.0% either way. The table above quotes the more conservative figures.
 
@@ -486,7 +486,7 @@ comparable across systems the way SHR is:
 
 ## 🧰 Core Tools
 
-While M3 features 100+ tools, these five serve as your primary interface:
+While m3 features 100+ tools, these five serve as your primary interface:
 
 | Tool Name | Operation Description |
 | :--- | :--- |
@@ -505,7 +505,7 @@ While M3 features 100+ tools, these five serve as your primary interface:
 You can drop the agent ruleset file [`examples/AGENT_RULES.md`](examples/AGENT_RULES.md) into your workspace to teach your agent best practices (e.g., query before writing, update existing records instead of duplicating).
 
 ### Command Installation Prompts
-Copy and paste these prompts into your terminal client to let your agent set up M3 for you:
+Copy and paste these prompts into your terminal client to let your agent set up m3 for you:
 
 #### Claude Code Prompt
 ```text
@@ -572,7 +572,7 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) fo
 
 ### Built with
 
-M3 Memory is authored and maintained by **skynetCMD**. It was built with the help of
+m3 Memory is authored and maintained by **skynetCMD**. It was built with the help of
 AI coding assistants — **Gemini CLI**, **Claude Code**, and **Google Antigravity** —
 which contributed code under the author's direction. (They are tools that assisted;
 they are not maintainers, sponsors, or co-owners of the project.)

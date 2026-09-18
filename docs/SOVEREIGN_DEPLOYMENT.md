@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Sovereign & Air-Gapped Deployment Guide
 
-This guide explains how to deploy M3-Memory as a completely self-contained
+This guide explains how to deploy m3-Memory as a completely self-contained
 "memory appliance" in secure, offline, or air-gapped environments.
 
 m3 is sovereign **by default**. The baseline install needs **zero external
@@ -13,7 +13,7 @@ own BGE-M3 CPU embedder ships with the repo and runs on port 8082.
 
 A sovereign deployment is:
 
-1. **M3-Memory core** — the MCP server, CLI, and tools (`pip install m3-memory`).
+1. **m3-Memory core** — the MCP server, CLI, and tools (`pip install m3-memory`).
 2. **Bundled BGE-M3 GGUF** — ships with the repo via Git LFS at
    `_assets/models/bge-m3-Q4_K_M.gguf` (~438 MB).
 3. **m3-embed-server** — Rust binary from the `oxidation` extra; serves an
@@ -121,8 +121,8 @@ LFS-tracked model file and any extra wheels you'll need offline.
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, diagnostics, admin). Only the ~18 essentials load at MCP startup
-> (~3,540 tokens, ~1.8% of a 200K window; the full catalog loads on demand). The
+> conversations, diagnostics, admin). Only the 20 essentials load at MCP startup
+> (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The
 > agent pulls in a domain on demand — just say "load the files tools" and it does.
 > Set `M3_TOOLS_LAZY=0` to disable. Especially relevant in air-gapped settings
 > where every token of context margin counts.
@@ -186,15 +186,15 @@ m3 doctor                # all subsystems healthy?
 
 ## FIPS 140-3 deployment-ready (hardened)
 
-For environments requiring FIPS-approved cryptography, M3 routes all crypto
-through **wolfCrypt** when configured. M3 is *deployment-ready*, **not** itself
+For environments requiring FIPS-approved cryptography, m3 routes all crypto
+through **wolfCrypt** when configured. m3 is *deployment-ready*, **not** itself
 a validated module — see [`FIPS_MODULE_BOUNDARY.md`](FIPS_MODULE_BOUNDARY.md) for
 the authoritative boundary, the two tiers, and limitations.
 
 > **Order matters:** FIPS mode **fails closed** — if you set the env vars before
-> wolfSSL is present, M3 will refuse to start. Install wolfSSL FIRST.
+> wolfSSL is present, m3 will refuse to start. Install wolfSSL FIRST.
 
-1. **Install wolfSSL** (M3 ships no binary — it builds from official source):
+1. **Install wolfSSL** (m3 ships no binary — it builds from official source):
 
    ```bash
    m3 fips install-wolfssl        # clones + builds + installs to ~/.m3/lib
@@ -221,7 +221,7 @@ the authoritative boundary, the two tiers, and limitations.
    export M3_WOLFSSL_SHA256=<that hash>
    ```
 
-   M3 loads wolfSSL only from trusted absolute paths it controls (`M3_WOLFSSL_LIB`
+   m3 loads wolfSSL only from trusted absolute paths it controls (`M3_WOLFSSL_LIB`
    > `~/.m3/lib` > system dirs) — never the CWD/`%PATH%` — to resist DLL-hijack.
 
 In FIPS mode, internal communication (e.g. to the embedder on port 8082) is

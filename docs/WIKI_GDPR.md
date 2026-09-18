@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> The Wiki & the Right to Erasure
 
-The [M3 Wiki](WIKI.md) compiles your memories into synthesized topic pages. A
+The [m3 Wiki](WIKI.md) compiles your memories into synthesized topic pages. A
 synthesis is **derived content that outlives its source**: it quotes and
 paraphrases the memories it was built from, and it persists as its own row after
 those memories change or are deleted. That makes erasure (GDPR Art. 17) a
@@ -109,5 +109,5 @@ silent divergence, caching content to fake reproducibility, and refusing to eras
 
 - [GDPR & the Right to Erasure in m3](GDPR_COMPLIANCE.md) — the core erasure doc
   (what survives a hard-delete, the `compliance` record, the program layer).
-- [The M3 Wiki](WIKI.md) — how syntheses are compiled and rendered.
+- [The m3 Wiki](WIKI.md) — how syntheses are compiled and rendered.
 - Regulation text — Art. 17 (erasure), Art. 5(2) (accountability).

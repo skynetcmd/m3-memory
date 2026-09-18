@@ -1,6 +1,6 @@
 # Design Philosophies
 
-M3 Memory is built to a set of design tenets that gate every change — the
+m3 Memory is built to a set of design tenets that gate every change — the
 authority a contributor (human or agent) re-reads before calling work done, and
 the checklist the pre-push hook echoes.
 

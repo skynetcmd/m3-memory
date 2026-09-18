@@ -401,7 +401,7 @@ with the exact one-liner to run by hand:
 sc.exe failure m3-embed-server reset= 60 actions= restart/5000/restart/5000/restart/5000
 ```
 
-Equivalent GUI path: `services.msc` -> M3 Embed Server -> Recovery tab.
+Equivalent GUI path: `services.msc` -> m3 Embed Server -> Recovery tab.
 
 ### Logs
 

@@ -1,6 +1,6 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Roadmap
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory — Roadmap
 
-> Current version: **v2026.7.21.1** — actively maintained, with SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20; 92% end-to-end QA, no oracle metadata on LongMemEval-S). Priorities shift based on community feedback; open an issue to vote on a feature.
+> Current version: **v2026.9.16.0** — actively maintained, with SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20; 92% end-to-end QA, no oracle metadata on LongMemEval-S). Priorities shift based on community feedback; open an issue to vote on a feature.
 
 ---
 
@@ -36,7 +36,7 @@ Roughly two months of releases (≈25 between `v2026.4.12b` and `v2026.6.8.1`); 
 
 ### Retrieval quality + LongMemEval-S benchmarks (v2026.6.6.0, v2026.6.8.1)
 
-- [x] **99.2% SHR @ k=10** on LongMemEval-S — full sweep **98.2% / 99.2% / 100.0%** @ k=5/10/20 (BGE-M3 hybrid FTS5 + vector + MMR; k=10 is M3's default search depth)
+- [x] **99.2% SHR @ k=10** on LongMemEval-S — full sweep **98.2% / 99.2% / 100.0%** @ k=5/10/20 (BGE-M3 hybrid FTS5 + vector + MMR; k=10 is m3's default search depth)
 - [x] ~~89.0% E2E QA~~ (**superseded** — oracle-routed configuration; replaced by the 92.0% no-oracle figure below. Not a current or a recall number.)
 - [x] **92.0% E2E QA — no oracle metadata** on LongMemEval-S (460 / 500, v3 inferred strategy routing, Claude Opus 4.6 answerer, gpt-4o judge) — supersedes the oracle-routed 89.0% headline; see the [LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md) and [xiaowu0162/LongMemEval#49](https://github.com/xiaowu0162/LongMemEval/issues/49)
 - [x] FTS5 sanitizer rewrite — allowlist tokenization fixes search crashes on queries containing hyphens, colons, `field:value` tokens (`gpt-4o`, `claude-code`, `100-200MB`, …)
@@ -157,7 +157,7 @@ Memory as a maintained body of knowledge, not a flat index. All additive and
 
 ## 📦 Planned — Distribution & Deployment
 
-- [ ] **pgvector / HNSW ANN on the PostgreSQL primary backend** — PostgreSQL can already be M3's primary live store (`M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`), but vector search there is still **brute-force Rust cosine**, the same as on SQLite. Index-accelerated approximate nearest-neighbor via pgvector/HNSW is not yet implemented — so PG-primary today is about a shared/server store, not faster vector search.
+- [ ] **pgvector / HNSW ANN on the PostgreSQL primary backend** — PostgreSQL can already be m3's primary live store (`M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`), but vector search there is still **brute-force Rust cosine**, the same as on SQLite. Index-accelerated approximate nearest-neighbor via pgvector/HNSW is not yet implemented — so PG-primary today is about a shared/server store, not faster vector search.
 - [ ] **Docker image** — `docker run -v ~/.m3-memory:/data ghcr.io/skynetcmd/m3-memory:latest`
 - [ ] **Auto MCP Registry** — zero-config discovery in Claude Code and other MCP clients via published `mcp-server.json`
 - [ ] **TestPyPI dry-run CI gate** — catch packaging regressions before every release

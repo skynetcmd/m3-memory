@@ -96,7 +96,6 @@ This document provides a comprehensive inventory of all 115 MCP tools available 
 | `files_entity_coalesce_unapply` | Files Memory | Reverse one coalescence cluster (drop edges, clear flags, strip aliases, tombstone the candidate so auto-merge won't resurrect it). Members are never deleted; re-apply via files_entity_coalesce_apply with candidate_uuids. |
 | `files_extract_pending` | Files Memory | Drain leaves with extraction_status='pending' through the LLM fact extractor. Used after a queue-mode ingest. Safe to call repeatedly. |
 | `files_get` | Files Memory | Fetch one record by UUID. Tries file_nodes then leaves. |
-| `files_health` | Files Memory | DB integrity + FTS5 sync check. Set rebuild=True to fix drift. |
 | `files_index` | Files Memory | Return file-level summaries for triage (wiki-index primitive). Cheap-first retrieval -- no leaf content. Use BEFORE files_search to decide which files are worth deep-reading. |
 | `files_ingest` | Files Memory | Walk a directory and ingest supported files into files.db. Idempotent: same content_sha256 -> no-op; changed content -> new file_node version supersedes prior. Use extract_mode to opt into fact extraction; use original_path (or a <path>.m3meta.json sidecar) to point search results at a source-of-truth file when the ingested file is a conversion. |
 | `files_link_rename` | Files Memory | Re-point an existing file_node at a new path (rename / move). NOT a supersession -- content stays identical. Use this only when staleness review surfaces a rename candidate. |
@@ -107,6 +106,7 @@ This document provides a comprehensive inventory of all 115 MCP tools available 
 | `files_staleness_review` | Files Memory | Compare filesystem against files.db. Surfaces stale, touched-only, missing, new, failed-extraction, drifted-promotion files, and rename candidates. Report-only. |
 | `files_stats` | Files Memory | Corpus-level counters: file_nodes, leaves, embed coverage, by-filetype. |
 | `files_watch_once` | Files Memory | Single-pass staleness check + notification dispatch. Suitable for cron / scheduled runners. Notifications are emitted via the memory.db notifications inbox; cooldown suppresses duplicates within the window. |
+| `files_health` | Diagnostics | DB integrity + FTS5 sync check. Set rebuild=True to fix drift. |
 | `memory_doctor` | Diagnostics | Self-service diagnostic for the m3-memory embedding cascade. Probes tier-1 (in-proc GGUF), tier-2 (m3-embed-server :8082), DB integrity, and end-to-end embed roundtrip — all concurrently with bounded 2s per-probe timeouts. Returns a structured dict with status ('healthy' | 'degraded' | 'broken'), per-tier details, issues, and actionable recommendations. Use this when memory_search hangs, embeddings look wrong, or you're standing up a new deployment. |
 | `memory_doctor_fix` | Diagnostics | Run the m3-memory self-repair mode (m3 doctor --fix). Attempts to auto-fix the most common deployment issues in order: (1) apply pending SQLite migrations, (2) rebuild the FTS5 full-text index, (3) embed-backfill items that are missing vector embeddings (capped at 500/run), (4) rebuild the m3_system_cohesion table if absent. Set dry_run=True to see what *would* be done without making any changes. Returns a structured dict with per-action outcomes and a summary status ('ok' | 'partial' | 'nothing_to_do' | 'failed'). |
 | `extract_entities` | Lifecycle & Maintenance | Accepts raw text, extracts entities and relationship predicates based on the configured pluggable entity-extraction backend, and returns them as structured JSON without modifying the database. Use this to preview what entities and relationships would be extracted from raw content. |
@@ -1672,20 +1672,6 @@ Fetch one record by UUID. Tries file_nodes then leaves.
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
-### `files_health`
-
-DB integrity + FTS5 sync check. Set rebuild=True to fix drift.
-
-**Source:** mcp_tool_catalog.py
-
-**Parameters:**
-
-| Parameter | Type | Required | Description | Default |
-| --- | --- | --- | --- | --- |
-| `rebuild` | `boolean` | No |  | `False` |
-| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
-| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
-
 ### `files_index`
 
 Return file-level summaries for triage (wiki-index primitive). Cheap-first retrieval -- no leaf content. Use BEFORE files_search to decide which files are worth deep-reading.
@@ -1866,6 +1852,20 @@ Single-pass staleness check + notification dispatch. Suitable for cron / schedul
 ---
 
 ## Diagnostics
+
+### `files_health`
+
+DB integrity + FTS5 sync check. Set rebuild=True to fix drift.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `rebuild` | `boolean` | No |  | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_doctor`
 

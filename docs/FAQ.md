@@ -1,13 +1,13 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory FAQ
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory FAQ
 
 > Working *on* m3 rather than using it? See the **[FAQ for
 > Developers](FAQ_FOR_DEVELOPERS.md)** instead — this page is for users and
 > operators.
 
-## What is M3?
+## What is m3?
 
 ### Q: Is my data private?
-**A:** Yes — 100% local. Memory lives in a SQLite file on your hardware, with zero cloud egress and zero telemetry. M3 runs fully air-gapped: the BGE-M3 embedder ships bundled and runs on your CPU with no API keys and no internet.
+**A:** Yes — 100% local. Memory lives in a SQLite file on your hardware, with zero cloud egress and zero telemetry. m3 runs fully air-gapped: the BGE-M3 embedder ships bundled and runs on your CPU with no API keys and no internet.
 
 ### Q: How good is retrieval?
 **A:** State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10 and 100% @ k=20** on the LongMemEval-S benchmark (no oracle routing), with the correct session as the #1 result for ~92% of questions. End-to-end QA accuracy is 92.0% (no oracle metadata). See the [Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
@@ -19,22 +19,22 @@
 **A:** No. Run **`/mcp`** (or your host's reconnect action) and the tools return immediately — a low-risk, idempotent action costing ~0.9 s, cold start included, that cannot lose data (the bridge is stateless; everything lives in the database). Chatlog capture writes to the database *directly* and does not travel over the MCP connection, so a dropped connection costs you searching and writing for a few seconds — not captured turns. Verify for yourself with `m3 chatlog doctor`. This is a client-side MCP lifecycle limitation (the client owns the pipe to the server process, so only the client can restore it), not an m3 failure — and it can affect **any** agent that reaches m3 over stdio, not just Claude Code. Full mechanism, measured evidence, and upstream references: [MCP_DISCONNECTS.md](MCP_DISCONNECTS.md).
 
 ### Q: Does it remember decisions across sessions?
-**A:** Yes — that's the point. M3 is a bitemporal knowledge base: it captures facts, resolves contradictions automatically, and lets you query what your agent believed at any past date. A verbatim chatlog subsystem also records conversation turns *before* compaction, so nothing is lost to context-window truncation.
+**A:** Yes — that's the point. m3 is a bitemporal knowledge base: it captures facts, resolves contradictions automatically, and lets you query what your agent believed at any past date. A verbatim chatlog subsystem also records conversation turns *before* compaction, so nothing is lost to context-window truncation.
 
 ### Q: I need verbatim recall of facts — should I use a verbatim-only store instead?
-**A:** No — M3 already gives you verbatim recall. Content is stored exactly as you wrote it and is **never altered in place**; the raw text is always retrievable byte-for-byte. When a fact is corrected, M3 doesn't overwrite the old one — it *closes* the old fact and links the new one, so the original wording stays queryable (via the `memory_history` tool, or an `as_of` point-in-time search) alongside the update. A verbatim-only store returns raw text too, but the moment a fact changes it loses the earlier version. M3 gives you exact recall **and** the full history of how a fact evolved — plus extraction and contradiction handling a plain verbatim store can't do.
+**A:** No — m3 already gives you verbatim recall. Content is stored exactly as you wrote it and is **never altered in place**; the raw text is always retrievable byte-for-byte. When a fact is corrected, m3 doesn't overwrite the old one — it *closes* the old fact and links the new one, so the original wording stays queryable (via the `memory_history` tool, or an `as_of` point-in-time search) alongside the update. A verbatim-only store returns raw text too, but the moment a fact changes it loses the earlier version. m3 gives you exact recall **and** the full history of how a fact evolved — plus extraction and contradiction handling a plain verbatim store can't do.
 
-### Q: Is M3 right for my project? When is a simpler approach better?
-**A:** Be honest with yourself about the need. Persistent, evolving memory earns its keep when users (or agents) interact **repeatedly over time** and benefit from accumulated context — long-running autonomous agents, coding assistants that improve across sessions, personal/research assistants, multi-session workflows. If your need is really just **conversation history + RAG over a knowledge base + a small structured user profile**, that combination is simpler to build, test, and operate, and you may not need a memory framework at all. M3 doesn't punish you for starting small, though: you can run it as a plain store (disable enrichment/extraction — see below) and turn on the higher-order features only when you need them.
+### Q: Is m3 right for my project? When is a simpler approach better?
+**A:** Be honest with yourself about the need. Persistent, evolving memory earns its keep when users (or agents) interact **repeatedly over time** and benefit from accumulated context — long-running autonomous agents, coding assistants that improve across sessions, personal/research assistants, multi-session workflows. If your need is really just **conversation history + RAG over a knowledge base + a small structured user profile**, that combination is simpler to build, test, and operate, and you may not need a memory framework at all. m3 doesn't punish you for starting small, though: you can run it as a plain store (disable enrichment/extraction — see below) and turn on the higher-order features only when you need them.
 
-### Q: What should I check before adopting M3? (evaluation checklist)
-**A:** Here are the standard "should I adopt this memory framework?" questions with M3's honest answers:
+### Q: What should I check before adopting m3? (evaluation checklist)
+**A:** Here are the standard "should I adopt this memory framework?" questions with m3's honest answers:
 
-| Question | M3's answer |
+| Question | m3's answer |
 |---|---|
 | **Actively maintained?** | Yes — frequent releases (see [CHANGELOG](../CHANGELOG.md)). |
 | **Memory format documented?** | Yes — a typed, code-cited schema ([MEMORY_MODEL.md](MEMORY_MODEL.md)) and a 100+ tool [API reference](API_REFERENCE.md). |
-| **Swap the storage backend?** | **Yes.** SQLite is the zero-infrastructure default, but you can run M3 with **PostgreSQL as the primary store** (`M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`) — the installer asks which backend to use, and the whole runtime works on either. (Separately, you can also *sync/federate* to a PostgreSQL data warehouse — see [SYNC.md](SYNC.md).) Note: on PostgreSQL, vector search is currently brute-force cosine; ANN indexing (pgvector) is a future item. |
+| **Swap the storage backend?** | **Yes.** SQLite is the zero-infrastructure default, but you can run m3 with **PostgreSQL as the primary store** (`M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`) — the installer asks which backend to use, and the whole runtime works on either. (Separately, you can also *sync/federate* to a PostgreSQL data warehouse — see [SYNC.md](SYNC.md).) Note: on PostgreSQL, vector search is currently brute-force cosine; ANN indexing (pgvector) is a future item. |
 | **Customize what's remembered/forgotten?** | Yes — write-gating, importance, confidence decay, TTL/expiry, and per-agent retention policies ([MEMORY_MODEL.md](MEMORY_MODEL.md)). |
 | **Debugging/introspection?** | Yes — `memory_suggest` returns a per-result score breakdown, `memory_history` shows the audit trail, `memory_verify` checks integrity, and `m3 doctor --fix` diagnoses the store. |
 | **Integrates with my stack?** | Yes — **MCP** (native), **LangChain/LangGraph** ([LANGCHAIN.md](integrations/LANGCHAIN.md)), **CrewAI** (`StorageBackend`; `pip install m3-memory[crewai]`), and **PydanticAI** (tools + `M3MemoryToolset`; `pip install m3-memory[pydantic-ai]`; runs on Python 3.14) are all drop-in. Beyond those, call the MCP tools directly. |
@@ -83,18 +83,17 @@ It detects how m3 was installed (`pipx`, `pip`, `pip --user`, or a host plugin) 
 
 Upgrading a **git checkout** instead? See the [Upgrade Guide](HOW-TO-UPGRADE.md).
 
-### Q: Why do my writes take so long? I thought M3 was "zero-lag."
-**A:** They're two different clocks, and the slow one isn't M3.
+### Q: Why do my writes take so long? I thought m3 was "zero-lag."
+**A:** They're two different clocks, and the slow one isn't m3.
 
-**Once M3 has the write, it's millisecond-to-sub-second.** Measured end-to-end on
-a real ~305 MB store: the write impl is ~1.7 ms warm, the MCP dispatch adds
-~0.02 ms, and embedding is ~0.8 ms of that (a live call to the shared embedder).
-That's the "zero-lag" promise, and it holds — a warm write lands well inside M3's
-5 ms budget.
+**Once m3 has the write, it's virtually instantaneous.** Measured end-to-end on
+a real store: a deferred write (which does not wait for embedding) takes just
+~2.16 ms (p50) / 3.66 ms (p95). That's the "zero-lag" promise, and it holds — a
+write lands near m3's 2 ms baseline.
 
-**What you're waiting on is the AI writing the memory, not M3 storing it.** When
+**What you're waiting on is the AI writing the memory, not m3 storing it.** When
 an assistant calls `memory_write`, it has to *generate the content as tool-call
-arguments*, one token at a time, before M3 ever receives the request. That
+arguments*, one token at a time, before m3 ever receives the request. That
 generation is **size-proportional**: a one-line memory is near-instant, but a
 multi-kilobyte memory can take seconds to tens of seconds to emit. In one
 measurement, a 23-byte write round-tripped in ~3.7 s while a 4 KB write of the
@@ -102,7 +101,7 @@ same shape took ~24 s — the only variable was how much text had to be generate
 
 This is **the same whether the assistant runs on a local LLM or a cloud AI** —
 token generation is proportional to output length in both cases, so a large
-memory is slow to *produce* regardless of provider. M3's storage cost is
+memory is slow to *produce* regardless of provider. m3's storage cost is
 identical either way.
 
 **Takeaways:**
@@ -111,7 +110,7 @@ identical either way.
   retrieval.
 - For bulk ingestion (many memories at once), the per-write generation cost
   dominates; that's what bulk-write paths exist to amortize.
-- A slow write is not a sign M3 is unhealthy. To confirm M3 itself is fast, time
+- A slow write is not a sign m3 is unhealthy. To confirm m3 itself is fast, time
   a tiny write — it should return almost immediately.
 
 ### Q: Where are the logs located?

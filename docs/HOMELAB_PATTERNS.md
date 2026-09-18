@@ -1,31 +1,31 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Homelab Patterns
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory — Homelab Patterns
 
-> Last updated: May 2026. Practical patterns for running M3 in homelab and small-server environments. Corrections and contributions welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
+> Last updated: May 2026. Practical patterns for running m3 in homelab and small-server environments. Corrections and contributions welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
 
-This guide covers how to deploy M3 Memory in homelab setups — N100 boxes, mini-PCs, single-board computers, multi-LLM workstations, mixed-OS households — and the patterns we've seen work well there.
+This guide covers how to deploy m3 Memory in homelab setups — N100 boxes, mini-PCs, single-board computers, multi-LLM workstations, mixed-OS households — and the patterns we've seen work well there.
 
 ---
 
-## 🏠 Why M3 fits homelabs
+## 🏠 Why m3 fits homelabs
 
-A few properties of M3's design happen to line up with what homelabs actually need:
+A few properties of m3's design happen to line up with what homelabs actually need:
 
-- **Concurrency-safe by default.** SQLite WAL handles multiple agents writing simultaneously without races. If you're running Claude Code on a laptop, Gemini CLI on a workstation, and a couple of background agents reacting to Home Assistant events, they can all share one M3 store without coordination.
+- **Concurrency-safe by default.** SQLite WAL handles multiple agents writing simultaneously without races. If you're running Claude Code on a laptop, Gemini CLI on a workstation, and a couple of background agents reacting to Home Assistant events, they can all share one m3 store without coordination.
 - **No GPU tax for memory operations.** Storage, retrieval, and graph traversal are all CPU + RAM only. Your GPU stays free for the LLM doing actual inference. Memory enrichment (the optional SLM-driven extraction layer) can run on the same GPU between calls, or on a separate small box, or be skipped entirely.
 - **Offline-tolerant.** No external dependencies in the data path. Internet drops don't stop your agents. Useful at the cabin, on the road, or in environments where intermittent connectivity is the rule.
 - **Cross-machine sync without a SaaS dependency.** Optional bi-directional delta sync via PostgreSQL. One env var, your memories follow you across boxes.
 - **Single-file SQLite (default).** In the default deployment your entire memory store is one file — easy to back up, easy to inspect with the standard `sqlite3` CLI, easy to move between machines. (If you opt into a PostgreSQL primary backend via `M3_DB_BACKEND=postgres`, the store lives in Postgres instead; back it up with `pg_dump`, not a file copy.)
 - **Runs everywhere.** macOS, Linux, Windows — same `pip install`. No Docker requirement, no Kubernetes, no service mesh.
 
-**What M3 doesn't try to be:** a high-scale multi-tenant SaaS. If you're building memory for thousands of paying users with team dashboards and SLAs, a hosted cognitive memory product (Mem0 cloud, Letta Cloud, Zep) probably fits better. M3 is built for one developer or one household running real agents on real hardware they own.
+**What m3 doesn't try to be:** a high-scale multi-tenant SaaS. If you're building memory for thousands of paying users with team dashboards and SLAs, a hosted cognitive memory product (Mem0 cloud, Letta Cloud, Zep) probably fits better. m3 is built for one developer or one household running real agents on real hardware they own.
 
 ---
 
 ## 🧠 Picking your cognition placement
 
-M3 ships with both a deterministic substrate and an SLM-driven extraction pipeline. Homelab users typically pick one of three patterns:
+m3 ships with both a deterministic substrate and an SLM-driven extraction pipeline. Homelab users typically pick one of three patterns:
 
-### Pattern A: M3 as raw substrate (no SLM extraction)
+### Pattern A: m3 as raw substrate (no SLM extraction)
 
 You write entities directly via MCP tools. Retrieval is pure SQLite + vector + graph traversal. No LLM in the memory data path.
 
@@ -41,9 +41,9 @@ pip install m3-memory
 # That's it. Don't run m3_enrich. Use mcp__m3_memory__memory_write directly.
 ```
 
-### Pattern B: M3 + built-in SLM extraction
+### Pattern B: m3 + built-in SLM extraction
 
-M3's `m3_enrich` reads conversational turns and emits typed observations (facts, preferences, decisions). The reflector resolves contradictions via supersedes relationships.
+m3's `m3_enrich` reads conversational turns and emits typed observations (facts, preferences, decisions). The reflector resolves contradictions via supersedes relationships.
 
 **When this fits:**
 - You have a GPU box (RTX 30/40/50 series, M-series Mac) and you're happy spending some of it on memory enrichment.
@@ -64,17 +64,17 @@ python bin/m3_enrich.py --profile enrich_local_qwen \
 
 Other profiles: `enrich_anthropic_haiku.yaml` (cloud, ~$3/1000 conversations), `enrich_google_gemini.yaml` (cloud, cheapest), `enrich_local_gemma.yaml` (faster local, less synthesis ability).
 
-### Pattern C: M3 substrate + your own lightweight extraction layer
+### Pattern C: m3 substrate + your own lightweight extraction layer
 
-You bypass `m3_enrich` and run your own minimal extraction pipeline upstream of M3. Useful when you want extraction policy fully under your control, or when the M3 SLM pipeline is more than you need.
+You bypass `m3_enrich` and run your own minimal extraction pipeline upstream of m3. Useful when you want extraction policy fully under your control, or when the m3 SLM pipeline is more than you need.
 
 A good homelab-friendly recipe:
 
 1. **Slugify entity names** for stable IDs (`"John Adams"` → `john-adams`).
-2. **Maintain an alias table** for known synonyms (`"NYC"` → `new-york-city`, `"MSFT"` → `microsoft`). A small JSON file or a dedicated namespace in M3.
+2. **Maintain an alias table** for known synonyms (`"NYC"` → `new-york-city`, `"MSFT"` → `microsoft`). A small JSON file or a dedicated namespace in m3.
 3. **Run a single LLM call** to extract entities from new text — return JSON with people / places / organizations / dates / events.
 4. **Run a second small LLM call** for coreference resolution against the entities already in your context window.
-5. **Write the resolved entities and relationships** into M3 via the standard MCP tools.
+5. **Write the resolved entities and relationships** into m3 via the standard MCP tools.
 
 This is "Hindsight-lite": you get most of the cognitive benefits at a fraction of the compute cost, and you own every step of the pipeline.
 
@@ -86,11 +86,11 @@ Rough guidance from real deployments. Adjust to your workload:
 
 | Box | What works | What to watch out for |
 |---|---|---|
-| **Raspberry Pi 5 / N100 mini-PC** | M3 substrate (Pattern A), ~10K-50K memories, occasional MCP queries from a single agent | Don't run SLM enrichment on the same box; offload to a GPU machine |
-| **Minisforum / 8-core mini-PC** | M3 substrate + light enrichment via small SLM (gemma-2-2b, qwen-3b) | CPU inference is slow; batch enrichment overnight rather than realtime |
+| **Raspberry Pi 5 / N100 mini-PC** | m3 substrate (Pattern A), ~10K-50K memories, occasional MCP queries from a single agent | Don't run SLM enrichment on the same box; offload to a GPU machine |
+| **Minisforum / 8-core mini-PC** | m3 substrate + light enrichment via small SLM (gemma-2-2b, qwen-3b) | CPU inference is slow; batch enrichment overnight rather than realtime |
 | **Workstation w/ 12GB+ GPU** | Full Pattern B with qwen3-8b extraction in realtime | Watch VRAM contention if the same GPU is also running your main agent |
 | **Apple Silicon (M-series)** | All patterns; Metal-accelerated inference makes Pattern B cheap | LM Studio + qwen3-8b runs comfortably alongside Claude Code |
-| **Mixed multi-box homelab** | Run M3 store on a small always-on box; run enrichment on the GPU box; sync if you want laptop access | Decide early which box is the "source of truth" — the SQLite WAL file should live there |
+| **Mixed multi-box homelab** | Run m3 store on a small always-on box; run enrichment on the GPU box; sync if you want laptop access | Decide early which box is the "source of truth" — the SQLite WAL file should live there |
 
 The store itself is small. Even with 100K memories and embeddings, the `agent_memory.db` is typically a few hundred MB to ~2 GB depending on embedding dimensions. Disk is rarely the constraint; RAM during enrichment is.
 
@@ -98,9 +98,9 @@ The store itself is small. Even with 100K memories and embeddings, the `agent_me
 
 ## 🤝 Multi-agent in a homelab
 
-This is where M3 earns its keep. A typical pattern:
+This is where m3 earns its keep. A typical pattern:
 
-- **One M3 store** (a single SQLite file on whichever box is most always-on — or a PostgreSQL primary backend if you'd rather run a shared server).
+- **One m3 store** (a single SQLite file on whichever box is most always-on — or a PostgreSQL primary backend if you'd rather run a shared server).
 - **Multiple agents** read and write through MCP — a Claude Code instance on your laptop, a Gemini CLI agent on your desktop, an OpenCode agent on a server, plus any background workers (a Home Assistant integration, a periodic web scraper, etc.).
 - **Per-agent scoping** via `agent_id` and optional `scope` keeps each agent's working memory tidy without preventing cross-agent reads. Use the agent registry (`mcp__m3_memory__agent_register`) so each writer is identified.
 - **Handoffs** via `memory_handoff` — agent A leaves a structured task for agent B, agent B's next session sees it via its inbox.
@@ -132,11 +132,11 @@ Things we've seen go wrong, and what to do about them:
 - [Multi-agent orchestration](MULTI_AGENT.md) — full multi-agent setup details
 - [Configuration & environment variables](ENVIRONMENT_VARIABLES.md) — what to tune for small boxes
 - [Architecture](ARCHITECTURE.md) — system design that makes the homelab patterns work
-- [Comparison guide](COMPARISON.md) — when M3 is the right choice and when it isn't
+- [Comparison guide](COMPARISON.md) — when m3 is the right choice and when it isn't
 - [Sovereign substrates table](M3_Comparison_Table.md) — broader landscape view ([interactive version](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html))
 
 ---
 
 ## Contributing patterns
 
-If you've got a homelab pattern that works for you and isn't covered here — multi-LLM-server setups, ESP32 sensor capture, Home Assistant + M3 integration, NAS-hosted memory with multiple thin clients — open an [issue](https://github.com/skynetcmd/m3-memory/issues) or PR. Real-world deployments are the most useful documentation.
+If you've got a homelab pattern that works for you and isn't covered here — multi-LLM-server setups, ESP32 sensor capture, Home Assistant + m3 integration, NAS-hosted memory with multiple thin clients — open an [issue](https://github.com/skynetcmd/m3-memory/issues) or PR. Real-world deployments are the most useful documentation.

@@ -17,7 +17,7 @@ the specific snags.
 
 ### Q: A tool I need (e.g. `memory_delete`) isn't in my tool list / `ToolSearch` finds nothing. Is it missing?
 
-**No — it's domain-gated, not missing.** Only the ~18 *essentials* (main searches +
+**No — it's domain-gated, not missing.** Only the 20 *essentials* (main searches +
 writes) register at MCP session start; everything else loads on demand to keep the
 startup context small. A tool not being in your surface is **not** "capability
 absent," and you should **never** fall back to raw `sqlite3` or shelling out via

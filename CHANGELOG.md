@@ -19,6 +19,18 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+### Changed
+
+- **Startup registers 10 tool schemas instead of 20** — about 2% of a 200K
+  context window, down from 3%. Every other tool is reached as before, through
+  `tools_load_domain` or by name with `m3_call`; `M3_TOOLS_LAZY=0` still
+  registers the full catalog.
+- `chatlog_status` and `files_health` moved into the `diagnostics` domain, so
+  that domain now covers all three stores.
+- Corrected tool counts and context percentages across the documentation, and
+  documented that an MCP disconnect is not a memory outage: the `m3` CLI
+  reaches the same database while the client reconnects.
+
 ## [2026.9.16.0] — 2026-09-17 — documents of every common format are readable
 
 ### Added
