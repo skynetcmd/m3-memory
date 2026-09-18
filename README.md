@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/skynetcmd/m3-memory">
-    <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3-banner.jpg" alt="m3 Memory Banner" width="100%">
+    <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/M3-banner.jpg" alt="m3 Memory Banner" width="100%">
   </a>
 </p>
 
