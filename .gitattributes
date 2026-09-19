@@ -11,6 +11,14 @@
 # that is invisible on the machine that authored the file.
 *.service  text eol=lf
 *.plist    text eol=lf
+# Same reasoning, one layer out: a Dockerfile with CRLF breaks `docker build` on
+# Linux, and a CRLF shell rc / .env is sourced with trailing \r on every value
+# (`command not found: openclaw\r`). These are LF today only by git's
+# content-based default, not by policy — pin them so a contributor with
+# core.autocrlf=true cannot commit CRLF into a file a Linux user must execute.
+Dockerfile text eol=lf
+*.example  text eol=lf
+*.env      text eol=lf
 # Generated SVGs (e.g. docs/star-history.svg) are byte-compared by their
 # generator to avoid spurious commits — pin LF so the committed file matches
 # what the generator writes on any runner, regardless of core.autocrlf.
