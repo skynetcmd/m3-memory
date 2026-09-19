@@ -234,6 +234,52 @@ _FEEDBACK_VERDICTS = ("useful", "not_useful", "misleading")
 _FEEDBACK_USEFUL_LIFT = 0.1
 _FEEDBACK_MISLEADING_DROP = 0.2
 
+# ── Decay floors ─────────────────────────────────────────────────────────────
+#
+# Decay used to run toward 0.0, so a memory's importance was bounded only by how
+# long it had been ignored. A floor bounds it by what the memory has EARNED
+# instead: forgetting should asymptote, not erase.
+#
+# Every value here sits AT OR BELOW what the live corpus already held when the
+# floors were introduced (measured 2026-09-19 over 4,034 rows), so switching them
+# on moves no row on the first pass -- it only bounds future decay. That makes
+# the change observable in isolation: movement on pass one is a bug, not the
+# feature.
+#
+#   pinned      observed min 0.75, avg 0.852  -> floor 0.70
+#   graded      (new signal, no history)      -> floor 0.40  (above the 0.298
+#                                                ordinary average, so a memory
+#                                                someone called useful stays
+#                                                distinguishable from the mass)
+#   ordinary    observed min 0.097, avg 0.298 -> floor 0.05
+#
+# ⚠ Pinned rows are EXCLUDED from the decay UPDATE entirely (the WHERE clause),
+# so _PINNED_FLOOR is the value the reinforcement pass and any future unpin path
+# must respect -- not something this statement applies. Kept here so the tiers
+# read as one policy rather than being split across two files.
+_DECAY_RATE = 0.995
+_PINNED_FLOOR = 0.70
+_GRADED_FLOOR = 0.40
+_ORDINARY_FLOOR = 0.05
+
+
+def _decay_floor_sql(_d) -> str:
+    """Per-row decay floor as a SQL expression, rendered through the seam.
+
+    A memory that someone explicitly graded `helpful` has evidence behind it that
+    an untouched memory does not, so it must not decay into the same band. A CASE
+    expression keeps that as ONE set-based UPDATE (§4: SQL does the work; no
+    per-row Python loop) while still varying the bound per row.
+
+    Uses helpful_count/unhelpful_count from migration 049. On a pre-049 DB the
+    column reference raises, and the caller falls back to the flat 0.0 floor --
+    the same absence-tolerant shape the pinned-column fallback already uses.
+    """
+    return (
+        "CASE WHEN COALESCE(helpful_count, 0) > COALESCE(unhelpful_count, 0) "
+        f"THEN {_GRADED_FLOOR} ELSE {_ORDINARY_FLOOR} END"
+    )
+
 
 def memory_feedback_impl(memory_id, feedback="useful"):
     """Record an explicit verdict on a memory. Returns a structured result.
@@ -622,20 +668,32 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
     report = []
     with _db() as db:
         if decay:
+            # The floor is a PER-ROW expression, not a constant: a memory the user
+            # has graded `helpful` must not decay into the same band as one nobody
+            # has ever found useful. Rendered through the seam (greatest/least)
+            # because SQLite spells scalar max as MAX() while PostgreSQL's MAX is
+            # an AGGREGATE and the scalar is GREATEST() — §10a.
+            _floor = _decay_floor_sql(_d)
+            _decayed = _d.greatest(_floor, f"importance * {_DECAY_RATE}")
             try:
                 # savepoint isolates the pinned-column attempt so its failure on a
                 # pre-pinned SQLite DB doesn't abort the txn before the fallback.
                 with _savepoint(db):
                     res = db.execute(
-                        f"UPDATE memory_items SET importance = {_d.greatest('0.0', 'importance * 0.995')} "
+                        f"UPDATE memory_items SET importance = {_decayed}, "
+                        f"decay_rate = {_DECAY_RATE} "
                         f"WHERE is_deleted = 0 AND {_age7} "
                         f"AND COALESCE(pinned, 0) = 0"
                     )
             except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
                 if not _is_missing_schema(e):
                     raise
+                # Pre-049 DBs have neither decay_rate nor helpful_count; fall all
+                # the way back to the original flat-floor form rather than failing
+                # the whole maintenance pass on an old schema.
                 res = db.execute(
-                    f"UPDATE memory_items SET importance = {_d.greatest('0.0', 'importance * 0.995')} "
+                    f"UPDATE memory_items SET importance = "
+                    f"{_d.greatest('0.0', f'importance * {_DECAY_RATE}')} "
                     f"WHERE is_deleted = 0 AND {_age7}"
                 )
             report.append(f"Decayed {res.rowcount} items")
