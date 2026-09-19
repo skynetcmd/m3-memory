@@ -825,9 +825,38 @@ def test_sha256sums_non_https_url_is_refused():
 # The console output of an upgrade is gone by the time anyone asks "when did
 # this host move to 3.9.16, and did its wheel verify?". A digest mismatch in
 # particular is an after-the-fact investigation.
+#
+# ⚠ These four tests USED to hardcode `tmp_path / "logs" / ...`, which is the
+# NON-macOS branch of rci._install_log_path(). On Darwin the log goes to
+# ~/Library/Logs by platform convention (mirroring m3_embed_watchdog._log_path),
+# so all four failed on every macOS lane while the behaviour they assert was
+# working correctly — the TEST encoded a platform assumption, not the code.
+# Hardcoding it also meant a passing run on Linux/Windows proved nothing about
+# Darwin. Ask the implementation where the log goes instead, and pin the macOS
+# branch into tmp_path so the test stays hermetic (never touching the runner's
+# real ~/Library/Logs).
 # ---------------------------------------------------------------------------
 
-def test_install_log_records_digest_outcome(monkeypatch, tmp_path, capsys):
+@pytest.fixture
+def install_log(monkeypatch, tmp_path):
+    """Pin rci's install log inside tmp_path on EVERY platform; yield the path.
+
+    A fixture rather than a call inside each test because the redirect has to be
+    in place BEFORE the code under test runs — the log is written during
+    install_from_github_release(), so patching afterwards would read a file the
+    implementation never wrote there.
+
+    Patching the resolver (not asserting a literal path) is what keeps this
+    honest on Darwin, where _install_log_path() returns ~/Library/Logs/... by
+    platform convention. It also keeps the test hermetic: without this, a macOS
+    run would append to the runner's real ~/Library/Logs.
+    """
+    log = tmp_path / "logs" / "m3_rust_core_install.log"
+    monkeypatch.setattr(rci, "_install_log_path", lambda: log)
+    return log
+
+
+def test_install_log_records_digest_outcome(monkeypatch, tmp_path, capsys, install_log):
     """A verified download leaves a durable record, not just a console line."""
     monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "config"))
     choice, name = _metal_target()
@@ -837,14 +866,14 @@ def test_install_log_records_digest_outcome(monkeypatch, tmp_path, capsys):
 
     assert rci.install_from_github_release(choice) == 0
 
-    log = tmp_path / "logs" / "m3_rust_core_install.log"
+    log = install_log
     assert log.exists(), "a verified install must be recorded"
     text = log.read_text(encoding="utf-8")
     assert "sha256 OK" in text
     assert _sha256_hex(GOOD_WHEEL) in text, "the full digest is the evidence"
 
 
-def test_install_log_records_a_mismatch_for_later_analysis(monkeypatch, tmp_path):
+def test_install_log_records_a_mismatch_for_later_analysis(monkeypatch, tmp_path, install_log):
     """The failure a user reports days later must still be on disk."""
     monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "config"))
     choice, name = _metal_target()
@@ -854,13 +883,13 @@ def test_install_log_records_a_mismatch_for_later_analysis(monkeypatch, tmp_path
 
     assert rci.install_from_github_release(choice) == 1
 
-    text = (tmp_path / "logs" / "m3_rust_core_install.log").read_text(encoding="utf-8")
+    text = install_log.read_text(encoding="utf-8")
     assert text.count("code=wheel_sha256_mismatch") == 2, "both attempts recorded"
     assert _sha256_hex(GOOD_WHEEL) in text, "expected digest"
     assert _sha256_hex(BAD_WHEEL) in text, "what we actually received"
 
 
-def test_install_log_records_the_version_transition(monkeypatch, tmp_path):
+def test_install_log_records_the_version_transition(monkeypatch, tmp_path, install_log):
     """The log answers "when did this host move to X" -- as a transition."""
     monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "config"))
     monkeypatch.setattr(rci, "installed_rust_core_version", lambda: "3.9.7")
@@ -871,13 +900,13 @@ def test_install_log_records_the_version_transition(monkeypatch, tmp_path):
 
     assert rci.install_rust_core() == 0
 
-    text = (tmp_path / "logs" / "m3_rust_core_install.log").read_text(encoding="utf-8")
+    text = install_log.read_text(encoding="utf-8")
     assert "install start:" in text
     assert "3.9.7 -> {}".format(rci.M3_CORE_RS_VERSION) in text
     assert "channel=github-release" in text
 
 
-def test_install_log_records_a_total_failure(monkeypatch, tmp_path):
+def test_install_log_records_a_total_failure(monkeypatch, tmp_path, install_log):
     """All three tiers failing is precisely what gets investigated later."""
     monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "config"))
     monkeypatch.setattr(rci, "installed_rust_core_version", lambda: None)
@@ -890,7 +919,7 @@ def test_install_log_records_a_total_failure(monkeypatch, tmp_path):
 
     assert rci.install_rust_core() != 0
 
-    text = (tmp_path / "logs" / "m3_rust_core_install.log").read_text(encoding="utf-8")
+    text = install_log.read_text(encoding="utf-8")
     assert "install FAILED" in text
     assert "still_at=(none)" in text, "records that nothing was installed"
 
