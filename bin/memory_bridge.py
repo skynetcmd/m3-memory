@@ -4,8 +4,8 @@ import logging
 import os
 import sys
 
-from m3_sdk import active_database
 import mcp_compat
+from m3_sdk import active_database
 from mcp_compat import FastMCP
 
 # ── Logging ───────────────────────────────────────────────────────────────────

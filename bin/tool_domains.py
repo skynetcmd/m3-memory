@@ -51,25 +51,25 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
     ("embedder_status",     "diagnostics"),
     ("chatlog_status",      "diagnostics"),
     ("files_health",        "diagnostics"),
-    
+
     # Core domain catch-alls (first prefix match wins)
     ("memory",              "memory"),
     ("curate_memory",       "memory"),
-    
+
     ("curate_chatlog",      "chatlog"),
     ("chatlog",             "chatlog"),
-    
+
     ("files",               "files"),
     ("entity",              "entity"),
     ("agent",               "agent"),
     ("task",                "tasks"),
     ("conversation",        "conversations"),
-    
+
     # dispatcher / meta tools (like tools_*, cross-cutting) — route to admin
     ("m3_call",             "admin"),
     ("m3_index",            "admin"),
     ("m3_help_capabilities", "admin"),
-    
+
     # cross-cutting / system tools
     ("notify",              "admin"),
     ("notifications",       "admin"),
