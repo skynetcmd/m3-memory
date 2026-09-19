@@ -275,6 +275,22 @@ def _register_one(spec):
     return True
 
 
+# The meta-tools that stay live in lazy mode regardless of domain: they are how
+# an agent discovers and loads the rest of the catalog, so gating them would make
+# lazy mode a dead end.
+#
+# MODULE-LEVEL ON PURPOSE. bin/measure_tool_tokens.py and every external client
+# that wants to mirror m3's startup surface (e.g. an OpenClaw `toolFilter`) read
+# this by `getattr(memory_bridge, "_META_TOOLS")`. It used to be a local inside
+# _register_initial_tools(), which meant that getattr silently returned None and
+# each consumer fell back to its own hardcoded literal -- the exact "second
+# hand-maintained list would drift from it silently" failure the measurement
+# script's own comment warns about. The lists happened to agree, so nothing was
+# broken; the seam was simply undefended. tests/test_meta_tools_single_owner.py
+# pins it.
+_META_TOOLS = {"tools_list_domains", "tools_load_domain"}
+
+
 def _register_initial_tools():
     """Initial registration set, called once at startup.
 
@@ -290,7 +306,6 @@ def _register_initial_tools():
     Re-derive both figures with `python bin/measure_tool_tokens.py`; the
     counts here are a snapshot and the script is the source of truth.
     """
-    _META_TOOLS = {"tools_list_domains", "tools_load_domain"}
     for spec in mcp_tool_catalog.TOOLS:
         if not _LAZY_MODE:
             _register_one(spec)
