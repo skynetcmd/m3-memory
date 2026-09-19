@@ -41,7 +41,7 @@ def _summary(plan, governor_result: Optional[dict] = None,
     if plan.targets.opencode:
         restart_lines.append("  • OpenCode                 — restart the CLI")
     if plan.targets.openclaw:
-        restart_lines.append("  • OpenClaw                 — start `m3 proxy start`, then set base URL")
+        restart_lines.append("  • OpenClaw                 — restart the CLI/gateway")
     if restart_lines:
         print("Next step — restart your agent so it picks up the new MCP server:")
         for line in restart_lines:

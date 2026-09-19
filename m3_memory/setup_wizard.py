@@ -168,10 +168,10 @@ def _detect_agents() -> AgentTargets:
         or (Path.home() / ".gemini" / "antigravity-cli").is_dir()
     )
     opencode = bool(shutil.which("opencode"))
-    # OpenClaw has no native MCP, so detection drives the proxy default rather
-    # than direct wiring. Signals: openclaw CLI on PATH (npm-global), the
-    # well-known npm-global fallback, the user's workspace dir, or the gateway
-    # token env var from a prior setup.
+    # OpenClaw speaks MCP natively since 2026.3.22, so detection drives DIRECT
+    # wiring (`openclaw mcp set`) — see _wire_openclaw. Signals: openclaw CLI on
+    # PATH (npm-global), the well-known npm-global fallback, the user's workspace
+    # dir, or the gateway token env var from a prior setup.
     openclaw = bool(
         shutil.which("openclaw")
         or (Path.home() / ".npm-global" / "bin" / "openclaw").exists()
@@ -400,7 +400,7 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
     print(f"    {'[x]' if detected.gemini      else '[ ]'} Gemini CLI           (gemini)")
     print(f"    {'[x]' if detected.antigravity else '[ ]'} Antigravity CLI/Desktop (antigravity)")
     print(f"    {'[x]' if detected.opencode    else '[ ]'} OpenCode             (opencode)")
-    print(f"    {'[x]' if detected.openclaw    else '[ ]'} OpenClaw             (no native MCP; wired via local proxy)")
+    print(f"    {'[x]' if detected.openclaw    else '[ ]'} OpenClaw             (native MCP since 2026.3.22)")
     print(f"    {'[x]' if detected.hermes      else '[ ]'} Hermes Agent         (file-based memory-provider plugin)")
     print(f"    {'[x]' if detected.cursor      else '[ ]'} Cursor               (~/.cursor/mcp.json)")
     print(f"    {'[x]' if detected.cline       else '[ ]'} Cline                (VS Code extension MCP settings)")
@@ -418,9 +418,12 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         plan.targets.cursor = _ask_yes_no("  Wire m3 into Cursor?", default=True)
     if detected.cline:
         plan.targets.cline = _ask_yes_no("  Wire m3 into Cline?", default=True)
-    plan.targets.openclaw = _ask_yes_no(
-        "  Set up OpenClaw proxy (localhost:9000)?", default=detected.openclaw
-    )
+    # Gated on detection like every sibling above. It used to be asked
+    # unconditionally, which was harmless when a "yes" only printed proxy
+    # instructions; now a yes without OpenClaw installed produces a warning, so
+    # only offer it when we actually found OpenClaw.
+    if detected.openclaw:
+        plan.targets.openclaw = _ask_yes_no("  Wire m3 into OpenClaw?", default=True)
     if detected.hermes:
         print()
         print("  [Probing] Hermes Agent detected on system!")
@@ -2493,12 +2496,241 @@ def _wire_cline() -> bool:
     return True
 
 
-def _wire_openclaw_note() -> bool:
-    """OpenClaw can't speak MCP natively — print proxy instructions."""
-    _say("  · OpenClaw needs the local proxy on http://localhost:9000/v1")
-    print("    Start with: m3 proxy start  (or `python bin/mcp_proxy.py`)")
-    print("    Point OpenClaw's OpenAI base URL at http://localhost:9000/v1")
-    return True
+# OpenClaw shipped a NATIVE MCP client in 2026.3.22. Bisected against upstream
+# tags (github.com/openclaw/openclaw, the `repository` of the npm package our
+# sandbox installs): 2026.3.11 has no src/config/mcp-config.ts, 2026.3.22 does.
+# Below that floor there is no `openclaw mcp` subcommand at all, so writing the
+# config would leave a file the client never reads — we refuse and say upgrade.
+_OPENCLAW_MIN_MCP_VERSION = "2026.3.22"
+
+# Same server name as Claude Code's registration, so the tool namespace is
+# `mcp__m3_memory__` on both and docs/AGENT_INSTRUCTIONS.md tool names port over.
+_OPENCLAW_SERVER_NAME = "m3_memory"
+
+
+def _ensure_payload_importable() -> None:
+    """Put the payload's bin/ on sys.path so `import m3_sdk` etc. resolve.
+
+    REQUIRED BEFORE installer._canonical_memory_server(): it reaches m3_sdk for
+    the root resolution, and bin/ is not a package, so without this it raises
+    ModuleNotFoundError('m3_sdk'). Found end-to-end, not by the unit tests — they
+    mock _canonical_memory_env, so every mocked path was green while the real one
+    failed. Same pattern installer.py:1113 uses. Idempotent.
+    """
+    import sys as _sys
+
+    bd = str(_bin_dir())
+    if bd not in _sys.path:
+        _sys.path.insert(0, bd)
+
+
+def _openclaw_startup_tools() -> "list[str]":
+    """The tool names m3 exposes at session start, for OpenClaw's toolFilter.
+
+    Mirrors memory_bridge._register_initial_tools() exactly: the meta-tools plus
+    tool_domains.ESSENTIAL_TOOL_NAMES. DERIVED, never a literal — a hand-copied
+    list here would drift from the bridge silently, which is the same defect the
+    bridge's own `_META_TOOLS` seam had.
+
+    Why filter at all: the full catalog is 115 tools / 29,658 tokens on the MCP
+    wire, vs 10 tools / 3,929 tokens for this set (measured with
+    `python bin/measure_tool_tokens.py`; 86.8% saved). Nothing is lost — `m3_call`
+    is in the set and dispatches ANY catalog tool by name, and `tools_load_domain`
+    pulls a whole domain live. Omitting the meta-tools would make the filter a
+    dead end, which is why they are included rather than just the 8 essentials.
+
+    Returns [] if the payload is not importable; the caller then registers with no
+    toolFilter (all 115 tools — heavier, still correct) and says so.
+    """
+    _ensure_payload_importable()
+    import mcp_tool_catalog  # noqa: PLC0415
+    import memory_bridge  # noqa: PLC0415
+    import tool_domains  # noqa: PLC0415
+
+    meta = set(getattr(memory_bridge, "_META_TOOLS", None) or ())
+    names = {
+        s.name for s in mcp_tool_catalog.TOOLS
+        if s.name in meta or tool_domains.is_essential(s.name)
+    }
+    return sorted(names)
+
+
+def _openclaw_version(exe: str) -> "tuple[bool, str]":
+    """(supports_native_mcp, version_string) for the OpenClaw binary at ``exe``.
+
+    Returns supports=True with version "unknown" when the version cannot be read
+    or parsed. That is deliberate: `openclaw mcp set` on a too-old build fails
+    loudly and writes nothing, so proceeding costs one clear error message,
+    whereas refusing on an unreadable banner would deny a working feature to
+    anyone on a fork or a -dev build. A version we CAN read and that IS too old
+    is refused by the caller.
+
+    Three traps, each measured on this machine 2026-09-18:
+      * `openclaw --version` prints `OpenClaw 2026.3.28 (f9b1079)` — a banner, not
+        a bare version. Anchor the regex to the product name: a config-anomaly
+        line or the random joke OpenClaw prints can carry its own digits.
+      * rust_core_install._parse_version RAISES TypeError on non-numeric input
+        (it mixes ints and tuples, so '' / '2026.3.22-beta.1' explode). It is
+        correct on clean numeric input for every OpenClaw shape, so extract the
+        dotted run FIRST and keep the compare inside try/except. Cross-module
+        reuse of that helper follows bin/doctor/oxidation_probe.py.
+      * `packaging` is NOT a declared dependency — do not reach for it.
+    """
+    import re  # noqa: PLC0415
+
+    try:
+        proc = subprocess.run([exe, "--version"], check=False, capture_output=True,
+                              text=True, timeout=60, **_hidden_window_kwargs())
+        blob = f"{proc.stdout or ''}\n{proc.stderr or ''}"
+    except Exception:  # noqa: BLE001 — an unreadable version is "unknown", not fatal
+        return True, "unknown"
+
+    m = re.search(r"OpenClaw\s+v?(\d+(?:\.\d+)+)", blob)
+    if not m:
+        m = re.search(r"(\d+(?:\.\d+){2,})", blob)  # fallback: a dotted triple+
+    if not m:
+        return True, "unknown"
+    found = m.group(1)
+
+    from m3_memory.rust_core_install import _parse_version  # noqa: PLC0415
+    try:
+        ok = _parse_version(found) >= _parse_version(_OPENCLAW_MIN_MCP_VERSION)
+    except Exception:  # noqa: BLE001 — see docstring: unparseable proceeds
+        return True, found
+    return ok, found
+
+
+def _openclaw_mcp_set(argv: "list[str]") -> bool:
+    """Run `openclaw mcp set …`, classifying the exit code. Never raises.
+
+    `mcp set` is idempotent by OVERWRITE — an existing entry of the same name is
+    replaced wholesale (verified: a second write omitting `env` dropped the env
+    from the first). So there is no remove-then-add dance here, unlike
+    `claude mcp add`, which no-ops on an existing name and would leave a stale
+    env behind (see _wire_claude). The corollary is that the spec must always be
+    COMPLETE — a partial spec silently drops fields.
+    """
+    import shlex  # noqa: PLC0415
+
+    try:
+        proc = subprocess.run(argv, check=False, capture_output=True, text=True,
+                              timeout=180, **_hidden_window_kwargs())
+    except FileNotFoundError:
+        # Unreachable via _wire_openclaw (it resolves an absolute path first,
+        # because bare "openclaw" is an npm .CMD shim that CreateProcess cannot
+        # launch — FileNotFoundError [WinError 2]). Kept for direct callers.
+        _warn(f"`openclaw` failed to invoke; manual: {shlex.join(argv)}")
+        return False
+    except Exception as e:  # noqa: BLE001
+        _warn(f"OpenClaw was NOT wired. "
+              f"observed: `openclaw mcp set` did not complete ({type(e).__name__}: {e}). "
+              f"inspect: run `{shlex.join(argv)}` by hand to see the client's own error.")
+        return False
+
+    blob = f"{proc.stdout or ''}\n{proc.stderr or ''}".strip()
+    if blob:
+        print(blob)
+    if proc.returncode == 0:
+        return True
+    # Echo the EXACT argv, never a simplified form: a shortened command that
+    # drops the root-pinning env gives the user a server reading DEFAULT roots
+    # while their chatlog hook writes the pinned ones — the split-brain hazard,
+    # arrived at by following our own advice. Same rationale as _claude_mcp_add.
+    # Safe to print: _canonical_memory_env() carries only M3_*_ROOT paths, no
+    # secrets (pinned by tests/test_openclaw_registration.py).
+    _warn(f"`openclaw mcp set {_OPENCLAW_SERVER_NAME}` failed "
+          f"(exit {proc.returncode}); manual: {shlex.join(argv)}")
+    return False
+
+
+def _wire_openclaw() -> bool:
+    """Register m3 as a native MCP server in OpenClaw via `openclaw mcp set`.
+
+    OpenClaw has spoken MCP natively since 2026.3.22, which retires the
+    OpenAI-shape proxy for current builds: m3 registers a real stdio MCP server
+    carrying the decoupled-root env, exactly as Claude Code and Gemini are wired.
+    bin/mcp_proxy.py stays for Aider and other non-MCP OpenAI-shape clients (see
+    its own comment block), but it is no longer OpenClaw's path.
+
+    Self-reporting is the ONLY failure channel: _step_wire_agents discards every
+    _wire_* return value and returns True unconditionally, so a silent
+    `return False` would be invisible. Every branch here prints its verdict.
+    """
+    # Bare "openclaw" is NOT launchable via subprocess on Windows — the npm shim
+    # is openclaw.CMD and CreateProcess raises FileNotFoundError [WinError 2].
+    # shutil.which DOES find it; pass the absolute path it returns. (Both halves
+    # measured 2026-09-18.)
+    exe = shutil.which("openclaw")
+    if not exe:
+        _warn("OpenClaw CLI not on PATH; skipping MCP registration. Install it "
+              "(`npm install -g openclaw`) and re-run `m3 setup`.")
+        return False
+
+    supported, version = _openclaw_version(exe)
+    if not supported:
+        # observed:/cause:/inspect: triad, per the evidence-level idiom used in
+        # bin/auth_utils.py. `cause:` and not `possible:` because the mechanism
+        # IS verified here: the `mcp` subcommand does not exist below the floor.
+        _warn(f"OpenClaw was NOT wired. "
+              f"observed: OpenClaw {version}, below the {_OPENCLAW_MIN_MCP_VERSION} "
+              f"native-MCP floor. "
+              f"cause: builds before {_OPENCLAW_MIN_MCP_VERSION} have no `openclaw mcp` "
+              f"subcommand, so the server entry would never be read. "
+              f"inspect: `openclaw --version`, then `npm install -g openclaw@latest`.")
+        print("    After upgrading, re-run:  m3 setup --agents openclaw")
+        return False
+
+    from m3_memory.installer import _canonical_memory_server  # noqa: PLC0415
+    try:
+        _ensure_payload_importable()   # m3_sdk lives in bin/; see the helper
+        spec = dict(_canonical_memory_server())
+    except Exception as e:  # noqa: BLE001
+        # Diverges from _wire_claude, which degrades to an empty env and still
+        # registers. For a NEW integration an env-less entry is the config drift
+        # installer.py:322's docstring warns about, so refuse instead.
+        _warn(f"OpenClaw was NOT wired. "
+              f"observed: the canonical server spec could not be built "
+              f"({type(e).__name__}: {e}). "
+              f"inspect: `m3 doctor` — this resolves the same roots the MCP "
+              f"registration and the chatlog hook share.")
+        return False
+
+    spec["enabled"] = True
+    # OpenClaw's schema requires a non-empty `command` when transport is stdio;
+    # _canonical_memory_server always sets one.
+    spec["transport"] = "stdio"
+
+    try:
+        startup = _openclaw_startup_tools()
+    except Exception as e:  # noqa: BLE001
+        startup = []
+        # Loud, not silent: registering all 115 tools is correct but costs ~26K
+        # extra tokens of schema every session, and a silent 7x regression in
+        # context cost is exactly the kind of thing that goes unnoticed.
+        _warn(f"could not derive the startup tool set ({type(e).__name__}: {e}); "
+              "registering the FULL catalog (heavier context, still correct).")
+    if startup:
+        # min-length 1 is schema-enforced on each toolFilter array, so an empty
+        # list would reject the whole entry — omit the key instead.
+        spec["toolFilter"] = {"include": startup}
+
+    # sort_keys keeps the written blob byte-stable run to run, so a diff of the
+    # user's openclaw.json shows real changes only. Compact separators because
+    # the whole JSON is a single argv token (never a shell string).
+    payload = json.dumps(spec, separators=(",", ":"), sort_keys=True)
+    argv = [exe, "mcp", "set", _OPENCLAW_SERVER_NAME, payload]
+
+    _say(f"  · registering m3 memory server in OpenClaw (mcp__{_OPENCLAW_SERVER_NAME}__, "
+         f"{len(startup) or 'all'} tools exposed)")
+    ok = _openclaw_mcp_set(argv)
+    if ok:
+        _ok(f"  OpenClaw memory server: mcp__{_OPENCLAW_SERVER_NAME}__ "
+            f"(native MCP, roots-pinned).")
+        if startup:
+            print(f"     {len(startup)} startup tools; `m3_call` reaches any other tool by")
+            print("     name and `tools_load_domain` loads a whole domain on demand.")
+        print(f"     Verify: openclaw mcp show {_OPENCLAW_SERVER_NAME}")
+    return ok
 
 
 # Files copied into the user's hermes-agent plugin dir. README/test stay behind
@@ -2698,7 +2930,7 @@ def _step_wire_agents(plan: SetupPlan, *, non_interactive: bool = False) -> bool
     if plan.targets.cline:
         _wire_cline()
     if plan.targets.openclaw:
-        _wire_openclaw_note()
+        _wire_openclaw()
     if plan.targets.hermes:
         _wire_hermes(non_interactive=non_interactive)
     return True
@@ -3298,7 +3530,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--agents", default=None,
         help="Comma-separated list of agents to wire in non-interactive mode "
-             "(any of: claude,gemini,opencode,openclaw). "
+             "(any of: claude,gemini,antigravity,opencode,openclaw,cursor,cline,hermes). "
              "Default: every agent detected on PATH.",
     )
     parser.add_argument(

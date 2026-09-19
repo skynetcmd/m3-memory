@@ -381,7 +381,7 @@ def run_gui() -> int:
     for name, label in (("claude", "Claude Code"), ("gemini", "Gemini CLI"),
                         ("antigravity", "Antigravity"), ("opencode", "OpenCode"),
                         ("cursor", "Cursor"), ("cline", "Cline"),
-                        ("openclaw", "OpenClaw (local proxy)")):
+                        ("openclaw", "OpenClaw")):
         var = tk.BooleanVar(value=_det(name))
         state[f"agent_{name}"] = var
         ttk.Checkbutton(agents_box, text=label, variable=var).pack(anchor="w")
