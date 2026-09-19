@@ -1372,31 +1372,22 @@ def _add_tool_domain_subcommands(subparsers) -> None:
             props = spec.parameters.get("properties", {}) or {}
             required = set(spec.parameters.get("required", []))
 
-            if complex_:
-                mx = tp.add_mutually_exclusive_group()
-                mx.add_argument(
-                    "--json", dest="_json_args", metavar="OBJ",
-                    help="Tool arguments as a single JSON object "
-                         "(this tool has a structured argument). Large payloads "
-                         "must use --json-file instead: cmd.exe caps a command "
-                         "line at 8,191 chars and rejects the call before this "
-                         "program runs (Windows CreateProcess itself allows "
-                         "~32 KB, so the ceiling depends on the shell).",
-                )
-                mx.add_argument(
-                    "--json-file", dest="_json_file", metavar="PATH",
-                    help="Read tool arguments from a JSON file (or '-' for "
-                         "stdin). Use this for any payload over a few KB -- "
-                         "--json passes the object through the command line, "
-                         "which the invoking shell may refuse outright.",
-                )
-            else:
+            if not complex_:
                 for pname, pdef in props.items():
                     if pname == "database":
                         continue  # added via the shared --database helper below
                     ptype = pdef.get("type", "string")
                     phelp = _esc(pdef.get("description", ""))
-                    req = pname in required
+                    # ⚠ NEVER argparse-required, even for a required property.
+                    # A required arg can now arrive EITHER as a flag or in the
+                    # piped/--json object, and argparse cannot see the latter --
+                    # it rejects the call before the JSON is ever read. The
+                    # requirement is enforced after the merge instead (see
+                    # _cmd_tool_dispatch), so both routes satisfy it and a
+                    # genuine omission still fails loudly with the same message.
+                    req = False
+                    if pname in required:
+                        phelp = (phelp + "  [required]").strip()
                     if ptype == "boolean":
                         tp.add_argument(
                             f"--{pname}", dest=pname,
@@ -1427,6 +1418,32 @@ def _add_tool_domain_subcommands(subparsers) -> None:
                         )
 
             # Universal extras on every tool subcommand.
+            #
+            # --json / --json-file live HERE, not under `if complex_:` where they
+            # started. Gated on complexity they reached only 10 of 118 tools, so
+            # `echo '{...}' | m3 memory memory_search --json-file -` -- the
+            # obvious UNIX thing -- failed on almost everything. The flags cost
+            # nothing on a simple tool and make piping uniform across the whole
+            # surface. Verified: no tool declares a property named `json`,
+            # `json_file` or `stdin`, so there is no collision to resolve.
+            mx = tp.add_mutually_exclusive_group()
+            mx.add_argument(
+                "--json", dest="_json_args", metavar="OBJ",
+                help="Tool arguments as a single JSON object. Merges with any "
+                     "flags you also pass; an explicit flag wins on conflict. "
+                     "Large payloads must use --json-file instead: cmd.exe caps "
+                     "a command line at 8,191 chars and rejects the call before "
+                     "this program runs (Windows CreateProcess itself allows "
+                     "~32 KB, so the ceiling depends on the shell).",
+            )
+            mx.add_argument(
+                "--json-file", dest="_json_file", metavar="PATH",
+                help="Read tool arguments from a JSON file, or '-' for stdin "
+                     "(`echo '{...}' | m3 <domain> <tool> --json-file -`). Use "
+                     "this for any payload over a few KB -- --json passes the "
+                     "object through the command line, which the invoking shell "
+                     "may refuse outright.",
+            )
             tp.add_argument("--database", dest="database", default=None,
                             help="SQLite DB path. Env: M3_DATABASE. Default: agent_memory.db.")
             tp.add_argument("--dry-run", dest="_dry_run", action="store_true",
@@ -1471,61 +1488,87 @@ def _cmd_tool_dispatch(args: argparse.Namespace) -> int:
         return 2
 
     # Assemble the tool args.
-    if getattr(args, "_tool_complex", False):
-        raw = getattr(args, "_json_args", None)
-        jfile = getattr(args, "_json_file", None)
-        if raw is None and jfile is None:
-            tool_args = {}
-        else:
-            if jfile is not None:
-                try:
-                    if jfile == "-":
-                        raw = sys.stdin.read()
-                    else:
-                        with open(jfile, "r", encoding="utf-8") as f:
-                            raw = f.read()
-                except Exception as e:
-                    print(f"Error: failed to read --json-file: {e}", file=sys.stderr)
-                    return 2
-            try:
-                tool_args = _json.loads(raw)
-            except (ValueError, _json.JSONDecodeError) as e:
-                print(f"Error: --json is not valid JSON: {e}", file=sys.stderr)
-                return 2
-            if not isinstance(tool_args, dict):
-                print("Error: --json must be a JSON object.", file=sys.stderr)
-                return 2
-            # Reject unknown keys instead of dropping them. The flag path only
-            # ever builds args from declared `properties`, so a typo there is a
-            # loud argparse error; --json used to pass the object straight
-            # through, so a near-miss key (`owner` for `owner_agent`) was
-            # silently discarded and the call still reported ok. That produced a
-            # task that looked assigned and was not. §3: fail loud, never
-            # silent. `database`/`timeout` are CLI-level extras the impls accept.
-            _declared = set((spec.parameters.get("properties") or {}).keys())
-            _declared |= {"database", "timeout"}
-            _unknown = sorted(set(tool_args) - _declared)
-            if _unknown:
-                import difflib as _difflib
-
-                lines = [f"Error: --json has unknown key(s) for {tool}: "
-                         + ", ".join(repr(k) for k in _unknown)]
-                for key in _unknown:
-                    near = _difflib.get_close_matches(key, sorted(_declared), n=1, cutoff=0.6)
-                    if near:
-                        lines.append(f"  did you mean {near[0]!r} instead of {key!r}?")
-                lines.append("  accepted: " + ", ".join(sorted(_declared)))
-                print("\n".join(lines), file=sys.stderr)
-                return 2
-    else:
-        props = spec.parameters.get("properties", {}) or {}
-        tool_args = {}
+    #
+    # Flags first, then JSON overlaid on top -- for EVERY tool, not just the
+    # complex ones. A simple tool now accepts a piped object as well as flags,
+    # so `echo '{"k":3}' | m3 memory memory_search --query x --json-file -`
+    # composes instead of one silently winning. An explicit flag beats the piped
+    # value: it is the more specific, more deliberate statement of intent, and it
+    # lets a script pipe a base object and override one field per invocation.
+    props = spec.parameters.get("properties", {}) or {}
+    flag_args = {}
+    if not getattr(args, "_tool_complex", False):
         for pname in props:
             if pname == "database":
                 continue
             val = getattr(args, pname, None)
             if val is not None:
-                tool_args[pname] = val
+                flag_args[pname] = val
+
+    raw = getattr(args, "_json_args", None)
+    jfile = getattr(args, "_json_file", None)
+    if raw is None and jfile is None:
+        tool_args = dict(flag_args)
+    else:
+        if jfile is not None:
+            try:
+                if jfile == "-":
+                    raw = sys.stdin.read()
+                else:
+                    with open(jfile, "r", encoding="utf-8") as f:
+                        raw = f.read()
+            except Exception as e:
+                print(f"Error: failed to read --json-file: {e}", file=sys.stderr)
+                return 2
+        try:
+            tool_args = _json.loads(raw)
+        except (ValueError, _json.JSONDecodeError) as e:
+            print(f"Error: --json is not valid JSON: {e}", file=sys.stderr)
+            return 2
+        if not isinstance(tool_args, dict):
+            print("Error: --json must be a JSON object.", file=sys.stderr)
+            return 2
+        # Reject unknown keys instead of dropping them. The flag path only
+        # ever builds args from declared `properties`, so a typo there is a
+        # loud argparse error; --json used to pass the object straight
+        # through, so a near-miss key (`owner` for `owner_agent`) was
+        # silently discarded and the call still reported ok. That produced a
+        # task that looked assigned and was not. §3: fail loud, never
+        # silent. `database`/`timeout` are CLI-level extras the impls accept.
+        _declared = set((spec.parameters.get("properties") or {}).keys())
+        _declared |= {"database", "timeout"}
+        _unknown = sorted(set(tool_args) - _declared)
+        if _unknown:
+            import difflib as _difflib
+
+            lines = [f"Error: --json has unknown key(s) for {tool}: "
+                     + ", ".join(repr(k) for k in _unknown)]
+            for key in _unknown:
+                near = _difflib.get_close_matches(key, sorted(_declared), n=1, cutoff=0.6)
+                if near:
+                    lines.append(f"  did you mean {near[0]!r} instead of {key!r}?")
+            lines.append("  accepted: " + ", ".join(sorted(_declared)))
+            print("\n".join(lines), file=sys.stderr)
+            return 2
+
+        # Explicit flags override the piped/JSON object. The JSON is the
+        # base; a flag the user typed on THIS invocation is the override.
+        tool_args.update(flag_args)
+
+    # Required-argument check, AFTER the merge. argparse can no longer do this
+    # (see the `req = False` note where the flags are declared): a required value
+    # may arrive as a flag or inside the piped JSON, and argparse only sees the
+    # former. Checking here means either route satisfies it, while a real
+    # omission still fails loudly rather than reaching the impl as a TypeError.
+    _missing = [p for p in (spec.parameters.get("required") or [])
+                if p not in tool_args and p != "database"]
+    if _missing:
+        print(
+            f"Error: {tool} requires {', '.join('--' + m for m in _missing)} "
+            f"— pass the flag, or include the key in --json / --json-file.",
+            file=sys.stderr,
+        )
+        return 2
 
     db = getattr(args, "database", None)
     if db:
