@@ -21,14 +21,18 @@ the policy is forward-going only.
 
 ## [2026.9.19.0] — 2026-09-19 — OpenClaw speaks MCP natively
 
+### Added
+
+- **MCP support for OpenClaw.** m3 is now a native MCP server in OpenClaw:
+  `m3 setup` detects OpenClaw and registers a roots-pinned stdio server with
+  `openclaw mcp set`, exposing the same 10-tool startup surface every other MCP
+  client gets. Requires OpenClaw `2026.3.22` or newer.
+
 ### Changed
 
-- **OpenClaw is wired as a native MCP server.** `m3 setup` now registers a
-  roots-pinned stdio server with `openclaw mcp set`, so OpenClaw no longer needs
-  the OpenAI-compatible proxy on `localhost:9000` or an `OPENAI_BASE_URL`
-  override. An unreachable m3 now costs only the memory tools; chat completions
-  keep working. The server is registered with the same 10-tool startup surface
-  every other client gets.
+- OpenClaw no longer needs the OpenAI-compatible proxy on `localhost:9000` or an
+  `OPENAI_BASE_URL` override. An unreachable m3 now costs only the memory tools;
+  chat completions keep working.
 - Setup refuses to wire OpenClaw builds older than `2026.3.22`, which have no
   MCP client, and prints the upgrade command instead of writing a config that
   would be ignored. The OpenClaw prompt is now offered only when OpenClaw is
@@ -46,6 +50,10 @@ the policy is forward-going only.
 
 - The shell helper in `config/zshrc.example` pointed at a sandbox directory that
   does not exist, so every `claw-*` function failed.
+- Install-log tests asserted a non-macOS path, so they failed on macOS while the
+  behaviour they cover worked correctly.
+- Elbow-trim tests now skip with a reason, instead of erroring, in environments
+  where an optional machine-learning dependency is unavailable.
 
 ## [2026.9.17.0] — 2026-09-17 — a lighter startup surface
 
