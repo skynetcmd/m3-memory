@@ -19,6 +19,34 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.9.19.0] — 2026-09-19 — OpenClaw speaks MCP natively
+
+### Changed
+
+- **OpenClaw is wired as a native MCP server.** `m3 setup` now registers a
+  roots-pinned stdio server with `openclaw mcp set`, so OpenClaw no longer needs
+  the OpenAI-compatible proxy on `localhost:9000` or an `OPENAI_BASE_URL`
+  override. An unreachable m3 now costs only the memory tools; chat completions
+  keep working. The server is registered with the same 10-tool startup surface
+  every other client gets.
+- Setup refuses to wire OpenClaw builds older than `2026.3.22`, which have no
+  MCP client, and prints the upgrade command instead of writing a config that
+  would be ignored. The OpenClaw prompt is now offered only when OpenClaw is
+  detected.
+- The setup summary no longer tells OpenClaw users to run `m3 proxy start`,
+  which was not a command.
+- The Docker sandbox in `examples/sandbox-openclaw/` reaches m3 on the host over
+  `streamable-http` and runs `openclaw@2026.9.4` on Node 24. `.env.example`
+  documents the bearer token and drops a reference to a configuration path that
+  no longer exists.
+- `bin/mcp_proxy.py` is unchanged and still serves Aider and other
+  OpenAI-compatible clients.
+
+### Fixed
+
+- The shell helper in `config/zshrc.example` pointed at a sandbox directory that
+  does not exist, so every `claw-*` function failed.
+
 ## [2026.9.17.0] — 2026-09-17 — a lighter startup surface
 
 ### Changed

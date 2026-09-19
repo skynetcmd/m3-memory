@@ -171,7 +171,7 @@ Short version: m3 is the **local-first, MCP-native** option that stays *yours* a
 | **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10, 100% @ k=20** on LongMemEval-S (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. SHR measures the memory layer alone — no answer model, no judge — which is why it, not end-to-end QA, is the like-for-like comparison between memory systems. See [Benchmarks](#-benchmarks). |
 | **Entity & Relationship Enrichment** | **Yes.** m3 includes LLM-based entity extraction and relationship enrichment (Observer + Reflector), running as background cognitive passes over raw text — automatic once a local or cloud LLM endpoint is configured. Observer emits entities, facts and typed relationships from unstructured text; Reflector resolves contradictions and writes `supersedes` edges. Any OpenAI-compatible endpoint (LM Studio / Ollama / llama.cpp auto-probed locally, or a cloud model). See [Enrichment Guide](docs/M3_ENRICH_GUIDE.md). |
 | **Context Efficiency** | Exposes 100+ tools but occupies just **~2% of a 200K context window** at startup — the 10 registered schemas absorb 95% of real tool calls; lazy domain-gating loads the rest on demand. |
-| **Maturity** | Stable, battle-tested core engine (3,250+ tests) that's safe to build on today; new features and integrations are added actively. **SQLite by default; PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam. (See [features.json](docs/features.json)) |
+| **Maturity** | Stable, battle-tested core engine (3,600+ tests) that's safe to build on today; new features and integrations are added actively. **SQLite by default; PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam. (See [features.json](docs/features.json)) |
 
 ---
 
@@ -424,7 +424,7 @@ m3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch
 ## 🛡️ Why Trust This
 
 *   **Benchmarked Retrieval:** State-of-the-art for a local-first substrate — 99.2% session-hit-rate @ k=10, 100% @ k=20 on LongMemEval-S — with a published, reproducible methodology and no oracle routing. See [Benchmarks](#-benchmarks).
-*   **Robust Coverage:** Over **3,250 tests** guarding correct behavior across search, sync, GDPR lifecycle, and files ingestion — run with warnings-as-errors, so a new warning fails the suite.
+*   **Robust Coverage:** Over **3,600 tests** guarding correct behavior across search, sync, GDPR lifecycle, and files ingestion — run with warnings-as-errors, so a new warning fails the suite. Every release runs the whole suite on **Linux, macOS and Windows × Python 3.12–3.15**, and again end-to-end **against PostgreSQL** — both backends get the full suite, not a backend-specific subset — so a platform- or backend-specific regression fails the build rather than reaching you.
 *   **Measured, Not Asserted:** Latency for the write, search, sync and embed paths is published with its method, its hardware, and its limits — including what the numbers look like **without a GPU** (~7× slower on embedding). See [Performance](docs/PERFORMANCE.md).
 *   **Audit Reports:** Regular vulnerability reports (Bandit, secrets scans, pip-audit) published directly under [`docs/audits/`](docs/audits/).
 *   **Explainable Retrieval:** No black-box queries; retrieval math is open, readable, and scoring parameters are outputted directly.
