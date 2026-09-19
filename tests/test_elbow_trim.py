@@ -5,6 +5,13 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
+# The trim_legacy fixture imports memory_core, which reaches transformers, whose
+# lazy __getattr__ can pull an image model that imports torchvision. When that
+# transitive chain is broken the fixture ERRORS at setup rather than failing a
+# test — which reads as a red suite even though the elbow logic under test is
+# pure scoring and needs none of it. Skip honestly instead.
+pytestmark = pytest.mark.requires_memory_core
+
 
 @pytest.fixture
 def trim_legacy(monkeypatch):

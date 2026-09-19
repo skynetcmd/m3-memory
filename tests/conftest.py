@@ -176,6 +176,34 @@ def _files_db_present() -> bool:
     return _FILES_DB.is_file()
 
 
+def _memory_core_importable() -> bool:
+    """True iff `import memory_core` succeeds in THIS environment.
+
+    Not a proxy for "is package X installed" — the probe is the import itself,
+    because the failure it guards is a BROKEN TRANSITIVE CHAIN, not a missing
+    direct dependency.
+
+    Measured 2026-09-19: every CI lane (3 OSes x 4 Pythons) errored at fixture
+    setup with `ModuleNotFoundError: No module named 'torchvision'`. Nothing in
+    m3 imports torchvision. The chain is: memory_core -> transformers, and
+    transformers' lazy `__getattr__` (transformers/__init__.py:867) resolves an
+    attribute that pulls models/aria/image_processing_aria.py, which does
+    `from torchvision.transforms.v2 import functional as tvF`. The same import
+    SUCCEEDS locally with torchvision absent, so keying on torchvision's
+    presence would skip tests that can actually run.
+
+    Importing here is safe and cheap: memory_core is already imported by most of
+    the suite, so this is a cache hit in the common case.
+    """
+    import importlib
+
+    try:
+        importlib.import_module("memory_core")
+        return True
+    except Exception:  # noqa: BLE001 — ANY import failure means "cannot run here"
+        return False
+
+
 # Marker -> probe. A marked test is skipped (with the given reason) when its
 # probe returns False. One place; adding a capability is one row.
 _CAPABILITY_PROBES = {
@@ -191,6 +219,9 @@ _CAPABILITY_PROBES = {
                           "shipped files_database.db absent"),
     "requires_llm": (_llm_chat_reachable,
                      "no reachable local chat model (set M3_WIKI_DRIFT_URL / load a model in LM Studio)"),
+    "requires_memory_core": (_memory_core_importable,
+                             "memory_core is not importable here (a transitive ML dep is "
+                             "broken in this environment — see _memory_core_importable)"),
 }
 
 
