@@ -419,6 +419,7 @@ m3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch
 | :--- | :--- | :--- |
 | 🗺️ [Roadmap](docs/ROADMAP.md) | 🔄 [Cross-Device Sync](docs/SYNC.md) | 👥 [Multi-Agent Orchestration](docs/MULTI_AGENT.md) |
 | ⚖️ [Comparison vs Alternatives](docs/COMPARISON.md) | ❓ [FAQ](docs/FAQ.md) | 🔐 [Security Policy](docs/SECURITY.md) |
+| 💻 [Using m3 for Coding Work](docs/CODING_FAQ.md) | 🧠 [Memory Model](docs/MEMORY_MODEL.md) | 🧪 [Myths and Facts](docs/MYTHS_AND_FACTS.md) |
 | 🩹 [Troubleshooting](docs/TROUBLESHOOTING.md) | ⌨️ [CLI Reference](docs/CLI_REFERENCE.md) | 📖 [API Reference](docs/API_REFERENCE.md) |
 | 📁 [Files Memory](docs/FILES_MEMORY.md) | 💬 [Chat Log Subsystem](docs/CHATLOG.md) | ✨ [Enrichment Guide](docs/M3_ENRICH_GUIDE.md) |
 | ⬆️ [Upgrade Guide](docs/HOW-TO-UPGRADE.md) | 🩺 [Health FAQ](docs/M3_HEALTH_FAQ.md) | 🧬 [Dual Embedding](docs/DUAL_EMBED.md) |
