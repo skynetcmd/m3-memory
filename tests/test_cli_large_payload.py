@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -69,15 +70,27 @@ def test_the_ceiling_is_the_shell_not_the_platform():
     passed only because that run went through a shell. Invoked directly it
     succeeds, which is why the help text names cmd.exe rather than "Windows".
     """
+    import pytest
+
     if sys.platform != "win32":
-        import pytest
         pytest.skip("cmd.exe ceiling is Windows-specific")
+
+    # Resolve the console script instead of invoking a bare name. With
+    # shell=False there is no PATH search, so a bare "m3" raises
+    # FileNotFoundError [WinError 2] wherever the entry point is not installed
+    # -- which is every CI lane running the hermetic suite from a source
+    # checkout. That error is NOT the ceiling this test measures, but it failed
+    # the lane as though it were. (Same trap as the npm .CMD shim in
+    # setup_wizard._wire_openclaw: on Windows, resolve, never assume PATH.)
+    exe = shutil.which("m3")
+    if not exe:
+        pytest.skip("`m3` console script not installed; nothing to measure")
 
     payload = json.dumps({
         "agent_id": "pytest-large@s1", "kind": "probe",
         "payload": {"blob": "x" * 20000},
     })
-    argv = ["m3", "admin", "notify", "--yes", "--dry-run", "--json", payload]
+    argv = [exe, "admin", "notify", "--yes", "--dry-run", "--json", payload]
 
     direct = subprocess.run(argv, capture_output=True, text=True, shell=False)
     viashell = subprocess.run(argv, capture_output=True, text=True, shell=True)
