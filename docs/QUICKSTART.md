@@ -356,9 +356,11 @@ Then restart the OpenClaw CLI or gateway. On a build older than `2026.3.22`,
 `m3 setup` refuses and tells you to upgrade (`npm install -g openclaw@latest`)
 rather than writing a config the client cannot read.
 
-Unlike the proxy path, an unreachable m3 now degrades only the tools —
-OpenClaw's chat completions keep working, because the model provider is no
-longer being reached through m3.
+Unlike the proxy path, a dropped MCP server costs you nothing: OpenClaw's chat
+completions keep working (the model provider is no longer reached through m3),
+and m3 itself stays fully usable through the `m3` CLI — the same store and every
+function — until you restart or reconnect the server. An MCP disconnect is not a
+memory outage.
 
 Seed the system prompt via OpenClaw's `hooks.internal.entries.boot-md`
 (enabled by default) — tell the model to call `memory_search` before

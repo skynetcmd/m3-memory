@@ -31,8 +31,10 @@ the policy is forward-going only.
 ### Changed
 
 - OpenClaw no longer needs the OpenAI-compatible proxy on `localhost:9000` or an
-  `OPENAI_BASE_URL` override. An unreachable m3 now costs only the memory tools;
-  chat completions keep working.
+  `OPENAI_BASE_URL` override. If the MCP server drops, OpenClaw's chat
+  completions are unaffected and m3 itself remains fully usable through the `m3`
+  CLI — the same store, every function available — until the server is
+  restarted or reconnected.
 - Setup refuses to wire OpenClaw builds older than `2026.3.22`, which have no
   MCP client, and prints the upgrade command instead of writing a config that
   would be ignored. The OpenClaw prompt is now offered only when OpenClaw is
