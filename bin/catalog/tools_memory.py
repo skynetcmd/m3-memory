@@ -668,7 +668,7 @@ TOOLS: list[ToolSpec] = [
                         "required": ["memory_id", "verdict"],
                     },
                 },
-                "window_minutes": {"type": "integer", "description": "Override the feedback window for this call. Omit to use the configured default."},
+                "window_minutes": {"type": "integer", "minimum": 1, "maximum": 1440, "description": "Override the feedback window for this call. Omit to use the configured default. Clamped to 1440 (24h): the window is what makes retrieval the capability to grade, so it cannot be widened to cover the whole store. An over-wide request is clamped, not rejected, and the response reports window_clamped_from."},
             },
             "required": ["grades"],
         },

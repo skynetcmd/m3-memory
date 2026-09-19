@@ -1560,8 +1560,13 @@ def _cmd_tool_dispatch(args: argparse.Namespace) -> int:
     # may arrive as a flag or inside the piped JSON, and argparse only sees the
     # former. Checking here means either route satisfies it, while a real
     # omission still fails loudly rather than reaching the impl as a TypeError.
+    # `is None` as well as absent: a piped `{"query": null}` puts the key in the
+    # dict while supplying nothing, so a presence-only check would pass it to the
+    # impl and surface as a TypeError from inside the tool instead of a clear
+    # CLI error here. Flags cannot produce this (flag_args drops None), so it is
+    # reachable only through the JSON route the merge added.
     _missing = [p for p in (spec.parameters.get("required") or [])
-                if p not in tool_args and p != "database"]
+                if tool_args.get(p) is None and p != "database"]
     if _missing:
         print(
             f"Error: {tool} requires {', '.join('--' + m for m in _missing)} "

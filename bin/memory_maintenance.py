@@ -450,6 +450,17 @@ _AUTONOMOUS_ARCHIVE_REASONS = ("low_importance",)
 #      than a guess — see _FEEDBACK_WINDOW_REJECTIONS.
 _FEEDBACK_WINDOW_MINUTES_DEFAULT = 5
 _FEEDBACK_WINDOW_CFG_TTL = 5.0
+
+# Upper bound on the feedback window, whatever route sets it.
+#
+# ⚠ THIS IS WHAT MAKES RETRIEVAL THE CAPABILITY. The window exists so a caller
+# can only grade what it demonstrably just retrieved; without a ceiling, a
+# per-call `window_minutes=525600` widens that to "anything retrieved this
+# year", which is most of the store, and the grade stops being evidence of use.
+# 24h is far past any plausible tool-using turn (the default is 5 minutes) while
+# still bounding the claim. Clamped, not rejected: an over-wide request is a
+# tuning mistake, not an attack, and the response reports the value used.
+_FEEDBACK_WINDOW_MINUTES_MAX = 1440
 _fb_window_cache: dict = {"ts": 0.0, "mtime": None, "minutes": None}
 
 # Rejection counter, process-local. Not persisted: this answers "is the window
@@ -512,9 +523,19 @@ def _feedback_window_minutes(now: float | None = None) -> int:
     if val is None:
         val = os.environ.get("M3_FEEDBACK_WINDOW_MINUTES")
     try:
-        return max(1, int(val))
+        return _clamp_feedback_window(int(val))
     except (TypeError, ValueError):
         return _FEEDBACK_WINDOW_MINUTES_DEFAULT
+
+
+def _clamp_feedback_window(minutes: int) -> int:
+    """Bound a feedback window to [1, _FEEDBACK_WINDOW_MINUTES_MAX].
+
+    Single owner for the bound (§10a): the config file, the env var and the
+    per-call `window_minutes` override all resolve through here, so widening the
+    ceiling is one edit and no route can quietly exceed it.
+    """
+    return max(1, min(int(minutes), _FEEDBACK_WINDOW_MINUTES_MAX))
 
 
 def memory_restore_impl(memory_id=None, reason=None, dry_run=True, limit=1000):
@@ -650,7 +671,17 @@ def memory_grade_impl(grades=None, window_minutes=None):
 
     _d = _dialect()
     _p = _d.param()
-    minutes = int(window_minutes) if window_minutes else _feedback_window_minutes()
+    requested = None
+    if window_minutes:
+        try:
+            requested = int(window_minutes)
+        except (TypeError, ValueError):
+            return {"ok": False, "applied": False, "graded": 0,
+                    "error": "bad_window_minutes",
+                    "observed": f"window_minutes={window_minutes!r} is not an integer"}
+        minutes = _clamp_feedback_window(requested)
+    else:
+        minutes = _feedback_window_minutes()
 
     accepted, rejected, unknown = [], [], []
     with _db() as db:
@@ -714,6 +745,14 @@ def memory_grade_impl(grades=None, window_minutes=None):
         "graded": len(accepted),
         "window_minutes": minutes,
     }
+    if requested is not None and requested != minutes:
+        # §3: applying a different window than the caller asked for, silently,
+        # would make every downstream count mean something other than it says.
+        out["window_clamped_from"] = requested
+        out["note"] = (
+            f"window_minutes={requested} exceeds the {_FEEDBACK_WINDOW_MINUTES_MAX}"
+            f" min ceiling; graded against {minutes} min"
+        )
     if rejected:
         # §3 evidence levels: say what was OBSERVED and name the knob.
         out["rejected_stale"] = len(rejected)

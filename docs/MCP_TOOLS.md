@@ -263,7 +263,7 @@ Grade retrieved memories AFTER using them — the signal that separates USED fro
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
 | `grades` | `array` | Yes | One entry per memory you were shown: {memory_id, verdict}. verdict is 'helpful' or 'unhelpful'. | `-` |
-| `window_minutes` | `integer` | No | Override the feedback window for this call. Omit to use the configured default. | `-` |
+| `window_minutes` | `integer` | No | Override the feedback window for this call. Omit to use the configured default. Clamped to 1440 (24h): the window is what makes retrieval the capability to grade, so it cannot be widened to cover the whole store. An over-wide request is clamped, not rejected, and the response reports window_clamped_from. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 

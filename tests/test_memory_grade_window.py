@@ -304,3 +304,70 @@ def test_rejection_rate_is_measurable(store):
 def test_window_default_is_five_minutes_and_configurable():
     assert mm._FEEDBACK_WINDOW_MINUTES_DEFAULT == 5
     assert mm._feedback_window_minutes() >= 1
+
+
+# ── the window ceiling ───────────────────────────────────────────────────────
+
+def test_an_over_wide_window_cannot_reach_an_ancient_retrieval(store):
+    """⚠ THE CEILING IS WHAT KEEPS RETRIEVAL THE CAPABILITY.
+
+    window_minutes is a documented tuning knob, so it is not a bypass in the
+    authorization sense -- but unbounded it dissolves the property the window
+    exists for. A caller passing a year grades anything retrieved in that year,
+    which is most of the store, and the grade stops being evidence that this
+    caller used this memory.
+    """
+    mid = store(accessed_minutes_ago=60 * 24 * 30)          # 30 days ago
+    res = mm.memory_grade_impl(
+        grades=[{"memory_id": mid, "verdict": "helpful"}],
+        window_minutes=525600,                              # one year
+    )
+    assert res["graded"] == 0, (
+        "a year-wide window reached a 30-day-old retrieval: the clamp is not "
+        "being applied"
+    )
+    assert _counts(mid) == (0, 0)
+
+
+def test_the_clamp_is_reported_not_silent(store):
+    """§3: applying a different window than asked, silently, is a false success."""
+    mid = store(accessed_minutes_ago=0)
+    res = mm.memory_grade_impl(
+        grades=[{"memory_id": mid, "verdict": "helpful"}], window_minutes=525600
+    )
+    assert res["window_minutes"] == mm._FEEDBACK_WINDOW_MINUTES_MAX
+    assert res["window_clamped_from"] == 525600
+    assert "note" in res, "the clamp happened with no word to the caller"
+
+
+def test_a_window_under_the_ceiling_is_untouched(store):
+    """The clamp must not cost the legitimate widening case."""
+    mid = store(accessed_minutes_ago=30)
+    res = mm.memory_grade_impl(
+        grades=[{"memory_id": mid, "verdict": "helpful"}], window_minutes=60
+    )
+    assert res["graded"] == 1
+    assert res["window_minutes"] == 60
+    assert "window_clamped_from" not in res
+
+
+def test_a_config_file_cannot_exceed_the_ceiling_either(monkeypatch):
+    """Every route resolves through one owner -- env included."""
+    monkeypatch.setenv("M3_FEEDBACK_WINDOW_MINUTES", "525600")
+    mm._fb_window_cache.update({"ts": 0.0, "mtime": None, "minutes": None})
+    assert mm._feedback_window_minutes() == mm._FEEDBACK_WINDOW_MINUTES_MAX
+
+
+def test_a_non_integer_window_returns_a_structured_error(store):
+    """Consistency with the rest of the tool: an error dict, not a ValueError.
+
+    Every other rejection path here returns {"ok": false, "error": ...}; raising
+    from one of them makes the caller handle two shapes for one tool.
+    """
+    mid = store()
+    res = mm.memory_grade_impl(
+        grades=[{"memory_id": mid, "verdict": "helpful"}], window_minutes="abc"
+    )
+    assert res["ok"] is False
+    assert res["error"] == "bad_window_minutes"
+    assert _counts(mid) == (0, 0)

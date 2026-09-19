@@ -186,3 +186,21 @@ def test_json_file_reaches_tools_of_every_shape(domain, tool):
     """
     out = _run([domain, tool, "--help"]).stdout
     assert "--json-file" in out, f"{domain} {tool} is missing --json-file"
+
+
+def test_an_explicit_json_null_is_a_missing_required_arg():
+    """⚠ REACHABLE ONLY THROUGH THE PIPE.
+
+    `{"query": null}` puts the key in the merged dict while supplying nothing,
+    so a presence-only check passes it through and the impl raises a TypeError
+    from inside the tool. Flags cannot produce this -- flag_args drops None --
+    so the JSON route the merge added is what opened it.
+    """
+    r = _run(["memory", "memory_search", "--json-file", "-"],
+             stdin_text=json.dumps({"query": None}))
+    assert r.returncode != 0, (
+        "an explicit null satisfied the required-arg check and reached the impl"
+    )
+    assert "requires --query" in r.stderr, (
+        f"the null was rejected, but not with the clear CLI error: {r.stderr[-300:]}"
+    )
