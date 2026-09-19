@@ -251,7 +251,29 @@ _FEEDBACK_MISLEADING_DROP = 0.2
 #                                                ordinary average, so a memory
 #                                                someone called useful stays
 #                                                distinguishable from the mass)
-#   ordinary    observed min 0.097, avg 0.298 -> floor 0.05
+#   ordinary    observed min 0.097, avg 0.298 -> floor 0.01
+#
+# ⚠ WHY 0.01 AND NOT 0.05, WHICH IS WHERE THIS STARTED. "Safely below the
+# observed 0.097 minimum" justifies *a* floor under 0.097; it does not pick one.
+# Measured, because the reasoning was otherwise just a preference:
+#
+#   floor   score contribution   days of neglect   graded:ordinary
+#           (IMPORTANCE_WEIGHT     to bottom out       ratio
+#            * floor = 0.15*f)
+#   0.05         0.0075               24.9              8x
+#   0.03         0.0045               29.1             13x
+#   0.01         0.0015               38.3             40x
+#
+# The ENTIRE spread from 0.05 to 0.01 is 0.006 of final score, against a
+# TITLE_MATCH_BOOST of 0.15 -- one matching title word outweighs the whole
+# question by 25x. So the choice is ranking-IRRELEVANT, and the tie-breaker is
+# what else the number buys: at 0.01 a graded memory reads 40x an ordinary one
+# instead of 8x, which is the separation the graded tier exists to create.
+#
+# The load-bearing property is NON-ZERO, not the magnitude: a floor above zero
+# means an ignored memory keeps a residual weight and stays retrievable by
+# content, contributing ~nothing to rank. That is "asymptote, not erase", and
+# 0.01 satisfies it exactly as well as 0.05 while separating the tiers better.
 #
 # ⚠ Pinned rows are EXCLUDED from the decay UPDATE entirely (the WHERE clause),
 # so _PINNED_FLOOR is the value the reinforcement pass and any future unpin path
@@ -260,7 +282,7 @@ _FEEDBACK_MISLEADING_DROP = 0.2
 _DECAY_RATE = 0.995
 _PINNED_FLOOR = 0.70
 _GRADED_FLOOR = 0.40
-_ORDINARY_FLOOR = 0.05
+_ORDINARY_FLOOR = 0.01
 
 
 def _decay_floor_sql(_d) -> str:

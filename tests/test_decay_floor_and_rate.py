@@ -187,15 +187,20 @@ def test_floor_is_inert_on_first_pass(main_db_template, monkeypatch, tmp_path):
 
     ⚠ THE CLAIM HAD TO BE NARROWED. The first version of this test asserted "no
     row moves, ever" and FAILED — correctly. A floor does not merely stop a
-    descent: it RAISES any row already sitting below it. Seeding a row at 0.02
-    against a 0.05 floor moves it to 0.05 on the first pass, by design.
+    descent: it RAISES any row already sitting below it.
 
     So the real property is conditional, and it is the one that made the floors
     safe to enable on the live corpus: **no row moves IF no row starts below its
     floor.** Verified against the real 4,034-row store when the floors were
-    chosen (min importance 0.0969, floor 0.05 — 0 of 3,904 in-scope rows moved).
-    This test reproduces that precondition on seeded data so it holds in CI too,
-    then asserts the sub-floor rows behave the other way.
+    chosen (min importance 0.0969 against an ordinary floor an order of
+    magnitude lower — 0 of 3,904 in-scope rows moved). This test reproduces that
+    precondition on seeded data so it holds in CI too, then asserts the sub-floor
+    rows behave the other way.
+
+    ⚠ Seed values are DERIVED from the floor constants, never hardcoded. An
+    earlier version pinned literal 0.02/0.05 and broke the moment the ordinary
+    floor was retuned from 0.05 to 0.01 — the test was encoding a constant it
+    does not own.
     """
     import shutil
 
@@ -203,10 +208,12 @@ def test_floor_is_inert_on_first_pass(main_db_template, monkeypatch, tmp_path):
     shutil.copy2(main_db_template, db_path)
     monkeypatch.setenv("M3_DATABASE", str(db_path))
 
-    # All ABOVE their floor — the live-corpus precondition.
-    above = ((0.30, 0), (0.41, 3), (0.90, 0))
-    # All BELOW their floor — these SHOULD move, and the second assertion pins it.
-    below = ((0.02, 0), (0.35, 3))
+    ordinary, graded = mm._ORDINARY_FLOOR, mm._GRADED_FLOOR
+    # Comfortably ABOVE their floor — the live-corpus precondition. The *2 / *1.05
+    # margins keep them clear of the floor even after one 0.995 multiplication.
+    above = ((ordinary * 20, 0), (graded * 1.05, 3), (0.90, 0))
+    # BELOW their floor — these SHOULD be raised, and the second assertion pins it.
+    below = ((ordinary / 2, 0), (graded / 2, 3))
     with mc._db() as db:
         for imp, helpful in above + below:
             db.execute(
