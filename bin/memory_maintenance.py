@@ -431,6 +431,92 @@ def _reinforce_importance(db) -> int:
 _AUTONOMOUS_ARCHIVE_REASONS = ("low_importance",)
 
 
+# ── Graded-feedback window ───────────────────────────────────────────────────
+#
+# An agent retrieves (id, content), decides, and calls back seconds-to-minutes
+# later from a DIFFERENT process. The window bounds how late that callback may
+# be, sourced from last_accessed_at (persisted, cross-process, stamped within
+# 250 ms of retrieval by memory/db.py's batched flusher).
+#
+# ⚠ WHY A WINDOW AT ALL. Without one, memory_id is an unauthenticated write
+# primitive: any caller could post `helpful` for any UUID with no evidence of
+# ever having retrieved it. The window makes the RETRIEVAL the capability.
+#
+# ⚠ 5 MINUTES IS DELIBERATELY TIGHT AND HAS A KNOWN FAILURE MODE: a long
+# tool-using turn can exceed it, and honest feedback then gets rejected — which
+# teaches agents to stop sending it. Two mitigations, both required:
+#   1. It is CONFIGURABLE without a code change or restart (below).
+#   2. Rejections are counted, so "is the window wrong?" is a measurement rather
+#      than a guess — see _FEEDBACK_WINDOW_REJECTIONS.
+_FEEDBACK_WINDOW_MINUTES_DEFAULT = 5
+_FEEDBACK_WINDOW_CFG_TTL = 5.0
+_fb_window_cache: dict = {"ts": 0.0, "mtime": None, "minutes": None}
+
+# Rejection counter, process-local. Not persisted: this answers "is the window
+# too tight for THIS deployment's agents", which is a live operational question,
+# and a counter that survives restarts would blend old tuning with new.
+_FEEDBACK_WINDOW_REJECTIONS = {"accepted": 0, "rejected": 0}
+
+
+def _feedback_window_minutes(now: float | None = None) -> int:
+    """Minutes a graded verdict stays valid after retrieval. file > env > default.
+
+    Lives in the existing `.governor_config.json` under `feedback_window_minutes`
+    rather than a new file — the same reasoning m3_core.gpu gives for putting
+    gpu_probe_ttl_seconds there: a fourth config file for one number is the
+    sprawl §2 warns about. Read directly rather than through governor's resolver
+    to avoid a new import edge (§10a).
+
+    ⚠ A CONFIG FILE, NOT JUST AN ENV VAR, because the cognitive loop that will
+    read this runs headless: none of the Windows scheduled task, macOS launchd
+    agent, or systemd --user unit reliably inherits a shell environment, so an
+    env var that is perfect in a terminal is simply absent there (§3).
+
+    mtime-cached, stat-throttled. Never raises.
+    """
+    import time as _time
+
+    now = now if now is not None else _time.time()
+    if now - _fb_window_cache["ts"] >= _FEEDBACK_WINDOW_CFG_TTL:
+        _fb_window_cache["ts"] = now
+        try:
+            from m3_sdk import get_m3_config_root
+            path = os.path.join(get_m3_config_root(), ".governor_config.json")
+        except Exception:  # noqa: BLE001 — config root unresolvable
+            path = None
+        mtime = None
+        if path:
+            try:
+                mtime = os.stat(path).st_mtime
+            except OSError:
+                mtime = None  # absent -> env + default
+        if mtime != _fb_window_cache["mtime"]:
+            _fb_window_cache["mtime"] = mtime
+            val = None
+            if mtime is not None:
+                try:
+                    import json as _json
+                    with open(path, encoding="utf-8") as f:
+                        val = (_json.load(f) or {}).get("feedback_window_minutes")
+                except Exception as e:  # noqa: BLE001
+                    # §3 never silent: a malformed file would otherwise revert to
+                    # the default invisibly, and the operator's tuning would be
+                    # dead while appearing live.
+                    logger.warning(
+                        "Governor config %s is unreadable/malformed (%s) — "
+                        "feedback window falling back to env var + default.",
+                        path, e)
+            _fb_window_cache["minutes"] = val
+
+    val = _fb_window_cache["minutes"]
+    if val is None:
+        val = os.environ.get("M3_FEEDBACK_WINDOW_MINUTES")
+    try:
+        return max(1, int(val))
+    except (TypeError, ValueError):
+        return _FEEDBACK_WINDOW_MINUTES_DEFAULT
+
+
 def memory_restore_impl(memory_id=None, reason=None, dry_run=True, limit=1000):
     """Bring back memories an AUTONOMOUS pass removed. Never user deletions.
 
@@ -517,6 +603,157 @@ def memory_restore_impl(memory_id=None, reason=None, dry_run=True, limit=1000):
         "reasons": list(reasons),
         "note": ("restored at the archive-candidate threshold — present and "
                  "searchable, still ranked low"),
+    }
+
+
+def memory_grade_impl(grades=None, window_minutes=None):
+    """Grade retrieved memories AFTER using them. The citation signal m3 lacked.
+
+    An agent retrieves (id, content), produces its answer, then calls this ONCE
+    with a verdict per memory it was shown:
+
+        memory_grade(grades=[{"memory_id": "...", "verdict": "helpful"},
+                             {"memory_id": "...", "verdict": "unhelpful"}])
+
+    ⚠ POST-ANSWER, NOT AT RETRIEVAL, and the distinction is the whole point.
+    Grading at retrieval time rates relevance-on-sight — approximately what the
+    ranker already computed — and feeding that back would be the ranker marking
+    its own homework. "Which of these did I actually rely on?" is different
+    information, and it is the only automatic signal separating USED from merely
+    RETRIEVED. m3 stamps access_count on retrieval; that says *seen*. This says
+    *used*.
+
+    ⚠ TWO COUNTERS, NEVER A NET. helpful_count and unhelpful_count are stored
+    separately (migration 049) and combined only at read time. A net is lossy
+    exactly where it matters: +5/-5 (contested, heavily used) and +0/-0 (never
+    seen) both net to zero while meaning opposite things. Separate counters also
+    permit asymmetric weighting, which a pre-summed number cannot express — the
+    confidence model keeps corroboration_count and contradiction_count apart for
+    the identical reason.
+
+    ⚠ TIME-BOUNDED. A verdict is only accepted while the memory was retrieved
+    within the feedback window (default 5 min, configurable — see
+    _feedback_window_minutes). Without that bound, memory_id is an
+    unauthenticated write primitive: anyone could grade any UUID having never
+    seen it. A LATE grade is NOT silently dropped — that would repeat the
+    false-success defect this module was just fixed for. It returns
+    applied=False with a reason, so the caller can see it did not count.
+
+    Bulk by design (§4: "bulk variants for any tool an agent calls in a loop").
+    Ten results graded one-at-a-time is ten round trips for one decision.
+    """
+    from memory.backends import dialect as _dialect
+
+    if not grades:
+        return {"ok": True, "applied": False, "graded": 0,
+                "note": "no grades supplied"}
+
+    _d = _dialect()
+    _p = _d.param()
+    minutes = int(window_minutes) if window_minutes else _feedback_window_minutes()
+
+    accepted, rejected, unknown = [], [], []
+    with _db() as db:
+        # One query resolves every id's eligibility: retrieved recently enough,
+        # and still live. Set-based rather than a per-id round trip (§4).
+        ids = [str(g.get("memory_id") or "") for g in grades if g.get("memory_id")]
+        if not ids:
+            return {"ok": False, "applied": False, "graded": 0,
+                    "error": "no_memory_ids"}
+        ph = ", ".join([_p] * len(ids))
+        fresh = {
+            r[0] for r in db.execute(
+                f"SELECT id FROM memory_items WHERE id IN ({ph}) "
+                f"AND is_deleted = 0 AND last_accessed_at IS NOT NULL "
+                f"AND {_d.age_minutes_lt('last_accessed_at', _p)}",
+                (*ids, minutes),
+            ).fetchall()
+        }
+        known = {
+            r[0] for r in db.execute(
+                f"SELECT id FROM memory_items WHERE id IN ({ph})", tuple(ids)
+            ).fetchall()
+        }
+
+        bump_helpful, bump_unhelpful = [], []
+        for g in grades:
+            mid = str(g.get("memory_id") or "")
+            verdict = str(g.get("verdict") or "").strip().lower()
+            if mid not in known:
+                unknown.append(mid)
+                continue
+            if mid not in fresh:
+                rejected.append(mid)
+                continue
+            if verdict in ("helpful", "up", "useful"):
+                bump_helpful.append(mid)
+                accepted.append(mid)
+            elif verdict in ("unhelpful", "down", "not_useful"):
+                bump_unhelpful.append(mid)
+                accepted.append(mid)
+            else:
+                unknown.append(mid)
+
+        for col, batch in (("helpful_count", bump_helpful),
+                           ("unhelpful_count", bump_unhelpful)):
+            for start in range(0, len(batch), 500):
+                chunk = batch[start:start + 500]
+                cph = ", ".join([_p] * len(chunk))
+                db.execute(
+                    f"UPDATE memory_items SET {col} = COALESCE({col}, 0) + 1 "
+                    f"WHERE id IN ({cph})",
+                    tuple(chunk),
+                )
+
+    _FEEDBACK_WINDOW_REJECTIONS["accepted"] += len(accepted)
+    _FEEDBACK_WINDOW_REJECTIONS["rejected"] += len(rejected)
+
+    out = {
+        "ok": True,
+        "applied": bool(accepted),
+        "graded": len(accepted),
+        "window_minutes": minutes,
+    }
+    if rejected:
+        # §3 evidence levels: say what was OBSERVED and name the knob.
+        out["rejected_stale"] = len(rejected)
+        out["reason"] = "outside_feedback_window"
+        out["observed"] = (
+            f"{len(rejected)} memory/ies were not retrieved within the last "
+            f"{minutes} min; grade immediately after using them"
+        )
+        out["inspect"] = (
+            "raise `feedback_window_minutes` in .governor_config.json if long "
+            "turns are being rejected"
+        )
+    if unknown:
+        out["unknown"] = len(unknown)
+    return out
+
+
+def memory_feedback_stats_impl():
+    """How often graded feedback is landing vs being rejected as stale.
+
+    The 5-minute window is tight by choice. This makes "is it too tight?" a
+    measurement rather than a guess — if rejections are a meaningful share of
+    grades, widen `feedback_window_minutes` in .governor_config.json. Without
+    this the default would be untunable in practice (§5: a knob nobody can
+    evaluate is not a knob).
+
+    Process-local and not persisted: it answers a live operational question, and
+    a counter surviving restarts would blend old tuning with new.
+    """
+    a = _FEEDBACK_WINDOW_REJECTIONS["accepted"]
+    r = _FEEDBACK_WINDOW_REJECTIONS["rejected"]
+    total = a + r
+    return {
+        "ok": True,
+        "accepted": a,
+        "rejected_stale": r,
+        "rejection_rate": round(r / total, 4) if total else 0.0,
+        "window_minutes": _feedback_window_minutes(),
+        "note": ("a high rejection rate means the window is too tight for this "
+                 "deployment's agents, not that the feedback was wrong"),
     }
 
 

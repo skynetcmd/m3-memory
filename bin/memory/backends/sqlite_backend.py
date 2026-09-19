@@ -93,6 +93,11 @@ class SqliteDialect(Dialect):
     def age_days_gt(self, ts_column: str, days_expr: str) -> str:
         return f"(julianday('now') - julianday({ts_column})) > {days_expr}"
 
+    def age_minutes_lt(self, ts_column: str, minutes_expr: str) -> str:
+        # julianday() PARSES the timestamp, so the stored format (ISO+offset,
+        # space-separated, or ...Z) does not matter. See the base docstring.
+        return f"((julianday('now') - julianday({ts_column})) * 1440.0) < {minutes_expr}"
+
     def all_rows_after_offset(self, offset_placeholder: str) -> str:
         return f"LIMIT -1 OFFSET {offset_placeholder}"
 

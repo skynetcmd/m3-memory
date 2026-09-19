@@ -195,6 +195,31 @@ class Dialect:
         """
         raise NotImplementedError("subclass must implement age_days_gt()")
 
+    def age_minutes_lt(self, ts_column: str, minutes_expr: str) -> str:
+        """Boolean predicate: ``ts_column`` is NEWER than ``minutes_expr`` minutes
+        ago (i.e. now - ts < minutes). The minutes-scale, recent-side counterpart
+        of :meth:`age_days_gt`.
+
+        ⚠ WHY NOT `ts_column >= now_minus_minutes(...)`. That STRING-COMPARES two
+        timestamps, and m3 writes at least three formats to these columns:
+        Python's ``2026-09-19T16:50:00.123456+00:00`` (memory/db.py's access
+        flusher), SQLite's ``2026-09-19 16:50:00`` (``datetime('now')``), and the
+        seam's own ``...T16:50:00Z``. Since ``ord('+') == 43 < ord('Z') == 90``, a
+        production ``+00:00`` timestamp sorts BEFORE an identical instant written
+        with ``Z`` — so a within-the-window row is silently judged stale. Measured
+        2026-09-19 while wiring the graded-feedback window: every grade was
+        rejected, including ones milliseconds old.
+
+        Comparing PARSED instants (julianday / interval arithmetic) is immune to
+        the written format, which is why age_days_gt has always used it.
+
+        ``minutes_expr`` is a bind placeholder or a trusted literal int.
+
+        SQLite:   ``(julianday('now') - julianday(<col>)) * 1440.0 < <minutes>``
+        Postgres: ``<col> > NOW() - (<minutes> * INTERVAL '1 minute')``
+        """
+        raise NotImplementedError("subclass must implement age_minutes_lt()")
+
     def all_rows_after_offset(self, offset_placeholder: str) -> str:
         """A ``LIMIT ... OFFSET`` tail that returns ALL rows after ``offset`` (no
         upper bound) — the "keep newest N, take the rest" idiom.

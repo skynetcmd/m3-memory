@@ -412,6 +412,11 @@ class PostgresDialect(Dialect):
         # julianday('now')-julianday(col) > N without PG-absent julianday().
         return f"{ts_column} < NOW() - ({days_expr} * INTERVAL '1 day')"
 
+    def age_minutes_lt(self, ts_column: str, minutes_expr: str) -> str:
+        # Interval arithmetic on a real timestamptz — format-agnostic by
+        # construction, same reasoning as the SQLite julianday form.
+        return f"{ts_column} > NOW() - ({minutes_expr} * INTERVAL '1 minute')"
+
     def all_rows_after_offset(self, offset_placeholder: str) -> str:
         # PG spells "no upper bound" as LIMIT ALL (vs SQLite's LIMIT -1).
         return f"LIMIT ALL OFFSET {offset_placeholder}"

@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_maintenance.py
-sha1: 5221d76304f6
-mtime_utc: 2026-09-19T16:51:30.211040+00:00
-generated_utc: 2026-09-19T16:51:30.986443+00:00
+sha1: 9e4152a0760e
+mtime_utc: 2026-09-19T17:07:56.278755+00:00
+generated_utc: 2026-09-19T17:08:10.394000+00:00
 private: false
 ---
 
@@ -29,6 +29,7 @@ _(no argparse arguments detected)_
 ## Environment variables read
 
 - `M3_DISTILL_MODEL`
+- `M3_FEEDBACK_WINDOW_MINUTES`
 
 ---
 
@@ -39,6 +40,7 @@ _(no argparse arguments detected)_
 - `audit_trail (write_audit_entry)`
 - `llm_failover (apply_thinking_suppression)`
 - `m3_sdk (_LAST_USER_INTERACTION)`
+- `m3_sdk (get_m3_config_root)`
 - `memory_core`
 - `memory_core (DEDUP_LIMIT, DEDUP_THRESHOLD, EMBED_DIM, _content_hash, _cosine, _db, _embed, _get_embed_client, _pack, _unpack, ctx, get_best_llm, m3_core_rs, memory_link_impl)`
 - `memory_core (memory_write_impl)`
@@ -51,7 +53,7 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 1690)
+- `httpx.AsyncClient()` (line 1927)
 
 
 ---
@@ -72,7 +74,7 @@ _(no argparse arguments detected)_
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- `.governor_config.json`
 
 ---
 

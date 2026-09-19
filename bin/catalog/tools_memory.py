@@ -639,6 +639,62 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="memory_grade",
+        description=(
+            "Grade retrieved memories AFTER using them — the signal that "
+            "separates USED from merely RETRIEVED. Call this ONCE after "
+            "answering, with a verdict per memory you were shown: "
+            "grades=[{memory_id, verdict}] where verdict is 'helpful' or "
+            "'unhelpful'. Do NOT grade at retrieval time: rating a memory you "
+            "have not used yet is relevance-on-sight, which is roughly what the "
+            "ranker already computed. Counts are stored separately (never a net) "
+            "so a contested memory stays distinguishable from an ignored one. "
+            "Only accepted while the memory was retrieved within the feedback "
+            "window (default 5 minutes); a late grade is reported as "
+            "applied=false with a reason rather than silently dropped."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "grades": {
+                    "type": "array",
+                    "description": "One entry per memory you were shown: {memory_id, verdict}. verdict is 'helpful' or 'unhelpful'.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "memory_id": {"type": "string", "description": "Memory item UUID, as returned by search."},
+                            "verdict":   {"type": "string", "enum": ["helpful", "unhelpful"], "description": "Did you actually rely on this memory?"},
+                        },
+                        "required": ["memory_id", "verdict"],
+                    },
+                },
+                "window_minutes": {"type": "integer", "description": "Override the feedback window for this call. Omit to use the configured default."},
+            },
+            "required": ["grades"],
+        },
+        impl=memory_maintenance.memory_grade_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="memory_feedback_stats",
+        description=(
+            "How often graded feedback is landing versus being rejected as "
+            "stale. The feedback window is deliberately tight, so this makes "
+            "'is it too tight for my agents?' a measurement rather than a guess "
+            "— a high rejection rate means the window needs widening in "
+            ".governor_config.json, not that the feedback was wrong."
+        ),
+        parameters={"type": "object", "properties": {}, "required": []},
+        impl=memory_maintenance.memory_feedback_stats_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="memory_history",
         description="Returns the change history (audit trail) for a memory item. Tracks create, update, delete, and supersede events.",
         parameters={
