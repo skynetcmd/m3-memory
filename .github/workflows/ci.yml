@@ -182,6 +182,21 @@ jobs:
     name: Test on ${{ matrix.os }} (py${{ matrix.python-version }})
     needs: [lint, typecheck, matrix-setup]
     runs-on: ${{ matrix.os }}
+    # The 3.15 cell is a CANARY, not a gate — see the matrix-setup block above
+    # for why it exists and why it currently fails (torch ships no cp315 wheel,
+    # so pip dies before a test runs).
+    #
+    # That block already names the cost: a red-forever lane trains everyone to
+    # ignore the one that matters, which is the §3 false alarm. It was tolerated
+    # on the grounds that the cause is documented — but tolerating it still left
+    # main permanently red, so a genuine regression had nothing to contrast
+    # against. Non-blocking resolves that without losing the probe: the lane
+    # still runs and still reports, it just no longer gates.
+    #
+    # When torch ships cp315 the cell goes green on its own; drop this line and
+    # restore the classifier together. 3.12/3.13/3.14 stay blocking — those are
+    # the versions pyproject.toml actually claims.
+    continue-on-error: ${{ matrix.python-version == '3.15' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.matrix-setup.outputs.matrix) }}
