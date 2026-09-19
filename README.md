@@ -293,6 +293,40 @@ pip install m3-memory[pydantic-ai]   # pydantic-ai-slim>=2,<3
 
 ---
 
+### ⌨️ The `m3` CLI — the same memory, without an agent
+
+MCP is not the only way in. The `m3` CLI and the MCP server are **two front doors
+to the same database**, so anything an agent can do over MCP you can do from a
+shell — the whole tool catalog, grouped as `memory`, `files`, `chatlog`, `tasks`,
+`agent`, `admin`, `conversations`, `diagnostics` and `entity`:
+
+```bash
+m3 memory memory_search --query "which signing algorithm did we pick?" --k 5
+m3 memory memory_write --content "..." --type belief --title "..."
+m3 memory memory_write_from_file --path notes.md --type belief --title "..."
+m3 chatlog status
+```
+
+Content comes from a command-line argument (`--content`) or from a file
+(`--path`) — handy when the body is long enough that shell quoting would mangle
+it.
+
+Results go to **stdout** and logs to **stderr**, so output pipes cleanly into
+`jq`, `grep` or a script:
+
+```bash
+m3 memory memory_search --query "postgres" --k 20 2>/dev/null | jq '.'
+```
+
+This matters when your MCP client drops the connection: **that is not a memory
+outage**. A dropped stdio session only the client can respawn leaves the store
+completely intact and fully usable from the CLI until you reconnect (`/mcp` in
+Claude Code). Check with `m3 --version`; if the CLI answers, m3 is up.
+
+*See the [CLI Reference](docs/CLI_REFERENCE.md) for the full command surface.*
+
+---
+
 ### Manual MCP Server Configuration
 To expose m3 to any Model Context Protocol host, add it to your configuration file:
 
