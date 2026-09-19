@@ -160,7 +160,7 @@
     "wiki_docs": "docs/WIKI.md"
   },
   "tools": {
-    "total": 115,
+    "total": 116,
     "by_domain": {
       "admin": 15,
       "agent": 6,
@@ -169,7 +169,7 @@
       "diagnostics": 5,
       "entity": 3,
       "files": 25,
-      "memory": 39,
+      "memory": 40,
       "tasks": 8
     },
     "catalog": "docs/tools/MCP_CATALOG.json",

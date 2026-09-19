@@ -608,6 +608,37 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="memory_restore",
+        description=(
+            "Restore memories that an AUTONOMOUS maintenance pass removed. Until "
+            "2026-09-19 a background sweep soft-deleted every memory under an "
+            "importance threshold (5,001 of them, all stamped "
+            "archive_reason='low_importance'); that sweep now only reports "
+            "candidates. Only autonomously-removed memories are eligible — a "
+            "deliberate user deletion stays deleted. Restores in place (the live "
+            "row is still there with is_deleted=1) at the archive-candidate "
+            "importance, so the memory is searchable again but still ranked low. "
+            "Defaults to dry_run=True."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string", "description": "Restore one specific memory UUID. Omit to restore in bulk."},
+                "reason":    {"type": "string", "enum": ["low_importance"], "description": "Restrict to one autonomous archive reason. Omit for all of them."},
+                "dry_run":   {"type": "boolean", "description": "Report the count without writing. Default true.", "default": True},
+                "limit":     {"type": "integer", "description": "Max rows per bulk call.", "default": 1000},
+            },
+            "required": [],
+        },
+        impl=memory_maintenance.memory_restore_impl,
+        is_async=False,
+        validators=(),
+        # Writes to the memory store, so it is opt-in like every other mutating
+        # tool -- even though the mutation here is RESTORATIVE.
+        default_allowed=False,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="memory_history",
         description="Returns the change history (audit trail) for a memory item. Tracks create, update, delete, and supersede events.",
         parameters={

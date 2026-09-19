@@ -284,6 +284,32 @@ _PINNED_FLOOR = 0.70
 _GRADED_FLOOR = 0.40
 _ORDINARY_FLOOR = 0.01
 
+# ── Reinforcement ────────────────────────────────────────────────────────────
+#
+# How much of a pass's decay a READ memory gets back. confidence.
+# access_reinforcement() caps its lift at 0.05, and this scales that into a
+# per-pass rate nudge: a hot memory decays at ~0.9995 instead of 0.995, so it
+# fades roughly an order of magnitude more slowly without ever growing.
+#
+# ⚠ _REINFORCE_CEILING is strictly BELOW _GRADED_FLOOR and that gap is
+# load-bearing, not cosmetic: it is the structural guarantee that no volume of
+# retrieval reaches the standing one explicit `helpful` verdict earns. Seen is
+# not used. If these two ever meet, a spurious memory swept into enough result
+# sets becomes indistinguishable from one a human vouched for.
+_REINFORCE_RATE_SHARE = 0.1
+_REINFORCE_CEILING = _GRADED_FLOOR - 0.01
+
+# Reporting-only threshold: memories below this and older than 30 days are
+# SURFACED as archive candidates. Nothing acts on it automatically.
+#
+# ⚠ DERIVED FROM THE FLOOR ON PURPOSE. This was a hardcoded 0.05 that happened to
+# equal the decay floor, which is the only reason its delete never fired -- decay
+# stopped exactly at the line. Two independent constants with an undocumented
+# relationship, where changing one re-enabled a destructive path governed by the
+# other. Expressing it as floor*5 makes the dependency visible: retune the floor
+# and the candidate band moves with it, by construction rather than by luck.
+_ARCHIVE_CANDIDATE_THRESHOLD = _ORDINARY_FLOOR * 5
+
 
 def _decay_floor_sql(_d) -> str:
     """Per-row decay floor as a SQL expression, rendered through the seam.
@@ -301,6 +327,197 @@ def _decay_floor_sql(_d) -> str:
         "CASE WHEN COALESCE(helpful_count, 0) > COALESCE(unhelpful_count, 0) "
         f"THEN {_GRADED_FLOOR} ELSE {_ORDINARY_FLOOR} END"
     )
+
+
+def _reinforce_importance(db) -> int:
+    """Raise the decay floor of memories that are actually being USED.
+
+    ⚠ THE ASYMMETRY THIS EXISTS TO FIX. m3 tracked access_count on every
+    retrieval (1,034 rows carried counts; the hottest had been read 762 times)
+    and nothing ever read it back. So a memory retrieved 762 times decayed at
+    exactly the same rate as one nobody had touched in a year.
+
+    ⚠ RETRIEVAL IS WEAK EVIDENCE, AND THIS DELIBERATELY TREATS IT THAT WAY.
+    Being returned in a result set means the RANKER matched it -- not that it
+    helped. A spurious memory that keeps matching queries would otherwise be
+    strengthened by its own noise, entrenching exactly the wrong content. Three
+    structural defences, none of them a tuning knob:
+
+      1. confidence.access_reinforcement() is LOGARITHMIC and HARD-CAPPED
+         (unit 0.01, cap 0.05): 50 reads and 10,000 reads both yield 0.05.
+         Measured -- a runaway is impossible by construction, not by limit.
+      2. The lift raises the FLOOR, never the importance directly. Being read a
+         lot slows forgetting; it cannot manufacture salience.
+      3. The reinforced floor is capped BELOW _GRADED_FLOOR, so no amount of
+         retrieval reaches the band an explicit `helpful` verdict earns. Seen
+         is not used, and used is not useful.
+
+    ⚠ THIS SLOWS THE DECAY RATE; IT DOES NOT RAISE A FLOOR. The first version
+    raised the floor instead, and a test caught it doing nothing: after 300
+    passes a memory read 762 times and one never read had both settled at
+    0.1111, identical. A floor only binds once decay REACHES it -- 423 passes to
+    fall to 0.06, 780 to reach 0.01 -- so for the entire period anyone would
+    notice, reinforcement was invisible. Lowering the ordinary floor to 0.01 made
+    that worse. Slowing the rate acts on every pass from the first, which is what
+    "frequently used memories fade more slowly" actually means.
+
+    IDEMPOTENT BY RECOMPUTATION, like _reinforce_confidence: the retained
+    importance is derived from the CURRENT access_count on every pass rather than
+    accumulated as a delta. That is what keeps an hourly maintenance loop from
+    compounding a weak signal into a strong one.
+
+    Returns the number of rows whose decay was slowed.
+    """
+    from memory.backends import dialect as _dialect
+    from memory.db import savepoint as _savepoint
+
+    from memory import confidence as _conf
+
+    _d = _dialect()
+    _p = _d.param()
+
+    # Only rows that have actually been read, are in the decay window, and are
+    # not pinned (pinned already sits above every reinforced floor).
+    try:
+        with _savepoint(db):
+            rows = db.execute(
+                "SELECT id, COALESCE(access_count, 0) FROM memory_items "
+                "WHERE is_deleted = 0 AND COALESCE(pinned, 0) = 0 "
+                "AND COALESCE(access_count, 0) > 0"
+            ).fetchall()
+    except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
+        if not _is_missing_schema(e):
+            raise
+        return 0
+
+    # Bucket by lift so N rows become a handful of set-based UPDATEs (§4: SQL
+    # does the work; no per-row round trip). log2 bucketing means thousands of
+    # rows collapse into at most ~6 distinct lift values.
+    buckets: dict[float, list] = {}
+    for mid, count in rows:
+        lift = _conf.access_reinforcement(int(count))
+        if lift > 0:
+            buckets.setdefault(round(lift, 6), []).append(mid)
+
+    raised = 0
+    for lift, ids in buckets.items():
+        # Give back a fraction of what this pass's decay just took. The decay
+        # UPDATE has already run (same maintenance pass, earlier block), so this
+        # restores `lift`-proportional ground rather than adding free importance:
+        # a read memory decays more slowly, it does not grow.
+        #
+        # _REINFORCE_RATE_SHARE scales the capped lift (max 0.05) into a rate
+        # nudge, and the result is clamped to _REINFORCE_CEILING -- strictly
+        # below _GRADED_FLOOR, so no volume of retrieval reaches the band an
+        # explicit `helpful` verdict earns. Seen is not used.
+        givebacks = lift * _REINFORCE_RATE_SHARE
+        for chunk_start in range(0, len(ids), 500):
+            chunk = ids[chunk_start:chunk_start + 500]
+            placeholders = ", ".join([_p] * len(chunk))
+            res = db.execute(
+                f"UPDATE memory_items SET importance = "
+                f"{_d.least(str(_REINFORCE_CEILING), f'importance * (1.0 + {givebacks})')} "
+                f"WHERE id IN ({placeholders}) AND importance < {_REINFORCE_CEILING}",
+                tuple(chunk),
+            )
+            raised += res.rowcount or 0
+    return raised
+
+
+# Archive reasons written by AUTONOMOUS passes. A memory removed for one of
+# these was never a human's decision, so it is restorable by default. A reason
+# NOT in this set (a user-invoked delete, a GDPR erasure) is deliberate and is
+# never swept back in by memory_restore_impl.
+_AUTONOMOUS_ARCHIVE_REASONS = ("low_importance",)
+
+
+def memory_restore_impl(memory_id=None, reason=None, dry_run=True, limit=1000):
+    """Bring back memories an AUTONOMOUS pass removed. Never user deletions.
+
+    ⚠ WHY THIS EXISTS. Until now a background sweep soft-deleted every memory
+    under an importance threshold: 5,001 of them, all stamped
+    archive_reason='low_importance'. An autonomous process does not get to decide
+    a deletion -- forgetting is DERANKING, and removal is a human's call. The
+    sweep no longer deletes (it reports candidates), but the rows it already took
+    need a way back.
+
+    The distinction that makes this safe is recorded in the data: every archived
+    row carries `archive_reason`. Only reasons in _AUTONOMOUS_ARCHIVE_REASONS are
+    eligible. A memory you deleted on purpose stays deleted -- restoring those
+    would be the same category error in the opposite direction, overriding a
+    human decision with a machine one.
+
+    Restoration is a FLAG FLIP, not a copy: the live row still exists with
+    is_deleted=1 (verified: all 5,001 archived rows have their live row intact),
+    so the content, embeddings and relationships never left.
+
+    dry_run defaults TRUE. This writes to the memory store, and the caller should
+    see the count before it happens.
+    """
+    from memory.backends import dialect as _dialect
+
+    _d = _dialect()
+    _p = _d.param()
+
+    reasons = (reason,) if reason else _AUTONOMOUS_ARCHIVE_REASONS
+    bad = [r for r in reasons if r not in _AUTONOMOUS_ARCHIVE_REASONS]
+    if bad:
+        return {
+            "ok": False,
+            "restored": 0,
+            "error": "reason_not_autonomous",
+            "observed": f"reason={bad!r}",
+            "note": ("only memories removed by an autonomous pass are restorable; "
+                     "a deliberate deletion stays deleted"),
+            "accepted": list(_AUTONOMOUS_ARCHIVE_REASONS),
+        }
+
+    placeholders = ", ".join([_p] * len(reasons))
+    with _db() as db:
+        if memory_id:
+            rows = db.execute(
+                f"SELECT a.id FROM memory_archive a JOIN memory_items m ON m.id = a.id "
+                f"WHERE a.id = {_p} AND m.is_deleted = 1 "
+                f"AND a.archive_reason IN ({placeholders})",
+                (memory_id, *reasons),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                f"SELECT a.id FROM memory_archive a JOIN memory_items m ON m.id = a.id "
+                f"WHERE m.is_deleted = 1 AND a.archive_reason IN ({placeholders}) "
+                f"ORDER BY a.archived_at DESC LIMIT {int(limit)}",
+                tuple(reasons),
+            ).fetchall()
+
+        ids = [r["id"] if hasattr(r, "keys") else r[0] for r in rows]
+        if dry_run:
+            return {
+                "ok": True, "applied": False, "dry_run": True,
+                "would_restore": len(ids), "reasons": list(reasons),
+                "note": "re-run with dry_run=False to restore",
+            }
+
+        restored = 0
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            ph = ", ".join([_p] * len(chunk))
+            # Restore to the archive-candidate threshold rather than to whatever
+            # importance they held when swept: they are back in the corpus but
+            # still ranked low, which is the deranked-not-deleted end state.
+            res = db.execute(
+                f"UPDATE memory_items SET is_deleted = 0, importance = "
+                f"{_d.greatest(str(_ARCHIVE_CANDIDATE_THRESHOLD), 'importance')} "
+                f"WHERE id IN ({ph})",
+                tuple(chunk),
+            )
+            restored += res.rowcount or 0
+
+    return {
+        "ok": True, "applied": True, "restored": restored,
+        "reasons": list(reasons),
+        "note": ("restored at the archive-candidate threshold — present and "
+                 "searchable, still ranked low"),
+    }
 
 
 def memory_feedback_impl(memory_id, feedback="useful"):
@@ -720,6 +937,17 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
                 )
             report.append(f"Decayed {res.rowcount} items")
         if reinforce:
+            # ⚠ TWO DISTINCT REINFORCEMENTS OVER THE SAME ROWS. Do not merge them.
+            #   confidence = "is this TRUE"   -- evidence from the corroboration
+            #                                    ledger, decays toward NEUTRAL.
+            #   importance = "does this MATTER" -- usage, decays toward a floor.
+            # A memory can be certainly true and no longer matter, or urgently
+            # relevant and unverified. Collapsing them into one number loses the
+            # distinction the whole model rests on.
+            i_count = _reinforce_importance(db)
+            if i_count:
+                report.append(f"Reinforced importance floor on {i_count} items")
+
             # Confidence reinforcement (Phase 3): re-aggregate ledger-active
             # memories, decay the un-reinforced toward NEUTRAL. No-op on pre-035/
             # 036 DBs. Distinct from importance decay above (toward 0).
@@ -777,17 +1005,37 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
                 if not _is_missing_schema(e):
                     raise
 
-        # Auto-archive low-importance memories older than 30 days
-        archivable = db.execute(
-            f"SELECT id FROM memory_items WHERE is_deleted = 0 AND importance < 0.05 "
+        # Low-importance memories older than 30 days: SURFACED, NOT DELETED.
+        #
+        # ⚠ THIS PASS USED TO SOFT-DELETE. It selected `importance < 0.05` and set
+        # is_deleted = 1 on every match -- 5,001 memories were removed this way
+        # before the behaviour was changed. An autonomous background sweep does
+        # not get to decide a deletion; forgetting is deranking, and removal is a
+        # decision a human or an explicitly-invoked tool makes.
+        #
+        # ⚠ IT WAS ALSO A HIDDEN COUPLING. The 0.05 literal here silently tracked
+        # the decay floor: while the floor was also 0.05, decay asymptoted exactly
+        # AT this line and nothing ever crossed it, so the delete never fired.
+        # Lowering the floor to 0.01 would have re-opened it against 3,742 aged
+        # rows -- a tuning change to one constant silently re-enabling deletion
+        # governed by another. Two constants, no relationship expressed anywhere.
+        #
+        # Now it reports a CANDIDATE COUNT and nothing else. Decay already
+        # deranks these rows continuously (importance feeds the score directly),
+        # which is the whole mechanism for making stale memories fade. They stay
+        # retrievable by content, and `memory_maintenance` surfaces how many are
+        # sitting at the bottom so a human can act if they want to.
+        candidates = db.execute(
+            f"SELECT COUNT(*) AS n FROM memory_items WHERE is_deleted = 0 "
+            f"AND importance < {_ARCHIVE_CANDIDATE_THRESHOLD} "
             f"AND {_d.age_days_gt('created_at', '30')}"
-        ).fetchall()
-        archived = 0
-        for row in archivable:
-            if _transfer_to_archive(row["id"], "low_importance", db):
-                db.execute(f"UPDATE memory_items SET is_deleted = 1 WHERE id = {_p}", (row["id"],))
-                archived += 1
-        report.append(f"Archived {archived} low-importance items")
+        ).fetchone()
+        n_candidates = (candidates["n"] if candidates else 0) or 0
+        if n_candidates:
+            report.append(
+                f"{n_candidates} low-importance item(s) older than 30d are archive "
+                f"CANDIDATES (not removed; run memory_delete or the curator to act)"
+            )
 
         # Enforce agent retention policies
         retention_purged = _enforce_retention_policies(db)
