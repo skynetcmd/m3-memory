@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_maintenance.py
-sha1: 399365ecf308
-mtime_utc: 2026-08-09T19:41:32.430027+00:00
-generated_utc: 2026-08-12T00:59:01.618710+00:00
+sha1: fa7d157b0874
+mtime_utc: 2026-09-19T15:12:52.046997+00:00
+generated_utc: 2026-09-19T15:13:09.448512+00:00
 private: false
 ---
 
@@ -51,7 +51,7 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 1275)
+- `httpx.AsyncClient()` (line 1362)
 
 
 ---

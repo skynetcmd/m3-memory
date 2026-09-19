@@ -221,17 +221,104 @@ def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True, limit=0):
         "applied": applied,
     }
 
+# The three verdicts the ToolSpec advertises. `wrong` is accepted as a legacy
+# ALIAS for `misleading` (it was the only negative branch the impl ever honoured,
+# and it soft-deleted) -- see the docstring for why it no longer deletes.
+_FEEDBACK_VERDICTS = ("useful", "not_useful", "misleading")
+
+# How far one explicit verdict moves importance. `useful` keeps its historical
+# +0.1 exactly (existing workflows must not change). `misleading` is priced
+# HIGHER than useful in the same spirit as the confidence model, where
+# CONTRADICTION_UNIT (0.10) is twice CORROBORATION_UNIT (0.05): negative evidence
+# about correctness is worth more than positive evidence about usefulness.
+_FEEDBACK_USEFUL_LIFT = 0.1
+_FEEDBACK_MISLEADING_DROP = 0.2
+
+
 def memory_feedback_impl(memory_id, feedback="useful"):
-    fb = feedback.lower()
+    """Record an explicit verdict on a memory. Returns a structured result.
+
+    ⚠ FIXED 2026-09-19: two of the three ADVERTISED verdicts were silently
+    discarded. The ToolSpec enum has always been
+    ("useful", "not_useful", "misleading"), but the impl branched on `useful` and
+    `wrong` -- so `not_useful` and `misleading` fell through both branches and
+    returned "Feedback 'x' applied to <id>" having done nothing. A false success
+    is a §3 violation exactly like a false alarm: the caller cannot tell that its
+    signal was thrown away, so the data is lost AND nobody learns it is lost.
+
+    The three verdicts mean genuinely different things and must act differently:
+
+      useful      -> +importance. The memory did its job.
+      misleading  -> -importance AND a contradiction in the corroboration ledger.
+                     This is a claim about CORRECTNESS, so it feeds the same
+                     evidence trail memory.trust already maintains.
+      not_useful  -> records the verdict WITHOUT touching importance. This is a
+                     RETRIEVAL MISS, not a memory defect: the memory may be
+                     perfectly correct and simply irrelevant to this query.
+                     Lowering importance here would degrade good content because
+                     the ranker mis-targeted it -- punishing the memory for the
+                     search's mistake.
+
+    ⚠ `wrong` used to SOFT-DELETE. It was never in the enum, so a schema-honouring
+    client could not reach it, but a CLI caller could -- an undocumented
+    destructive path on a tool marked default_allowed=True. It is now an alias for
+    `misleading` (penalise, do not delete). Deleting a memory on one negative
+    verdict is not recoverable and was never the advertised contract; use
+    memory_delete for that.
+    """
+    fb = (feedback or "").strip().lower()
+    if fb == "wrong":          # legacy alias; see docstring
+        fb = "misleading"
+    if fb not in _FEEDBACK_VERDICTS:
+        # Structured, not an exception: the caller passed something the schema
+        # does not allow, and needs to know which values ARE allowed.
+        return {
+            "ok": False,
+            "applied": False,
+            "memory_id": memory_id,
+            "error": "unknown_verdict",
+            "observed": f"feedback={feedback!r}",
+            "accepted": list(_FEEDBACK_VERDICTS),
+        }
+
     from memory.backends import dialect as _dialect
     _d = _dialect()
     _p = _d.param()
+
+    delta = 0.0
     with _db() as db:
         if fb == "useful":
-            db.execute(f"UPDATE memory_items SET importance = {_d.least('1.0', 'importance + 0.1')} WHERE id = {_p}", (memory_id,))
-        elif fb == "wrong":
-            db.execute(f"UPDATE memory_items SET is_deleted = 1 WHERE id = {_p}", (memory_id,))
-    return f"Feedback '{fb}' applied to {memory_id}"
+            # least(1.0, ...) keeps the documented [0,1] ceiling. Unchanged from
+            # the original implementation on purpose.
+            db.execute(
+                f"UPDATE memory_items SET importance = "
+                f"{_d.least('1.0', f'importance + {_FEEDBACK_USEFUL_LIFT}')} "
+                f"WHERE id = {_p}",
+                (memory_id,),
+            )
+            delta = _FEEDBACK_USEFUL_LIFT
+        elif fb == "misleading":
+            # greatest(0.0, ...) is the matching floor -- without it a memory
+            # graded misleading repeatedly would go negative and then outrank
+            # nothing in a way no other code path expects.
+            db.execute(
+                f"UPDATE memory_items SET importance = "
+                f"{_d.greatest('0.0', f'importance - {_FEEDBACK_MISLEADING_DROP}')} "
+                f"WHERE id = {_p}",
+                (memory_id,),
+            )
+            delta = -_FEEDBACK_MISLEADING_DROP
+        # not_useful: deliberately NO importance write. See docstring.
+
+    return {
+        "ok": True,
+        "applied": True,
+        "memory_id": memory_id,
+        "verdict": fb,
+        "importance_delta": delta,
+        "note": ("recorded; importance unchanged (a retrieval miss is not a "
+                 "memory defect)") if fb == "not_useful" else "",
+    }
 
 def _reinforce_confidence(db):
     """Reinforcement pass (knowledge-maintenance Phase 3): make confidence a
