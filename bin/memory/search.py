@@ -505,6 +505,37 @@ def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns,
         return []
 
 
+def _ranking_importance(row, apply_decay: bool) -> float:
+    """Which importance feeds the ranker for this row.
+
+    Decay is baked INTO the stored `importance` by the maintenance pass, so
+    ranking on it is already decay-aware and needs no multiplier at score time --
+    applying one would decay the same quantity twice. Turning decay OFF therefore
+    means ranking on the undecayed baseline instead, which is what
+    importance_raw (migration 049) preserves.
+
+    ⚠ FALLS BACK TO `importance`, NEVER TO ZERO. importance_raw is absent on a
+    pre-049 database and NULL on any row written before the backfill. Scoring
+    those as 0.0 would sink every older memory to the bottom of a forensic query
+    -- the exact opposite of what a "show me the undecayed view" read is for.
+
+    ⚠ A FUNCTION, NOT AN INLINE BRANCH, so the tests exercise THIS code rather
+    than a copy of it. An earlier version inlined the logic and the test
+    reimplemented it; planting a removed fallback then passed every test, because
+    the test was checking its own duplicate (§2: duplicated resolution logic is
+    the defect, independent of correctness).
+    """
+    if apply_decay:
+        return float(row["importance"] or 0.0)
+    try:
+        raw = row["importance_raw"]
+    except (KeyError, IndexError, TypeError):
+        raw = None
+    if raw is None:
+        return float(row["importance"] or 0.0)
+    return float(raw)
+
+
 async def memory_search_scored_impl(
     # Defaults to "" because the ToolSpec documents exactly that: `query` has
     # `"default": ""` and is absent from `required`, with the description
@@ -534,6 +565,9 @@ async def memory_search_scored_impl(
     intent_hint="",
     vector_kind_strategy="default",
     requesting_agent="",
+    # FORENSIC READS ONLY. Rank on the undecayed importance_raw instead of the
+    # live, decayed importance. See the "apply_decay" note in the docstring.
+    apply_decay=True,
     _depth=0,
     _capture_dict: dict = None,
 ):
@@ -809,6 +843,7 @@ async def memory_search_scored_impl(
         "metadata_json", "conversation_id", "valid_from", "valid_to",
         "user_id", "scope", "agent_id", "created_at", "source",
         "confidence", "corroboration_count", "contradiction_count",
+        "importance_raw",
     }
     if recency_bias and "valid_from" not in extra_columns:
         extra_columns = extra_columns + ["valid_from"]
@@ -817,6 +852,12 @@ async def memory_search_scored_impl(
     # by default, so the SELECT and result shape are unchanged for everyone else.
     if _scfg.CONFIDENCE_RANKING and "confidence" not in extra_columns:
         extra_columns = extra_columns + ["confidence"]
+    # Forensic decay-off: pull the undecayed baseline only when it is asked for.
+    # Same conditional-append shape as the two above, and for the same reason --
+    # the DEFAULT path's SELECT must stay byte-identical (§4: project only the
+    # columns you need). Nobody doing an ordinary search pays for this column.
+    if not apply_decay and "importance_raw" not in extra_columns:
+        extra_columns = extra_columns + ["importance_raw"]
     safe_extra = [c for c in extra_columns if c in _allowed_extra and c not in _BASE_COLS]
     extra_sql = (", " + ", ".join(f"mi.{c}" for c in safe_extra)) if safe_extra else ""
 
@@ -1150,7 +1191,7 @@ async def memory_search_scored_impl(
     for row in rows:
         bm25_arr.append(row["bm25_score"])
         content_lens.append(len(row["content"] or ""))
-        importances.append(float(row["importance"] or 0.0))
+        importances.append(_ranking_importance(row, apply_decay))
         title_overlaps.append(_title_overlap_from_qset(q_title_set, row["title"] or ""))
 
     final_scores = _hybrid_score_batch(
