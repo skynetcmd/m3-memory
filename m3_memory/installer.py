@@ -29,8 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from m3_memory._platform import os_name as _os_name
 from m3_memory._platform import hidden_window_kwargs as _hidden_window_kwargs
+from m3_memory._platform import os_name as _os_name
 from m3_memory._platform import python_exe as _python_exe
 from m3_memory.install.fs import (  # noqa: F401  (re-exported facade surface — see cli.py / test_installer.py importers)
     _drain_wal,
