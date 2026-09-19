@@ -110,6 +110,16 @@ def test_complex_arg_tool_set_is_pinned():
         # gdpr_forget --help` renders the `--json OBJ` structured-argument
         # fallback, so it is pinned here rather than taught.
         "gdpr_forget",
+        # memory_grade takes `grades`, an array of {memory_id, verdict} objects —
+        # one entry per memory the agent was shown, so a single post-answer call
+        # can grade a whole result set. Verified through the codegen rather than
+        # assumed:
+        #   echo '{"grades":[{"memory_id":"...","verdict":"helpful"}]}' \
+        #     | m3 memory memory_grade --json-file -
+        # accepts and applies. (Piping now works on EVERY tool, not just the
+        # complex ones, but this set still pins which tools NEED the structured
+        # --json path because their arguments cannot be flat flags.)
+        "memory_grade",
     }
     assert found == expected, (
         f"complex-arg tool set drifted — extra (teach the CLI codegen, then add "
