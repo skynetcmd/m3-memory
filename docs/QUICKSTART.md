@@ -267,10 +267,15 @@ Restart your agent after saving the config.
 
 ### Agents without native MCP support
 
-Aider and OpenClaw can't speak MCP directly. Route them through the
-bundled [`mcp_proxy`](../bin/mcp_proxy.py) — an OpenAI-compatible server
-on `localhost:9000` that injects m3-memory tools into every request and
+Aider can't speak MCP directly. Route it through the bundled
+[`mcp_proxy`](../bin/mcp_proxy.py) — an OpenAI-compatible server on
+`localhost:9000` that injects m3-memory tools into every request and
 executes `tool_calls` by calling bridge functions directly.
+
+> **OpenClaw no longer belongs here.** It has spoken MCP natively since
+> `2026.3.22`, so `m3 setup` wires it directly — see
+> [OpenClaw](#openclaw) below. The proxy still works for it, but there is
+> no reason to run one.
 
 **High-level flow:** agent → `localhost:9000/v1` (OpenAI-compatible) →
 proxy injects tools → real model provider (Anthropic / Google / xAI) →
@@ -316,10 +321,11 @@ Start-Process -WindowStyle Hidden `
 
 **Health check:** `curl -sf http://localhost:9000/v1/models && echo "proxy OK"`
 
-> **Important:** Aider / OpenClaw will fail to reach a model if the proxy
-> isn't running — their `OPENAI_BASE_URL` points at `localhost:9000`. Start
-> the proxy before launching those agents, or use one of the autostart
-> options above.
+> **Important:** Aider will fail to reach a model if the proxy isn't running —
+> its `OPENAI_BASE_URL` points at `localhost:9000`. Start the proxy before
+> launching it, or use one of the autostart options above. (This no longer
+> applies to OpenClaw: it reaches its model provider directly and only loses
+> m3's tools if the MCP server is unavailable.)
 
 #### Aider
 
@@ -338,15 +344,21 @@ prompt — without that, the tools are available but unused.
 
 #### OpenClaw
 
-Edit `~/.openclaw/openclaw.json`'s `env` block:
-```json
-"env": {
-  "OPENAI_API_KEY": "sk-...existing...",
-  "OPENAI_BASE_URL": "http://localhost:9000/v1"
-}
+OpenClaw is a **native MCP client** since `2026.3.22` — no proxy, no
+`OPENAI_BASE_URL` override:
+
+```bash
+m3 setup --agents openclaw
+openclaw mcp show m3_memory     # verify: transport stdio, env carries the root pins
 ```
 
-Back up first: `cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak`
+Then restart the OpenClaw CLI or gateway. On a build older than `2026.3.22`,
+`m3 setup` refuses and tells you to upgrade (`npm install -g openclaw@latest`)
+rather than writing a config the client cannot read.
+
+Unlike the proxy path, an unreachable m3 now degrades only the tools —
+OpenClaw's chat completions keep working, because the model provider is no
+longer being reached through m3.
 
 Seed the system prompt via OpenClaw's `hooks.internal.entries.boot-md`
 (enabled by default) — tell the model to call `memory_search` before
@@ -356,8 +368,10 @@ them.
 
 OpenClaw's own `session-memory` hook can stay enabled in parallel, or
 disable it with `hooks.internal.entries.session-memory.enabled = false`
-to make m3-memory the sole store. Caveat: when the proxy is down,
-OpenClaw's chat completions will fail.
+to make m3-memory the sole store.
+
+Full detail, including the Docker sandbox over `streamable-http`:
+[MCP_CLIENT_INSTALL.md](MCP_CLIENT_INSTALL.md).
 
 #### Migrating existing flat-file memory
 

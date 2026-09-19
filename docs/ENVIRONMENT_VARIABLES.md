@@ -252,7 +252,7 @@ Tiered FIPS crypto — see [`FIPS_MODULE_BOUNDARY.md`](FIPS_MODULE_BOUNDARY.md).
 
 ### MCP Proxy (`bin/mcp_proxy.py`)
 
-The MCP proxy bridges OpenAI-compatible chat clients (Aider, OpenClaw) to the MCP tool catalog. It runs on `localhost:9000` by default.
+The MCP proxy bridges OpenAI-compatible chat clients (Aider, and any custom HTTP client) to the MCP tool catalog. It runs on `localhost:9000` by default. OpenClaw does not use it — it speaks MCP natively since 2026.3.22.
 
 | Variable | Purpose | Default |
 |---|---|---|

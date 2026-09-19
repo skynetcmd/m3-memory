@@ -1,5 +1,13 @@
 # m3 Memory: "Homecoming" Migration Plan
 
+> **Historical record — do not follow as current guidance.** Two things below have
+> since changed: the single `~/.m3-memory` root was superseded by the three
+> decoupled roots (`M3_MEMORY_ROOT` / `M3_ENGINE_ROOT` / `M3_CONFIG_ROOT`), and
+> OpenClaw no longer uses `mcp_proxy` — it has been a native MCP client since
+> `2026.3.22` and is wired directly by `m3 setup`. The steps are kept verbatim as
+> a record of what was decided and done; see `CLAUDE.md` and
+> `docs/MCP_CLIENT_INSTALL.md` for the current state.
+
 This plan outlines the process for consolidating existing m3-memory installations into a unified, cross-platform default root directory: `~/.m3-memory`.
 
 ## 🎯 Goals

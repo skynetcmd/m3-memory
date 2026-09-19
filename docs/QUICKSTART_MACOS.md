@@ -105,12 +105,15 @@ Add to `opencode.json` (project root) or `~/.config/opencode/opencode.json`:
 
 ### OpenClaw
 
-OpenClaw can't speak MCP natively. Run the bundled proxy on `localhost:9000` and point OpenClaw's OpenAI endpoint there:
+OpenClaw speaks MCP natively since `2026.3.22`, so `m3 setup` already registered
+the server — no proxy needed. Verify and restart:
 
 ```bash
-bash bin/start_mcp_proxy.sh --background
-# Then set OpenClaw's base URL to:  http://localhost:9000/v1
+openclaw mcp show m3_memory   # transport stdio, env carries M3_ENGINE_ROOT/M3_CONFIG_ROOT
 ```
+
+On an older build, `m3 setup` refuses and tells you to run
+`npm install -g openclaw@latest` rather than writing config the client ignores.
 
 ---
 

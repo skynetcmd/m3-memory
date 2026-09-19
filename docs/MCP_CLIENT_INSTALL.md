@@ -153,50 +153,85 @@ Restart OpenCode. Verify via in-app tool browser.
 
 ---
 
-## Client 4 — OpenClaw (via the MCP HTTP proxy)
+## Client 4 — OpenClaw
 
-**OpenClaw has no native MCP support.** It talks an OpenAI-compatible
-chat shape; m3 ships an MCP→OpenAI proxy (`bin/mcp_proxy.py`) that
-injects MCP tools into every chat request and executes `tool_calls`
-by calling the bridge functions directly. Memory `a18d6a67`
-documents the proxy architecture in detail.
+**OpenClaw speaks MCP natively since `2026.3.22`.** `m3 setup` registers a
+roots-pinned stdio server directly, the same way Claude Code and Gemini are
+wired — no proxy, no `OPENAI_BASE_URL` override, no second long-running process.
 
-### Start the proxy
+> Older than `2026.3.22`? Those builds have no `openclaw mcp` subcommand at all,
+> so a server entry would never be read. `m3 setup` detects this and refuses with
+> an upgrade instruction rather than writing config the client ignores. Upgrade
+> with `npm install -g openclaw@latest`.
 
-From a clone of m3-memory:
-
-```bash
-# foreground
-python3 ./bin/mcp_proxy.py
-
-# or via the launcher script (handles env + logging)
-bash ./bin/start_mcp_proxy.sh
-```
-
-Default bind: `localhost:9000`. The proxy is a long-running process —
-keep it in a separate terminal, tmux pane, or supervise it via your OS
-service manager (systemd / launchd / nssm).
-
-### Point OpenClaw at the proxy
+### Register m3
 
 ```bash
-export OPENAI_BASE_URL=http://localhost:9000/v1
-export OPENCLAW_GATEWAY_TOKEN=<optional auth token>
-openclaw
+m3 setup --agents openclaw        # or just `m3 setup` and answer the prompt
 ```
 
-The proxy exposes the full MCP tool catalog with the same domain
-grouping as native clients. `tools_load_domain` works through the
-proxy identically.
+Verify what landed:
+
+```bash
+openclaw mcp show m3_memory
+```
+
+You should see `transport: "stdio"`, a `command`/`args` pair pointing at your
+interpreter and `bin/memory_bridge.py`, and an `env` block carrying
+`M3_ENGINE_ROOT` / `M3_CONFIG_ROOT` / `M3_MEMORY_ROOT`. Those root pins matter:
+the server and the chatlog hook must agree on the same databases (see the
+split-brain hazard in `CLAUDE.md`). Restart the OpenClaw CLI or gateway to pick
+the server up.
+
+To register by hand — note the `env` block is the part people drop, and dropping
+it is what causes the split-brain:
+
+```bash
+openclaw mcp set m3_memory '{
+  "command": "/path/to/python",
+  "args": ["/path/to/m3-memory/bin/memory_bridge.py"],
+  "env": {"M3_ENGINE_ROOT": "...", "M3_CONFIG_ROOT": "..."},
+  "transport": "stdio",
+  "enabled": true
+}'
+```
+
+`openclaw mcp set` **replaces** an existing entry of the same name outright, so
+re-running is safe — but a partial spec silently drops the fields you omit.
+
+### The startup tool surface
+
+m3 registers a `toolFilter` of the same 10 tools it exposes to every other
+client: `memory_search`, `memory_write`, `memory_get`, `memory_supersede`,
+`chatlog_search`, `chatlog_status`, `files_search`, `m3_call`,
+`tools_list_domains`, `tools_load_domain`.
+
+That is 3,929 tokens on the wire instead of 29,658 for the full catalog
+— an 86.8% reduction, measured with `python bin/measure_tool_tokens.py`. Nothing
+is lost: `m3_call` invokes any catalog tool by name, and `tools_load_domain`
+pulls a whole domain in live.
 
 ### Sandboxed OpenClaw via Docker
 
-m3-memory ships a reference Docker setup at
-`examples/sandbox-openclaw/` (Dockerfile + docker-compose.yml) that
-runs OpenClaw + the proxy in an isolated container. Useful for
-development or untrusted workloads. Copy `.env.example` to `.env`,
-set `OPENCLAW_GATEWAY_TOKEN` + `OPENAI_API_KEY`, then
-`docker compose up`.
+`examples/sandbox-openclaw/` runs OpenClaw in a container against m3 on the
+**host**, over `streamable-http` rather than stdio — the image ships OpenClaw
+alone, so a stdio `command` would have nothing to launch.
+
+On the host:
+
+```bash
+m3 serve --generate-token     # once; prints the token
+m3 serve --host 0.0.0.0 --port 8080 --public-host host.docker.internal
+```
+
+Both flags are required. `--host 0.0.0.0` because the `127.0.0.1` default is
+unreachable from the container; `--public-host` because the transport allowlists
+only the bind host plus loopback, so a request arriving with
+`Host: host.docker.internal:8080` is rejected with **421 before auth runs**.
+Bearer auth is mandatory and is not waived for loopback.
+
+Then copy `.env.example` to `.env`, set `M3_SERVE_TOKEN` and
+`OPENCLAW_GATEWAY_TOKEN`, and `docker compose up`.
 
 ### Auto-detection by `m3 setup`
 
@@ -206,13 +241,19 @@ The wizard flags OpenClaw as detected when any of these is true:
 - `~/.openclaw/` workspace directory exists
 - `OPENCLAW_GATEWAY_TOKEN` env var is set
 
-When detected, the wizard defaults the proxy-install prompt to ON.
+The wiring prompt is offered only when OpenClaw is detected.
 
 ---
 
 ## Client 5 — Aider
 
-Same proxy path as OpenClaw (Aider is also OpenAI-shape):
+Aider has no native MCP support — it talks an OpenAI-compatible chat shape, so it
+reaches m3 through the MCP→OpenAI proxy (`bin/mcp_proxy.py`), which injects MCP
+tools into each chat request and executes the returned `tool_calls` against the
+bridge. Start it with `python3 ./bin/mcp_proxy.py` (or
+`bash ./bin/start_mcp_proxy.sh`, which handles env + logging); it binds
+`localhost:9000` and is a long-running process, so keep it in its own terminal or
+supervise it via systemd / launchd / nssm.
 
 ```bash
 aider --openai-api-base http://localhost:9000/v1 \
@@ -351,4 +392,6 @@ detected issue.
 - `docs/ENVIRONMENT_VARIABLES.md` — every M3_* env var the cascade
   understands
 - `bin/memory/doctor.py` — the diagnostic impl
-- Memory `a18d6a67` — OpenClaw & MCP Proxy Integration Architecture
+- Memory `a18d6a67` — MCP Proxy Integration Architecture (the Aider path; its
+  OpenClaw sections are superseded — OpenClaw is a native MCP client since
+  `2026.3.22`)

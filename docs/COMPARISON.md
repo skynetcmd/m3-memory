@@ -90,7 +90,7 @@ If "the LLM should decide what's worth remembering" matches your worldview, a ti
 
 ## ⚔️ m3-Memory vs Mem0
 
-Mem0 is a popular agentic memory library with broad ecosystem adoption. m3-Memory offers a **superset of Mem0's capabilities** and ships a drop-in Mem0-compatible surface (`from m3_memory.langchain import Memory` — a one-line import swap), so LangChain/LangGraph users get everything Mem0 does plus contradiction supersession, bitemporal history, commanded forgetting, and hybrid+graph retrieval — locally, with no server or API key. m3 also backs **CrewAI** (native `StorageBackend`) and **PydanticAI** (drop-in tools + a formal `M3MemoryToolset`) from the same store — so one local memory serves LangChain, CrewAI, and PydanticAI agents at once. And it serves developers using **desktop coding agents** (Claude Code, Cursor, Cline, Gemini CLI, Aider) who need memory that is private, offline-capable, and speaks MCP natively.
+Mem0 is a popular agentic memory library with broad ecosystem adoption. m3-Memory offers a **superset of Mem0's capabilities** and ships a drop-in Mem0-compatible surface (`from m3_memory.langchain import Memory` — a one-line import swap), so LangChain/LangGraph users get everything Mem0 does plus contradiction supersession, bitemporal history, commanded forgetting, and hybrid+graph retrieval — locally, with no server or API key. m3 also backs **CrewAI** (native `StorageBackend`) and **PydanticAI** (drop-in tools + a formal `M3MemoryToolset`) from the same store — so one local memory serves LangChain, CrewAI, and PydanticAI agents at once. And it serves developers using **desktop coding agents** (Claude Code, Cursor, Cline, Gemini CLI, OpenClaw, Aider) who need memory that is private, offline-capable, and speaks MCP natively.
 
 | Feature | m3-Memory | Mem0 |
 |---|---|---|
@@ -110,7 +110,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. m3-Memor
 
 ### When to choose m3-Memory over Mem0
 
-- You use Claude Code, Cursor, Cline, Gemini CLI, Aider, or any MCP-compatible agent
+- You use Claude Code, Cursor, Cline, Gemini CLI, OpenClaw, Aider, or any MCP-compatible agent
 - Your data cannot leave your machine (enterprise, regulated industries, personal privacy)
 - You need agents that stay factually consistent (contradiction detection matters)
 - You want compliance tooling (GDPR forget/export) without building it yourself

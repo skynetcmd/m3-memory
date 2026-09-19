@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_proxy.py
-sha1: 468272eb9502
-mtime_utc: 2026-09-19T02:02:42.968995+00:00
-generated_utc: 2026-09-19T02:02:48.711173+00:00
+sha1: 9a50dcb4f166
+mtime_utc: 2026-09-19T02:10:06.579773+00:00
+generated_utc: 2026-09-19T02:10:11.241247+00:00
 private: false
 ---
 
@@ -16,10 +16,15 @@ OpenAI-compatible server on localhost:9000.
 
 Purpose
 -------
-Older Aider / OpenClaw / Hermes builds have no native MCP support. This proxy
-sits between them and the actual model, injecting MCP tools into every request
-and executing tool_calls by calling m3 functions directly — no MCP transport
-overhead. (Newer builds of those clients speak MCP natively and do not need it.)
+Aider has no native MCP support, and neither do assorted custom HTTP clients.
+This proxy sits between them and the actual model, injecting MCP tools into every
+request and executing tool_calls by calling m3 functions directly — no MCP
+transport overhead.
+
+OpenClaw is NOT in that list any more: every release since 2026.3.22 speaks MCP
+natively, and `m3 setup` wires it directly (setup_wizard._wire_openclaw). Hermes
+loads m3 through a file-based plugin, not this proxy. Keep the proxy for the
+OpenAI-shape clients that genuinely have no MCP transport.
 
 Tool source
 -----------
@@ -127,7 +132,7 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 519)
+- `httpx.AsyncClient()` (line 524)
 
 
 ---
