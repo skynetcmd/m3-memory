@@ -11,8 +11,35 @@
       "token": "${OPENCLAW_GATEWAY_TOKEN}"
     }
   },
+  "mcp": {
+    "servers": {
+      "m3_memory": {
+        "enabled": true,
+        "transport": "streamable-http",
+        "url": "http://host.docker.internal:8080/mcp",
+        "headers": {
+          "Authorization": "Bearer ${M3_SERVE_TOKEN}"
+        },
+        "timeout": 60,
+        "toolFilter": {
+          "include": [
+            "chatlog_search",
+            "chatlog_status",
+            "files_search",
+            "m3_call",
+            "memory_get",
+            "memory_search",
+            "memory_supersede",
+            "memory_write",
+            "tools_list_domains",
+            "tools_load_domain"
+          ]
+        }
+      }
+    }
+  },
   "meta": {
-    "lastTouchedVersion": "2026.2.26",
-    "lastTouchedAt": "2026-03-02T01:58:17.142Z"
+    "lastTouchedVersion": "2026.9.4",
+    "lastTouchedAt": "2026-09-19T00:00:00.000Z"
   }
 }

@@ -46,7 +46,11 @@ else
     function aider-gemini { _run_aider "--model gemini/gemini-2-0-flash-exp" "$@"; }
 
     # OpenClaw Sandbox Management
-    _OPENCLAW_SANDBOX="$M3_MEMORY_ROOT/sandbox-openclaw"
+    # examples/ prefix is load-bearing: the sandbox lives at
+    # examples/sandbox-openclaw. Without it every claw-* function below cd'd into
+    # a directory that does not exist and `docker compose` failed with no useful
+    # message.
+    _OPENCLAW_SANDBOX="$M3_MEMORY_ROOT/examples/sandbox-openclaw"
 
     _claw_switch() {
         # This is a simplified helper for switching OpenClaw models.

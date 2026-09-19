@@ -76,7 +76,11 @@ Usage
 Configure clients:
   Aider aider-local:  --openai-api-base http://localhost:9000/v1
   Aider + Claude:     --model openai/claude-sonnet-4-6 --openai-api-base http://localhost:9000/v1
-  OpenClaw:           OPENAI_BASE_URL=http://localhost:9000/v1 (see claw-proxy in .zshrc)
+
+OpenClaw is NOT listed here any more. It speaks MCP natively since 2026.3.22 and
+is wired directly by `m3 setup` (see setup_wizard._wire_openclaw), so it no longer
+needs this proxy. The removed line also pointed at a `claw-proxy` shell function
+that has never existed in config/zshrc.example -- following it led nowhere.
 """
 from __future__ import annotations
 

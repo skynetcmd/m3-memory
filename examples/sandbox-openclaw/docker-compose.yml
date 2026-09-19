@@ -9,9 +9,19 @@ services:
       - ./.openclaw:/home/clawuser/.openclaw
       - ../AGENT_INSTRUCTIONS.md:/shared/AGENT_INSTRUCTIONS.md:ro
     env_file: .env
+    # host.docker.internal (used by config/openclaw.json to reach m3's HTTP MCP
+    # endpoint on the host) resolves out of the box on Docker Desktop for
+    # Windows/macOS but NOT on stock Linux Docker. host-gateway makes the example
+    # portable across all three rather than only where it was written.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Bearer token for m3's streamable-http MCP endpoint. Interpolated into
+      # config/openclaw.json; OpenClaw warns loudly if it is unset rather than
+      # sending an empty Authorization header.
+      - M3_SERVE_TOKEN=${M3_SERVE_TOKEN}
     restart: unless-stopped
     command: ["--token", "${OPENCLAW_GATEWAY_TOKEN}"]
     deploy:

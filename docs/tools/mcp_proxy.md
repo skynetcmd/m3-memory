@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_proxy.py
-sha1: fb655bbe3faa
-mtime_utc: 2026-09-17T18:02:46.149959+00:00
-generated_utc: 2026-09-17T18:03:36.513102+00:00
+sha1: 468272eb9502
+mtime_utc: 2026-09-19T02:02:42.968995+00:00
+generated_utc: 2026-09-19T02:02:48.711173+00:00
 private: false
 ---
 
@@ -86,7 +86,11 @@ Usage
 Configure clients:
   Aider aider-local:  --openai-api-base http://localhost:9000/v1
   Aider + Claude:     --model openai/claude-sonnet-4-6 --openai-api-base http://localhost:9000/v1
-  OpenClaw:           OPENAI_BASE_URL=http://localhost:9000/v1 (see claw-proxy in .zshrc)
+
+OpenClaw is NOT listed here any more. It speaks MCP natively since 2026.3.22 and
+is wired directly by `m3 setup` (see setup_wizard._wire_openclaw), so it no longer
+needs this proxy. The removed line also pointed at a `claw-proxy` shell function
+that has never existed in config/zshrc.example -- following it led nowhere.
 
 ---
 
@@ -123,7 +127,7 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 515)
+- `httpx.AsyncClient()` (line 519)
 
 
 ---

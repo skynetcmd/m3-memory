@@ -1,4 +1,11 @@
-FROM node:22-slim
+# Node 24 is REQUIRED by the OpenClaw pin below, not a gratuitous bump:
+# openclaw@2026.9.4 declares engines.node ">=24.16.0 <25 || >=26.1.0" (verified
+# against the upstream tag). node:24-slim currently resolves to 24.21.0, inside
+# that range. Running OpenClaw on an under-version Node does NOT fail cleanly --
+# upstream's 2026.9.3 notes report SQLite text truncation, i.e. silent data
+# corruption. So this line and the `npm install -g openclaw@...` line are ONE
+# constraint: never move one without the other.
+FROM node:24-slim
 
 # Install git, C++ build tools (required for OpenClaw's native node-llama-cpp),
 # and runtime utilities requested by the agent.
@@ -16,8 +23,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Security: Run as an unprivileged jailable user
 RUN groupadd -r clawgroup && useradd -r -g clawgroup clawuser
 
-# Install OpenClaw globally
-RUN npm install -g openclaw@2026.2.26
+# Install OpenClaw globally.
+# 2026.9.4 (was 2026.2.26, which predates native MCP entirely). The floor for
+# the `mcp` section in config/openclaw.json is 2026.3.22 -- the release that
+# added the native MCP client. Pinned rather than @latest so the image is
+# reproducible; if you bump it, re-check engines.node against the FROM line above.
+RUN npm install -g openclaw@2026.9.4
 
 # Create necessary directories and enforce ownership
 RUN mkdir -p /home/clawuser/.openclaw /shared && chown -R clawuser:clawgroup /home/clawuser /shared
