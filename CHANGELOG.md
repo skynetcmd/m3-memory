@@ -94,6 +94,10 @@ the policy is forward-going only.
   rejected; the comparison now parses instants through the dialect seam.
 - Three memories held an importance of 5.0–8.0. The field is documented 0.0–1.0
   and nothing clamped on write, which distorted every floor computation.
+- **Spilled chat turns never drained on PostgreSQL.** The drain activated the
+  captured database path before writing, but on a pooled backend that value
+  is a DSN label rather than a file path, so the resolver refused it and the
+  batch was retried and kept. Turns accumulated on disk indefinitely.
 - **Access stamps were never written on PostgreSQL.** The batched update
   carried a SQLite placeholder, which PostgreSQL rejects, and the failure was
   logged at debug level. `last_accessed_at` and `access_count` therefore never

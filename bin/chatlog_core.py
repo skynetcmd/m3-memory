@@ -395,11 +395,28 @@ def _executemany_insert(batch: list[dict]) -> int:
         ))
 
     written = 0
+    from memory.backends import active_backend as _active_backend
+
+    _is_sqlite = _active_backend().name == "sqlite"
     for db_path, rows in groups.items():
         # Activate the captured path so M3Context.for_db(None).get_chatlog_conn()
         # routes to the right pool. (ContextVars are thread-local-ish; this
         # executor-thread sets its own.)
-        with active_database(db_path):
+        #
+        # ⚠ SQLITE ONLY, gated on capability (§10a). On a pooled backend
+        # `_db_path` is a LABEL, not a location (§10) — for PostgreSQL it is the
+        # DSN — and resolve_db_path() correctly REFUSES a DSN, so activating it
+        # raised ValueError and the whole spill batch was retried five times and
+        # then kept. Net effect: PostgreSQL spill never drained, and the turns
+        # sat on disk indefinitely. There is one pooled store, so there is
+        # nothing to activate: route straight to it.
+        if _is_sqlite and db_path:
+            with active_database(db_path):
+                ctx = M3Context.for_db(None)
+                with ctx.get_chatlog_conn() as conn:
+                    conn.executemany(sql, rows)
+                    conn.commit()
+        else:
             ctx = M3Context.for_db(None)
             with ctx.get_chatlog_conn() as conn:
                 conn.executemany(sql, rows)
