@@ -41,8 +41,16 @@ is *not* done.
 
 ## Decisions deferred to a human
 
-- [x] **Embedded-embedder default switch — SETTLED: the tags are ONE space; no
-  migration needed, leave the switch opt-in.** _Measured 2026-09-20 against the
+- [x] **Embedded-embedder default switch — SETTLED AND ACTIONED. The tags were
+  ONE space; they have been converged to `text-embedding-bge-m3`.**
+
+  ⚠ **Do not re-open.** Full record in m3 memory `a43b1205` (search "embed tag
+  split"), which is the canonical home — this entry is status, not the decision.
+  165,571 rows converged out-of-band; `_EMBED_GGUF_MODEL_TAG` now defaults to
+  `config.EMBED_SPACE_TAG`; `_LEGACY_SPACE_TAGS` keeps the retired tag readable
+  forever. Commit 8f38ca61.
+
+  Original analysis, retained for the measurements: _Measured 2026-09-20 against the
   reference install's stored vectors._
 
   The original concern was that `text-embedding-bge-m3` and
