@@ -289,6 +289,10 @@ def _fake_halt(roles):
     # wizard's lookups drift from production behaviour, so mirror the contract
     # rather than leaving the attribute absent.
     m.base_role = lambda role: (role or "").split("(", 1)[0].strip()
+    # A start only launches; the child registers itself moments later. The real
+    # module waits for that. A double with no wait would let the wizard grade a
+    # service the instant it is started — the race this step exists to avoid.
+    m.wait_for_roles = lambda roles, **k: []
     return m
 
 
@@ -368,6 +372,7 @@ def test_a_stopped_daemon_is_restarted_not_just_reported(wizard, monkeypatch, ca
 
         m.list_live_processes = live
         m.base_role = lambda role: (role or "").split("(", 1)[0].strip()
+        m.wait_for_roles = lambda roles, **k: []
         return m
 
     monkeypatch.setattr(wizard, "_import_m3_halt", _halt_mod)
@@ -389,7 +394,113 @@ def test_a_daemon_that_stays_down_still_fails(wizard, monkeypatch, capsys):
         types.SimpleNamespace(role="dashboard", pid=1)
     ]
     m.base_role = lambda role: (role or "").split("(", 1)[0].strip()
+    m.wait_for_roles = lambda roles, **k: list(roles)
     monkeypatch.setattr(wizard, "_import_m3_halt", lambda: m)
 
     assert wizard._step_verify_daemons(_P(loop=True, dash=True)) is False
     assert "cognitive-loop: NOT running" in "".join(capsys.readouterr())
+
+
+# ── a just-started service must not be graded before it can register ─────────
+#
+# Starting a service only LAUNCHES it: schtasks /Run (and launchctl/systemctl)
+# return once the supervisor accepts the request, while the registry entry is
+# written by the CHILD after its interpreter boots. Reading the registry
+# immediately therefore reports a healthy, still-booting service as down — a §3
+# false alarm, and the one failure mode that teaches an operator to ignore this
+# check entirely.
+
+def test_wait_for_roles_tolerates_a_late_registration():
+    """The registry entry lands after the start returns; that is not a failure."""
+    import sys
+    import time
+    import types
+    sys.path.insert(0, "bin")
+    import m3_halt
+
+    t0 = time.monotonic()
+    real = m3_halt.list_live_processes
+    try:
+        m3_halt.list_live_processes = lambda engine_root=None: (
+            [] if time.monotonic() - t0 < 0.4
+            else [types.SimpleNamespace(role="cognitive-loop", pid=1)]
+        )
+        assert m3_halt.wait_for_roles(["cognitive-loop"], timeout=5, poll=0.1) == []
+    finally:
+        m3_halt.list_live_processes = real
+
+
+def test_wait_for_roles_still_reports_a_service_that_never_registers():
+    """The wait must not turn a genuinely dead service green — only delay the verdict."""
+    import sys
+    import time
+    import types  # noqa: F401 — parity with the sibling test's stubbing style
+    sys.path.insert(0, "bin")
+    import m3_halt
+
+    real = m3_halt.list_live_processes
+    try:
+        m3_halt.list_live_processes = lambda engine_root=None: []
+        started = time.monotonic()
+        missing = m3_halt.wait_for_roles(["cognitive-loop"], timeout=0.5, poll=0.1)
+        assert missing == ["cognitive-loop"]
+        assert time.monotonic() - started < 5, "the wait must stay bounded"
+    finally:
+        m3_halt.list_live_processes = real
+
+
+def test_wait_for_roles_normalises_the_elevated_suffix():
+    """A scan-derived provenance suffix is not part of the role's identity."""
+    import sys
+    import types
+    sys.path.insert(0, "bin")
+    import m3_halt
+
+    real = m3_halt.list_live_processes
+    try:
+        m3_halt.list_live_processes = lambda engine_root=None: [
+            types.SimpleNamespace(role="cognitive-loop(elevated?)", pid=1)
+        ]
+        assert m3_halt.wait_for_roles(["cognitive-loop"], timeout=1, poll=0.1) == []
+    finally:
+        m3_halt.list_live_processes = real
+
+
+def test_verify_waits_before_grading_a_restarted_service(wizard, monkeypatch, capsys):
+    """THE REGRESSION: a service restarted by setup must be given time to register.
+
+    The registry is read twice — once before the restart (down) and once after.
+    Without a settle wait the second read races the child's own registration and
+    reports "NOT running" for a service that started correctly.
+    """
+    monkeypatch.setattr(wizard, "_start_service_for_role", lambda role: True)
+
+    import types
+    calls = {"n": 0}
+    m = types.ModuleType("m3_halt")
+
+    def live(*a, **k):
+        calls["n"] += 1
+        # Down on every read until the settle wait is actually performed.
+        roles = ["dashboard"] if calls["n"] <= 2 else ["dashboard", "cognitive-loop"]
+        return [types.SimpleNamespace(role=r, pid=i) for i, r in enumerate(roles, 1)]
+
+    m.list_live_processes = live
+    m.base_role = lambda role: (role or "").split("(", 1)[0].strip()
+    waited = []
+
+    def wait_for_roles(roles, engine_root=None, timeout=20.0, poll=0.5):
+        waited.append(list(roles))
+        live()  # the wait polls; that poll is what lets the entry appear
+        return []
+
+    m.wait_for_roles = wait_for_roles
+    monkeypatch.setattr(wizard, "_import_m3_halt", lambda: m)
+
+    assert wizard._step_verify_daemons(_P(loop=True, dash=True)) is True, (
+        "a service that registers during the settle wait must not be failed"
+    )
+    assert waited == [["cognitive-loop"]], (
+        f"setup must wait for the restarted role to register, got {waited}"
+    )
+    assert "NOT running" not in "".join(capsys.readouterr())

@@ -3026,6 +3026,18 @@ def _step_governor_migration(plan: SetupPlan, *, non_interactive: bool = False,
 # 300s, which was 50x the real cost and inconsistent with that existing budget.
 _DOCTOR_TIMEOUT_S = 60.0
 
+# How long to let a just-started service appear in the PID registry before
+# calling it down. A start only LAUNCHES the service; the entry is written by
+# the child after its interpreter boots, so this covers Python startup +
+# imports on a loaded host — not a service's full readiness.
+#
+# Sized against the existing budgets above rather than guessed: an order of
+# magnitude below _DOCTOR_TIMEOUT_S (60s) and below --quiesce-timeout (30s),
+# because a process that has not even registered within 20s is not slow, it
+# failed to start. The wait polls, so a healthy start costs well under a second
+# and only a genuinely dead service pays the full timeout.
+_REGISTER_SETTLE_S = 20.0
+
 
 def _trace(msg: str) -> None:
     """Unbuffered breadcrumb to BOTH stderr and a file. Debug instrumentation.
@@ -3224,8 +3236,9 @@ def _step_verify_daemons(plan=None) -> bool:
     # produced the suffixed role in the first place. Both ship in one payload,
     # so an absent attribute means a broken import, which the guard below
     # already reports.
-    if halt is None or not all(hasattr(halt, a)
-                               for a in ("list_live_processes", "base_role")):
+    if halt is None or not all(hasattr(halt, a) for a in
+                               ("list_live_processes", "base_role",
+                                "wait_for_roles")):
         _warn("  could not read the process registry — service state UNKNOWN. "
               "Run `m3 doctor` to check.")
         return True
@@ -3249,9 +3262,20 @@ def _step_verify_daemons(plan=None) -> bool:
     # nothing.
     if missing:
         _say("  restarting stopped services...")
-        for role in list(missing):
-            if _start_service_for_role(role):
-                _ok(f"  {role}: restarted")
+        started = [r for r in missing if _start_service_for_role(r)]
+        for role in started:
+            _ok(f"  {role}: restarted")
+        # Starting a service only LAUNCHES it. The registry entry is written by
+        # the child, from inside its own process, once the interpreter has
+        # booted — so re-reading the registry immediately reports a service that
+        # is starting correctly as down. Wait for the entry to land instead of
+        # racing it; a genuinely dead service still fails, just after the
+        # timeout rather than before the child could possibly have registered.
+        if started:
+            try:
+                halt.wait_for_roles(started, timeout=_REGISTER_SETTLE_S)
+            except Exception:  # noqa: BLE001 — a settle wait must not fail setup
+                pass
         try:
             live_roles = {halt.base_role(p.role)
                           for p in halt.list_live_processes()}

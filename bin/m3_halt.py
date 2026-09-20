@@ -795,6 +795,45 @@ class QuiesceResult:
     stuck: list[ProcInfo]
 
 
+def wait_for_roles(roles, engine_root: Optional[str] = None,
+                   timeout: float = 20.0, poll: float = 0.5) -> list:
+    """Wait up to ``timeout`` s for every role in ``roles`` to appear registered.
+
+    The inverse of ``wait_for_quiesce``: that waits for writers to LEAVE the
+    registry, this waits for them to JOIN it. Returns the roles still missing
+    when the deadline passes — empty list when all arrived (§3: an empty result
+    is a list, never None).
+
+    WHY THIS IS NEEDED, and why an immediate re-read is wrong. Starting a
+    service only LAUNCHES it: ``schtasks /Run`` (and launchctl/systemctl alike)
+    returns once the supervisor has accepted the request, while the registry
+    entry is written by the CHILD, from inside its own process, after the
+    interpreter boots and its imports complete. So there is a real window in
+    which the service is starting correctly and the registry does not yet know
+    it. Reading the registry immediately after a start therefore reports a
+    healthy service as down — a §3 false alarm, and the one failure mode that
+    teaches an operator to ignore this check.
+
+    Roles are normalised through ``base_role`` so a scan-derived provenance
+    suffix ("cognitive-loop(elevated?)") matches a clean registry role.
+
+    Polling, not a fixed sleep: the common case returns as soon as the entry
+    lands (typically well under a second), and only a genuinely dead service
+    pays the full timeout.
+    """
+    want = {base_role(r) for r in roles}
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        try:
+            have = {base_role(p.role) for p in list_live_processes(engine_root)}
+        except Exception:  # noqa: BLE001 — an unreadable registry is "not yet"
+            have = set()
+        missing = want - have
+        if not missing or time.monotonic() >= deadline:
+            return sorted(missing)
+        time.sleep(poll)
+
+
 def wait_for_quiesce(engine_root: Optional[str] = None, timeout: float = 30.0,
                      poll: float = 0.5,
                      on_tick: Optional[Callable[[float, float, List["ProcInfo"]], None]] = None
