@@ -1917,11 +1917,23 @@ def _step_rust_core(plan: "SetupPlan") -> bool:
         return True
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         rc = getattr(e, "returncode", "n/a")
-        _warn(f"native core not installed (exit {rc}) — m3 remains fully usable:")
         try:
-            from m3_memory.rust_core_install import oxidation_fallback_note
-            print(oxidation_fallback_note(indent="    "))
+            from m3_memory.rust_core_install import (
+                active_embedder_tier,
+                native_core_outcome_note,
+            )
+            # The exit code reports the FETCH, not the capability. On an upgrade
+            # the old wheel is still loaded and still fast, so ask the live tier
+            # before choosing the headline.
+            still_native = active_embedder_tier().get("native", False)
+            if still_native:
+                _warn(f"native core upgrade did not land (exit {rc}) — "
+                      f"the loaded core keeps serving:")
+            else:
+                _warn(f"native core not installed (exit {rc}) — m3 remains fully usable:")
+            print(native_core_outcome_note(indent="    "))
         except Exception:  # noqa: BLE001
+            _warn(f"native core not installed (exit {rc}) — m3 remains fully usable:")
             print("    Embeddings continue via the HTTP fallback path.")
         return False
 
@@ -1948,13 +1960,27 @@ def _step_gpu_embedder(plan: "SetupPlan") -> bool:
     except subprocess.CalledProcessError as e:
         # rc != 0 here means no prebuilt wheel matched AND source build was
         # disabled (or failed). Reassure: m3 is fully functional in pure-Python.
-        _warn(f"native wheel not installed (exit {e.returncode}) — that's OK:")
         try:
-            from m3_memory.rust_core_install import oxidation_fallback_note
-            print(oxidation_fallback_note(indent="    "))
-            print("    To build your own wheel, see docs/BUILD_WHEELS.md or run "
-                  "`m3 embedder install-gpu` with a Rust toolchain installed.")
+            from m3_memory.rust_core_install import (
+                active_embedder_tier,
+                native_core_outcome_note,
+            )
+            # See _step_native_core: rc != 0 is a FETCH result. Probe the live
+            # tier so an upgrade-over-a-working-wheel is not reported as a loss
+            # of the hot path — and so we do not tell a user with a healthy
+            # native core to install a Rust toolchain.
+            still_native = active_embedder_tier().get("native", False)
+            if still_native:
+                _warn(f"native wheel upgrade did not land (exit {e.returncode}) "
+                      f"— that's OK:")
+                print(native_core_outcome_note(indent="    "))
+            else:
+                _warn(f"native wheel not installed (exit {e.returncode}) — that's OK:")
+                print(native_core_outcome_note(indent="    "))
+                print("    To build your own wheel, see docs/BUILD_WHEELS.md or run "
+                      "`m3 embedder install-gpu` with a Rust toolchain installed.")
         except Exception:  # noqa: BLE001 — reassurance is best-effort
+            _warn(f"native wheel not installed (exit {e.returncode}) — that's OK:")
             print("    m3 stays fully functional via its pure-Python embed path.")
         return True  # non-fatal
 
@@ -3192,13 +3218,20 @@ def _step_verify_daemons(plan=None) -> bool:
 
     _say("Verifying background services are running")
     halt = _import_m3_halt()
-    if halt is None or not hasattr(halt, "list_live_processes"):
+    # m3_halt owns role normalisation (base_role). Deliberately NOT re-implemented
+    # here: a local copy is the §10a defect independent of correctness — copies
+    # drift, and this predicate must agree with the halt/quiesce path that
+    # produced the suffixed role in the first place. Both ship in one payload,
+    # so an absent attribute means a broken import, which the guard below
+    # already reports.
+    if halt is None or not all(hasattr(halt, a)
+                               for a in ("list_live_processes", "base_role")):
         _warn("  could not read the process registry — service state UNKNOWN. "
               "Run `m3 doctor` to check.")
         return True
 
     try:
-        live_roles = {(p.role or "").split("(", 1)[0].strip()
+        live_roles = {halt.base_role(p.role)
                       for p in halt.list_live_processes()}
     except Exception as e:  # noqa: BLE001 — a probe must not fail the install
         _warn(f"  could not read the process registry ({type(e).__name__}) — "
@@ -3220,7 +3253,7 @@ def _step_verify_daemons(plan=None) -> bool:
             if _start_service_for_role(role):
                 _ok(f"  {role}: restarted")
         try:
-            live_roles = {(p.role or "").split("(", 1)[0].strip()
+            live_roles = {halt.base_role(p.role)
                           for p in halt.list_live_processes()}
             missing = [r for r in expected if r not in live_roles]
         except Exception:  # noqa: BLE001 — keep the pre-restart verdict

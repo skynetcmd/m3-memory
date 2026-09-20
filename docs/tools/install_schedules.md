@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: 851366e03463
-mtime_utc: 2026-09-17T10:45:36.080211+00:00
-generated_utc: 2026-09-17T23:58:53.256051+00:00
+sha1: ee00eaef8a7c
+mtime_utc: 2026-09-20T15:50:40.257499+00:00
+generated_utc: 2026-09-20T15:59:04.656855+00:00
 private: false
 ---
 
@@ -47,6 +47,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `m3_halt (base_role)`
 - `m3_sdk (ensure_governor_config)`
 - `m3_sdk (get_m3_engine_root)`
 - `m3_sdk (kill_stale_daemons)`

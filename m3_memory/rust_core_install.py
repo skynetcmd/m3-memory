@@ -162,6 +162,56 @@ def oxidation_fallback_note(*, indent: str = "") -> str:
     return "\n".join(f"{indent}{ln}".rstrip() for ln in lines)
 
 
+def native_core_outcome_note(*, indent: str = "") -> str:
+    """What to tell the user after an install/upgrade of the native core FAILED.
+
+    A non-zero exit from `embedder install-gpu` means the FETCH failed. It does
+    NOT mean the hot path is gone: on an UPGRADE the previously-installed wheel
+    is still imported and still serving. Those two facts come apart on exactly
+    the case where the reassurance is most wrong, so this probes the live tier
+    instead of inferring capability from an exit code.
+
+    Two outcomes, never conflated:
+      * native core still loaded -> say so, with backend and version, and name
+        the upgrade as the only thing that did not land.
+      * no native core at all    -> the pure-Python reassurance, which is the
+        ONLY state ``oxidation_fallback_note`` describes (see the comment above
+        it). Printing it while a wheel is live is a false alarm: it tells the
+        user to install a toolchain they do not need to fix a slowdown they do
+        not have.
+
+    Single owner of this decision — every call site that reports a failed
+    native-core install must route through here rather than printing the
+    fallback note unconditionally.
+    """
+    tier = active_embedder_tier()
+    if not tier.get("native"):
+        return oxidation_fallback_note(indent=indent)
+
+    backend = tier.get("backend")
+    where = f"{backend}, " if backend else ""
+    # §3 evidence levels: the tier probe is MEASURED (it imported the module and
+    # read its backend), so it is stated as observed. Why the fetch failed is
+    # NOT measured here — this function sees no channel exit codes — so the
+    # candidates are offered as `possible:` and never asserted as the cause.
+    lines = [
+        f"observed: native core loaded and serving ({where}"
+        f"m3_core_rs {tier.get('version')}) — the in-process hot path is "
+        f"UNAFFECTED.",
+        f"observed: the upgrade to {M3_CORE_RS_VERSION} did not land; the "
+        f"loaded core is unchanged.",
+        "possible: no wheel published for this platform/Python yet, or the "
+        "download failed.",
+        "inspect : `m3 doctor` (oxidation section), or the install log via "
+        "`m3 embedder install-gpu`.",
+        "",
+        "  No action needed and no toolchain to install: embeds keep running",
+        "  in-process at full speed. The upgrade retries on the next",
+        "  `m3 setup` once a matching wheel is available.",
+    ]
+    return "\n".join(f"{indent}{ln}".rstrip() for ln in lines)
+
+
 def active_embedder_tier() -> dict:
     """Report which embedder tier is actually live on this host.
 
@@ -343,6 +393,70 @@ def detect_backend(os_tok: Optional[str] = None) -> BackendChoice:
         return BackendChoice(os_tok, "vulkan", "Vulkan device detected via vulkaninfo")
 
     return BackendChoice(os_tok, "cpu", "no GPU toolchain detected — CPU build")
+
+
+def detect_backend_chain(os_tok: Optional[str] = None) -> list[BackendChoice]:
+    """The ordered list of backends to try for this host, best first.
+
+    ``detect_backend`` names the single BEST backend. That is the right answer
+    to "what should this host run", but the wrong input to an installer: when
+    no wheel exists for that backend, the host does not suddenly lose its GPU.
+    A CUDA box that cannot get a CUDA wheel can still run the Vulkan wheel, and
+    failing that the CPU wheel — all three are the in-process EmbeddedEmbedder
+    (the oxidized hot path). Dropping to pure-Python HTTP because ONE of the
+    three was unpublished discards a working native tier for no reason.
+
+    Order is by hardware capability, and each step is a real downgrade the host
+    can actually execute:
+
+        NVIDIA host  : cuda -> vulkan -> cpu
+        Vulkan host  : vulkan -> cpu
+        macOS        : metal -> cpu
+        no GPU       : cpu
+
+    ⚠ Vulkan is offered ONLY to a host shown to have a Vulkan-capable device,
+    never as a blind middle step. An NVIDIA GPU is Vulkan-capable by
+    construction (every supported NVIDIA driver ships a Vulkan ICD), which is
+    what makes cuda -> vulkan sound without a second probe. A CPU-only host
+    gets no vulkan entry: a wheel whose device is absent would install happily
+    and then fail at runtime, which is worse than not installing it.
+
+    The CPU wheel is always last and always present — it is the floor, not a
+    fallback, and it keeps the install inside the native hot path.
+    """
+    best = detect_backend(os_tok or host_os())
+    # Derive the OS from the CHOSEN backend, never from this call's argument:
+    # detect_backend is the single owner of that decision and may legitimately
+    # return a different os_tok than it was handed. Reading the argument here
+    # instead produced a chain whose fallbacks named a different OS than its
+    # head (linux-cuda -> windows-vulkan) — a package that cannot exist.
+    os_tok = best.os_tok
+
+    # NOTE metal has no fallback by construction: macOS publishes ONLY the
+    # metal wheel (there is no ("macos", "cpu") in _VALID), so the generic
+    # path below correctly yields a single-entry chain.
+
+    def _add(chain: list, backend: str, reason: str) -> None:
+        """Append a fallback only if that (os, backend) wheel actually exists.
+
+        Guards against naming a package the project never publishes — a step
+        that could only ever 404, converting one honest miss into several and
+        burying the real reason under noise.
+        """
+        if (os_tok, backend) in _VALID:
+            chain.append(BackendChoice(os_tok, backend, reason))
+
+    chain = [best]
+    if best.backend == "cuda":
+        # An NVIDIA GPU always exposes Vulkan, so this needs no device probe.
+        # Do not add a vulkaninfo check here: the tools are frequently absent
+        # on a working CUDA box and their absence would wrongly drop the tier.
+        _add(chain, "vulkan",
+             "fallback — no CUDA wheel; NVIDIA GPUs are Vulkan-capable")
+        _add(chain, "cpu", "fallback — no CUDA or Vulkan wheel")
+    elif best.backend == "vulkan":
+        _add(chain, "cpu", "fallback — no Vulkan wheel available")
+    return chain
 
 
 def _pip(*args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
@@ -581,6 +695,23 @@ def _print_manual_build_recommendation(
     install_rust_cmd = (
         "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
     )
+
+    # An UPGRADE over an already-working wheel fails here too, and for that host
+    # every line below — the slowdown, the toolchain, the build steps — is false
+    # and actively misleading. Report the live tier and stop: there is no hot
+    # path to unlock because it is already running.
+    if active_embedder_tier().get("native"):
+        print(
+            f"\n[rust-core] No prebuilt wheel available for {choice.package} "
+            f"{M3_CORE_RS_VERSION} on this Python.\n"
+            f"            PyPI returned exit {pypi_rc}; "
+            f"GitHub Release returned exit {release_rc}.\n"
+            f"\n"
+            f"{native_core_outcome_note(indent='            ')}\n",
+            file=sys.stderr,
+        )
+        return
+
     print(
         f"\n[rust-core] No prebuilt wheel available for {choice.package} "
         f"{M3_CORE_RS_VERSION} on this Python.\n"
@@ -1049,7 +1180,12 @@ def install_from_source(choice: BackendChoice, *,
             "  If cmake/c++/cargo exists but gives 'Permission denied', the\n"
             "  binary is not executable by this user — ask an admin to fix\n"
             "  permissions or install the package for this user's distro.\n"
-            f"{oxidation_fallback_note(indent='  ')}",
+            # Toolchain advice above stands — the caller asked for a SOURCE
+            # build, so naming the missing prerequisites is the answer. Only the
+            # closing reassurance can be wrong: route it through the live-tier
+            # probe so a host whose existing wheel still serves is not told its
+            # embeds fell back to HTTP.
+            f"{native_core_outcome_note(indent='  ')}",
             file=sys.stderr,
         )
         return 1
@@ -1109,10 +1245,18 @@ def install_rust_core(os_tok: Optional[str] = None, *,
             )
             return 2
         choice = BackendChoice(os_tok, backend, "explicit --backend override")
+        # An explicit override is an INSTRUCTION, not a preference: silently
+        # installing a different backend than the one named would defeat the
+        # flag's only purpose. No chain here — this backend or nothing.
+        chain = [choice]
         print(f"[rust-core] backend override: {choice.package}")
     else:
-        choice = detect_backend(os_tok)
+        chain = detect_backend_chain(os_tok)
+        choice = chain[0]
         print(f"[rust-core] detected backend: {choice.package} ({choice.reason})")
+        if len(chain) > 1:
+            print("[rust-core] fallback order: "
+                  + " -> ".join(c.backend for c in chain))
 
     if (choice.os_tok, choice.backend) not in _VALID:
         print(f"[rust-core] unsupported combination "
@@ -1154,17 +1298,33 @@ def install_rust_core(os_tok: Optional[str] = None, *,
                 f"target={M3_CORE_RS_VERSION} tag={M3_CORE_RS_GIT_TAG} "
                 f"from_version={_before or '(none)'} reason={choice.reason}")
 
-    rc_gh = install_from_github_release(choice)
-    if rc_gh == 0:
-        print(f"[rust-core] installed {choice.package} {M3_CORE_RS_VERSION} "
-              f"(GitHub Release)")
-        install_log(f"install OK: {_before or '(none)'} -> {M3_CORE_RS_VERSION} "
-                    f"package={choice.package} channel=github-release")
-        return 0
+    # Both prebuilt channels are tried for EVERY backend in the chain before
+    # giving up on prebuilts entirely. A missing wheel for the best backend is
+    # a PUBLISHING gap, not a statement about this host's hardware: the box
+    # that cannot get a CUDA wheel still runs the Vulkan or CPU wheel in-process
+    # at full native speed. Falling through to pure-Python because one wheel was
+    # unpublished discards a working hot path for no reason.
+    rc_gh = rc = 1
+    installed = choice  # the backend that actually landed; may differ from choice
+    for attempt in chain:
+        installed = attempt
+        if attempt is not choice:
+            print(f"[rust-core] falling back to {attempt.package} "
+                  f"({attempt.reason})", file=sys.stderr)
+        rc_gh = install_from_github_release(attempt)
+        if rc_gh == 0:
+            print(f"[rust-core] installed {attempt.package} {M3_CORE_RS_VERSION} "
+                  f"(GitHub Release)")
+            install_log(f"install OK: {_before or '(none)'} -> "
+                        f"{M3_CORE_RS_VERSION} package={attempt.package} "
+                        f"channel=github-release requested={choice.package}")
+            return 0
 
-    print(f"[rust-core] GitHub Release unavailable for {choice.package} "
-          f"(exit {rc_gh}); trying pip prebuilt.", file=sys.stderr)
-    rc = install_prebuilt(choice)
+        print(f"[rust-core] GitHub Release unavailable for {attempt.package} "
+              f"(exit {rc_gh}); trying pip prebuilt.", file=sys.stderr)
+        rc = install_prebuilt(attempt)
+        if rc == 0:
+            break
     if rc == 0:
         # Deliberately does NOT claim "PyPI". pip exits 0 just as happily from
         # its local cache without contacting PyPI at all, and install_prebuilt
@@ -1173,10 +1333,11 @@ def install_rust_core(os_tok: Optional[str] = None, *,
         # was provably wrong for CUDA: `m3-core-rs-windows-cuda` is a 404 on
         # PyPI by design, yet a cache hit still printed "(PyPI prebuilt)" — a
         # misleading claim in exactly the place someone debugs distribution.
-        print(f"[rust-core] installed {choice.package} {M3_CORE_RS_VERSION} "
+        print(f"[rust-core] installed {installed.package} {M3_CORE_RS_VERSION} "
               f"(prebuilt wheel via pip)")
         install_log(f"install OK: {_before or '(none)'} -> {M3_CORE_RS_VERSION} "
-                    f"package={choice.package} channel=pip-prebuilt")
+                    f"package={installed.package} channel=pip-prebuilt "
+                    f"requested={choice.package}")
         return 0
 
     if not allow_source_fallback:

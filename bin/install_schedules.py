@@ -2213,7 +2213,13 @@ def main():
                 # the Task Scheduler recorded LastResult=1 for the KILL, which
                 # looked exactly like a startup crash. Diagnosed 2026-07-27
                 # after three upgrades each left the dashboard dead.
-                _reaped_roles.update(r["role"] for r in killed)
+                # Normalise through the single owner: a scan-discovered writer
+                # carries a provenance suffix ("embed-server(elevated?)") that is
+                # not a role name, so an un-normalised entry misses every
+                # _ROLE_TO_SERVICE lookup and the service we stopped stays down
+                # behind a warning naming a role that IS mapped.
+                from m3_halt import base_role
+                _reaped_roles.update(base_role(r["role"]) for r in killed)
             for r in stuck:
                 _safe_print(f"{WARN} Could not stop {r['role']} (pid {r['pid']}): "
                             f"{r['error']} — re-run elevated or stop it manually, "

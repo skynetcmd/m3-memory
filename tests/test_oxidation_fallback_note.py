@@ -138,3 +138,70 @@ def test_in_privileged_group_false_on_windows(monkeypatch):
     and never tries to import the Unix-only `grp` module there."""
     monkeypatch.setattr(rci.sys, "platform", "win32")
     assert rci._in_privileged_group() is False
+
+
+# ── the note must be GATED on the live tier, not on an exit code ──────────────
+#
+# A non-zero exit from the install subprocess reports the FETCH, not the
+# capability. The two coincide only on a first install; on an upgrade the
+# previously-installed wheel is still imported and still serving, so choosing
+# the message from the exit code alone claims a slowdown that is not happening
+# and prescribes a toolchain the host does not need. §3: a warning that fires
+# when nothing is wrong trains people to ignore the one that matters.
+
+def _fake_tier(monkeypatch, *, native, backend=None, version=None):
+    monkeypatch.setattr(rci, "active_embedder_tier", lambda: {
+        "native": native, "backend": backend, "version": version, "summary": "",
+    })
+
+
+def test_outcome_note_reports_the_loaded_core_when_one_is_live(monkeypatch):
+    """Native wheel present -> say so, with backend and version."""
+    _fake_tier(monkeypatch, native=True, backend="cuda", version="3.9.8")
+    note = rci.native_core_outcome_note()
+    assert "cuda" in note and "3.9.8" in note
+    assert "UNAFFECTED" in note
+
+
+def test_outcome_note_marks_evidence_levels(monkeypatch):
+    """§3: state what was OBSERVED, mark what is INFERRED, name the knob.
+
+    The tier probe is measured, so it is reported as observed. This function
+    sees no channel exit codes, so WHY the fetch failed is a candidate list —
+    it must never be asserted as the cause.
+    """
+    _fake_tier(monkeypatch, native=True, backend="cuda", version="3.9.8")
+    note = rci.native_core_outcome_note()
+    assert "observed:" in note
+    assert "possible:" in note, "an unverified cause must not be asserted"
+    assert "inspect" in note, "name the knob to inspect"
+
+
+def test_outcome_note_never_claims_a_slowdown_that_is_not_happening(monkeypatch):
+    """The pure-Python copy must NOT appear while a native core is serving."""
+    _fake_tier(monkeypatch, native=True, backend="cuda", version="3.9.8")
+    note = rci.native_core_outcome_note().lower()
+    for lie in ("pure-python", "not employed", "http fallback",
+                rci.OXIDATION_SPEEDUP_X.lower()):
+        assert lie not in note, f"false alarm: note still claims {lie!r}"
+
+
+def test_outcome_note_gives_no_toolchain_advice_when_core_is_live(monkeypatch):
+    """A live native core means there is nothing to build; say nothing about it."""
+    _fake_tier(monkeypatch, native=True, backend="cuda", version="3.9.8")
+    note = rci.native_core_outcome_note().lower()
+    for noise in ("visual studio", "rustup", "cmake", "build tools"):
+        assert noise not in note
+
+
+def test_outcome_note_falls_back_to_the_reassurance_with_no_native_core(monkeypatch):
+    """No wheel at all is the ONE state oxidation_fallback_note describes."""
+    _fake_tier(monkeypatch, native=False)
+    assert rci.native_core_outcome_note() == rci.oxidation_fallback_note()
+
+
+def test_outcome_note_honours_indent(monkeypatch):
+    _fake_tier(monkeypatch, native=True, backend="cuda", version="3.9.8")
+    for line in rci.native_core_outcome_note(indent="    ").splitlines():
+        if line.strip():
+            assert line.startswith("    ")

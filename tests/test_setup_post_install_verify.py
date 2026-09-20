@@ -284,6 +284,11 @@ def _fake_halt(roles):
     m.list_live_processes = lambda *a, **k: [
         types.SimpleNamespace(role=r, pid=i) for i, r in enumerate(roles, 1)
     ]
+    # The real m3_halt owns role normalisation (it strips the "(elevated?)"
+    # provenance suffix a scan adds). A double that omits it would let the
+    # wizard's lookups drift from production behaviour, so mirror the contract
+    # rather than leaving the attribute absent.
+    m.base_role = lambda role: (role or "").split("(", 1)[0].strip()
     return m
 
 
@@ -362,6 +367,7 @@ def test_a_stopped_daemon_is_restarted_not_just_reported(wizard, monkeypatch, ca
             return [types.SimpleNamespace(role=r, pid=i) for i, r in enumerate(roles, 1)]
 
         m.list_live_processes = live
+        m.base_role = lambda role: (role or "").split("(", 1)[0].strip()
         return m
 
     monkeypatch.setattr(wizard, "_import_m3_halt", _halt_mod)
@@ -382,6 +388,7 @@ def test_a_daemon_that_stays_down_still_fails(wizard, monkeypatch, capsys):
     m.list_live_processes = lambda *a, **k: [
         types.SimpleNamespace(role="dashboard", pid=1)
     ]
+    m.base_role = lambda role: (role or "").split("(", 1)[0].strip()
     monkeypatch.setattr(wizard, "_import_m3_halt", lambda: m)
 
     assert wizard._step_verify_daemons(_P(loop=True, dash=True)) is False

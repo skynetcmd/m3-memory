@@ -202,19 +202,30 @@ def test_install_rust_core_falls_back_github_to_pip(monkeypatch):
 
 
 def test_install_rust_core_falls_back_all_three_tiers(monkeypatch):
-    """GitHub Release + pip both fail -> source build attempted."""
+    """Both prebuilt channels fail for EVERY backend -> source build attempted.
+
+    The channel cascade (Release -> pip) is tried per backend, and the whole
+    backend chain (cuda -> vulkan -> cpu) is exhausted before the source build
+    runs. Source builds from the PREFERRED backend, not the last one probed:
+    a host that can compile should compile the backend its hardware wants.
+    """
     calls = []
     monkeypatch.setattr(rci, "install_prebuilt",
-                        lambda c, **k: calls.append("prebuilt") or 1)
+                        lambda c, **k: calls.append(("prebuilt", c.backend)) or 1)
     monkeypatch.setattr(rci, "install_from_github_release",
-                        lambda c, **k: calls.append("github") or 1)
+                        lambda c, **k: calls.append(("github", c.backend)) or 1)
     monkeypatch.setattr(rci, "install_from_source",
-                        lambda c, **k: calls.append("source") or 0)
+                        lambda c, **k: calls.append(("source", c.backend)) or 0)
     monkeypatch.setattr(rci, "detect_backend",
                         lambda os_tok=None: rci.BackendChoice("linux", "cuda", "t"))
     rc = rci.install_rust_core()
     assert rc == 0
-    assert calls == ["github", "prebuilt", "source"]
+    assert calls == [
+        ("github", "cuda"), ("prebuilt", "cuda"),
+        ("github", "vulkan"), ("prebuilt", "vulkan"),
+        ("github", "cpu"), ("prebuilt", "cpu"),
+        ("source", "cuda"),
+    ]
 
 
 def test_install_rust_core_no_source_fallback_when_disabled(monkeypatch):
@@ -948,3 +959,90 @@ def test_install_log_failure_never_breaks_the_install(monkeypatch, tmp_path):
 
     assert rci.install_from_github_release(choice) == 0, \
         "logging is best-effort; it must never fail the install"
+
+
+# ── backend fallback chain: cuda -> vulkan -> cpu ─────────────────────────────
+#
+# A missing wheel for the best backend is a PUBLISHING gap, not a statement
+# about the host's hardware. A GPU box that cannot fetch its preferred wheel can
+# still run the next backend down in-process at native speed, so the installer
+# must exhaust the chain before conceding the hot path.
+
+def _chain_backends(os_tok):
+    return [c.backend for c in rci.detect_backend_chain(os_tok)]
+
+
+def test_chain_on_nvidia_host_is_cuda_then_vulkan_then_cpu(monkeypatch):
+    """An NVIDIA box degrades through Vulkan before it ever reaches CPU."""
+    monkeypatch.setattr(rci, "detect_backend", lambda os_tok=None:
+                        rci.BackendChoice(os_tok or "windows", "cuda", "test"))
+    assert _chain_backends("windows") == ["cuda", "vulkan", "cpu"]
+    assert _chain_backends("linux") == ["cuda", "vulkan", "cpu"]
+
+
+def test_chain_on_vulkan_host_does_not_offer_cuda(monkeypatch):
+    """No CUDA step for a host with no NVIDIA toolchain — it would only 404."""
+    monkeypatch.setattr(rci, "detect_backend", lambda os_tok=None:
+                        rci.BackendChoice(os_tok or "windows", "vulkan", "test"))
+    assert _chain_backends("windows") == ["vulkan", "cpu"]
+
+
+def test_chain_on_cpu_host_never_offers_vulkan(monkeypatch):
+    """A box with no GPU must not be handed a Vulkan wheel.
+
+    It would install happily and then fail at RUNTIME for want of a device —
+    strictly worse than not installing it (§3: fail loud, not late).
+    """
+    monkeypatch.setattr(rci, "detect_backend", lambda os_tok=None:
+                        rci.BackendChoice(os_tok or "windows", "cpu", "test"))
+    assert _chain_backends("windows") == ["cpu"]
+
+
+def test_chain_never_names_an_unpublished_package(monkeypatch):
+    """Every step must exist in _VALID; macOS ships metal only, so no cpu step."""
+    for os_tok in ("windows", "linux", "macos"):
+        for c in rci.detect_backend_chain(os_tok):
+            assert (c.os_tok, c.backend) in rci._VALID, \
+                f"{c.package} is not a published wheel"
+    monkeypatch.setattr(rci, "detect_backend", lambda os_tok=None:
+                        rci.BackendChoice("macos", "metal", "test"))
+    assert _chain_backends("macos") == ["metal"]
+
+
+def _wire_chain(monkeypatch, available):
+    """Only wheels whose backend is in `available` can be fetched."""
+    monkeypatch.setattr(rci, "detect_backend", lambda os_tok=None:
+                        rci.BackendChoice(os_tok or "windows", "cuda", "test"))
+    monkeypatch.setattr(rci, "install_from_github_release",
+                        lambda c, **k: 0 if c.backend in available else 1)
+    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: 1)
+    monkeypatch.setattr(rci, "installed_rust_core_version", lambda: None)
+    monkeypatch.setattr(rci, "install_log", lambda *a, **k: None)
+
+
+def test_missing_cuda_wheel_installs_vulkan_instead(monkeypatch, capsys):
+    """THE REGRESSION: cuda unpublished must not mean pure-Python."""
+    _wire_chain(monkeypatch, {"vulkan", "cpu"})
+    rc = rci.install_rust_core(os_tok="windows", allow_source_fallback=False)
+    assert rc == 0
+    assert "m3-core-rs-windows-vulkan" in capsys.readouterr().out
+
+
+def test_missing_cuda_and_vulkan_wheels_install_cpu(monkeypatch, capsys):
+    """The CPU wheel is the floor — still the in-process hot path, not HTTP."""
+    _wire_chain(monkeypatch, {"cpu"})
+    rc = rci.install_rust_core(os_tok="windows", allow_source_fallback=False)
+    assert rc == 0
+    assert "m3-core-rs-windows-cpu" in capsys.readouterr().out
+
+
+def test_explicit_backend_override_never_falls_back(monkeypatch):
+    """--backend is an instruction, not a preference.
+
+    Silently installing a different backend than the one named would defeat the
+    flag's only purpose, so an override that cannot be satisfied must FAIL.
+    """
+    _wire_chain(monkeypatch, {"vulkan", "cpu"})
+    rc = rci.install_rust_core(os_tok="windows", backend="cuda",
+                               allow_source_fallback=False)
+    assert rc != 0, "an unsatisfiable override must not silently substitute"

@@ -529,14 +529,26 @@ def _is_venv_launcher_stub(proc) -> bool:
     return False
 
 
+def base_role(role: str) -> str:
+    """The registry role name, with any scan-derived suffix stripped.
+
+    ``scan_db_writer_processes`` labels a process it could not read a cmdline
+    for as ``"embed-server(elevated?)"``. That suffix is a PROVENANCE marker,
+    not part of the role's identity, so every consumer that looks a role up in
+    a role-keyed table must normalise through here first. Single owner: a copy
+    of this predicate drifts, and the copy that is MISSING is worse still — it
+    silently fails the lookup and leaves a stopped service down.
+    """
+    return (role or "").split("(", 1)[0].strip()
+
+
 def _role_blocks(role: str) -> bool:
     """Does a writer of this role have to quiesce before a DB-exclusive op?
 
     Matches on the role PREFIX so scan-derived suffixes ("embed-server(elevated?)")
     classify the same as a clean registry role.
     """
-    base = (role or "").split("(", 1)[0].strip()
-    return base not in NON_BLOCKING_ROLES
+    return base_role(role) not in NON_BLOCKING_ROLES
 
 
 def list_all_db_writers(engine_root: Optional[str] = None) -> list[ProcInfo]:
