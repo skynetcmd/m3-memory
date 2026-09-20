@@ -1277,7 +1277,27 @@ async def run_distill_pass(args):
         )
         logger.info("Distillation pass: %s", out.strip().replace("\n", " | "))
     except Exception as e:
-        logger.error(f"Distillation pass error: {type(e).__name__}: {e}")
+        # §3 evidence levels, matching the embed-backfill site above. The bare
+        # form ("Distillation pass error: <type>: <msg>") states a fact with no
+        # frame and no knob, so a repeating failure says the same thing forever
+        # without ever becoming actionable — this one logged `no such table:
+        # tasks` once a minute for days while has_distill_work(), which probes
+        # the DB it is HANDED, kept reporting that work existed.
+        #
+        # exc_info is the load-bearing part: the guard and the implementation
+        # resolve the store SEPARATELY (has_distill_work probes args.database;
+        # memory_distill_procedures_impl opens its own via _db()), so the frame
+        # is what distinguishes "wrong store" from "unmigrated store". Without
+        # it the two are indistinguishable in the log.
+        logger.error(
+            f"observed: distillation pass failed ({type(e).__name__}: {e}). "
+            f"possible: the store this pass opened is not the one holding "
+            f"`tasks` (the guard and the implementation resolve it separately), "
+            f"or that store predates the orchestration migration. "
+            f"inspect: the trace below; `m3 doctor`; confirm which store has "
+            f"`tasks` before assuming either. Will retry next cycle.",
+            exc_info=True,
+        )
 
 
 def has_chatlog_prune_work(chatlog_db: Optional[str], prune_days: float,
