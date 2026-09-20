@@ -1289,13 +1289,28 @@ async def run_distill_pass(args):
         # memory_distill_procedures_impl opens its own via _db()), so the frame
         # is what distinguishes "wrong store" from "unmigrated store". Without
         # it the two are indistinguishable in the log.
+        # Name BOTH resolutions. The whole difficulty of this failure is that
+        # two code paths answer "which store holds `tasks`" independently, and
+        # a traceback shows only the one that raised — so the log has to carry
+        # the guard's answer too or the reader is left re-deriving it by hand.
+        # Both reads are defensive: a diagnostic must never raise from inside
+        # an exception handler and mask the error it is describing.
+        try:
+            from memory_core import ctx as _ctx
+            impl_db = str(getattr(_ctx, "db_path", None) or "(unresolved)")
+        except Exception:  # noqa: BLE001 — diagnostics are best-effort
+            impl_db = "(unreadable)"
+        guard_db = str(args.database or "(resolver default)")
         logger.error(
             f"observed: distillation pass failed ({type(e).__name__}: {e}). "
-            f"possible: the store this pass opened is not the one holding "
-            f"`tasks` (the guard and the implementation resolve it separately), "
-            f"or that store predates the orchestration migration. "
-            f"inspect: the trace below; `m3 doctor`; confirm which store has "
-            f"`tasks` before assuming either. Will retry next cycle.",
+            f"observed: guard probed {guard_db!r} and reported work; the "
+            f"implementation opened {impl_db!r}. "
+            f"possible: those are different stores, or the opened one predates "
+            f"the orchestration migration that creates `tasks` "
+            f"(memory/migrations/012_orchestration.sql). "
+            f"inspect: the trace below; compare the two paths above; "
+            f"`m3 doctor --fix` applies pending migrations. "
+            f"Will retry next cycle.",
             exc_info=True,
         )
 
