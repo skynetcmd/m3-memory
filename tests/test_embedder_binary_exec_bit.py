@@ -118,3 +118,91 @@ def test_service_cmd_ensures_the_bit_before_exec():
         "_service_cmd no longer ensures the exec bit before running the "
         "binary; a non-executable wheel will fail setup again"
     )
+
+
+# ── doctor reports it, --fix repairs it ──────────────────────────────────────
+
+from m3_memory.embedder_admin import exec_bit_status, repair_exec_bit  # noqa: E402
+
+
+@_posix_only
+def test_status_detects_a_non_executable_binary(tmp_path):
+    """Detection is separate from repair on purpose.
+
+    `_ensure_executable` fixes this at exec time, which keeps setup working —
+    but a silent repair hides a wheel that ships 0644, and a read-only install
+    cannot be repaired at all. doctor has to be able to SAY it.
+    """
+    binary = tmp_path / "m3-embed-server"
+    binary.write_text("#!/bin/sh\n")
+    os.chmod(binary, 0o644)
+
+    st = exec_bit_status(binary)
+    assert st["state"] == "not-executable", st
+    assert st["mode"] == "644"
+    assert "chmod +x" in st["detail"], "the report must name the fix"
+
+
+@_posix_only
+def test_status_is_ok_for_an_executable_binary(tmp_path):
+    binary = tmp_path / "m3-embed-server"
+    binary.write_text("#!/bin/sh\n")
+    os.chmod(binary, 0o755)
+    assert exec_bit_status(binary)["state"] == "ok"
+
+
+def test_status_is_ok_on_windows_without_pretending(tmp_path):
+    """Windows has no exec bit; a check there would be vacuously green.
+
+    Asserting the DETAIL, not just the state: the point is that it says why,
+    rather than implying something was verified.
+    """
+    if os.name != "nt":
+        pytest.skip("Windows-specific")
+    st = exec_bit_status(tmp_path / "anything")
+    assert st["state"] == "ok"
+    assert "no exec bit" in st["detail"].lower()
+
+
+@_posix_only
+def test_repair_fixes_a_user_owned_binary(tmp_path):
+    binary = tmp_path / "m3-embed-server"
+    binary.write_text("#!/bin/sh\n")
+    os.chmod(binary, 0o644)
+
+    res = repair_exec_bit(binary)
+    assert res["status"] == "fixed", res
+    assert exec_bit_status(binary)["state"] == "ok"
+
+    # Idempotent: a second --fix must not report a repair it did not make.
+    assert repair_exec_bit(binary)["status"] == "ok"
+
+
+@_posix_only
+def test_repair_dry_run_changes_nothing(tmp_path):
+    binary = tmp_path / "m3-embed-server"
+    binary.write_text("#!/bin/sh\n")
+    os.chmod(binary, 0o644)
+
+    res = repair_exec_bit(binary, dry_run=True)
+    assert res["status"] == "skipped"
+    assert "would chmod" in res["detail"]
+    assert exec_bit_status(binary)["state"] == "not-executable", (
+        "dry_run repaired the file anyway"
+    )
+
+
+def test_repair_never_prompts_for_a_password():
+    """⚠ `sudo -n`, NOT `sudo`. doctor --fix runs from scheduled tasks and
+    scripts; a hidden password prompt would hang them indefinitely. The
+    non-interactive flag makes an unprivileged failure immediate and reports
+    the manual command instead."""
+    import inspect
+
+    from m3_memory import embedder_admin
+
+    src = inspect.getsource(embedder_admin.repair_exec_bit)
+    assert '"sudo", "-n"' in src, (
+        "the escalation lost its non-interactive flag — doctor --fix can now "
+        "block on a password prompt"
+    )

@@ -69,6 +69,23 @@ def run(brief: bool = False) -> int:
     captures the subprocess output and prints only a one-line verdict.
     """
     exe = _resolve_binary()
+
+    # ⚠ CHECK THE EXEC BIT BEFORE ANYTHING ELSE. The macos-metal wheel has
+    # shipped m3-embed-server mode 0644, and that single EACCES surfaces
+    # downstream as a broken cascade, an embed-server error, two
+    # shared-embedder issues and an empty :8082 — four symptoms, none of which
+    # names the cause. m3 repairs it before exec, but a silent repair hides a
+    # packaging bug, and a read-only install cannot be repaired at all. Say so.
+    try:
+        from m3_memory.embedder_admin import exec_bit_status
+
+        _bit = exec_bit_status(exe)
+        if _bit.get("state") == "not-executable":
+            print(f"⚠️  embed-server binary is not executable (mode "
+                  f"{_bit.get('mode')}) — {_bit.get('detail')}")
+    except Exception:  # noqa: BLE001 — a diagnostic must never break the probe
+        pass
+
     if not exe:
         # Three states, not two. "Cannot find the binary" and "the service is
         # absent" are different claims, and conflating them reported a live

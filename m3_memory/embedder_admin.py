@@ -305,6 +305,114 @@ def _ensure_executable(binary: Path) -> None:
         print(f"[i] could not chmod +x {binary}: {exc}", file=sys.stderr)
 
 
+def exec_bit_status(binary: "Path | None" = None) -> dict:
+    """Report whether the embed-server binary is executable. Never raises.
+
+    Shared by `m3 setup` and `m3 doctor` so there is ONE predicate rather than
+    a copy in each (§10a). Returns a dict with a stable `state`:
+
+        'ok'            — executable, or Windows (no exec bit exists there)
+        'not-executable'— present but missing the exec bit: the failure below
+        'absent'        — no binary resolved; the oxidation extra is optional
+        'unknown'       — could not stat it
+
+    ⚠ WHY IT IS WORTH A CHECK OF ITS OWN. `_ensure_executable` repairs this at
+    exec time, which keeps setup working, but a silent repair hides a wheel that
+    ships the binary 0644 — and on a read-only install the repair cannot run at
+    all. Reporting the state means the packaging bug is visible rather than
+    papered over on every machine forever.
+
+    Windows has no exec bit: `os.access(X_OK)` is True for every file there and
+    `os.chmod` ignores 0o111, so any check would be vacuously green. Say 'ok'
+    and mean it, rather than implying something was verified.
+    """
+    if os.name == "nt":
+        return {"state": "ok", "detail": "Windows has no exec bit"}
+    try:
+        binary = binary or _server_binary()
+    except Exception:  # noqa: BLE001 — resolution is best-effort
+        binary = None
+    if binary is None:
+        return {"state": "absent", "detail": "no m3-embed-server binary resolved"}
+    try:
+        mode = os.stat(binary).st_mode
+    except OSError as exc:
+        return {"state": "unknown", "path": str(binary),
+                "detail": f"{type(exc).__name__}: {exc}"}
+    if mode & 0o111:
+        return {"state": "ok", "path": str(binary), "mode": f"{mode & 0o777:o}"}
+    return {
+        "state": "not-executable",
+        "path": str(binary),
+        "mode": f"{mode & 0o777:o}",
+        "detail": (
+            "the wheel shipped it without an exec bit; m3 repairs this before "
+            "running it, but a read-only install cannot be repaired. "
+            f"fix: chmod +x {binary}"
+        ),
+    }
+
+
+def repair_exec_bit(binary: "Path | None" = None, dry_run: bool = False) -> dict:
+    """Make the embed-server binary executable, escalating only if it must.
+
+    Ladder, cheapest first — each step is tried only because the previous one
+    could not work:
+
+      1. `os.chmod` as the current user. Succeeds whenever the install is
+         user-owned, which is the normal pipx/venv case.
+      2. `sudo -n chmod +x` — NON-INTERACTIVE on purpose. A system-wide install
+         (`/usr/local`, a root-owned venv) needs root, but `doctor --fix` must
+         never sit at a hidden password prompt: it runs from scheduled tasks and
+         from scripts. `-n` fails immediately when sudo would ask, and the
+         caller is told the exact command to run by hand.
+
+    Windows is a no-op: there is no exec bit, `os.chmod` ignores 0o111, and
+    pretending otherwise would report a repair that did nothing.
+    """
+    status = exec_bit_status(binary)
+    if status.get("state") != "not-executable":
+        return {"status": "ok", "detail": status.get("detail")
+                or f"already executable ({status.get('state')})"}
+
+    path = status.get("path")
+    if dry_run:
+        return {"status": "skipped",
+                "detail": f"dry_run=True; would chmod +x {path}"}
+
+    # 1. As the current user.
+    try:
+        mode = os.stat(path).st_mode
+        os.chmod(path, mode | 0o111)
+        if exec_bit_status(Path(path)).get("state") == "ok":
+            return {"status": "fixed", "detail": f"chmod +x {path}"}
+    except OSError as exc:
+        first = f"{type(exc).__name__}: {exc}"
+    else:
+        first = "chmod returned without error but the bit is still unset"
+
+    # 2. Escalate, without ever blocking on a prompt.
+    try:
+        proc = subprocess.run(["sudo", "-n", "chmod", "a+x", str(path)],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"status": "failed",
+                "detail": f"observed: {first}. sudo unavailable: {exc}. "
+                          f"fix: sudo chmod +x {path}"}
+    if proc.returncode == 0 and exec_bit_status(Path(path)).get("state") == "ok":
+        return {"status": "fixed", "detail": f"sudo chmod a+x {path}"}
+    return {
+        "status": "failed",
+        "detail": (
+            f"observed: {first}; sudo -n rc={proc.returncode} "
+            f"{(proc.stderr or '').strip()[:80]}. "
+            f"possible: the install is root-owned, or sudo needs a password "
+            f"(-n refuses to prompt so this never hangs). "
+            f"fix: sudo chmod +x {path}"
+        ),
+    }
+
+
 def _service_cmd(binary: Path, gguf: Path, sub: str, *extra: str) -> int:
     """Run `<binary> <sub> [extra...]` with the GGUF path in env."""
     _ensure_executable(binary)

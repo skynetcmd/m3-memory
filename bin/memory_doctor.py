@@ -279,6 +279,22 @@ def main() -> int:
         # binary is not a Python-side failure.
         embed_server_probe.run(brief=brief)
 
+        # A non-executable binary is m3's OWN file and a packaging defect, not
+        # the user's config, so --fix repairs it without the --fix-hooks gate
+        # (that gate exists for ~/.claude, which belongs to the user). The
+        # repair escalates to `sudo -n` only for a root-owned install and never
+        # prompts, so it stays safe from a scheduled task.
+        if args.fix:
+            try:
+                from m3_memory.embedder_admin import repair_exec_bit
+
+                _res = repair_exec_bit(dry_run=args.dry_run)
+                if _res["status"] != "ok":
+                    print(f"  [{_res['status']}] embed-server exec bit: "
+                          f"{_res['detail']}")
+            except Exception as _exc:  # noqa: BLE001 — never break doctor
+                print(f"  [skipped] embed-server exec bit: {_exc}")
+
     if not args.skip_oxidation:
         from doctor import oxidation_probe
         # Report-only: a pure-Python deployment (no/old wheel) is supported, so
