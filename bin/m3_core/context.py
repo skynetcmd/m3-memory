@@ -688,6 +688,19 @@ def _ensure_dispatch_schema(conn) -> None:
     the runner's problem, and silently patching it here would hide a real
     version skew.
     """
+    # ⚠ KNOWN DEFECT, POSTGRESQL: this probe reads `sqlite_master`, a
+    # SQLite-ONLY catalog table. On PostgreSQL the query raises, the except
+    # branch below turns it into a warning, and the dispatch tables are never
+    # created — so `m3_dispatch.notification_dispatch` does not exist and every
+    # send fails on that backend. Reproduces on
+    # tests/test_pg_entity_orchestration_live.py. Pre-existing (not from the
+    # 2026.9.20.0 dynamics work); confirmed on a clean origin/main worktree.
+    #
+    # The seam already has the portable primitive — `dialect.table_exists()`,
+    # whose own docstring names this anti-pattern (§10a) — and PostgreSQL has a
+    # separate bootstrap at memory/dispatch_migrations/postgres/. Swapping the
+    # probe alone does NOT fix it: the send path does not reach this bootstrap
+    # on PG at all, so the fix needs its own change and its own PG-live test.
     try:
         present = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' "

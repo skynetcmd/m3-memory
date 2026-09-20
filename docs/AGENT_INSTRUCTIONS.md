@@ -159,6 +159,17 @@ Before any push to a remote:
    places than the two documented generators touch. A `git status` that is not
    clean after running all five is the same STOP signal.
 
+   **Edited a heading in `README.md` or any `docs/*.md`? Run the link gate:**
+   ```
+   python -m pytest tests/test_doc_links.py -q
+   ```
+   It resolves links ACROSS files, which an in-file check cannot. Renaming or
+   re-anchoring a heading silently breaks every `../README.md#slug` in `docs/`,
+   and nothing else catches it until the full suite ~10 minutes in. ⚠ A heading
+   whose emoji carries a variation selector (`🛡️`, `🎚️`, `⚖️`, `⌨️`) does not
+   slug like its neighbours — give those an explicit `<a id="...">` rather than
+   guessing at GitHub's rule.
+
 2. **Commit messages and `CHANGELOG.md` describe the change, not the
    reasoning.** State what changed. Decision process, measurement narrative,
    rejected alternatives and post-mortems do not belong in a public git
