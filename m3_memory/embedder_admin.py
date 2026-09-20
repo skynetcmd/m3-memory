@@ -274,8 +274,40 @@ def _server_binary() -> Optional[Path]:
     return Path(on_path) if on_path else None
 
 
+def _ensure_executable(binary: Path) -> None:
+    """Add the exec bit if the wheel shipped the binary without one.
+
+    ⚠ ONE EACCES LOOKS LIKE FOUR FAILURES. The macos-metal wheel has shipped
+    `m3_core_rs/m3-embed-server` as mode 0644, so `m3 setup` step 2/5 died with
+    `PermissionError: [Errno 13]` — and that single cause surfaced as
+    "embedding-cascade: broken", "embed-server: error", "shared-embedder: 2
+    issue(s)", nothing LISTENing on :8082, and "VERIFICATION FAILED". Easy to
+    misdiagnose as an embedder or config problem (macOS arm64, py3.14,
+    m3-memory 2026.9.20.1).
+
+    The real fix is packaging the wheel 0755. This is the defensive half, and
+    it is worth keeping even after that: it costs one stat on a path we are
+    about to exec, and it survives any future wheel that regresses.
+
+    Best-effort — a read-only install is a legitimate deployment, and the exec
+    below reports the failure honestly if the bit could not be set.
+    """
+    try:
+        if os.access(binary, os.X_OK):
+            return
+        mode = os.stat(binary).st_mode
+        os.chmod(binary, mode | 0o111)
+        print(f"[~] added the exec bit to {binary.name} "
+              f"(the wheel shipped it non-executable)")
+    except OSError as exc:
+        # Say it here rather than let the exec's EACCES stand alone: that error
+        # names a permission problem without saying we tried to correct it.
+        print(f"[i] could not chmod +x {binary}: {exc}", file=sys.stderr)
+
+
 def _service_cmd(binary: Path, gguf: Path, sub: str, *extra: str) -> int:
     """Run `<binary> <sub> [extra...]` with the GGUF path in env."""
+    _ensure_executable(binary)
     env = os.environ.copy()
     env.setdefault("M3_EMBED_GGUF", str(gguf))
     env.setdefault("M3_EMBED_SERVER_PORT", "8082")

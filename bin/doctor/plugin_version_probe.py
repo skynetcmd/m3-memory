@@ -6,12 +6,18 @@ own version, and they drift: the plugin manifest can lag the code by weeks, and
 m3 vanishes from /mcp with no error. This probe DETECTS both — a stale plugin
 version and a disabled-but-installed plugin — and prints the exact fix commands.
 
-It cannot FIX either itself: `/plugin marketplace update`, `/plugin install`,
-and `/reload-plugins` are Claude Code CLIENT slash-commands, not things a Python
-process can invoke, and editing Claude Code's own config from here would risk a
-half-broken state. So this is report-only (like schedule_probe) — it never
-mutates ~/.claude, and it does not bump the doctor exit code (a lagging plugin
-is a recoverable, user-actionable state, not a broken install).
+`run()` is report-only and never mutates ~/.claude, and it does not bump the
+doctor exit code (a lagging plugin is recoverable and user-actionable, not a
+broken install).
+
+`repair()` — reached only via `doctor --fix --fix-hooks` — does update it, using
+the supported `claude plugin` CLI. The slash-commands (`/plugin`,
+`/reload-plugins`) are indeed client-side and uninvokable from here, but
+`claude plugin marketplace update` and `claude plugin update` are not; an
+earlier version of this docstring generalised from the former to the latter and
+left the drift permanently manual. It never hand-edits installed_plugins.json or
+copies cache directories: the pinned copy and its recorded gitCommitSha must
+stay consistent, and only the CLI keeps them so.
 
 Cross-platform, network-free (reads local Claude Code config only), never raises.
 """
@@ -234,18 +240,117 @@ def run(brief: bool = False) -> int:
         print("              fresh as the marketplace clone, last refreshed")
         print(f"              {age_days:.0f}d ago, so a newer release may exist upstream.")
         print("  note      : expected if this machine is offline / air-gapped —")
-        print("              nothing is wrong. If it IS networked and you want the")
-        print("              latest: /plugin marketplace update skynetcmd")
+        print("              nothing is wrong.")
         print("  why       : third-party marketplaces have auto-update OFF by default")
         print("              (Anthropic's own are ON), so this clone only moves when")
         print("              someone refreshes it by hand — it does not drift, it")
-        print("              simply never updates. A one-time fix:")
-        print("  fix       : /plugin -> Marketplaces -> skynetcmd -> enable auto-update")
-        print("              (then the clone refreshes itself after session start;")
-        print("               /reload-plugins applies it without a restart)")
+        print("              simply never updates.")
+        # ⚠ TWO THINGS, AND REFRESHING THE CLONE ALONE DOES NOTHING. The
+        # marketplace clone (~/.claude/plugins/marketplaces/skynetcmd) is a git
+        # checkout; the plugin that actually LOADS is a pinned copy under
+        # ~/.claude/plugins/cache/skynetcmd/m3/<version>, recorded in
+        # installed_plugins.json with its gitCommitSha. Measured 2026-09-20: a
+        # marketplace update fast-forwarded 794 commits and doctor still
+        # reported the old version, because the pinned copy stayed on its old
+        # commit. Advising only the first command sends the user in a circle.
+        print("  fix       : claude plugin marketplace update skynetcmd")
+        print("              claude plugin update m3@skynetcmd")
+        print("              (BOTH — the first refreshes the marketplace clone,")
+        print("               the second moves the pinned copy that actually loads.")
+        print("               Then restart Claude Code to apply.)")
+        print("  avoid next: /plugin -> Marketplaces -> skynetcmd -> auto-update on")
+        print("              keeps the CLONE fresh; the installed copy still needs")
+        print("              `claude plugin update` to move.")
     elif not problem:
         print("  status    : OK — installed, enabled, and current.")
 
     # Report-only: a stale/disabled plugin is user-recoverable, not a broken
     # install, so do not bump the doctor exit code.
     return 0
+
+
+def repair(dry_run: bool = False) -> dict:
+    """Refresh the marketplace clone AND the pinned plugin copy.
+
+    ⚠ TWO THINGS, AND THE CLONE ALONE IS NOT ENOUGH. The marketplace clone is a
+    git checkout under ~/.claude/plugins/marketplaces/skynetcmd; the plugin that
+    actually LOADS is a pinned copy under
+    ~/.claude/plugins/cache/skynetcmd/m3/<version>, recorded in
+    installed_plugins.json with its gitCommitSha. Measured 2026-09-20: a
+    marketplace update fast-forwarded 794 commits while doctor still reported
+    the old version, because the pinned copy never moved. So both commands run,
+    in order.
+
+    ⚠ MUST-PRESERVE INVARIANT. This machine runs the DIRECT mcp__m3_memory__
+    registration and keeps the plugin's own servers off via
+    settings.json `disabledMcpServers: ["plugin:m3:memory", "plugin:m3:m3"]`.
+    A plugin upgrade that re-enabled them would leave two competing memory
+    servers running. The list is captured before and compared after; a
+    regression is reported loudly rather than silently accepted.
+
+    Uses the supported CLI. Never hand-edits installed_plugins.json or copies
+    cache directories — the pinned copy and its recorded sha must stay
+    consistent, and only the CLI keeps them so.
+    """
+    import subprocess
+
+    actions: list = []
+
+    def _disabled_servers() -> list:
+        try:
+            p = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
+            with open(p, "r", encoding="utf-8") as fh:
+                return sorted(json.load(fh).get("disabledMcpServers") or [])
+        except Exception:  # noqa: BLE001 — absence is not a regression signal
+            return []
+
+    before = _disabled_servers()
+
+    for label, argv in (
+        ("marketplace", ["claude", "plugin", "marketplace", "update", "skynetcmd"]),
+        ("plugin", ["claude", "plugin", "update", "m3@skynetcmd"]),
+    ):
+        if dry_run:
+            actions.append({"action": label, "status": "skipped",
+                            "detail": f"dry_run=True; would run: {' '.join(argv)}"})
+            continue
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True,
+                                  timeout=300, **_no_window_kwargs())
+        except (OSError, subprocess.SubprocessError) as exc:
+            actions.append({"action": label, "status": "failed",
+                            "detail": f"{type(exc).__name__}: {exc}"})
+            continue
+        detail = (proc.stdout or proc.stderr or "").strip().splitlines()
+        actions.append({
+            "action": label,
+            "status": "ok" if proc.returncode == 0 else "failed",
+            "detail": (detail[-1][:160] if detail else f"rc={proc.returncode}"),
+        })
+
+    after = _disabled_servers()
+    if not dry_run and before and after != before:
+        actions.append({
+            "action": "invariant", "status": "failed",
+            "detail": (
+                f"disabledMcpServers changed: {before} -> {after}. The plugin's "
+                f"own MCP servers must stay disabled or two memory servers run "
+                f"at once. inspect: ~/.claude/settings.json"
+            ),
+        })
+
+    if not dry_run and any(a["status"] == "ok" for a in actions):
+        actions.append({"action": "restart", "status": "ok",
+                        "detail": "restart Claude Code to load the new version"})
+    return {"actions": actions}
+
+
+def _no_window_kwargs() -> dict:
+    """CREATE_NO_WINDOW on Windows so a repair never flashes a console."""
+    try:
+        from _task_runtime import no_window_kwargs
+        return no_window_kwargs()
+    except ImportError:
+        import subprocess as _sp
+        flag = getattr(_sp, "CREATE_NO_WINDOW", 0)
+        return {"creationflags": flag} if flag else {}

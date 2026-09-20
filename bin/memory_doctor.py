@@ -337,10 +337,17 @@ def main() -> int:
 
     if not args.skip_plugin:
         from doctor import plugin_version_probe
-        # Report-only: a stale or disabled Claude Code plugin is user-recoverable
-        # (the fix is client-side /plugin + /reload-plugins commands doctor can't
-        # invoke), so it nags with the exact commands but never bumps the exit code.
+        # Report-only by default: a stale or disabled plugin is user-recoverable
+        # and never bumps the exit code. Under `--fix --fix-hooks` it is also
+        # repairable — `claude plugin marketplace update` + `claude plugin
+        # update` are real CLI commands, unlike the /plugin slash-commands.
+        # Shares the --fix-hooks gate with the other probes that touch the
+        # user's ~/.claude, since a plugin upgrade can flip the enabled flag.
         plugin_version_probe.run(brief=brief)
+        if args.fix and args.fix_hooks:
+            res = plugin_version_probe.repair(dry_run=args.dry_run)
+            for act in res.get("actions", []):
+                print(f"  [{act['status']}] plugin {act['action']}: {act['detail']}")
 
     if not args.skip_entrypoints:
         from doctor import entrypoint_probe

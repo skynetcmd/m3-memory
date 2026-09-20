@@ -128,7 +128,18 @@ def run(brief: bool = False) -> int:
             if r.returncode == 0:
                 state = (r.stdout or "").strip().splitlines()[-1:] or [""]
                 detail = f" ({state[0]})" if sub == "status" and state[0] else ""
-                print(f"✅ embed-server: ok{detail}")
+                # ⚠ "ok (not installed)" IS A MISLABEL. `status` exits 0 while
+                # REPORTING that no service exists, so the rc alone says the
+                # query worked, not that the service is healthy. Printing a
+                # green tick beside "not installed" reads as fine when
+                # shared-mode config requires something on :8082 — and it is
+                # precisely the reassurance that masked a killed embedder
+                # (macOS, 2026-09-20). Report the state, not the exit code.
+                if "not installed" in (r.stdout or "").lower():
+                    print("⚠️  embed-server: not installed — shared mode expects "
+                          "a service on this port. fix: m3 embedder install")
+                else:
+                    print(f"✅ embed-server: ok{detail}")
             else:
                 print(f"❌ embed-server: FAILED ({sub})")
         return r.returncode
