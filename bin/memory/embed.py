@@ -311,9 +311,27 @@ def _read_embed_config() -> tuple[dict, bool]:
 _EMBED_CFG, _EMBED_CFG_PRESENT = _read_embed_config()
 
 _EMBED_GGUF_PATH: str | None = (os.environ.get("M3_EMBED_GGUF") or "").strip() or None
+# Defaults to the canonical SPACE tag, not a file name. The GGUF tiers used to
+# default to "bge-m3-GGUF-Q4_K_M.gguf" while LM Studio wrote
+# "text-embedding-bge-m3", which read as two embedding namespaces and was
+# repeatedly re-investigated as a migration. It never was one: measured
+# 2026-09-20, both tags are 1024-dim and unit-norm, 1000 same-content pairs
+# across both stores agree at min cos 0.9948 with none below 0.95, and the same
+# text through the GGUF server and LM Studio returns cos = 1.000000.
+#
+# A tag names the vector SPACE, not the service or the file that produced it.
+# Two tags for one space cost a split embed cache and a recurring false
+# migration question, and bought nothing — search already had to treat both as
+# compatible. Existing rows were converged out-of-band.
+#
+# ⚠ Override ONLY for a genuinely different model (different family or
+# dimension). Pointing this at a new name while old rows carry the old one
+# drops those rows out of `_compatible_model_names()` and therefore out of
+# search entirely; add the old tag to M3_EMBED_COMPATIBLE_MODELS first.
+# `m3 doctor`'s embed-space probe reports UNREACHABLE if that happens.
 _EMBED_GGUF_MODEL_TAG: str = (
     (os.environ.get("M3_EMBED_GGUF_MODEL_TAG") or "").strip()
-    or "bge-m3-GGUF-Q4_K_M.gguf"
+    or config.EMBED_SPACE_TAG
 )
 # Explicit opt-IN to a per-process in-process embedder (a second CUDA context).
 # Shared mode is the safe default; this is the escape hatch for someone who
@@ -374,17 +392,37 @@ def _proper_embed_dim() -> int:
     return int(config.EMBED_DIM)
 
 
+# Tags that older m3 versions wrote for the SAME bge-m3 space, kept permanently
+# readable. These are not aliases of convenience: a store written by an earlier
+# release still carries them, and search filters `embed_model IN
+# (_compatible_model_names())` — so dropping one silently removes its rows from
+# every query while leaving them present, valid and unit-length in the table.
+#
+# Measured equivalence (2026-09-20): 1024-dim and unit-norm in both stores;
+# 1000 same-content pairs at min cos 0.9948, none below 0.95; the same text
+# through the GGUF server and LM Studio returns cos = 1.000000.
+#
+# Read-compatibility only — nothing WRITES these any more. Append here when a
+# tag is retired; never remove an entry, because that strands whatever rows
+# still carry it on someone's older store.
+_LEGACY_SPACE_TAGS: frozenset[str] = frozenset({
+    "bge-m3-GGUF-Q4_K_M.gguf",
+})
+
+
 def _compatible_model_names() -> frozenset[str]:
     """The embed_model tags that map to the proper embed space. A tier whose tag
     is in this set is accepted; anything else is a foreign embedder. Includes the
     configured name, the tier-1 GGUF tag, the tier-2 fallback tag, the space tag,
-    any runtime model override, and operator-supplied extras."""
+    any runtime model override, retired tags for this same space, and
+    operator-supplied extras."""
     names = {
         config.EMBED_MODEL,
         config.EMBED_SPACE_TAG,
         config.EMBED_FALLBACK_MODEL_TAG,
         _EMBED_GGUF_MODEL_TAG,
         config._EMBED_MODEL_OVERRIDE or config.EMBED_MODEL,
+        *_LEGACY_SPACE_TAGS,
         *config.EMBED_COMPATIBLE_MODELS,
     }
     return frozenset(n for n in names if n)

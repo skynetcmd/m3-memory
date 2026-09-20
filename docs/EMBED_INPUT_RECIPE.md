@@ -217,16 +217,45 @@ Consequences operators should know:
 
 ## Model-tag namespacing
 
-Vectors are tagged with the embedding model that produced them, and the
-tags form independent cache namespaces:
+Vectors are tagged with the embedding model that produced them. **Every bge-m3
+tier writes the one canonical tag — `text-embedding-bge-m3`.** The tag names the
+SPACE, not the service that produced the vector.
 
 | Source                        | `embed_model` tag                | Notes                                          |
 |-------------------------------|----------------------------------|------------------------------------------------|
-| In-process llama.cpp (bge-m3) | `bge-m3-GGUF-Q4_K_M.gguf`        | Default tag; parity-verified cosine ~0.996 vs llama-server bge-m3 |
-| llama-server bge-m3 (HTTP)    | `bge-m3-GGUF-Q4_K_M.gguf`        | Same tag — same model, same quant              |
-| LM Studio bge-m3              | `text-embedding-bge-m3`          | **Different tag** — different cache namespace, but vectors are cosine-comparable |
-| CPU HTTP fallback             | `bge-m3-GGUF-Q4_K_M.gguf`        | Inherits the GGUF tag                          |
+| In-process llama.cpp (bge-m3) | `text-embedding-bge-m3`          | Canonical tag                                  |
+| llama-server bge-m3 (HTTP)    | `text-embedding-bge-m3`          | Same space, same tag                           |
+| LM Studio bge-m3              | `text-embedding-bge-m3`          | Same space, same tag                           |
+| CPU HTTP fallback             | `text-embedding-bge-m3`          | Same space, same tag                           |
 | Qwen3-Embedding (bench-only)  | `qwen3-embedding`                | Different vector space — do **not** mix with bge-m3 rows |
+
+### Why one tag — settled, do not re-open
+
+The bge-m3 tiers once wrote two different tags (`bge-m3-GGUF-Q4_K_M.gguf` for
+the GGUF tiers, `text-embedding-bge-m3` for LM Studio), which read as two
+embedding namespaces and was repeatedly re-investigated as a possible migration.
+It was not one. Measured 2026-09-20, three ways:
+
+- **Stored vectors, both tags, both stores:** 1024-dim, unit norm
+  (0.999999–1.000001).
+- **Same content under both tags:** 500 `content_hash`-matched pairs per store —
+  memory min cos **0.9948**, chatlog min cos **0.9955**, **zero** pairs below
+  0.95 out of 1000. A genuine split is bimodal with a low mode; there is none.
+- **Live cross-endpoint:** the same five strings (English, code, CJK, a hex
+  error code) embedded through the `:8082` GGUF server and LM Studio on `:1234`
+  give **cos = 1.000000** on every one.
+
+The spread is quantization noise between quants of one model. The legacy tag was
+therefore converged onto the canonical name out-of-band (43,580 rows across
+`memory_embeddings` and `entity_embeddings` in both stores); no vector was
+recomputed, so no retrieval result moved.
+
+⚠ **A tag is not a space.** Only change a tag when the MODEL changes — a
+different family, or a different dimension. Renaming for cosmetics rewrites the
+cache key for no retrieval benefit; and a tag that leaves
+`embed._compatible_model_names()` silently drops its rows out of search
+(`search.py` filters `embed_model IN (...)`). `m3 doctor`'s `embed-space` probe
+reports `UNREACHABLE` if that ever happens.
 
 Override via `M3_EMBED_GGUF_MODEL_TAG` env var if your deployment uses a
 non-default GGUF.
