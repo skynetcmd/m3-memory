@@ -19,6 +19,33 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.9.20.2] — 2026-09-20 — a clearer install on macOS and Linux
+
+### Fixed
+
+- **`m3 setup` failed when the embed-server binary shipped without an exec
+  bit.** One `PermissionError` surfaced as four unrelated-looking failures —
+  a broken embedding cascade, an embed-server error, two shared-embedder
+  issues, and nothing listening on `:8082` — none of which named the cause.
+  The binary is now made executable before it is run.
+- **`doctor` reported `embed-server: ok (not installed)`.** The exit code only
+  says the status query worked, not that a service exists. It now reports the
+  state.
+
+### Added
+
+- **`doctor` reports a non-executable embed-server binary, and `doctor --fix`
+  repairs it.** The repair runs as the current user first and escalates with
+  `sudo -n` only for a root-owned install; it never prompts, so it is safe from
+  a scheduled task, and a refusal prints the manual command. Windows reports ok
+  and says why — it has no exec bit.
+- **`doctor --fix --fix-hooks` updates a stale Claude Code plugin.** Refreshing
+  the marketplace clone alone leaves the pinned copy that actually loads on its
+  old commit, so both supported CLI commands run in order. The plugin's own MCP
+  servers are verified to stay disabled afterwards, since re-enabling them would
+  leave two memory servers competing.
+
+
 ## [2026.9.20.1] — 2026-09-20 — native core 3.9.20, honest install reporting
 
 ### Fixed
