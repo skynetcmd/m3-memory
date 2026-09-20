@@ -19,6 +19,41 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.9.20.1] — 2026-09-20 — native core 3.9.20, honest install reporting
+
+### Fixed
+- Setup reported a failed native-core **fetch** as an absent capability, so an
+  upgrade over a working wheel printed the pure-Python fallback notice and
+  toolchain instructions while the native core was still loaded and serving.
+  The message now probes the live embedder tier and marks evidence levels.
+- The native-core installer falls back across backends (cuda → vulkan → cpu)
+  when a wheel is missing for the preferred one, instead of dropping to
+  pure-Python. An explicit `--backend` override never substitutes.
+- Setup waited for a restarted service to register before grading it; the
+  registry entry is written by the child after its interpreter boots, so an
+  immediate re-read reported a correctly-starting service as down.
+- All bge-m3 embedder tiers now write one canonical `embed_model` tag. The
+  GGUF tiers previously tagged wheels by model filename, splitting the embed
+  cache across two tags for one vector space. Retired tags stay readable.
+- `m3 doctor` reports stored embedding tags that are excluded from search by
+  the compatibility set — rows that are present and valid but never scored.
+- The cognitive loop's distillation error names both store resolutions,
+  attaches a traceback, and rules out causes its own data disproves.
+- Scheduled tasks carry the self-heal repetition on the boot trigger only.
+  Emitting it on both triggers gave two cadences, so each interval launched a
+  process that existed only to lose the single-instance lock race.
+
+### Added
+- `M3Context` logs the first bind of each store, with the requested path beside
+  the resolved one.
+- Index on `memory_embeddings(content_hash, embed_model)` — the pair the embed
+  cache probes by. PostgreSQL already had it.
+
+### Changed
+- Pins native core `m3-core-rs` **3.9.20** (`v2026.9.20`): dispatcher latency
+  percentiles are now measured rather than hardcoded zero, Windows Vulkan
+  builds again, and the wheel matrix covers CPython 3.11–3.15.
+
 ## [2026.9.20.0] — 2026-09-20 — memories that strengthen with use
 
 ### Added
