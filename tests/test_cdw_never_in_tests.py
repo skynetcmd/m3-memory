@@ -46,16 +46,37 @@ def test_warehouse_env_is_scrubbed(var):
 def test_no_test_dsn_points_at_the_warehouse(var):
     """A test DSN must name a throwaway cluster, never the shared warehouse.
 
-    Checked by shape rather than by one hardcoded address: any RFC1918 host is
-    suspect here, because the sanctioned target is a local WSL/CI cluster
-    reached on a link-local or loopback address.
+    Checked by SHAPE, not against a hardcoded address. Two reasons: a literal
+    host would publish an internal network address in a public repository, and
+    it would only ever catch the one warehouse it names. The sanctioned target
+    is a disposable local cluster — loopback, or the WSL bridge on 172.16/12 —
+    so any OTHER private-range host is the thing to refuse.
     """
+    import ipaddress
+    import re
+    from urllib.parse import urlparse
+
     dsn = os.environ.get(var, "")
     if not dsn:
         pytest.skip(f"{var} not set — PG tests will self-skip")
-    assert "10.21.40.51" not in dsn, (
-        f"{var} targets the production warehouse: {dsn!r}. Use the throwaway "
-        f"cluster from WSL_POSTGRES_TEST_DB_RUNBOOK."
+
+    host = urlparse(dsn).hostname or ""
+    if not host or not re.fullmatch(r"[0-9.]+", host):
+        return  # a hostname, not a literal address — nothing to classify
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return
+
+    if addr.is_loopback:
+        return
+    # The WSL bridge the PG runbook provisions lives in 172.16/12.
+    if addr in ipaddress.ip_network("172.16.0.0/12"):
+        return
+    assert not addr.is_private, (
+        f"{var} points at {host}, a private-range host that is not loopback or "
+        f"the WSL bridge — that shape is a shared/production cluster. Use the "
+        f"throwaway cluster from WSL_POSTGRES_TEST_DB_RUNBOOK."
     )
 
 
