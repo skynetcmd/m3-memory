@@ -36,5 +36,15 @@ if (-not $py) {
     }
 }
 
-& $py (Join-Path $base "bin\chatlog_ingest.py") --format aider --watch $RepoRoot
+# ⚠ NOT `--watch`: no such flag exists, so this hook exited 2 on every fire and
+# Aider capture never ran. Ingest is idempotent per turn (the cursor tracks seen
+# ids), so re-reading the whole history each time is correct and cheap —
+# already-captured turns come back as `skipped`.
+$hist = if ($env:AIDER_CHAT_HISTORY_FILE) { $env:AIDER_CHAT_HISTORY_FILE }
+        else { Join-Path $RepoRoot ".aider.chat.history.md" }
+if (-not (Test-Path $hist)) {
+    Write-Warning "aider_chat_watcher: no history at $hist (no-op)"
+    exit 0
+}
+& $py (Join-Path $base "bin\chatlog_ingest.py") --format aider --transcript-path $hist --variant session_end
 exit $LASTEXITCODE

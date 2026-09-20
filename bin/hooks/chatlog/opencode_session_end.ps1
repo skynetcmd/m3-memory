@@ -30,5 +30,12 @@ if (-not $py) {
     }
 }
 
-$input | & $py (Join-Path $base "bin\chatlog_ingest.py") --format opencode
+# ⚠ --transcript-path IS REQUIRED and was missing, so this exited 2 on every
+# fire and OpenCode capture never ran. OpenCode writes no transcript FILE: it
+# keeps sessions in opencode.db (v1.2.0+) or a legacy per-message JSON tree, so
+# point ingest at the STORE and let the parser resolve the layout.
+# "auto" asks chatlog_ingest to locate the store. The per-OS candidate list
+# lives there, in ONE place, rather than being re-derived in each shell wrapper
+# — which is how two platforms drift apart (DESIGN §1, §10a).
+$input | & $py (Join-Path $base "bin\chatlog_ingest.py") --format opencode --transcript-path auto --variant session_end
 exit $LASTEXITCODE

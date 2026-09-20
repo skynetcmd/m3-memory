@@ -170,3 +170,72 @@ def test_chatlog_promote_cross_table_on_pg(pg):
         with pg.connection() as c:
             c.execute("DELETE FROM chat_log_items WHERE conversation_id=%s", (conv,))
             c.execute("DELETE FROM memory_items WHERE id=%s", (mid,))
+
+
+# ── host-agent capture on PostgreSQL ─────────────────────────────────────────
+
+def test_every_host_agent_parser_writes_on_pg(pg):
+    """⚠ §0.4 / §1: CAPTURE IS NOT DONE BECAUSE IT WORKS ON SQLITE.
+
+    The parsers added for openclaw, opencode and aider emit plain dicts, so the
+    backend-varying half is entirely in chatlog_write_bulk_impl — which is
+    exactly why a SQLite-only test proves nothing about it. On PG the chatlog
+    lives in chat_log_* tables in the SAME database as core, so the write takes
+    a different path (and a different INSERT) than the split-file SQLite case.
+
+    This also pins the value that a live database rejected: OpenCode reports
+    providerID="opencode", which is not in the vendor enum, and every turn
+    failed to write until it was normalised. A CHECK constraint is a
+    backend-enforced contract, so it deserves a backend-live assertion.
+    """
+    import asyncio
+
+    import chatlog_core
+    import chatlog_ingest
+
+    convo = f"pgcap-{uuid.uuid4().hex[:8]}"
+    rows = []
+
+    # One representative turn per parser, built by the REAL parsers rather than
+    # hand-written dicts — hand-written rows would not catch a parser emitting a
+    # field the schema rejects, which is the defect this guards.
+    aider, _ = chatlog_ingest._parse_aider(
+        "# aider chat started at 2026-01-11 11:00:00\n#### q\n\nan answer\n")
+    openclaw, _ = chatlog_ingest._parse_openclaw(
+        '{"type":"session","sessionId":"s1"}\n'
+        '{"type":"model_change","model":"gpt-4o"}\n'
+        '{"id":"m1","type":"message","message":{"role":"user","content":"q"}}\n')
+    opencode = [chatlog_ingest._opencode_item(
+        {"role": "user", "providerID": "opencode", "modelID": "qwen3.6-plus-free"},
+        "m1", "s1", ["routed through opencode's own gateway"], 1767237681693)]
+
+    for agent, items in (("aider", aider), ("openclaw", openclaw),
+                         ("opencode", opencode)):
+        for it in items:
+            row = dict(it)
+            row.pop("uuid", None)          # internal to ingest, not the schema
+            row["host_agent"] = agent
+            row["conversation_id"] = convo
+            rows.append(row)
+
+    assert len(rows) >= 4, "fixture did not produce turns from every parser"
+
+    res = asyncio.run(chatlog_core.chatlog_write_bulk_impl(rows, embed=False))
+    assert res.get("failed", 0) == 0, (
+        f"turns rejected by PostgreSQL: {res.get('errors')}"
+    )
+    # The bulk writer reports ids, not a count — asserting a "written" key
+    # that does not exist would have read as zero rows written while the
+    # write actually succeeded.
+    assert len(res.get("written_ids") or []) == len(rows), res
+
+    # And they are really there, in the PG clone table.
+    with pg.connection() as c:
+        cur = c.cursor()
+        cur.execute(
+            "SELECT count(*) FROM chat_log_items WHERE conversation_id = %s",
+            (convo,),
+        )
+        assert cur.fetchone()[0] == len(rows), (
+            "write reported success but the rows are not in chat_log_items"
+        )

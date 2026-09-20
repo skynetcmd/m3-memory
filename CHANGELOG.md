@@ -89,6 +89,11 @@ the policy is forward-going only.
   and nothing clamped on write, which distorted every floor computation.
 - Background liveness and shutdown checks ran `tasklist` and `taskkill` without
   suppressing the console, flashing a window on Windows every few minutes.
+- **Chat log capture now works for OpenClaw, OpenCode and Aider.** All three
+  were registered host agents whose hooks invoked the ingest CLI with an
+  argument it does not accept, so capture never ran. OpenCode is read from
+  its SQLite store (v1.2.0+) or the legacy JSON tree, whichever is present,
+  and its store is located per platform rather than at a fixed path.
 - **Chat log capture now works for OpenClaw.** It was a registered host agent
   with no transcript parser and no hook. The hook finds the newest session
   transcript under `~/.openclaw/agents/<agent>/sessions/` itself, since OpenClaw

@@ -28,4 +28,13 @@ else
     m3_usable "$PY" || echo "opencode_session_end: no python with httpx found; trying '$PY' anyway" >&2
 fi
 
-exec "$PY" "$BASE/bin/chatlog_ingest.py" --format opencode
+# --transcript-path IS REQUIRED and was missing, so this exited 2 on every fire
+# and OpenCode capture never ran. OpenCode writes no transcript FILE: it keeps
+# sessions in opencode.db (v1.2.0+) or a legacy per-message JSON tree.
+#
+# "auto" asks chatlog_ingest to locate the store. The per-OS candidate list
+# lives there, in ONE place: XDG on Linux, ~/Library/Application Support on
+# macOS, LOCALAPPDATA on Windows, all overridable by OPENCODE_DATA_DIR. Each
+# shell wrapper deriving its own default is how two platforms drift apart, and
+# the sh copy hardcoded the Linux convention (DESIGN §1, §10a).
+exec "$PY" "$BASE/bin/chatlog_ingest.py" --format opencode --transcript-path auto --variant session_end

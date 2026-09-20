@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_ingest.py
-sha1: fcd15d659c7a
-mtime_utc: 2026-09-20T05:20:12.766110+00:00
-generated_utc: 2026-09-20T05:22:41.605994+00:00
+sha1: 86a1078d2a1a
+mtime_utc: 2026-09-20T05:47:31.481639+00:00
+generated_utc: 2026-09-20T05:51:47.935487+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ message ids / indices have been ingested so re-invoking on the same transcript
 
 ## Entry points
 
-- `async def main()` (line 506)
+- `async def main()` (line 858)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -54,18 +54,22 @@ message ids / indices have been ingested so re-invoking on the same transcript
 
 - `COMPUTERNAME`
 - `HOSTNAME`
+- `LOCALAPPDATA`
 - `M3_AUTO_ENRICH`
 - `M3_AUTO_ENRICH_MIN_TURNS`
 - `M3_CHATLOG_DB_PATH`
 - `M3_DATABASE`
+- `OPENCODE_DATA_DIR`
 - `USER`
 - `USERNAME`
+- `XDG_DATA_HOME`
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config`
+- `chatlog_config (VALID_PROVIDERS)`
 - `chatlog_core`
 - `m3_sdk (add_database_arg)`
 - `memory_core`
@@ -74,7 +78,10 @@ message ids / indices have been ingested so re-invoking on the same transcript
 
 ## Calls OUT (external side-channels)
 
-_(no subprocess / http / sqlite calls detected)_
+**sqlite**
+
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 630)
+
 
 ---
 
@@ -87,6 +94,8 @@ _(no subprocess / http / sqlite calls detected)_
 ## File dependencies (repo paths referenced)
 
 - `.chatlog_ingest_cursor.json`
+- `.db`
+- `opencode.db`
 
 ---
 

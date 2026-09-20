@@ -31,4 +31,10 @@ else
     m3_usable "$PY" || echo "aider_chat_watcher: no python with httpx found; trying '$PY' anyway" >&2
 fi
 
-exec "$PY" "$BASE/bin/chatlog_ingest.py" --format aider --watch "$REPO"
+# ⚠ NOT `--watch`: no such flag exists, so this hook exited 2 on every
+# fire and Aider capture never ran. Ingest is idempotent per turn (the
+# cursor tracks seen ids), so re-reading the whole history each time is
+# correct and cheap -- already-captured turns come back as `skipped`.
+HIST="${AIDER_CHAT_HISTORY_FILE:-$REPO/.aider.chat.history.md}"
+[ -f "$HIST" ] || { echo "aider_chat_watcher: no history at $HIST (no-op)" >&2; exit 0; }
+exec "$PY" "$BASE/bin/chatlog_ingest.py" --format aider --transcript-path "$HIST" --variant session_end
