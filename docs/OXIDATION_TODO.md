@@ -41,28 +41,60 @@ is *not* done.
 
 ## Decisions deferred to a human
 
-- [ ] **Embedded-embedder default switch.** The in-process llama.cpp path
-  (`M3_EMBED_GGUF`) is verified at cosine ≈ 0.996 against the
-  `bge-m3-GGUF-Q4_K_M.gguf`-tagged rows. The LM Studio `text-embedding-bge-m3`
-  rows carry a *different tag*. Making the embedded path the *default* embedder
-  would change which tag new rows get. It is intentionally opt-in. Decision
-  needed: leave opt-in, or re-embed the corpus under one tag.
+- [x] **Embedded-embedder default switch — SETTLED: the tags are ONE space; no
+  migration needed, leave the switch opt-in.** _Measured 2026-09-20 against the
+  reference install's stored vectors._
 
-  ⚠ RE-MEASURE BEFORE DECIDING — the counts in the original note are stale, and
-  the framing has since been partly answered by code. Measured on the reference
-  install 2026-09-20: `memory_embeddings` holds 19,413 `text-embedding-bge-m3`
-  and 3,528 `bge-m3-GGUF-Q4_K_M.gguf`; `entity_embeddings` is the reverse
-  (6,226 GGUF, 1 LM Studio). So the LM Studio side is the bulk of memory rows
-  and the GGUF side is the bulk of entity rows — a switch strands neither
-  wholesale, but it does keep splitting both tables.
+  The original concern was that `text-embedding-bge-m3` and
+  `bge-m3-GGUF-Q4_K_M.gguf` were "a separate, unverified embedding namespace",
+  so switching the default would strand the bulk of the index. Tested directly
+  rather than argued:
 
-  `bin/doctor/embed_space_probe.py` now collapses both tags to one
-  cosine-comparable FAMILY (`_family`) and reports
-  `embed-space: ok (single space: bge-m3)`. That is a deliberate judgement that
-  the two are same-dimension and comparable — read it as m3's answer to
-  "verify parity first", not as evidence the tags were unified. Do NOT close
-  this item on the strength of that green line alone (it was misread that way
-  once); the tag split is real and visible in the tables above.
+  | check | result |
+  |---|---|
+  | dimension, both tags | 1024 / 1024 |
+  | vector norm, both tags | 0.999999–1.000001 (unit, as bge-m3 requires) |
+  | same-content pairs (`content_hash` join, n=500) | median cos **0.998**, min **0.9948** |
+  | pairs below cos 0.95 | **0** |
+
+  A genuine namespace split shows up as a bimodal distribution with a low mode.
+  There is none.
+
+  **Confirmed live, both endpoints up (2026-09-20).** Embedding the SAME five
+  strings — English, code, CJK, and a hex error code — through the tier-2 GGUF
+  server on `:8082` and LM Studio on `:1234` gives **cos = 1.000000 on every
+  one**, dim 1024, unit norm on both sides. Not merely comparable: identical.
+  The two servers report different model labels (`bge-m3-Q4_K_M.gguf` vs
+  `text-embedding-bge-m3`), so this is two distinct services that happen to be
+  serving the same bge-m3 quant — which is exactly why the vectors coincide.
+
+  ⚠ That last point is the load-bearing caveat: the identity is a property of
+  what LM Studio currently has LOADED, not a guarantee of the tag. Load a
+  different bge-m3 quant there and the vectors diverge (the stored pairs, which
+  span older LM Studio state, sit at 0.995-0.999 rather than 1.0). The tags stay
+  cosine-comparable either way — that is the family claim, and it holds — but do
+  not read cos=1.0 as permanent.
+
+  **Nothing is stranded today, and this is the load-bearing part.**
+  `embed._compatible_model_names()` resolves to
+  `['bge-m3-GGUF-Q4_K_M.gguf', 'text-embedding-bge-m3']` on this install, and
+  `search.py:1035` filters `embed_model IN (...)` over that set — so all 22,941
+  rows are searched regardless of tag. The tag partitions the embed CACHE
+  namespace, not the search space.
+
+  ⇒ **Do not re-embed.** A 22.9k-row re-embed buys a cosmetically uniform tag
+  column and changes no retrieval result. Re-embedding is justified only by a
+  MODEL change (a different family, or a different dimension), not by a tag.
+
+  ⚠ Two live conditions to preserve, since the safety rests on them:
+  - `EMBED_COMPATIBLE_MODELS` is currently empty — the compat set holds both
+    tags only because `_EMBED_GGUF_MODEL_TAG` defaults to the GGUF name. If
+    `M3_EMBED_GGUF_MODEL_TAG` is ever overridden, the old tag leaves the set and
+    3,528 rows silently drop out of search. Pin it in
+    `EMBED_COMPATIBLE_MODELS` before changing that variable.
+  - `m3 doctor`'s `embed-space: ok (single space: bge-m3)` reports a cosine-
+    comparable FAMILY, not tag uniformity. It is correct, and it is NOT evidence
+    the tags were unified (it was misread that way once).
 
 - [x] **Route cutover.** _Shipped_ — both stated gates are resolved in code.
   `M3_ROUTE_SHADOW_MODE=enforce` is implemented (`bin/auto_route.py:307`) and is

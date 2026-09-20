@@ -197,6 +197,28 @@ def run(brief: bool = False) -> int:
     mixed = {k: fams for k, fams in by_kind.items() if len(fams) > 1}
     dim_split = {k: d for k, d in dims_by_kind.items() if len(d) > 1}
 
+    # A tag can be cosine-COMPATIBLE and still be excluded from every query.
+    # search.py filters `me.embed_model IN (_compatible_model_names())`, so a
+    # stored tag outside that set is unreachable — the rows are present, valid
+    # and unit-length, and simply never scored. The family check above cannot
+    # see this: both tags belong to one family, which is exactly the case where
+    # the store looks healthy while part of it is dark.
+    #
+    # Real exposure, not hypothetical: the two bge-m3 tags land in the compat
+    # set only because `_EMBED_GGUF_MODEL_TAG` happens to default to the GGUF
+    # name. Overriding `M3_EMBED_GGUF_MODEL_TAG` drops the old tag out and takes
+    # its rows with it, silently.
+    unreachable: "dict[str, int]" = {}
+    try:
+        from memory.embed import _compatible_model_names
+        compat = _compatible_model_names()
+        if compat:
+            for _kind, tag, _dim, n in rows:
+                if tag and tag not in compat:
+                    unreachable[tag] = unreachable.get(tag, 0) + n
+    except Exception as e:  # noqa: BLE001 — a probe must not fail the doctor
+        logger.debug("compat-set check skipped: %s", e)
+
     if brief:
         if mixed:
             worst = max(mixed.items(), key=lambda kv: len(kv[1]))
@@ -204,6 +226,12 @@ def run(brief: bool = False) -> int:
                   f"in '{worst[0]}' (search rankings unreliable)")
         elif dim_split:
             print("embed-space: MIXED dimensions — cosine cannot be computed")
+        elif unreachable:
+            total = sum(unreachable.values())
+            worst_tag = max(unreachable.items(), key=lambda kv: kv[1])[0]
+            print(f"embed-space: UNREACHABLE — {total} row(s) tagged "
+                  f"{worst_tag!r} are excluded from search "
+                  f"(add it to M3_EMBED_COMPATIBLE_MODELS)")
         else:
             fam = next(iter(next(iter(by_kind.values()))))
             print(f"embed-space: ok (single space: {fam})")
