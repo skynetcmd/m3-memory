@@ -154,15 +154,22 @@ def test_ensure_schema_creates_primary_schema(backend):
 
     with backend.connection() as conn:
         cur = conn.cursor()
+        # ⚠ SCHEMA-QUALIFIED. Without the table_schema filter this counts by
+        # NAME across every schema, so the dispatch store's own
+        # `m3_dispatch.schema_versions` (and any other fleet schema on the same
+        # database) inflates the total and this reads 6 where it means 4. The
+        # assertion is about the PRIMARY schema being applied, not about how
+        # many schemas happen to share a table name.
         cur.execute(
             "SELECT count(*) FROM information_schema.tables "
-            "WHERE table_name IN ('memory_items','memory_embeddings',"
+            "WHERE table_schema = 'public' AND table_name IN "
+            "('memory_items','memory_embeddings',"
             "'memory_relationships','schema_versions')"
         )
         assert cur.fetchone()[0] == 4
         cur.execute(
             "SELECT count(*) FROM information_schema.columns "
-            "WHERE table_name = 'memory_items'"
+            "WHERE table_schema = 'public' AND table_name = 'memory_items'"
         )
         # A FLOOR, not a pin. ensure_schema applies the cumulative baseline AND
         # every pg_040+ incremental, so any migration that adds a column moves

@@ -491,6 +491,15 @@ class M3Context:
             _backend = None
         if _backend is not None and _backend.name != "sqlite":
             with _backend.connection() as conn:
+                # ⚠ BOOTSTRAP HERE TOO. This branch used to yield the connection
+                # untouched, so on PostgreSQL NOTHING ever created the dispatch
+                # schema: memory/dispatch_migrations/postgres/pg_001_bootstrap.up.sql
+                # shipped with no applier anywhere in the tree, and every send
+                # failed with `relation "m3_dispatch.notification_dispatch" does
+                # not exist`. Both SQLite arms below have always bootstrapped;
+                # this one was simply missing (§3 — shipped DDL with no call
+                # site is a declared capability that never runs).
+                _ensure_dispatch_schema_pg(conn)
                 yield conn
             return
 
@@ -684,6 +693,70 @@ class M3Context:
                     time.sleep(3)
         raise RuntimeError(f"PostgreSQL connection failed after 2 attempts: {last_exc}")
 
+_DISPATCH_PG_READY: set = set()
+
+
+def _ensure_dispatch_schema_pg(conn) -> None:
+    """Create the dispatch SCHEMA and its tables on a server backend.
+
+    The PostgreSQL counterpart of ``_ensure_dispatch_schema``. It existed as
+    shipped DDL (``memory/dispatch_migrations/postgres/pg_001_bootstrap.up.sql``)
+    with no applier, so the schema was never created and every send on PG raised
+    ``relation "m3_dispatch.notification_dispatch" does not exist``.
+
+    ⚠ THE DDL IS DELIBERATELY UNQUALIFIED. Its own header says the caller sets
+    ``search_path`` and the script names no schema, so one file serves any fleet's
+    schema name (``M3_DISPATCH_PG_SCHEMA``, default ``m3_dispatch``). Qualifying
+    the table names in the DDL instead would hardcode one deployment's layout
+    into shipped SQL.
+
+    Cheap after the first call: a process-local set short-circuits before any
+    SQL runs, and the DDL is ``CREATE ... IF NOT EXISTS`` throughout, so a race
+    between two processes is harmless.
+    """
+    schema = None
+    try:
+        from m3_core.paths import dispatch_migrations_dir, dispatch_pg_schema
+
+        schema = dispatch_pg_schema()
+        if schema in _DISPATCH_PG_READY:
+            return
+
+        boot = os.path.join(dispatch_migrations_dir(), "postgres",
+                            "pg_001_bootstrap.up.sql")
+        with open(boot, "r", encoding="utf-8") as fh:
+            ddl = fh.read()
+
+        cur = conn.cursor()
+        # Identifier, not a bind parameter — a placeholder cannot name a schema.
+        # dispatch_pg_schema() is operator-supplied, so quote it rather than
+        # interpolating raw: an unquoted name would also fold case and break on
+        # a hyphen.
+        safe = '"' + schema.replace('"', '""') + '"'
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {safe}")
+        cur.execute(f"SET LOCAL search_path TO {safe}")
+        cur.execute(ddl)
+        conn.commit()
+        _DISPATCH_PG_READY.add(schema)
+    except Exception as exc:  # noqa: BLE001 -- a send must not die because the
+        # bootstrap could not run; the caller's INSERT raises a clear
+        # "relation does not exist" immediately after, which is the honest error.
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        import logging
+
+        logging.getLogger("memory_core").warning(
+            "could not bootstrap the PostgreSQL dispatch schema. "
+            f"observed: {type(exc).__name__}: {exc}. "
+            f"possible: the role cannot CREATE SCHEMA {schema!r}, or the "
+            "migrations directory is missing. "
+            "inspect: M3_DISPATCH_PG_SCHEMA, and "
+            "memory/dispatch_migrations/postgres/pg_001_bootstrap.up.sql"
+        )
+
+
 def _ensure_dispatch_schema(conn) -> None:
     """Create the dispatch schema on first use, if it is not there yet.
 
@@ -706,19 +779,11 @@ def _ensure_dispatch_schema(conn) -> None:
     the runner's problem, and silently patching it here would hide a real
     version skew.
     """
-    # ⚠ KNOWN DEFECT, POSTGRESQL: this probe reads `sqlite_master`, a
-    # SQLite-ONLY catalog table. On PostgreSQL the query raises, the except
-    # branch below turns it into a warning, and the dispatch tables are never
-    # created — so `m3_dispatch.notification_dispatch` does not exist and every
-    # send fails on that backend. Reproduces on
-    # tests/test_pg_entity_orchestration_live.py. Pre-existing (not from the
-    # 2026.9.20.0 dynamics work); confirmed on a clean origin/main worktree.
-    #
-    # The seam already has the portable primitive — `dialect.table_exists()`,
-    # whose own docstring names this anti-pattern (§10a) — and PostgreSQL has a
-    # separate bootstrap at memory/dispatch_migrations/postgres/. Swapping the
-    # probe alone does NOT fix it: the send path does not reach this bootstrap
-    # on PG at all, so the fix needs its own change and its own PG-live test.
+    # `sqlite_master` is correct here: this function is SQLite-only by
+    # construction. get_dispatch_conn returns at its server-backend branch
+    # before reaching either call site, and PostgreSQL is bootstrapped by
+    # _ensure_dispatch_schema_pg above. A portable probe would suggest this
+    # runs on both backends, which it does not.
     try:
         present = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' "
