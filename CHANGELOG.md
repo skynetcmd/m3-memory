@@ -19,6 +19,77 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.9.20.0] — 2026-09-20 — memories that strengthen with use
+
+### Added
+
+- **Memories now have dynamics rather than a fixed importance.** Decay runs
+  toward a floor that varies by what a memory has earned instead of toward zero,
+  frequently-retrieved memories fade more slowly, and pinned rows are unchanged.
+  A memory retrieved hundreds of times previously decayed at exactly the same
+  rate as one nobody had touched in a year.
+- **`memory_grade`** — after answering, an agent can report which retrieved
+  memories it actually relied on. Helpful and unhelpful verdicts are stored as
+  two separate counts, never netted, so a contested memory stays distinguishable
+  from an unused one. Verdicts are accepted only while the memory was retrieved
+  within the feedback window (default five minutes, configurable in
+  `.governor_config.json`, capped at 24 hours); a late grade reports
+  `applied: false` with a reason rather than being dropped.
+- **`memory_feedback_stats`** — the in-window and out-of-window grade counts, so
+  the feedback window can be tuned on evidence rather than guessed.
+- **`memory_restore`** — brings back memories an autonomous pass removed. It
+  refuses to touch deliberate deletions.
+- **`importance_raw`**, the undecayed baseline, and `apply_decay=False` for
+  point-in-time and audit reads. Decay overwrites importance in place, so
+  without it a faded memory carried no record of its original weight.
+- **Every CLI tool accepts a piped JSON object.** `--json` and `--json-file`
+  were limited to the ten tools with an object parameter; they now sit beside
+  `--database` and `--dry-run` on every generated subcommand:
+
+  ```bash
+  echo '{"query":"postgres","k":3}' | m3 memory memory_search --json-file -
+  ```
+
+  A piped object merges with any flags rather than replacing them, and an
+  explicit flag wins, so a script can pipe a base object and override one field
+  per call.
+- **[Using m3 for coding work](docs/CODING_FAQ.md)** — what m3 does for a coding
+  agent, what it leaves to the agent, and how to wire the parts it leaves out.
+
+### Changed
+
+- **An autonomous maintenance pass no longer deletes.** It previously
+  soft-deleted every memory under an importance threshold older than 30 days.
+  Forgetting is now deranking; removal is a person's decision. The pass reports
+  candidates instead, and `memory_restore` recovers what earlier passes took.
+- **`memory_feedback` honours every verdict it advertises.** `not_useful` and
+  `misleading` were accepted, reported as applied, and discarded. The three now
+  act as the distinct claims they are: `useful` raises importance, `misleading`
+  lowers it, and `not_useful` records the verdict without changing importance,
+  because a retrieval miss is the ranker's failure rather than the memory's.
+- Retrieval is treated as weak evidence throughout: the lift from being
+  retrieved is logarithmic, hard-capped, and bounded below what a single
+  explicit helpful verdict earns. Being matched often cannot become being
+  useful.
+- `decay_rate` is recorded per row. It was declared in the first migration and
+  never written.
+
+### Fixed
+
+- **A forensic read ranked on the decayed importance.** The search path resolved
+  its projected columns in three places, and two of them — the exact-phrase
+  short-circuit and the no-embedder fallback — never learned about
+  `importance_raw`, so the result depended on which path served the query.
+- **PostgreSQL:** migration 058 reached `memory_items` but not its chatlog
+  clone, leaving the chatlog half of the store without the new columns.
+- The feedback window compared timestamps as strings. m3 writes several
+  timestamp formats to these columns, so a fresh grade was occasionally
+  rejected; the comparison now parses instants through the dialect seam.
+- Three memories held an importance of 5.0–8.0. The field is documented 0.0–1.0
+  and nothing clamped on write, which distorted every floor computation.
+- Background liveness and shutdown checks ran `tasklist` and `taskkill` without
+  suppressing the console, flashing a window on Windows every few minutes.
+
 ## [2026.9.19.0] — 2026-09-19 — OpenClaw speaks MCP natively
 
 ### Added

@@ -406,7 +406,39 @@ Recommended as a safer alternative to manual `adaptive_k` tuning.
 | `memory_dedup(threshold, dry_run)` | Find near-duplicate memories. Use `dry_run=True` first to preview. |
 | `memory_consolidate(type_filter, agent_filter, threshold)` | Merge old memories of the same type into LLM-generated summaries. Use when a category has too many items. |
 | `memory_set_retention(agent_id, max_memories, ttl_days)` | Set per-agent retention limits. Enforced automatically by `memory_maintenance`. |
-| `memory_feedback(memory_id, feedback)` | Mark a memory as `useful` (boosts importance +0.1) or `wrong` (soft-deletes). |
+| `memory_feedback(memory_id, feedback)` | One memory, one verdict. `useful` raises importance, `misleading` lowers it, `not_useful` records a retrieval miss without changing importance. For a whole result set, use `memory_grade` instead. |
+| `memory_grade(grades, window_minutes)` | **Grade a result set after answering** — see below. |
+| `memory_feedback_stats()` | In-window vs. out-of-window grade counts. Read this before widening the feedback window. |
+| `memory_restore(memory_id, reason, dry_run)` | Bring back memories an *autonomous* pass removed. Refuses deliberate deletions. `dry_run=True` by default. |
+
+#### Grading what you actually used
+
+`memory_maintenance` no longer deletes anything — low-value memories are
+deranked, not removed. What decides "low-value" is partly **you**: whether a
+retrieved memory actually contributed to your answer.
+
+**Call `memory_grade` after you answer, not while you read.** Grading at
+retrieval time rates relevance on sight, which is roughly what the ranker
+already computed; the useful signal is which memories you *relied on*.
+
+```
+memory_grade(grades=[
+  {"memory_id": "…", "verdict": "helpful"},
+  {"memory_id": "…", "verdict": "unhelpful"},
+])
+```
+
+- **Bulk, one call per answer.** Ten memories is one call, not ten.
+- **Voluntary.** Low uptake means less reinforcement, never wrong
+  reinforcement — so grade when you are confident and skip when you are not.
+- **Time-bounded.** A verdict counts only while the memory was retrieved within
+  the feedback window (five minutes by default). This is what makes having
+  retrieved a memory the thing that entitles you to grade it. A late grade
+  returns `applied: false` with a reason rather than failing or silently
+  passing; if you see those often, read `memory_feedback_stats()` and widen
+  `feedback_window_minutes` in `.governor_config.json`.
+- **`helpful` and `unhelpful` are counted separately**, never netted, so a
+  contested memory stays distinguishable from an unused one.
 
 ### Data Governance
 
