@@ -76,7 +76,60 @@ def _unattended_files() -> list[str]:
         if os.path.exists(p):
             files.add(p)
 
-    return sorted(files)
+    # ⚠ FOLLOW IMPORTS. The seeds above are ENTRYPOINTS; the spawn that flashes
+    # is usually a few frames down. version_drift._pid_is_alive shells out to
+    # `tasklist` (console-subsystem) on every liveness probe and was missed for
+    # exactly this reason -- it is imported by scheduled paths, never scheduled
+    # itself, so a guard that only walks the ten scheduled scripts reported
+    # green while a window flashed every few minutes on the user's desktop
+    # (reported 2026-09-19). m3_core/locking.py had the identical call WITH the
+    # flag, which is what made the omission a drift rather than a gap.
+    #
+    # Transitive over bin/-local imports only: stdlib and third-party modules
+    # are not ours to police, and the traversal must terminate.
+    seen: set[str] = set()
+    stack = list(files)
+    while stack:
+        path = stack.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        for mod in _local_imports(path):
+            target = _resolve_bin_module(mod)
+            if target and target not in seen:
+                stack.append(target)
+
+    return sorted(seen)
+
+
+def _local_imports(path: str) -> set:
+    """Top-level module names imported by `path` (absolute imports only)."""
+    try:
+        # `with`, not a bare open(): an unclosed handle surfaces later as a
+        # ResourceWarning that pytest raises as PytestUnraisableExceptionWarning
+        # against whichever test happens to run next, which reads as an
+        # unrelated failure.
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            tree = ast.parse(fh.read())
+    except (OSError, SyntaxError):
+        return set()
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                out.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            out.add(node.module.split(".")[0])
+    return out
+
+
+def _resolve_bin_module(mod: str) -> "str | None":
+    """Resolve a module name to a file under bin/, or None if it is not ours."""
+    for cand in (os.path.join(_BIN, mod + ".py"),
+                 os.path.join(_BIN, mod, "__init__.py")):
+        if os.path.exists(cand):
+            return os.path.abspath(cand)
+    return None
 
 
 def _argv0_literal(call: ast.Call) -> str | None:
@@ -115,15 +168,35 @@ def _call_has_no_window(call: ast.Call) -> bool:
 _SPAWN_OBJECTS = {"subprocess", "_sp", "sp"}
 
 
-def _is_spawn(call: ast.Call) -> bool:
+def _bare_spawn_names(tree: ast.Module) -> set:
+    """Names this module actually imported FROM subprocess.
+
+    ⚠ A BARE `run(...)` IS NOT EVIDENCE OF A SPAWN. `run` is an ordinary verb:
+    chatlog_prune.py defines its own `run(db, args)` and calls it from main(),
+    and the guard reported it as an unflagged console spawn in a file that never
+    imports subprocess at all. §3 counts that false alarm as a violation in its
+    own right — a guard that cries wolf gets muted, and then it is not a guard.
+
+    So resolve the name against the module's own imports instead of assuming.
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            for alias in node.names:
+                if alias.name in _SPAWN_ATTRS:
+                    names.add(alias.asname or alias.name)
+    return names
+
+
+def _is_spawn(call: ast.Call, bare_names: set = frozenset()) -> bool:
     """Only real subprocess spawns:  subprocess.run(...) / _sp.Popen(...), or a
-    bare run/Popen(...) imported `from subprocess import run`. Crucially NOT
-    asyncio.run / loop.run_* / <other>.run — those are not process spawns."""
+    bare run/Popen(...) that this module imported `from subprocess`. Crucially
+    NOT asyncio.run / loop.run_* / <other>.run / a locally-defined run()."""
     func = call.func
     if isinstance(func, ast.Attribute) and func.attr in _SPAWN_ATTRS:
         obj = func.value
         return isinstance(obj, ast.Name) and obj.id in _SPAWN_OBJECTS
-    if isinstance(func, ast.Name) and func.id in _SPAWN_ATTRS:
+    if isinstance(func, ast.Name) and func.id in bare_names:
         return True  # bare Popen(...) from `from subprocess import Popen`
     return False
 
@@ -132,8 +205,9 @@ def _offending_spawns(path: str) -> list[tuple[int, str]]:
     with open(path, encoding="utf-8") as f:
         tree = ast.parse(f.read(), filename=path)
     bad: list[tuple[int, str]] = []
+    bare = _bare_spawn_names(tree)
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not _is_spawn(node):
+        if not isinstance(node, ast.Call) or not _is_spawn(node, bare):
             continue
         cmd0 = _argv0_literal(node)
         if cmd0 and cmd0 in _POSIX_ONLY_CMDS:

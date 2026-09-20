@@ -664,8 +664,14 @@ def kill_stale_daemons(
                 continue
             if os.name == "nt":
                 import subprocess
+
+                # taskkill is console-subsystem: flashes a window without the
+                # flag. Output is captured, so the helper's precondition holds.
+                from _task_runtime import no_window_kwargs
+
                 cp = subprocess.run(["taskkill", "/F", "/T", "/PID", str(w.pid)],
-                                    capture_output=True, text=True)
+                                    capture_output=True, text=True,
+                                    **no_window_kwargs())
                 # /T also kills the child tree — a pythonw launcher stub + its real
                 # worker die together, so no orphaned half-generation is left.
                 if cp.returncode != 0 and _pid_is_alive(w.pid):
@@ -1447,8 +1453,13 @@ def _steal_lock(owner: "Optional[ProcInfo]", path: Path, our_fd: int) -> None:
     try:
         if os.name == "nt":
             import subprocess
+
+            # taskkill is console-subsystem: flashes a window without the flag.
+            from _task_runtime import no_window_kwargs
+
             subprocess.run(["taskkill", "/F", "/PID", str(owner.pid)],
-                           capture_output=True, check=False)
+                           capture_output=True, check=False,
+                           **no_window_kwargs())
         else:
             import signal as _signal
             os.kill(owner.pid, _signal.SIGTERM)

@@ -154,9 +154,19 @@ def _pid_is_alive(pid: int) -> bool:
         if os.name == "nt":
             # Windows: tasklist filter by PID
             import subprocess
+
+            # ⚠ tasklist is a CONSOLE-subsystem exe, and this is a liveness
+            # probe called from scheduled-task paths — so without the flag it
+            # flashes a window every time it runs. no_window_kwargs is safe
+            # here because output is captured (its documented precondition);
+            # with inherited handles the flag would swallow the stdout this
+            # function parses.
+            from _task_runtime import no_window_kwargs
+
             out = subprocess.run(
                 ["tasklist", "/fi", f"PID eq {pid}", "/fo", "csv", "/nh"],
                 capture_output=True, text=True, timeout=5, check=False,
+                **no_window_kwargs(),
             )
             return f'"{pid}"' in out.stdout or f",{pid}," in out.stdout
         else:
