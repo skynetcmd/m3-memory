@@ -133,6 +133,15 @@ is *not* done.
   public API surface, not just an internal dependency — it needs a version bump
   and a note, and must not ride along in an unrelated release.
 
+  ⚠ **SURFACE THIS whenever Rust-core changes are being considered** — it is a
+  standing to-do, deferred 2026-09-20 in favour of cutting a release first, not
+  a closed question. Do not silently fold it into an unrelated change.
+
+  One more dependent found 2026-09-20, not in the original note:
+  `crates/m3-core-py/tests/smoke.py::test_rank` exercises `RankRow` + `fuse` and
+  passes today. Removal must delete that test in the same change, or the smoke
+  suite goes red on a wheel that no longer has the symbols.
+
   Sequence when it is done: remove the PyO3 bindings and `pub use` first
   (that is what drops the export), then the workspace member and the
   `m3-core-py` dependency, then verify the export list shrinks by exactly the
