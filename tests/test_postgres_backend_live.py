@@ -164,7 +164,18 @@ def test_ensure_schema_creates_primary_schema(backend):
             "SELECT count(*) FROM information_schema.columns "
             "WHERE table_name = 'memory_items'"
         )
-        assert cur.fetchone()[0] == 37  # full primary schema (36 + search_vector)
+        # A FLOOR, not a pin. ensure_schema applies the cumulative baseline AND
+        # every pg_040+ incremental, so any migration that adds a column moves
+        # this number -- pg_058 (memory dynamics) took it 37 -> 40. The point
+        # here is that the full primary schema was applied rather than a stub,
+        # which a floor establishes; an exact count just conscripts an unrelated
+        # test into reviewing every future migration. Same reasoning the version
+        # assertion below already applies to the schema version.
+        n_cols = cur.fetchone()[0]
+        assert n_cols >= 37, (
+            f"memory_items has {n_cols} columns: the full primary schema "
+            f"(37 at pg_039 + search_vector) was not applied"
+        )
 
     # Idempotent: re-applying the SQL (IF NOT EXISTS throughout) must not error.
     backend._schema_ready = False

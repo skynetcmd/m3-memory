@@ -85,17 +85,53 @@ def test_importance_raw_is_only_selected_when_decay_is_off():
     Same conditional-append shape as recency_bias -> valid_from and
     CONFIDENCE_RANKING -> confidence. An unconditional append would widen the
     SELECT for every ordinary search.
+
+    ⚠ CALLS THE RESOLVER rather than grepping the impl's source. This used to
+    assert on a substring of memory_search_scored_impl, which passed for the
+    wrong reason: the append existed there, but TWO OTHER PATHS (the FTS
+    exact-match short-circuit and the no-embedder FTS-only fallback) had their
+    own copies of the allowlist and never appended it at all. A forensic read
+    served by either silently ranked on the decayed value. The text was right
+    and the behaviour was wrong -- so assert the behaviour.
     """
-    src = _src()
-    assert 'if not apply_decay and "importance_raw" not in extra_columns' in src, (
-        "importance_raw is no longer conditionally appended — the default "
-        "search now fetches a column it does not use."
+    assert "importance_raw" in S._resolve_extra_columns([], apply_decay=False), (
+        "a forensic read does not project importance_raw, so it would rank on "
+        "the decayed importance"
+    )
+    assert "importance_raw" not in S._resolve_extra_columns([], apply_decay=True), (
+        "the default search fetches a column it does not use"
+    )
+
+
+def test_every_path_resolves_columns_through_one_owner():
+    """⚠ THE DEFECT THIS FILE MISSED. Three copies of the allowlist existed --
+    the main path, the short-circuit, and the FTS-only fallback -- and only one
+    of them knew about importance_raw.
+
+    That block has drifted this way before: its own comment records tenancy
+    predicates going missing from it in 2026-07, leaking cross-tenant rows,
+    because the early-return path never reached the filtered branch. A second
+    allowlist literal in this module is the defect, independent of whether this
+    particular column is in it (§10a).
+    """
+    src = inspect.getsource(S)
+    # The SET LITERAL specifically -- a caller passing a couple of column names
+    # (line ~2470) or a docstring listing them is not a second allowlist. Anchor
+    # on the pair that only the allowlist definition contains.
+    copies = src.count('"corroboration_count", "contradiction_count",')
+    assert copies == 1, (
+        f"the extra-column allowlist appears {copies} times — import "
+        f"_resolve_extra_columns instead of writing a second copy"
+    )
+    # And the filter itself: every path must call the resolver, not re-derive it.
+    assert "if c in _allowed_extra" not in src, (
+        "a path is filtering extra columns with its own local allowlist again"
     )
 
 
 def test_importance_raw_is_allowlisted():
     """The allowlist is the gate; an un-allowlisted column is silently dropped."""
-    assert '"importance_raw",' in _src()
+    assert "importance_raw" in S._ALLOWED_EXTRA
 
 
 # ── the scoring decision ─────────────────────────────────────────────────────

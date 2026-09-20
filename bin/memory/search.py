@@ -476,14 +476,9 @@ def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns,
         from memory.backends import active_backend as _ab
 
         _backend_fb = _ab()
-        _BASE_COLS = ["id", "content", "title", "type", "importance"]
-        _allowed_extra = {
-            "metadata_json", "conversation_id", "valid_from", "valid_to",
-            "user_id", "scope", "agent_id", "created_at", "source",
-            "confidence", "corroboration_count", "contradiction_count",
-        }
-        safe_extra = [c for c in (extra_columns or [])
-                      if c in _allowed_extra and c not in _BASE_COLS]
+        # Filter only -- the caller has already resolved the conditional
+        # appends, and this degrade path must not add its own (§10a: one owner).
+        safe_extra = _resolve_extra_columns(extra_columns)
         # Predicates from the seam (Dialect.scope_predicates) so they are
         # rendered in THIS backend's placeholder style; the query itself from
         # keyword_search_with_row_data so the SQL is the backend's own.
@@ -503,6 +498,47 @@ def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns,
     except Exception as exc:  # noqa: BLE001 — fallback must never raise
         logger.debug("FTS-only fallback failed (non-fatal): %s", exc)
         return []
+
+
+_BASE_COLS = ["id", "content", "title", "type", "importance"]
+
+_ALLOWED_EXTRA = frozenset({
+    "metadata_json", "conversation_id", "valid_from", "valid_to",
+    "user_id", "scope", "agent_id", "created_at", "source",
+    "confidence", "corroboration_count", "contradiction_count",
+    "importance_raw",
+})
+
+
+def _resolve_extra_columns(extra_columns, *, apply_decay=True, recency_bias=False,
+                           confidence_ranking=False):
+    """The projected extra columns for one search. SINGLE OWNER (§10a).
+
+    ⚠ THIS WAS DUPLICATED AND THE COPIES DRIFTED. The FTS exact-match
+    short-circuit built its own allowlist and its own filtered list, separately
+    from the main path -- and the copy never learned about importance_raw, so a
+    forensic read whose query happened to hit an exact substring silently ranked
+    on the DECAYED value. The failure is invisible: the same call returns the
+    right answer or the wrong one depending on whether the query phrase appears
+    verbatim in the corpus.
+
+    That block has drifted before in exactly this way: its own comment records
+    tenancy predicates going missing from it in 2026-07, leaking cross-tenant
+    rows, because the early-return path never reached the filtered branch.
+
+    Conditional appends live here too, so a new one cannot reach some callers
+    and not others. Each is off by default -- the ordinary search projects the
+    five base columns and nothing more (§4).
+    """
+    cols = list(extra_columns or [])
+    if recency_bias and "valid_from" not in cols:
+        cols = cols + ["valid_from"]
+    if confidence_ranking and "confidence" not in cols:
+        cols = cols + ["confidence"]
+    # Forensic decay-off: pull the undecayed baseline only when asked for.
+    if not apply_decay and "importance_raw" not in cols:
+        cols = cols + ["importance_raw"]
+    return [c for c in cols if c in _ALLOWED_EXTRA and c not in _BASE_COLS]
 
 
 def _ranking_importance(row, apply_decay: bool) -> float:
@@ -695,14 +731,16 @@ async def memory_search_scored_impl(
             if query_words.issubset(conversational_stops):
                 raise ValueError("Generic conversational query; skipping short-circuit.")
 
+            # Same resolver as the main path. This block RETURNS EARLY, so a
+            # column it fails to project is simply absent from the answer --
+            # which is how importance_raw went missing from forensic reads whose
+            # query hit an exact substring.
             extra_columns = list(extra_columns or [])
-            _BASE_COLS = ["id", "content", "title", "type", "importance"]
-            _allowed_extra = {
-                "metadata_json", "conversation_id", "valid_from", "valid_to",
-                "user_id", "scope", "agent_id", "created_at", "source",
-                "confidence", "corroboration_count", "contradiction_count",
-            }
-            safe_extra = [c for c in extra_columns if c in _allowed_extra and c not in _BASE_COLS]
+            safe_extra = _resolve_extra_columns(
+                extra_columns, apply_decay=apply_decay,
+                recency_bias=recency_bias,
+                confidence_ranking=_scfg.CONFIDENCE_RANKING,
+            )
 
             # TENANCY (SECURITY, 2026-07-14): the short-circuit MUST apply the
             # SAME user_id/scope isolation the main branch does at ~L681, or it
@@ -820,8 +858,18 @@ async def memory_search_scored_impl(
         # The short-circuit above only fires for >3-char, exact-SUBSTRING hits, so
         # short/token-boundary queries fell through to here and vanished. This
         # keeps the <=8s degrade contract (one bounded FTS query, no cascade).
+        # ⚠ RESOLVE HERE, not at the call inside. This degrade path returns
+        # BEFORE the main resolution below, so passing the caller's raw argument
+        # projected the default column set -- and a forensic read served by this
+        # path (embedder down, which is exactly when it fires) silently ranked on
+        # the decayed importance.
         fts_fallback = _fts_only_results(
-            query, search_mode, k, user_id, scope, extra_columns,
+            query, search_mode, k, user_id, scope,
+            _resolve_extra_columns(
+                extra_columns, apply_decay=apply_decay,
+                recency_bias=recency_bias,
+                confidence_ranking=_scfg.CONFIDENCE_RANKING,
+            ),
             type_filter=type_filter, agent_filter=agent_filter,
         )
         if fts_fallback:
@@ -837,28 +885,17 @@ async def memory_search_scored_impl(
                      "will be empty unless the store also uses dim %d.",
                      len(q_vec), config.EMBED_DIM, len(q_vec))
 
-    extra_columns = list(extra_columns or [])
-    _BASE_COLS = ["id", "content", "title", "type", "importance"]
-    _allowed_extra = {
-        "metadata_json", "conversation_id", "valid_from", "valid_to",
-        "user_id", "scope", "agent_id", "created_at", "source",
-        "confidence", "corroboration_count", "contradiction_count",
-        "importance_raw",
-    }
-    if recency_bias and "valid_from" not in extra_columns:
-        extra_columns = extra_columns + ["valid_from"]
-    # When confidence-ranking is enabled, auto-include the confidence column so
-    # the ranker can blend it (same pattern as recency_bias -> valid_from). Off
-    # by default, so the SELECT and result shape are unchanged for everyone else.
-    if _scfg.CONFIDENCE_RANKING and "confidence" not in extra_columns:
-        extra_columns = extra_columns + ["confidence"]
-    # Forensic decay-off: pull the undecayed baseline only when it is asked for.
-    # Same conditional-append shape as the two above, and for the same reason --
-    # the DEFAULT path's SELECT must stay byte-identical (§4: project only the
-    # columns you need). Nobody doing an ordinary search pays for this column.
-    if not apply_decay and "importance_raw" not in extra_columns:
-        extra_columns = extra_columns + ["importance_raw"]
-    safe_extra = [c for c in extra_columns if c in _allowed_extra and c not in _BASE_COLS]
+    # One resolver for every path (§10a). The conditional appends -- valid_from
+    # for recency_bias, confidence for confidence-ranking, importance_raw for a
+    # forensic read -- all live inside it, so the short-circuit above, the
+    # FTS-only fallback and the PG branch cannot project different sets.
+    safe_extra = _resolve_extra_columns(
+        extra_columns, apply_decay=apply_decay, recency_bias=recency_bias,
+        confidence_ranking=_scfg.CONFIDENCE_RANKING,
+    )
+    # Rebound so the PG branch and the recursive calls below carry the resolved
+    # set rather than the caller's raw argument.
+    extra_columns = list(safe_extra)
     extra_sql = (", " + ", ".join(f"mi.{c}" for c in safe_extra)) if safe_extra else ""
 
     where_clauses = ["mi.is_deleted = 0"]

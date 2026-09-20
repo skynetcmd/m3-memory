@@ -44,3 +44,31 @@ UPDATE memory_items SET importance_raw = importance WHERE importance_raw IS NULL
 CREATE INDEX IF NOT EXISTS idx_memory_items_reinforce
     ON memory_items(last_accessed_at, access_count)
     WHERE is_deleted = 0;
+
+-- ⚠ THE CHATLOG CLONE — POSTGRES ONLY, AND THE REASON THIS FILE IS NOT JUST THE
+-- SQLITE MIGRATION TRANSLATED.
+--
+-- On SQLite the chatlog is a SEPARATE FILE carrying the same table names, so
+-- migration 049 reaches it as `memory_items`. On PG both stores share one
+-- database and the chatlog is a CLONE, `chat_log_items` (pg_043), so a column
+-- added to the core table alone silently misses the chatlog half — and any code
+-- routed through dialect.chatlog_table() then hits a missing column on PG only.
+--
+-- This is exactly the class pg_049 was written to repair: pg_041 added `status`
+-- to entity_extraction_queue, the clone never got it, and chatlog entity
+-- extraction could not mark a turn terminal on PG, so the cognitive loop never
+-- idled. test_schema_parity_pg_live.py::test_chatlog_clones_mirror_core_columns
+-- guards the class; it caught this migration.
+--
+-- The clone gets the columns but NOT the reinforce index: nothing reinforces
+-- chatlog turns (chatlog_decay.py owns their lifecycle), so the index would be
+-- write cost with no reader.
+
+ALTER TABLE chat_log_items ADD COLUMN IF NOT EXISTS importance_raw DOUBLE PRECISION DEFAULT NULL;
+ALTER TABLE chat_log_items ADD COLUMN IF NOT EXISTS helpful_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE chat_log_items ADD COLUMN IF NOT EXISTS unhelpful_count INTEGER NOT NULL DEFAULT 0;
+
+UPDATE chat_log_items SET importance = 1.0 WHERE importance > 1.0;
+UPDATE chat_log_items SET importance = 0.0 WHERE importance < 0.0;
+
+UPDATE chat_log_items SET importance_raw = importance WHERE importance_raw IS NULL;

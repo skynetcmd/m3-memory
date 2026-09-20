@@ -359,6 +359,45 @@ jobs:
       run: |
         pytest tests/ -m "not integration" -p no:cacheprovider -q
 
+    - name: Run the requires_pg suites
+      env:
+        M3_DB_BACKEND: postgres
+        M3_PRIMARY_PG_URL: postgresql://m3dev:m3devpass@localhost:5432/m3_citest
+      # ⚠ THE STEP ABOVE CANNOT REACH THESE. `-m "not integration"` is correct
+      # for suites whose SERVICE is missing here, but the collection hook gives
+      # EVERY capability-marked test the `integration` umbrella -- including
+      # requires_pg. So the lane that exists to exercise PostgreSQL was
+      # deselecting every test written specifically for PostgreSQL: measured
+      # 2026-09-19, all 16 of test_memory_dynamics_pg_live were deselected by
+      # that filter, and the *_pg_live.py files generally.
+      #
+      # The cluster IS reachable in this job (asserted two steps up), so these
+      # cannot self-skip into a false green the way they would elsewhere. That
+      # is also why this runs as its own step: a skip here is a real signal.
+      #
+      # --no-skip-ok: a run that SKIPS everything exits 0 and is
+      # indistinguishable from a pass, which is the exact ambiguity #160 was
+      # filed about. Assert a real collection instead of trusting the exit code.
+      run: |
+        pytest tests/ -m requires_pg -p no:cacheprovider -q --junitxml=pg-marker.xml
+        python - <<'PY'
+        import sys, xml.etree.ElementTree as ET
+        root = ET.parse("pg-marker.xml").getroot()
+        # `find(...) or root` would warn (and eventually break): an Element with
+        # no children is falsy. Compare to None explicitly.
+        s = root.find("testsuite")
+        if s is None:
+            s = root
+        ran = int(s.get("tests", 0)) - int(s.get("skipped", 0))
+        print(f"requires_pg: {s.get('tests')} collected, {s.get('skipped')} skipped, {ran} executed")
+        if ran < 50:
+            sys.exit(
+                f"only {ran} requires_pg tests actually executed. The cluster is "
+                f"reachable in this job, so a skip means the marker or the "
+                f"fixture stopped resolving -- not an absent service."
+            )
+        PY
+
   # ── End-to-end install ──────────────────────────────────────────────────────
   # The unit lane covers the install PIECES; nothing exercised the whole path.
   # test_install_no_clobber deliberately swallows wiring failures

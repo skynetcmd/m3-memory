@@ -19,3 +19,11 @@ DROP INDEX IF EXISTS idx_memory_items_reinforce;
 ALTER TABLE memory_items DROP COLUMN IF EXISTS unhelpful_count;
 ALTER TABLE memory_items DROP COLUMN IF EXISTS helpful_count;
 ALTER TABLE memory_items DROP COLUMN IF EXISTS importance_raw;
+
+-- The chatlog clone, same three columns (see the up migration for why PG has a
+-- second table here and SQLite does not). Dropped too, or a re-apply would find
+-- them present on the clone and absent on core — a half-migrated state that
+-- reads as success because every ALTER is IF NOT EXISTS.
+ALTER TABLE chat_log_items DROP COLUMN IF EXISTS unhelpful_count;
+ALTER TABLE chat_log_items DROP COLUMN IF EXISTS helpful_count;
+ALTER TABLE chat_log_items DROP COLUMN IF EXISTS importance_raw;

@@ -524,6 +524,66 @@ def _snapshot_embed_globals(mod) -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _no_console_windows_during_tests():
+    """Stop test subprocesses flashing console windows on Windows.
+
+    ⚠ REPORTED BY THE USER, 2026-09-19: "when you're doing testing I have random
+    python windows appearing". 42 test files spawn subprocesses and most pass no
+    creationflags, so each one allocates a console -- a window that steals focus
+    on someone's desktop while a suite runs for ten minutes.
+
+    Patched at ``Popen.__init__`` rather than on ``subprocess.run`` because run,
+    check_output, check_call and call all funnel through Popen: one seam instead
+    of four, and it also covers the many call sites that construct Popen
+    directly (§10a -- the convergence point, not the call sites).
+
+    ⚠ ADDS ONLY, NEVER OVERRIDES. A test that passes its own creationflags is
+    making a deliberate statement -- test_installer_spawns_are_hidden and
+    test_python_exe_windowless both assert on exactly these flags -- so this
+    ORs into whatever the caller asked for and leaves an explicit choice intact.
+    DETACHED_PROCESS is deliberately NOT added: it would reparent the child and
+    break the output capture every one of these tests depends on.
+
+    ⚠ WHY A PROBE FROM AN AUTOMATED RUN DOES NOT SHOW THE BUG. A child inherits
+    its parent's console rather than allocating a new one, so when pytest itself
+    is launched WITHOUT a visible console (a CI runner, an agent's captured
+    shell) the child has no window either and GetConsoleWindow() returns 0 with
+    or without this fixture. Measured 2026-09-19: identical result with the
+    fixture disabled. The flash only appears when a human runs the suite from an
+    interactive session -- which is exactly the case being fixed, and the one a
+    captured-output check cannot reproduce. Verify by running a suite by hand,
+    not by asserting on a spawned child's console handle.
+
+    No-op off Windows, where the flag does not exist and no console is allocated.
+    """
+    if _os.name != "nt":
+        yield
+        return
+
+    import subprocess as _sp
+
+    flag = getattr(_sp, "CREATE_NO_WINDOW", 0)
+    if not flag:
+        yield
+        return
+
+    _orig_init = _sp.Popen.__init__
+
+    def _quiet_init(self, *args, **kwargs):
+        # Positional creationflags would be argument 13; nothing in this repo
+        # passes it that way, and honouring the keyword form covers every call
+        # site. A caller's own flags are preserved, not replaced.
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | flag
+        return _orig_init(self, *args, **kwargs)
+
+    _sp.Popen.__init__ = _quiet_init
+    try:
+        yield
+    finally:
+        _sp.Popen.__init__ = _orig_init
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _capture_pristine_embed_globals():
     """Import memory.embed once at session start and snapshot its shared-mode
     switches, so the restore below always has genuinely-pristine values."""
