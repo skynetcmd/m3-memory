@@ -369,14 +369,40 @@ def _ensure_sync_tables(db_path: str | None = None) -> None:
         except Exception:
             _nw = {}
         with migration_lock():
-            subprocess.run(
+            # ⚠ CAPTURE THE CHILD'S STDOUT, THEN RELAY IT TO STDERR.
+            #
+            # migrate_memory is also a human-facing CLI, so it prints its plan
+            # ("Current version: v000 / Will apply: ...") to stdout. Inheriting
+            # that handle injected those lines into the STDOUT OF WHATEVER
+            # COMMAND happened to trigger the auto-migration — so the first
+            # `m3 ... --as_records` against a fresh database emitted migration
+            # prose followed by JSON, and every parser downstream failed.
+            #
+            # Now that every tool is pipeable, "stdout is the result, stderr is
+            # the narration" is a contract, not a preference (§3). Relayed
+            # rather than discarded: a migration is worth seeing, just not in
+            # the data channel.
+            proc = subprocess.run(
                 [sys.executable, migration_script, "up", "--yes", *target_flag],
                 check=True,
                 timeout=300,
                 stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
                 env=env,
                 **_nw,
             )
+            for stream in (proc.stdout, proc.stderr):
+                if stream and stream.strip():
+                    print(stream.rstrip(), file=sys.stderr)
+    except subprocess.CalledProcessError as e:
+        # §3: capturing output must not HIDE a failure. Without this the child's
+        # diagnostics died inside the CalledProcessError and the log carried
+        # only an exit code.
+        for stream in (e.stdout, e.stderr):
+            if stream and str(stream).strip():
+                print(str(stream).rstrip(), file=sys.stderr)
+        logger.exception(f"_ensure_sync_tables migration failed: {e}")
     except Exception as e:
         logger.exception(f"_ensure_sync_tables failed: {e}")
 
@@ -625,6 +651,69 @@ def _gate_active(env_var: str, count_query: str, threshold: int = 1) -> bool:
 # ──────────────────────────────────────────────────────────────────────────────
 # Access-stamp batcher
 # ──────────────────────────────────────────────────────────────────────────────
+def _flush_access_batch(batch: list) -> int:
+    """Write one batch of access stamps. Returns the number of ids attempted.
+
+    ⚠ THROUGH THE SEAM. This carried literal `?` placeholders, which PostgreSQL
+    rejects outright — and the caller swallowed the error at debug level, so on
+    PG `last_accessed_at` was NEVER written and `access_count` never moved.
+    Everything downstream of those two columns was therefore dead on that
+    backend: decay reinforcement had nothing to read, and `memory_grade`'s
+    retrieval window could never open, so grading rejected every verdict as
+    stale. Verified against a live cluster (§0.4, §10a).
+
+    Extracted so the flusher loop and the synchronous final drain share ONE
+    implementation rather than two copies of the same UPDATE.
+    """
+    if not batch:
+        return 0
+    from memory.backends import dialect as _dialect
+
+    _d = _dialect()
+    _p = _d.param()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        with _db() as db:
+            placeholders = ",".join([_p] * len(batch))
+            db.execute(
+                f"UPDATE memory_items "
+                f"SET last_accessed_at = {_p}, access_count = "
+                f"COALESCE(access_count, 0) + 1 "
+                f"WHERE id IN ({placeholders})",
+                (now_iso, *batch),
+            )
+            if hasattr(db, "commit"):
+                db.commit()
+    except Exception as e:  # noqa: BLE001 — never break a read path
+        logger.debug(f"access-stamp flush failed (batch={len(batch)}): {e}")
+        return 0
+    return len(batch)
+
+
+def flush_access_stamps_now() -> int:
+    """Drain pending access stamps SYNCHRONOUSLY. Returns ids written.
+
+    ⚠ WHY A SHORT-LIVED PROCESS NEEDS THIS. The batcher is a 0.25s async task
+    that lives for the lifetime of an event loop. The MCP server has one; a CLI
+    invocation does not — it exits long before the first tick, so a search run
+    from the shell stamped NOTHING.
+
+    That made `memory_grade` unreachable over a pipe: the grade window is
+    authorised by `last_accessed_at`, so every verdict came back
+    `outside_feedback_window` no matter how promptly it was sent. Now that every
+    tool is pipeable, `m3 memory memory_search ... | ... | m3 memory
+    memory_grade` is an obvious thing to write, and it could not work.
+
+    Safe to call when nothing is pending (returns 0) and from any thread.
+    """
+    global _access_pending
+    if not _access_pending:
+        return 0
+    batch = list(_access_pending)
+    _access_pending.clear()
+    return _flush_access_batch(batch)
+
+
 async def _access_stamp_flusher() -> None:
     """Drains _access_pending into a single batched UPDATE on a fixed cadence.
 
@@ -640,18 +729,7 @@ async def _access_stamp_flusher() -> None:
                     continue
                 batch = list(_access_pending)
                 _access_pending.clear()
-            now_iso = datetime.now(timezone.utc).isoformat()
-            try:
-                with _db() as db:
-                    placeholders = ",".join("?" * len(batch))
-                    db.execute(
-                        f"UPDATE memory_items "
-                        f"SET last_accessed_at = ?, access_count = access_count + 1 "
-                        f"WHERE id IN ({placeholders})",
-                        (now_iso, *batch),
-                    )
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"access-stamp flush failed (batch={len(batch)}): {e}")
+            _flush_access_batch(batch)
         except asyncio.CancelledError:
             return
         except Exception as e:  # noqa: BLE001 — keep the task alive

@@ -87,6 +87,22 @@ the policy is forward-going only.
   rejected; the comparison now parses instants through the dialect seam.
 - Three memories held an importance of 5.0–8.0. The field is documented 0.0–1.0
   and nothing clamped on write, which distorted every floor computation.
+- **Access stamps were never written on PostgreSQL.** The batched update
+  carried a SQLite placeholder, which PostgreSQL rejects, and the failure was
+  logged at debug level. `last_accessed_at` and `access_count` therefore never
+  moved on that backend, so decay reinforcement had no signal to read and
+  `memory_grade` rejected every verdict as stale.
+- **A search answered by the exact-phrase or no-embedder path recorded no
+  retrieval.** Those paths return before the stamping step, and the step itself
+  skipped rows without a keyword score — so the most precise results were the
+  least likely to be gradeable.
+- **CLI output was double-encoded.** `--as_records` produced JSON inside a JSON
+  string, so `| jq '.items[].id'` silently returned nothing.
+- **Automatic migrations printed to stdout.** A command run against a fresh
+  database emitted the migration plan ahead of its own JSON, breaking any
+  parser downstream. Migration output now goes to stderr.
+- A search run from the CLI now records retrieval before the process exits, so
+  `memory_search | memory_grade` works from a shell.
 - Background liveness and shutdown checks ran `tasklist` and `taskkill` without
   suppressing the console, flashing a window on Windows every few minutes.
 - **Chat log capture now works for OpenClaw, OpenCode and Aider.** All three

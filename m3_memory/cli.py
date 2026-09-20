@@ -1588,12 +1588,49 @@ def _cmd_tool_dispatch(args: argparse.Namespace) -> int:
             spec, tool_args, agent_id="", dry_run=dry_run,
             allow_caller_agent_id=True)
 
+    async def _run_and_drain():
+        out = await _run()
+        # ⚠ DRAIN BEFORE THE LOOP DIES. Access stamps are batched by a 0.25s
+        # async task that only exists while a loop runs. A CLI process exits
+        # first, so a search from the shell stamped nothing — and since
+        # `last_accessed_at` is what authorises a grade, `memory_search | ...
+        # | memory_grade` could never apply a verdict. Best-effort: a failed
+        # stamp must never fail the command that produced the answer.
+        try:
+            from memory.db import flush_access_stamps_now
+            flush_access_stamps_now()
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
     try:
-        result = asyncio.run(_run())
+        result = asyncio.run(_run_and_drain())
     except Exception as e:  # validation (ValueError) or impl failure
         print(_json.dumps({"ok": False, "error": "call_failed", "tool": tool,
                            "detail": f"{type(e).__name__}: {e}"}), file=sys.stderr)
         return 1
+    # ⚠ DO NOT DOUBLE-ENCODE A RESULT THAT IS ALREADY JSON.
+    #
+    # Several impls return a JSON *string* rather than an object — `--as_records`
+    # is the clearest case: memory_search builds {"count", "items", "query"} and
+    # serializes it. Dumping that string again produced a JSON string CONTAINING
+    # JSON, so every consumer had to json.loads twice. Piping is now universal,
+    # so this is the difference between
+    #
+    #     m3 memory memory_search --query x --as_records | jq '.items[].id'
+    #
+    # working and silently returning nothing on a string.
+    #
+    # Only unwrap what genuinely parses as an object or array — a plain prose
+    # result stays a JSON string, because emitting it raw would break the
+    # "stdout is always valid JSON" contract the pipe depends on.
+    if isinstance(result, str):
+        stripped = result.lstrip()
+        if stripped[:1] in ("{", "["):
+            try:
+                result = _json.loads(result)
+            except ValueError:
+                pass  # looked like JSON, is not — emit as the string it is
     print(_json.dumps(result, default=str, indent=2))
     return 0
 

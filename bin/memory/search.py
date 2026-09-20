@@ -541,6 +541,33 @@ def _resolve_extra_columns(extra_columns, *, apply_decay=True, recency_bias=Fals
     return [c for c in cols if c in _ALLOWED_EXTRA and c not in _BASE_COLS]
 
 
+def _stamp_retrieved(hits) -> None:
+    """Record that these ranked hits were retrieved. SINGLE OWNER (§10a).
+
+    ⚠ THREE PATHS ANSWER A SEARCH, and each one used to decide this for itself
+    — or not at all. The FTS exact-phrase short-circuit and the no-embedder
+    fallback both RETURN EARLY, so only the main path stamped, and even that
+    filtered on `"bm25_score" in row`, which excluded the exact hits. The net
+    effect was that the most precise results were the least likely to be
+    recorded as seen.
+
+    That matters beyond bookkeeping: `last_accessed_at` is what authorises
+    `memory_grade`, so an agent that searched precisely and then graded got
+    `outside_feedback_window` for exactly the memories it had just used, and
+    `access_count` under-counted the rows that matched best — biasing decay
+    reinforcement against them.
+
+    Being retrieved is not a property of the branch that retrieved you.
+    """
+    if not hits:
+        return
+    _enqueue_access_stamps([
+        h[1].get("id") for h in hits
+        if isinstance(h, (list, tuple)) and len(h) > 1
+        and isinstance(h[1], dict) and h[1].get("id")
+    ])
+
+
 def _ranking_importance(row, apply_decay: bool) -> float:
     """Which importance feeds the ranker for this row.
 
@@ -797,7 +824,16 @@ async def memory_search_scored_impl(
                     )
                     # bm25 order preserved (rows came back ORDER BY _bm25 ASC);
                     # all share score 1.0 as exact-substring hits. Cap at k.
-                    return exact_hits[:k]
+                    #
+                    # ⚠ STAMP BEFORE RETURNING. This path answers in full and
+                    # never reaches the post-retrieval stamping below, so an
+                    # exact-phrase hit — the most precise result m3 can give —
+                    # was returned without recording that it had been seen.
+                    # `last_accessed_at` authorises `memory_grade`, so grading
+                    # the result of a precise search always failed as stale.
+                    _hits = exact_hits[:k]
+                    _stamp_retrieved(_hits)
+                    return _hits
                 if exact_hits:
                     # FEWER exact hits than the caller asked for. Returning just
                     # these answered k=10 with 7 rows while the store held
@@ -875,6 +911,10 @@ async def memory_search_scored_impl(
         if fts_fallback:
             logger.info("FTS-only fallback (no query vector) for %r: %d match(es)",
                         query, len(fts_fallback))
+        # Third early return, same reason as the short-circuit above: this path
+        # answers in full when the embedder is down, so without stamping here a
+        # degraded-mode search would return memories that can never be graded.
+        _stamp_retrieved(fts_fallback)
         return fts_fallback
     # The embeddings join is dim-filtered (me.dim = ? below) and the query is
     # packed at its own length, so a wrong-dim query simply matches no stored
@@ -1434,7 +1474,19 @@ async def memory_search_scored_impl(
 
     # ── Post-Retrieval Expansions ────────────────────────────────────────
     if ranked:
-        _enqueue_access_stamps([item[1]["id"] for item in ranked if "bm25_score" in item[1]])
+        # ⚠ STAMP EVERY RETURNED ROW, not just the keyword-scored ones.
+        #
+        # This filtered on `"bm25_score" in item[1]`, which reads as "came from
+        # the DB" but is really "was scored by the keyword branch". Rows from
+        # the FTS exact-phrase short-circuit carry no bm25_score, so the MOST
+        # PRECISE results — an exact title or phrase match — were the ones never
+        # stamped. `last_accessed_at` is what authorises `memory_grade`, so an
+        # agent that searched precisely and then graded got
+        # `outside_feedback_window` for exactly the memories it had just used.
+        #
+        # Retrieval is retrieval regardless of which branch produced it; the
+        # ranking path it took is not a property of having been seen.
+        _stamp_retrieved(ranked)
 
     if ranked and (smart_time_boost > 0.0 or smart_neighbor_sessions > 0):
         ranked = await _resolve_graph_helper("_apply_smart_expansions")(

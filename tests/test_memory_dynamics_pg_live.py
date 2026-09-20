@@ -459,3 +459,59 @@ def test_a_null_importance_raw_falls_back_on_pg(pg):
         "a NULL importance_raw scored as zero instead of falling back to "
         "importance -- every pre-049 row would sink in a forensic query"
     )
+
+
+# ── access stamping on PG ────────────────────────────────────────────────────
+
+def test_access_stamps_are_written_on_pg(pg):
+    """⚠ THE FLUSHER'S SQL WAS A SYNTAX ERROR ON POSTGRESQL, AND IT WAS SILENT.
+
+    `SET last_accessed_at = ?` carried a literal SQLite placeholder, and the
+    caller logged the failure at debug level. So on PG the column was NEVER
+    written and access_count never moved — which silently killed BOTH features
+    that read them: decay reinforcement had no signal, and memory_grade's
+    retrieval window could never open, so every verdict was rejected as stale.
+
+    An entire backend had the feature set disabled and nothing said so. This
+    asserts the write really lands, on the backend that rejected it.
+    """
+    from memory.db import _access_pending, flush_access_stamps_now
+
+    uid = f"dyn-{uuid.uuid4().hex[:8]}"
+    mid = _write(uid, type="note", content="stamp me", importance=0.5)
+    _set(mid, last_accessed_at=None, access_count=0)
+
+    _access_pending.clear()
+    _access_pending.add(mid)
+    written = flush_access_stamps_now()
+
+    assert written == 1, "the flusher reported no rows written on PG"
+    assert _get(mid, "last_accessed_at") is not None, (
+        "last_accessed_at is still NULL on PostgreSQL — the flusher's SQL was "
+        "rejected and the error swallowed"
+    )
+    assert _get(mid, "access_count") == 1, "access_count did not increment on PG"
+
+
+def test_a_stamped_memory_can_be_graded_on_pg(pg):
+    """The end of the chain: stamp -> window opens -> verdict applies.
+
+    Both halves failed together on PG, so assert them together.
+    """
+    import memory_maintenance as MM
+    from memory.db import _access_pending, flush_access_stamps_now
+
+    uid = f"dyn-{uuid.uuid4().hex[:8]}"
+    mid = _write(uid, type="note", content="grade me", importance=0.5)
+    _set(mid, last_accessed_at=None)
+
+    _access_pending.clear()
+    _access_pending.add(mid)
+    flush_access_stamps_now()
+
+    res = MM.memory_grade_impl(grades=[{"memory_id": mid, "verdict": "helpful"}])
+    assert res["applied"] is True, (
+        f"grading failed on PG after a stamp: {res.get('reason')} / "
+        f"{res.get('observed')}"
+    )
+    assert _get(mid, "helpful_count") == 1
