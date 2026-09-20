@@ -210,7 +210,18 @@ is *not* done.
   (pyo3 + async + generics was deferred as a rabbit hole). Only needed if Python
   should *drive* the dispatcher rather than just configure it.
 
-- [ ] **Dispatcher latency histogram is a §3 false signal — fix or stop publishing.**
+- [x] **Dispatcher latency histogram — WIRED.** _Done 2026-09-20_ (m3-core-rs `47e1cd4`).
+  `LatencyRing`: a fixed 1024-sample lock-free ring of recent batch latencies,
+  written wait-free from all three batch-execution sites (including the
+  coalesced scheduler path) and read without a lock, so scraping metrics cannot
+  contend with serving. Nearest-rank percentiles over the filled prefix only.
+  `p50_ms`/`p99_ms` are now `Option<f64>` and serialize as JSON `null` until a
+  batch completes — a breaking change to `DispatcherStats`, and deliberately
+  `null` rather than `0.0`.
+  ⚠ Ships only in the NEXT m3-core-rs release; the installed 3.9.8 wheel still
+  serves `0.0`.
+
+  Original finding, kept for context:
   `DispatcherStats.p50_ms` / `p99_ms` are hardcoded `0.0`
   (`m3-dispatcher/src/lib.rs:471-472`, flagged by two in-code TODOs at `:94`/`:96`)
   and then **served on the embed server's metrics endpoint**
