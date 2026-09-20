@@ -59,6 +59,38 @@ OWNERSHIP_MARKER = "chatlog"
 # are the actual turn-capture path.
 CAPTURE_EVENTS = ("PreCompact", "Stop")
 
+
+def _capture_support_gap(agent: str) -> "str | None":
+    """Why `agent` cannot be captured, or None if the machinery is all present.
+
+    Checks the two things that make capture structurally impossible regardless
+    of how the host's own config is written: a parser to read its transcript,
+    and a hook file to invoke. Both were missing for agents that `chatlog
+    status` nonetheless reported as `wired: true`, because that field is the
+    config's own claim echoed back rather than evidence.
+
+    Deliberately NOT a verdict on the host's config file — this probe cannot
+    read OpenClaw's or Gemini's. Absence of a gap means "m3's side is ready",
+    not "capture is confirmed running".
+    """
+    try:
+        import chatlog_ingest
+        import chatlog_init
+    except Exception:  # noqa: BLE001 — probe context, never fatal
+        return None
+
+    reasons = []
+    if agent not in getattr(chatlog_ingest, "PARSERS", {}):
+        reasons.append(f"m3 has no transcript parser for it "
+                       f"(`--format {agent}` is not a valid ingest format)")
+    try:
+        sh_path, _ps1, desc = chatlog_init.get_hook_path_for_agent(agent)
+        if "unknown" in desc or not os.path.exists(sh_path):
+            reasons.append("no hook script ships for it under bin/hooks/chatlog")
+    except Exception:  # noqa: BLE001
+        pass
+    return " and ".join(reasons) if reasons else None
+
 # Roots that must be pinned inline in the hook command (CLAUDE.md split-brain).
 REQUIRED_ROOT_PINS = ("M3_ENGINE_ROOT", "M3_CONFIG_ROOT")
 
@@ -252,6 +284,28 @@ def check() -> dict:
                           "settings.json contains no m3 hook entry — capture "
                           "is not actually running",
             })
+
+        # ⚠ EVERY OTHER AGENT WAS INVISIBLE HERE. This probe reads only
+        # ~/.claude/settings.json, so for a user on OpenClaw (or Gemini, or
+        # OpenCode) it inspected a file with nothing to do with them, found
+        # nothing, and reported clean — including under `--fix --fix-hooks`,
+        # whose repair path is install_claude_settings. A user reported exactly
+        # that on 2026-09-20: chatlog never wired for OpenClaw, and doctor never
+        # said so.
+        #
+        # A full per-agent wiring check needs each host's own config format, so
+        # this does the part that is both cheap and decisive: an agent cannot be
+        # capturing if m3 has no way to ingest it. That catches the real defect
+        # class (registered-but-unsupported) without pretending to verify a
+        # config file this probe cannot read.
+        for agent in sorted(claimed - {"claude-code"}):
+            gap = _capture_support_gap(agent)
+            if gap:
+                findings.append({
+                    "kind": "claimed_not_supported", "event": agent,
+                    "detail": f"config reports the {agent} hook enabled, but "
+                              f"{gap} — capture cannot run for this agent",
+                })
     except Exception:  # noqa: BLE001 — config is optional context, not the check
         pass
 

@@ -89,6 +89,17 @@ the policy is forward-going only.
   and nothing clamped on write, which distorted every floor computation.
 - Background liveness and shutdown checks ran `tasklist` and `taskkill` without
   suppressing the console, flashing a window on Windows every few minutes.
+- **Chat log capture now works for OpenClaw.** It was a registered host agent
+  with no transcript parser and no hook. The hook finds the newest session
+  transcript under `~/.openclaw/agents/<agent>/sessions/` itself, since OpenClaw
+  passes no envelope.
+- **`doctor` reports an enabled host agent whose capture cannot run.** The check
+  that corroborated the config against reality covered Claude Code only, so on
+  any other host `--fix` and `--fix-hooks` reported clean. Where capture is not
+  yet supported for an agent, `doctor` now says so instead of staying silent.
+- Consolidated the list of valid host agents, which existed in three copies, and
+  mapped every registered agent to its hook so an unmapped one can no longer
+  resolve to a path that does not exist.
 
 ## [2026.9.19.0] — 2026-09-19 — OpenClaw speaks MCP natively
 

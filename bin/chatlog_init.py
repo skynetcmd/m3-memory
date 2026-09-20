@@ -93,11 +93,16 @@ def print_section(title: str) -> None:
 
 def get_hook_path_for_agent(agent: str) -> tuple[str, str]:
     """Return (sh_path, ps1_path) for a host agent."""
+    # ⚠ EVERY AGENT IN VALID_HOST_AGENTS NEEDS A ROW, or it takes the fallback
+    # below and the user is handed a path to a file that has never existed.
+    # tests/test_host_agent_capture_parity.py fails on a missing row rather than
+    # letting it surface as silently-absent capture.
     agent_map = {
         "claude-code": ("claude_code_precompact", "claude-code pre-compaction hook"),
         "gemini-cli": ("gemini_cli_onexit", "Gemini CLI session exit hook"),
         "antigravity-cli": ("gemini_cli_onexit", "Antigravity CLI session exit hook"),
         "opencode": ("opencode_session_end", "OpenCode session end hook"),
+        "openclaw": ("openclaw_session_end", "OpenClaw session end hook"),
         "aider": ("aider_chat_watcher", "Aider chat watcher hook"),
     }
     base_name, desc = agent_map.get(agent, ("unknown", "unknown hook"))

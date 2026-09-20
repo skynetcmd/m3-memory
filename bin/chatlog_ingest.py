@@ -328,13 +328,115 @@ def _normalize(items: list[dict], host_agent: str, variant: Optional[str],
     return out
 
 
+def _openclaw_content_to_text(content) -> str:
+    """Flatten OpenClaw message content to text.
+
+    `content` is either a plain string or a list of typed parts; only `text`
+    parts carry conversation. Verified against a real transcript under
+    ~/.openclaw/agents/<agent>/sessions/*.jsonl rather than assumed.
+    """
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = [
+            p.get("text", "") for p in content
+            if isinstance(p, dict) and p.get("type") == "text"
+        ]
+        return "\n".join(t for t in parts if t).strip()
+    return ""
+
+
+def _parse_openclaw(raw: str) -> tuple[list[dict], Optional[str]]:
+    """Parse an OpenClaw session transcript. Returns (items, sessionId).
+
+    JSONL, one object per line, of several `type`s — `session` (the header),
+    `model_change`, `thinking_level_change`, `custom`, and `message`. Only
+    `message` lines carry conversation:
+
+        {"id": ..., "parentId": ..., "timestamp": ..., "type": "message",
+         "message": {"role": "user"|"assistant", "content": ..., "timestamp": ...}}
+
+    ⚠ SLASH COMMANDS ARE SKIPPED, matching OpenClaw's own bundled session-memory
+    handler: `/new`, `/reset` and friends are control input, not conversation,
+    and capturing them would file the command that ENDED a session as its last
+    user turn.
+
+    Tolerant by line (§3 degrade, don't abort): a malformed line is logged and
+    skipped so one bad record cannot cost the whole transcript.
+    """
+    if not raw.strip():
+        return [], None
+
+    items: list[dict] = []
+    session_id: Optional[str] = None
+    model_id = ""
+
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Malformed OpenClaw JSONL line, skipping: {e}")
+            continue
+        if not isinstance(obj, dict):
+            continue
+
+        rec_type = obj.get("type")
+        if rec_type == "session":
+            session_id = obj.get("sessionId") or obj.get("id") or session_id
+            continue
+        if rec_type == "model_change":
+            # Carries the model in force for every message that FOLLOWS it, so
+            # later turns are attributed to the model that actually produced
+            # them rather than to the session's opening model.
+            model_id = obj.get("model") or obj.get("modelId") or model_id
+            continue
+        if rec_type != "message":
+            continue
+
+        msg = obj.get("message")
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        content = _openclaw_content_to_text(msg.get("content"))
+        if not content or content.startswith("/"):
+            continue
+
+        items.append({
+            "content": content,
+            "role": role,
+            "model_id": model_id or "unknown",
+            "conversation_id": session_id or "",
+            "provider": "other",
+            "timestamp": msg.get("timestamp") or obj.get("timestamp", ""),
+            "uuid": obj.get("id"),
+        })
+
+    return items, session_id
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 PARSERS = {
     "claude-code": _parse_claude_code,
     "gemini-cli":  _parse_gemini_cli,
     "antigravity-cli": _parse_gemini_cli,
+    "openclaw": _parse_openclaw,
 }
+# ⚠ `opencode` IS DELIBERATELY ABSENT, AND ITS HOOK IS CURRENTLY BROKEN.
+# bin/hooks/chatlog/opencode_session_end.py passes `--format opencode`, which
+# argparse rejects because there is no such parser — so OpenCode capture has
+# never worked. Found 2026-09-20 while adding OpenClaw; the two are different
+# products and their transcript formats are NOT known to match, so mapping
+# OpenCode onto the OpenClaw parser would be a guess of exactly the kind that
+# produced this bug. It needs a real transcript to write against.
+# test_host_agent_capture_parity marks it a KNOWN GAP rather than letting the
+# registration keep implying support. Tracked as an explicit exemption there,
+# not a silent omission.
 
 
 async def _ingest(format_name: str, transcript_path: str,

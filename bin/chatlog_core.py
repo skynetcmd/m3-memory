@@ -38,11 +38,14 @@ from memory_core import _sanitize_fts
 logger = logging.getLogger("chatlog_core")
 
 VALID_ROLES = frozenset({"user", "assistant", "system", "tool"})
-VALID_HOST_AGENTS = frozenset({"claude-code", "gemini-cli", "antigravity-cli", "opencode", "aider", "langchain"})
-VALID_PROVIDERS = frozenset({
-    "anthropic", "google", "openai", "local", "xai",
-    "deepseek", "mistral", "meta", "other",
-})
+
+# ⚠ IMPORTED, NOT RESTATED. These two lists were duplicated here verbatim, and
+# a copy is the defect independent of whether it currently agrees (§10a): the
+# config would have accepted a host_agent that ingest then rejected, and the
+# failure would surface as silently-missing capture rather than a bad config
+# error. chatlog_config owns them because it owns the dataclass whose default
+# host_agents map is built from the same set.
+from chatlog_config import VALID_HOST_AGENTS, VALID_PROVIDERS  # noqa: E402
 MAX_CONTENT_LEN = 50_000
 # Hard cap on search result rows. Defends the API boundary against pathological
 # `k` (DESIGN §4/§6): SQLite treats `LIMIT -1` as UNBOUNDED, so a negative k

@@ -74,7 +74,15 @@ INGEST_CURSOR = _resolve_engine_file(".chatlog_ingest_cursor.json")
 # which homecoming never populates, so the chatlog DB could never be bootstrapped.
 CHATLOG_MIGRATIONS_DIR = os.path.join(BASE_DIR, "memory", "chatlog_migrations")
 
-VALID_HOST_AGENTS: frozenset[str] = frozenset(("claude-code", "gemini-cli", "antigravity-cli", "opencode", "aider", "langchain"))
+# ⚠ THE SINGLE OWNER. chatlog_core imports this rather than restating it, and
+# ChatlogConfig.host_agents is built from it. Adding an agent here is not enough
+# to make capture work — it also needs a hook or watcher under bin/hooks/chatlog
+# and a wiring path, which tests/test_host_agent_capture_parity.py enforces.
+# ("openclaw" is distinct from "opencode": different products, both supported.)
+VALID_HOST_AGENTS: frozenset[str] = frozenset((
+    "claude-code", "gemini-cli", "antigravity-cli", "opencode", "openclaw",
+    "aider", "langchain",
+))
 VALID_PROVIDERS: frozenset[str] = frozenset((
     "anthropic", "google", "openai", "local", "xai",
     "deepseek", "mistral", "meta", "other",
@@ -118,14 +126,13 @@ class CostTrackingSpec:
 @dataclass
 class ChatlogConfig:
     db_path: str = DEFAULT_DB_PATH
-    host_agents: dict[str, HookSpec] = field(default_factory=lambda: {
-        "claude-code": HookSpec(),
-        "gemini-cli":  HookSpec(),
-        "antigravity-cli": HookSpec(),
-        "opencode":    HookSpec(),
-        "aider":       HookSpec(),
-        "langchain":   HookSpec(),
-    })
+    # Derived from VALID_HOST_AGENTS, not restated: a hand-written map here
+    # drifted from the allowlist means an agent is either registered-but-invalid
+    # or valid-but-unregistered, and both fail as missing capture rather than as
+    # an error (§10a — one owner).
+    host_agents: dict[str, HookSpec] = field(
+        default_factory=lambda: {a: HookSpec() for a in sorted(VALID_HOST_AGENTS)}
+    )
     embed_default: bool = False
     embed_sweeper: EmbedSweeperSpec = field(default_factory=EmbedSweeperSpec)
     queue_flush_rows: int = 200

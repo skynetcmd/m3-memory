@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_core.py
-sha1: b2a78459c3a6
-mtime_utc: 2026-09-07T21:18:39.910243+00:00
-generated_utc: 2026-09-07T21:37:21.403593+00:00
+sha1: a3d140539b68
+mtime_utc: 2026-09-20T05:20:21.641160+00:00
+generated_utc: 2026-09-20T05:22:41.588490+00:00
 private: false
 ---
 
@@ -50,6 +50,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config`
+- `chatlog_config (VALID_HOST_AGENTS, VALID_PROVIDERS)`
 - `chatlog_redaction`
 - `m3_sdk (M3Context)`
 - `m3_sdk (M3Context, active_database)`
