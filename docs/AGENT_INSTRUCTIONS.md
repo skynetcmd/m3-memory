@@ -97,6 +97,30 @@ When m3 memory contradicts what you think you remember from context — **trust 
 
 ---
 
+## 🔁 Adding a pipeable output shape — extend, don't duplicate
+
+Prefer adding the record shape to the **existing** tool. The `as_records`
+envelope is built by one shared helper (`bin/memory/records.py`), so a tool opts
+in by handing it the rows it already has — no second code path, and the display
+string it returned before stays byte-identical for the callers that parse it.
+
+Note the two defaults are deliberate and both are test-pinned: the **ToolSpec**
+default stays `False` (every MCP caller predates the param and parses the
+display string), while the **CLI** defaults it on (its consumer is a pipe, not
+an LLM reading prose). One impl, two surface defaults — not two functions.
+
+A separate pipeable function is the **fallback, not the pattern**. It is
+justified only when the existing tool genuinely cannot carry the shape, or when
+changing its output would break callers that cannot be migrated. The cost is
+real and recurring: two functions answering one question drift, and every later
+fix has to be made twice. If you add one, it must call the same underlying logic
+and differ only in what it emits — never re-derive the answer.
+
+Guards: `tests/test_as_records_contract.py` fails a new list-shaped tool that
+cannot emit records (declare a genuine exception in `_NOT_A_COLLECTION` with a
+reason), and pins that the two defaults stay different.
+
+---
 ## 🚦 Pre-push process — ALL agents (not just Claude)
 
 **This applies to every agent and human — Claude, Gemini CLI, Antigravity, and

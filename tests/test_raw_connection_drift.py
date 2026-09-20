@@ -75,6 +75,16 @@ _EXEMPT = {
         "Already branches on `is_file`; the raw connect is the SQLite arm and "
         "applies the shared pragma stack.",
 
+    # --- Foreign stores: another product's file, not an m3 store. ---
+    "bin/chatlog_ingest.py":
+        "Reads OpenCode's OWN database (opencode.db) to import its transcripts. "
+        "The seam is deliberately wrong here: backend.open_readonly() ignores "
+        "db_path on PostgreSQL and would hand back m3's store instead of the "
+        "file asked for, and the file is SQLite because OpenCode chose SQLite — "
+        "not because m3 did. Adding a backend would not change this line, which "
+        "is DESIGN section 10a's own test for what belongs in the dialect. "
+        "Opened read-only; m3 never writes to it.",
+
     # --- Bootstrap: runs BEFORE a usable schema/seam exists. ---
     "bin/migrate_memory.py":
         "Creates and versions the schema the seam later assumes.",

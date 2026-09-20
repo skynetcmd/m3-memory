@@ -1,43 +1,66 @@
 # Using m3 for coding work
 
-What m3 does for a coding agent, what it deliberately leaves to the agent, and
-how to wire the parts it leaves out.
+**m3 is a memory layer, not an agent framework.** It owns durable, searchable,
+multi-agent memory and stops there — so it composes with whatever you have
+rather than asking you to adopt a stack.
 
-The short version: **m3 owns the memory store and exposes two seams.** MCP plumbs
-it into another process — any agent, any IDE. The CLI plumbs it into your own
-code — scripts, hooks, CI. Work that needs your repo's syntax tree or your git
-history lives on the *other* side of that boundary, and this page explains why
-that is a design choice rather than a gap.
+Two seams, either or both:
+
+- **MCP** — plumb it into another process. Any agent, any IDE, no code.
+- **CLI** — plumb it into your own code. Every tool in the catalog reads JSON on
+  stdin and writes JSON on stdout, so m3 is scriptable from any language, any
+  runtime, and from hooks and CI. **MCP is optional**, not the price of entry.
+
+Language-specific work — parsing your syntax tree, watching your git history —
+is deliberately *outside* the layer. Not missing: outside. Those live in a few
+lines of your own code on top of the CLI, and this page shows the code. The
+payoff is a memory layer that never needs to know your language, your VCS, or
+your framework, and so never becomes the thing you have to work around.
 
 ---
 
 ## Does m3 index my code symbols? Does it follow refactors?
 
-**No, and that is deliberate.** m3 stores memories; it does not parse your
-language. There is no AST walker, no language server, and no symbol table for
-your project inside m3.
+m3 does not ship a parser for your language, and that is what keeps it useful
+across all of them. **Symbol indexing is an integration, not a missing feature** —
+you own the AST, m3 owns what you decided about it.
 
-The reason is that your coding agent already has all of it. Claude Code, Cursor,
-Antigravity and the rest hold the file, the parse, and the repo state at the
-moment you ask them to change something. A memory layer that built a *second*
-parser would be maintaining a stale copy of a thing the agent already knows,
-across every language you use — and the two would disagree. The interesting
-question is not "can m3 parse Python" but "which component should own the
-answer", and the component holding the buffer is the better owner.
+Use whatever parser you already trust — `ast` in Python, tree-sitter,
+`ts-morph`, your language server — and write the result in:
 
-What m3 contributes instead is the part the agent loses: durability across
-sessions and across tools. When a refactor lands, the agent writes what it
-decided and why. That record survives the session, the IDE switch, and the model
-upgrade.
+```python
+import ast, json, subprocess
 
-**Wiring it up:** have the agent write a memory when it makes a structural
-decision, not when it touches a file. `m3 setup` registers the tools; the agent
-calls `memory_write` on its own.
+tree = ast.parse(open("payments/ledger.py").read())
+symbols = [n.name for n in ast.walk(tree)
+           if isinstance(n, (ast.FunctionDef, ast.ClassDef))]
 
-**What m3 genuinely does not do, stated plainly:** there is no git-history hook.
-Nothing in m3 watches commits or reacts to a diff. If you want a memory written
-on every commit, that is a `post-commit` hook calling the CLI — a few lines, and
-[the CLI section below](#the-cli-is-a-first-class-interface) shows the shape.
+subprocess.run(
+    ["m3", "memory", "memory_write", "--json-file", "-"],
+    input=json.dumps({
+        "type": "reference",
+        "title": "payments/ledger.py symbols",
+        "content": "\n".join(symbols),
+    }),
+    text=True,
+)
+```
+
+That is the whole integration. Swap `ast` for tree-sitter and the same nine
+lines index Go, Rust or TypeScript — because m3 never had an opinion about the
+language in the first place.
+
+**Why it is not built in.** Your coding agent already holds the file, the parse
+and the repo state. A memory layer carrying a *second* parser would maintain a
+stale copy of something the agent already knows, in every language you use, and
+the two would disagree. The useful question is not "can m3 parse Python" but
+"which component should own the answer" — and the one holding the buffer is the
+better owner.
+
+What m3 contributes is the part the agent loses at the end of the session:
+durability across sessions, tools and model upgrades. When a refactor lands, the
+agent records what it decided and why, and that record outlives the IDE it was
+made in.
 
 ---
 
@@ -105,9 +128,10 @@ capture state.
 
 ---
 
-## <a id="the-cli-is-a-first-class-interface"></a>Is the CLI as capable as MCP?
+## <a id="the-cli-is-a-first-class-interface"></a>Can I use m3 without MCP?
 
-Yes. The CLI and the MCP server are **two front doors to the same database** —
+Yes — the CLI is a full interface, not a fallback. It and the MCP server are
+**two front doors to the same database** —
 the whole tool catalog, grouped as `memory`, `files`, `chatlog`, `tasks`,
 `agent`, `admin`, `conversations`, `diagnostics` and `entity`.
 
@@ -116,11 +140,22 @@ m3 memory memory_search --query "which signing algorithm did we pick?" --k 5
 m3 memory memory_write --content "..." --type belief --title "..."
 ```
 
-Results go to **stdout** and logs to **stderr**, so output pipes cleanly:
+Results go to **stdout** and logs to **stderr**, and a listing returns records
+rather than a rendered table, so output composes:
 
 ```bash
-m3 memory memory_search --query postgres --k 20 2>/dev/null | jq '.'
+m3 memory memory_search --query postgres --k 20 2>/dev/null | jq '.items[].id'
+m3 tasks task_list 2>/dev/null | jq '.items[] | select(.state=="pending") | .title'
 ```
+
+The envelope is always `{count, items}` — `count` lets you check for truncation
+without walking the list. Pass `--no-as_records` for the human-readable form.
+
+> **`jq` is not an m3 dependency.** It is used in the examples below only
+> because it reads clearly. m3 emits plain JSON on stdout, so anything that
+> parses JSON works just as well — `python -c "import sys,json; ..."`,
+> PowerShell's `ConvertFrom-Json`, Node, or your language's client. Nothing in
+> m3 shells out to `jq`, and none of these pipelines require it to be installed.
 
 Every tool also accepts a JSON object on **stdin**, which is what makes m3
 scriptable from a hook or a CI step:
@@ -132,10 +167,56 @@ echo '{"query":"postgres","k":3}' | m3 memory memory_search --json-file -
 Flags and piped JSON compose, and an explicit flag wins — so a script can pipe a
 base object and override one field per invocation.
 
+### Composing tools
+
+Because output is records and input is JSON, one tool's result drives the next
+without parsing prose. The bulk tools take arrays, so a query can drive an edit:
+
+```bash
+# Pin everything matching a query.
+m3 memory memory_search --query "deployment runbook" --k 20 2>/dev/null \
+  | jq '{updates: [.items[] | {memory_id: .id, pinned: 1}]}' \
+  | m3 memory memory_update_bulk --json-file - --dry-run
+```
+
+Drop `--dry-run` to apply. The same shape works for `memory_delete_bulk` and
+`memory_link_bulk`.
+
+The same pipeline without `jq`, to make the point that it is only a convenience:
+
+```bash
+m3 memory memory_search --query "deployment runbook" --k 20 2>/dev/null \
+  | python -c "import sys,json; d=json.load(sys.stdin); \
+      print(json.dumps({'updates':[{'memory_id':i['id'],'pinned':1} for i in d['items']]}))" \
+  | m3 memory memory_update_bulk --json-file - --dry-run
+```
+
+Grading a result set after you answer is the same pattern:
+
+```bash
+m3 memory memory_search --query "signing algorithm" --k 5 2>/dev/null \
+  | jq '{grades: [.items[] | {memory_id: .id, verdict: "helpful"}]}' \
+  | m3 memory memory_grade --json-file -
+# -> {"ok": true, "applied": true, "graded": 5}
+```
+
+A search records that it retrieved those memories, which is what entitles you to
+grade them — so this works from a shell, not only from an agent holding an MCP
+session. Grades outside the feedback window come back `applied: false` with a
+reason rather than failing.
+
 **This is why a missing feature is rarely a blocker.** Anything m3 does not do
 itself, you can drive from the side it does expose. A git `post-commit` hook that
-records what changed is a CLI call. A CI step that writes a deployment note is a
-CLI call.
+records what changed is a CLI call:
+
+```bash
+# .git/hooks/post-commit
+m3 memory memory_write --type note --title "$(git log -1 --format=%s)" \
+  --content "$(git log -1 --format='%H%n%an%n%b')$(git diff-tree --no-commit-id --name-only -r HEAD)"
+```
+
+A CI step that writes a deployment note is a CLI call. Exit codes are real: a
+rejected argument exits 2 with the accepted keys listed, so `set -e` works.
 
 **It also means an MCP disconnect is not an outage.** A dropped stdio session
 leaves the store completely intact and fully usable from the shell until the
@@ -143,19 +224,29 @@ client reconnects. Check with `m3 --version`: if the CLI answers, m3 is up.
 
 ---
 
-## What m3 does not do
+## Where the boundary sits
 
-Kept honest deliberately — a list of strengths with no limits is not useful.
+m3 is a memory layer. These live on your side of it **by design**, and each is
+a short integration rather than a gap to wait on:
 
-- **No code-symbol index.** No AST, no language server, no symbol table. See the
-  first question for why this belongs to the agent.
-- **No git-history hook.** Nothing watches commits. Wire one with the CLI.
-- **No "was this memory used in the answer" signal by default.** `memory_grade`
-  is the deliberate version of it, and it relies on the agent choosing to call
-  it after answering. Uptake is voluntary; low uptake means less reinforcement,
-  not wrong reinforcement.
+| Outside the layer | Your integration | Shown in |
+|---|---|---|
+| Parsing your language | Any parser → `memory_write` | [above](#does-m3-index-my-code-symbols-does-it-follow-refactors) |
+| Watching your VCS | A `post-commit` hook → CLI | [above](#the-cli-is-a-first-class-interface) |
+| Your agent's prompt and control flow | Your framework; m3 is the store | — |
+
+Keeping these out is what lets the same memory layer serve a Python monorepo, a
+Rust service and a TypeScript frontend without forking.
+
+### Current limits, stated plainly
+
+These are real and on the roadmap — not design boundaries:
+
 - **Pinning and expiry are not yet honoured at search time.** They govern the
-  maintenance passes. An expired-but-unpurged memory is still retrievable.
+  maintenance passes, so an expired-but-unpurged memory is still retrievable.
+- **The "was this memory used?" signal is opt-in.** `memory_grade` is the
+  deliberate version and depends on the caller choosing to send a verdict after
+  answering. Low uptake means *less* reinforcement, never wrong reinforcement.
 
 ---
 

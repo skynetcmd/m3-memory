@@ -239,3 +239,111 @@ def test_every_spec_uses_the_one_description():
     assert seen.pop() == records.PARAM_SPEC["description"], (
         "catalog description drifted from memory.records.PARAM_SPEC, the owner"
     )
+
+
+# ── a NEW list-shaped tool must not ship prose-only ──────────────────────────
+
+def _list_shaped_tools():
+    """Tools whose name says they return a collection.
+
+    Derived from the catalog rather than hand-listed: AS_RECORDS_TOOLS above is
+    a pinned set of tools that HAVE the param, which by construction cannot
+    notice a new tool that lacks it. The whole failure mode here is omission,
+    so the expectation has to come from the catalog itself.
+    """
+    import mcp_tool_catalog as _cat
+
+    suffixes = ("_list", "_search", "_report", "_poll", "_queue", "_tree",
+                "_inbox", "_history", "_capabilities")
+    return sorted(
+        t.name for t in _cat.TOOLS
+        if any(t.name.endswith(s) for s in suffixes)
+    )
+
+
+# Tools that end in a collection-shaped suffix but genuinely return a SCALAR or
+# a single object, so records would be noise. Each entry is a decision with a
+# reason, which is the opposite of the silent omission this guards.
+_NOT_A_COLLECTION = {
+    "chatlog_status": "one status object, not a collection",
+    "files_stats": "one stats object, not a collection",
+    "embedder_status": "one status object, not a collection",
+    "memory_feedback_stats": "process-local counters, one object",
+    "chatlog_cost_report": "one aggregate report object",
+    "files_corpus_list": "already returns structured rows, no display string",
+    "files_dedup_list": "already returns structured rows, no display string",
+    "files_promotion_list": "already returns structured rows, no display string",
+    "files_entity_coalesce_list": "already returns structured rows, no display string",
+    "files_search": "already returns a structured array, no display string",
+    "entity_search": "already returns a structured array, no display string",
+    "chatlog_search": "already returns structured rows, no display string",
+    "memory_search_slim": "slim variant; its parent memory_search carries the param",
+    "tools_list_domains": "catalog meta-tool, returns a structured map",
+}
+
+
+@pytest.mark.parametrize("name", _list_shaped_tools())
+def test_a_list_shaped_tool_can_emit_records(name):
+    """⚠ §3's FIRST TENET: "return structured data, never message strings".
+
+    A tool that renders its rows into prose forces every caller to parse the
+    rendering back. That was tolerable while the only consumer was an LLM
+    reading the text; now that every tool is pipeable, prose is a hard boundary
+    — `m3 tasks task_list | jq '.items[]'` cannot consume
+    "Tasks (20):\n  [c0aab26a] P0 ...".
+
+    Measured 2026-09-20: 22 list-shaped tools, 12 without records. This fails
+    on the NEXT one rather than on the backlog, because each known case is
+    either fixed or carries a written reason above.
+    """
+    import mcp_tool_catalog as _cat
+
+    if name in _NOT_A_COLLECTION:
+        pytest.skip(f"{name}: {_NOT_A_COLLECTION[name]}")
+
+    spec = {t.name: t for t in _cat.TOOLS}[name]
+    props = (spec.parameters or {}).get("properties", {}) or {}
+    assert "as_records" in props, (
+        f"'{name}' is list-shaped but cannot emit records, so a piped caller "
+        f"has to parse its display string. Add as_records (see "
+        f"memory/records.py for the shared envelope), or declare it in "
+        f"_NOT_A_COLLECTION with a reason."
+    )
+
+
+def test_every_exemption_still_names_a_real_tool():
+    """A stale exemption silently suppresses the check for a renamed tool."""
+    import mcp_tool_catalog as _cat
+
+    known = {t.name for t in _cat.TOOLS}
+    stale = sorted(set(_NOT_A_COLLECTION) - known)
+    assert not stale, (
+        f"_NOT_A_COLLECTION names tool(s) that no longer exist: {stale}"
+    )
+
+
+def test_the_cli_defaults_records_on_without_changing_the_toolspec():
+    """⚠ TWO SURFACES, TWO DEFAULTS, ON PURPOSE.
+
+    The ToolSpec default stays False because ~400 MCP callers predate the param
+    and parse the display string — memory/records.py's compatibility rule, and
+    test_spec_advertises_as_records pins it. The CLI flips it because its
+    consumer is a pipe, not an LLM reading prose.
+
+    Asserting both together so a future "simplification" cannot quietly align
+    them and break one side or the other.
+    """
+    import inspect
+
+    import mcp_tool_catalog as _cat
+    from m3_memory import cli as _cli
+
+    spec = {t.name: t for t in _cat.TOOLS}["task_list"]
+    assert spec.parameters["properties"]["as_records"]["default"] is False, (
+        "the MCP default changed — every caller that parses the display string "
+        "would now receive JSON"
+    )
+    src = inspect.getsource(_cli)
+    assert 'tool_args["as_records"] = True' in src, (
+        "the CLI no longer defaults records on, so piped output is prose again"
+    )

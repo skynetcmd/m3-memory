@@ -1579,6 +1579,27 @@ def _cmd_tool_dispatch(args: argparse.Namespace) -> int:
     if db:
         tool_args["database"] = db
 
+    # ⚠ RECORDS BY DEFAULT ON THE CLI ONLY — NOT IN THE TOOLSPEC.
+    #
+    # §3's first tenet: "return structured data, never message strings; a tool
+    # that returns 'Found 21 groups.' forces the caller into prose-parsing."
+    # Thirteen tools carry an `as_records` option whose default is False, and
+    # that default is DELIBERATE and test-pinned: ~400 MCP callers predate the
+    # param and parse the display string, so flipping it in the ToolSpec would
+    # break every one of them (see memory/records.py's compatibility rule).
+    #
+    # But the CLI's consumer is a PIPE, not an LLM reading prose. Now that every
+    # tool is pipeable, `m3 tasks task_list | jq '.items[]'` is the obvious
+    # thing to write, and it silently matched nothing because stdout was
+    # "Tasks (20):\n  [c0aab26a] P0 ...". So the default flips HERE, at the
+    # surface whose consumer changed, and the MCP contract is untouched.
+    #
+    # An explicit --no-as_records still wins: the flag is parsed before this and
+    # only an ABSENT value is defaulted.
+    _props = (spec.parameters or {}).get("properties", {}) or {}
+    if "as_records" in _props and "as_records" not in tool_args:
+        tool_args["as_records"] = True
+
     async def _run():
         # allow_caller_agent_id: this is a human at a terminal, not an LLM, so an
         # explicit `--agent_id` is the user's own choice and must survive. The
@@ -1632,7 +1653,50 @@ def _cmd_tool_dispatch(args: argparse.Namespace) -> int:
             except ValueError:
                 pass  # looked like JSON, is not — emit as the string it is
     print(_json.dumps(result, default=str, indent=2))
+    _warn_if_not_applied(result, tool)
     return 0
+
+
+def _warn_if_not_applied(result, tool: str) -> None:
+    """Narrate a completed-but-inapplicable call on stderr.
+
+    ⚠ THE CASE A PIPELINE CANNOT SEE. A tool can succeed at doing nothing:
+    `memory_grade` returns `{"ok": true, "applied": false, "graded": 0,
+    "reason": "outside_feedback_window"}` when every verdict arrived late. That
+    is a correct RESULT, not a failure — the call completed and declined — so
+    it keeps exit 0 per the UNIX convention (0 = the operation completed; 1 = a
+    negative result that PREVENTS it; 2 = usage/refusal before it).
+
+    But stdout carries only data, so nothing told the operator. The signal was
+    machine-readable and human-invisible, which is the §3 shape: not a lie, but
+    a success that reads as more than it was.
+
+    So: data stays on stdout, the narration goes to stderr, exit code unchanged.
+    A script that wants to branch still reads `applied` from the payload; a
+    human watching a pipeline now sees why nothing happened.
+
+    §3's evidence levels are preserved VERBATIM rather than reworded — the impl
+    already emits `observed:` for measured values and `inspect:` for the knob,
+    and paraphrasing them here would create a second wording to keep in step.
+    """
+    if not isinstance(result, dict):
+        return
+    # Only narrate an explicit non-application. A tool that never reports
+    # `applied` is not making this claim, and inventing a warning for it would
+    # be the false alarm §3 counts as a violation in its own right.
+    if result.get("applied") is not False:
+        return
+
+    lines = [f"Note: {tool} completed but applied nothing."]
+    for key in ("reason", "observed", "inspect", "note"):
+        value = result.get(key)
+        if value:
+            lines.append(f"  {key}: {value}")
+    for key in ("rejected_stale", "unknown"):
+        value = result.get(key)
+        if value:
+            lines.append(f"  {key}: {value}")
+    print("\n".join(lines), file=sys.stderr)
 
 
 def main() -> None:

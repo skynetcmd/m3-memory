@@ -71,14 +71,20 @@ def test_a_piped_object_drives_a_simple_tool():
     r = _run(["memory", "memory_search", "--json-file", "-"],
              stdin_text=json.dumps({"query": "postgres", "k": 2}))
     assert r.returncode == 0, r.stderr[-400:]
-    assert "results" in r.stdout
+    # The CLI defaults as_records on (its consumer is a pipe), so a
+    # successful search is a records envelope, not the prose word
+    # "results". Asserting the STRUCTURE is also the stronger check.
+    assert "items" in json.loads(r.stdout)
 
 
 def test_flags_still_work_unchanged():
     """The change must not cost the existing, overwhelmingly common path."""
     r = _run(["memory", "memory_search", "--query", "postgres", "--k", "1"])
     assert r.returncode == 0, r.stderr[-400:]
-    assert "results" in r.stdout
+    # The CLI defaults as_records on (its consumer is a pipe), so a
+    # successful search is a records envelope, not the prose word
+    # "results". Asserting the STRUCTURE is also the stronger check.
+    assert "items" in json.loads(r.stdout)
 
 
 def test_flags_and_piped_json_compose():

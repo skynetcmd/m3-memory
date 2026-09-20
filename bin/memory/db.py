@@ -363,11 +363,34 @@ def _ensure_sync_tables(db_path: str | None = None) -> None:
         env = os.environ.copy()
         if target_flag:
             env["M3_DATABASE"] = active
+        # ⚠ RESOLVE THE HELPER, DO NOT HOPE FOR IT.
+        #
+        # `from _task_runtime import ...` is a BARE module name: it resolves
+        # only when bin/ is already on sys.path. A scheduled task runs
+        # `python bin/memory_maintenance.py`, which puts bin/ on the path as the
+        # script's own directory — but an import of memory.db from anywhere
+        # else does not, and the except-branch then set _nw = {} SILENTLY. The
+        # migration child was spawned with no CREATE_NO_WINDOW, so it flashed a
+        # console on a user's desktop at 03:00 (reported 2026-09-20).
+        #
+        # Belt and braces: add bin/ to sys.path before retrying, and if the
+        # helper is still unreachable, synthesise the flag rather than
+        # degrading to "no flag" — the whole point is that a background spawn
+        # must never allocate a console.
         try:
             from _task_runtime import no_window_kwargs
             _nw = no_window_kwargs()
-        except Exception:
-            _nw = {}
+        except ImportError:
+            _bin_dir = os.path.join(config.BASE_DIR, "bin")
+            if _bin_dir not in sys.path:
+                sys.path.insert(0, _bin_dir)
+            try:
+                from _task_runtime import no_window_kwargs
+                _nw = no_window_kwargs()
+            except ImportError:
+                logger.debug("_task_runtime unavailable; applying CREATE_NO_WINDOW directly")
+                _flag = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                _nw = {"creationflags": _flag} if _flag else {}
         with migration_lock():
             # ⚠ CAPTURE THE CHILD'S STDOUT, THEN RELAY IT TO STDERR.
             #

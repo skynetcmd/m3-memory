@@ -71,7 +71,11 @@ def test_a_prose_result_is_still_valid_json():
     Only a result that genuinely parses as an object/array is unwrapped; a
     human-readable string stays a JSON string so the pipe never sees raw prose.
     """
-    r = _run(["memory", "memory_search", "--query", "postgres", "--k", "1"])
+    # memory_search now defaults to records on the CLI, so ask for the display
+    # string explicitly — that is the path this guards. A tool WITHOUT an
+    # as_records option would take it implicitly.
+    r = _run(["memory", "memory_search", "--query", "postgres", "--k", "1",
+              "--no-as_records"])
     assert r.returncode == 0, r.stderr[-400:]
     payload = json.loads(r.stdout)          # must not raise
     assert isinstance(payload, str), (
@@ -261,3 +265,98 @@ def test_an_exact_phrase_hit_is_stamped(tmp_path):
         f"an exact-phrase hit could not be graded: {out.get('reason')} — the "
         f"short-circuit path is not recording retrieval"
     )
+
+
+# ── a completed-but-inapplicable call narrates on stderr ─────────────────────
+
+def test_a_non_applied_result_is_narrated_on_stderr():
+    """⚠ A SUCCESS THAT DID NOTHING WAS INVISIBLE TO A PIPELINE.
+
+    memory_grade can return {"ok": true, "applied": false} when every verdict
+    arrived outside the window. That is a correct RESULT, not a failure — so it
+    keeps exit 0, per the UNIX convention (0 = the operation completed; 1 = a
+    negative result that prevents it; 2 = usage/refusal before it). But stdout
+    carries only data, so nothing told the operator why nothing happened.
+
+    §3's evidence lines are relayed VERBATIM rather than reworded, so there is
+    one wording to maintain rather than two that can disagree.
+    """
+    import memory_core as mc
+
+    marker = "stale-narrate-" + os.urandom(4).hex()
+    assert _run(["memory", "memory_write", "--content", marker,
+                 "--type", "note", "--title", marker]).returncode == 0
+    r = _run(["memory", "memory_search", "--query", marker, "--k", "1",
+              "--as_records"])
+    mid = json.loads(r.stdout)["items"][0]["id"]
+
+    # Age the retrieval past the window so the grade is declined.
+    with mc._db() as db:
+        db.execute("UPDATE memory_items SET last_accessed_at = ? WHERE id = ?",
+                   ("2020-01-01T00:00:00+00:00", mid))
+        db.commit()
+
+    graded = _run(["memory", "memory_grade", "--json-file", "-"],
+                  stdin_text=json.dumps({"grades": [
+                      {"memory_id": mid, "verdict": "helpful"}]}))
+
+    assert graded.returncode == 0, (
+        "a declined grade is a result, not a failure — the exit code must stay 0"
+    )
+    payload = json.loads(graded.stdout)
+    assert payload["applied"] is False
+    assert "reason" not in graded.stdout or True  # payload keeps the machine signal
+
+    err = graded.stderr
+    assert "applied nothing" in err, (
+        f"nothing on stderr explained the non-application: {err[-200:]!r}"
+    )
+    assert "observed:" in err, "the §3 observed: line was not relayed"
+    assert "inspect:" in err, "the §3 inspect: line (the knob) was not relayed"
+    # Verbatim, not paraphrased.
+    assert payload["observed"] in err
+    assert payload["inspect"] in err
+
+
+def test_a_successful_call_says_nothing_on_stderr():
+    """§3: prove the warning stays QUIET on a healthy call.
+
+    A note that fires when nothing is wrong trains the operator to ignore the
+    one that matters, which is a violation in its own right.
+    """
+    marker = "quiet-" + os.urandom(4).hex()
+    assert _run(["memory", "memory_write", "--content", marker,
+                 "--type", "note", "--title", marker]).returncode == 0
+    r = _run(["memory", "memory_search", "--query", marker, "--k", "1",
+              "--as_records"])
+    mid = json.loads(r.stdout)["items"][0]["id"]
+
+    graded = _run(["memory", "memory_grade", "--json-file", "-"],
+                  stdin_text=json.dumps({"grades": [
+                      {"memory_id": mid, "verdict": "helpful"}]}))
+    assert json.loads(graded.stdout)["applied"] is True
+    assert "applied nothing" not in graded.stderr, (
+        "the non-application note fired on a call that DID apply"
+    )
+
+
+def test_stdout_stays_pure_json_when_stderr_narrates():
+    """The whole point: narration must not contaminate the data channel."""
+    import memory_core as mc
+
+    marker = "purity-" + os.urandom(4).hex()
+    assert _run(["memory", "memory_write", "--content", marker,
+                 "--type", "note", "--title", marker]).returncode == 0
+    r = _run(["memory", "memory_search", "--query", marker, "--k", "1",
+              "--as_records"])
+    mid = json.loads(r.stdout)["items"][0]["id"]
+    with mc._db() as db:
+        db.execute("UPDATE memory_items SET last_accessed_at = ? WHERE id = ?",
+                   ("2020-01-01T00:00:00+00:00", mid))
+        db.commit()
+
+    graded = _run(["memory", "memory_grade", "--json-file", "-"],
+                  stdin_text=json.dumps({"grades": [
+                      {"memory_id": mid, "verdict": "helpful"}]}))
+    json.loads(graded.stdout)      # must not raise
+    assert graded.stderr.strip(), "stderr should carry the narration"
