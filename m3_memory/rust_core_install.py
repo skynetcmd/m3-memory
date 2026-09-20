@@ -87,17 +87,38 @@ from m3_memory._platform import os_name as _os_name
 # `m3-core-rs-windows-cuda` being a 404 on PyPI is BY DESIGN.
 #
 # The resolver therefore cascades GitHub Release -> PyPI -> source. The Release
-# is the CANONICAL channel: it carries all 7 backends x 4 interpreters on every
-# tag, so it is complete by construction, whereas PyPI can never carry CUDA.
+# is the CANONICAL channel: it is the only one that CAN carry every backend,
+# because PyPI can never carry CUDA (size cap, below).
 #
-# It is also the only channel that is CURRENT. The 5 PyPI-eligible backends
-# (cpu / vulkan / macos-metal) are supposed to publish to PyPI but do not: every
-# publish job fails trusted-publishing exchange with `invalid-publisher`, so all
-# five still serve 3.7.4 (2026-07-04) while 3.7.25/.27/.28/.29/.31 each shipped a
-# complete Release. A PyPI-first cascade would install that stale core and STOP,
-# because pip exits 0 — a stale success is worse than a clean miss. Fixing the
-# PyPI publishers (see docs) does not make PyPI-first correct again; leave the
-# Release first.
+# ⚠ "Complete by construction" is what the workflow INTENDS, not a guarantee the
+# resolver can rely on. v2026.9.16 shipped 28 wheels and still carried only SIX
+# backends: windows_cuda was missing (its job was cancelled by a mid-flight
+# re-tag) and a generically-named m3_core_rs-* set filled the count. Since the
+# cascade below matches assets BY FILENAME, that was a hard miss for every
+# Windows+NVIDIA host, not a fallback. Do not treat a tag's existence as proof
+# its assets are complete, and do not restate the matrix as a fixed count — the
+# interpreter set moves (cp311-314 -> cp312-315, plus a one-time cp311 set in
+# 3.9.20). The property that matters is that all seven
+# m3_core_rs_<os>_<backend> prefixes are present.
+#
+# It is also the only channel that is CURRENT. The PyPI-eligible backends are
+# supposed to publish there but do not: every publish job fails
+# trusted-publishing exchange with `invalid-publisher`. Measured 2026-09-20,
+# cache-busted against the JSON API:
+#
+#     m3-core-rs-windows-cpu    3.7.4       (2026-07-04)
+#     m3-core-rs-linux-cpu      3.7.4
+#     m3-core-rs-macos-metal    3.7.4
+#     m3-core-rs-windows-cuda   NOT ON PyPI AT ALL
+#
+# ⚠ Only THREE resolve — fewer than the "5 PyPI-eligible" this comment used to
+# claim. Every release since 3.7.4 has shipped via the Release alone.
+#
+# A PyPI-first cascade would install that 2026-07-04 core and STOP, because pip
+# exits 0 — a stale success is worse than a clean miss, and the user has no
+# signal they are five versions behind. Fixing the publishers does not make
+# PyPI-first correct again; leave the Release first. PyPI publishing is opt-in
+# and off by default in release.yml.
 M3_CORE_RS_VERSION = "3.9.20"
 M3_CORE_RS_GIT_TAG = "v2026.9.20"
 
@@ -1272,18 +1293,21 @@ def install_rust_core(os_tok: Optional[str] = None, *,
 
     # Three-tier install cascade — GITHUB RELEASE FIRST.
     #
-    #   1. GitHub Release prebuilt — the canonical, COMPLETE channel: every
-    #      release carries all 7 backends x 4 interpreters, and it is the only
-    #      channel for the size-capped CUDA wheels (windows-cuda ~244 MiB,
-    #      linux-cuda ~949 MiB against a 100 MB per-file limit).
+    #   1. GitHub Release prebuilt — the canonical channel, and the only one
+    #      that can carry the size-capped CUDA wheels (windows-cuda ~244 MiB,
+    #      linux-cuda ~949 MiB against a 100 MB per-file limit). Intended to
+    #      carry every backend on every tag; see the header for why that is an
+    #      intent rather than a guarantee (v2026.9.16 shipped without
+    #      windows_cuda), which is exactly why the backend chain below exists.
     #   2. pip prebuilt — PyPI or pip's local wheel cache.
     #   3. Source build — last resort, needs Rust + cmake + C++ + backend SDK.
     #
     # WHY THE RELEASE COMES FIRST (changed 2026-07-31). PyPI is not merely
     # incomplete, it is STALE: every `publish` job has failed trusted-publishing
-    # exchange with `invalid-publisher` since 3.7.4, so all five PyPI-eligible
-    # projects still serve a 2026-07-04 build while 3.7.25/.27/.28/.29/.31 each
-    # shipped a complete 28-asset Release. Trying PyPI first therefore meant
+    # exchange with `invalid-publisher` since 3.7.4, so the PyPI projects still
+    # serve a 2026-07-04 build (measured 2026-09-20: only THREE resolve at all)
+    # while every release since has shipped via the Release. Trying PyPI first
+    # therefore meant
     # either installing a months-old core (pip exits 0 — a SUCCESS, so the
     # cascade stops and never reaches the good wheel) or paying a doomed network
     # round-trip before falling through. Version-pinning the pip install does not
@@ -1294,9 +1318,10 @@ def install_rust_core(os_tok: Optional[str] = None, *,
     # "which is nominally fastest" also fixes the CUDA case, where the pip hop
     # was always a wasted attempt against a package that 404s by design.
     #
-    # This is not a workaround to unwind once PyPI is fixed: the Release is
-    # complete by construction for all 7 backends, while PyPI can never carry
-    # CUDA. Keep the Release first.
+    # This is not a workaround to unwind once PyPI is fixed: the Release is the
+    # only channel that CAN carry all 7 backends, while PyPI can never carry
+    # CUDA. Keep the Release first. (Can, not does — v2026.9.16 shipped without
+    # windows_cuda; see the module header.)
     # Recorded BEFORE the cascade so the log line reads as a transition
     # ("3.9.7 -> 3.9.16") rather than a bare end state. None means no native
     # core was importable, i.e. this is a first install rather than an upgrade.

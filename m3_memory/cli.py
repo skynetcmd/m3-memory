@@ -305,9 +305,20 @@ def _offer_rust_core_upgrade(
     count_tokens path they upgraded to get, which is precisely the kind of
     "it says it upgraded, so it must be fixed" trust gap that costs us.
 
-    Default is YES: the pin names a Release known to carry all 7 backends x 4
-    interpreters, so accepting is the safe, expected answer. Declining is
-    non-destructive -- the tier-2 HTTP fallback keeps embeddings working.
+    Default is YES: the pin names a Release that should carry every backend for
+    this version's interpreter set, so accepting is the safe, expected answer.
+    Declining is non-destructive -- the tier-2 HTTP fallback keeps embeddings
+    working.
+
+    ⚠ That "should" is doing real work, and it is the releaser's job to make it
+    true. Do NOT restate it as a fixed count: the set changes (v2026.9.16 was
+    7 x cp311-314; 3.9.20 is 7 x cp312-315 plus a one-time cp311 courtesy set),
+    and a count is not the property that matters anyway. v2026.9.16 shipped 28
+    assets while carrying only SIX backends -- windows_cuda was missing and a
+    generically-named m3_core_rs-* set filled the count. Since the cascade
+    matches assets BY FILENAME, that is a hard miss for a Windows+NVIDIA host,
+    not a fallback. Verify a release by confirming all seven
+    m3_core_rs_<os>_<backend> prefixes are present, never by counting assets.
 
     Best-effort and advisory: any import/probe failure is swallowed, exactly
     like _warn_if_pypi_newer. NEVER prompts when stdin is not a TTY -- a
