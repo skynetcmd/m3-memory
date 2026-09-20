@@ -113,6 +113,24 @@ class M3Context:
                 _CONTEXTS.move_to_end(resolved)
                 return ctx
             # Miss — build and insert. Evict LRU if full.
+            #
+            # Log the FIRST bind of each store, with the argument beside the
+            # resolution. A long-lived daemon binds once and reuses that context
+            # for its whole life, so if the resolver ever answers differently
+            # than a caller expects — an explicit path vs the None default, or a
+            # resolution taken before the roots settle — nothing downstream ever
+            # says so again, and the mismatch surfaces only as a confusing query
+            # failure against a store that looks correct.
+            #
+            # INFO, not debug: this is one line per distinct store per process
+            # (the cache guarantees it), and it is the record that makes a
+            # wrong binding attributable after the fact rather than requiring a
+            # live debugger. requested=None means "resolver default".
+            logger.info(
+                "M3Context first bind: requested=%r -> resolved=%r "
+                "(cached stores=%d)",
+                db_path, resolved, len(_CONTEXTS) + 1,
+            )
             ctx = cls(resolved)
             _CONTEXTS[resolved] = ctx
             while len(_CONTEXTS) > _CONTEXT_CACHE_SIZE:
