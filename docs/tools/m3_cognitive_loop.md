@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_cognitive_loop.py
-sha1: e9c7f4c53402
-mtime_utc: 2026-09-20T16:24:33.557567+00:00
-generated_utc: 2026-09-20T16:25:27.649699+00:00
+sha1: c2e1cdeb1b02
+mtime_utc: 2026-09-20T21:16:13.455217+00:00
+generated_utc: 2026-09-20T21:17:21.971388+00:00
 private: false
 ---
 
@@ -30,7 +30,7 @@ for m3_enrich and m3_entities.
 
 ## Entry points
 
-- `def main()` (line 1818)
+- `def main()` (line 1849)
 - `if __name__ == "__main__"` guard
 
 ---

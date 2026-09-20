@@ -1301,15 +1301,46 @@ async def run_distill_pass(args):
         except Exception:  # noqa: BLE001 — diagnostics are best-effort
             impl_db = "(unreadable)"
         guard_db = str(args.database or "(resolver default)")
+
+        # RULE OUT what this frame can already settle, rather than listing
+        # candidates the message's own data disproves. The first version
+        # printed both paths and then suggested "possible: those are different
+        # stores" on the very next line — self-contradicting when they match,
+        # and it sent the reader to `m3 doctor --fix` for a migration that was
+        # already applied. §3: never assert an unconfirmed cause, and do not
+        # keep offering one the evidence has eliminated.
+        same_store = (impl_db == guard_db)
+        missing = "no such table" in str(e).lower()
+        if same_store and missing:
+            # Both paths agree and the table is absent to THIS connection.
+            # A store mismatch and a pending migration are both excluded: the
+            # guard read the same file successfully moments earlier.
+            verdict = (
+                "ruled out: not a store mismatch (both paths above are "
+                "identical) and not a pending migration (the guard read the "
+                "same file and found work). "
+                "possible: this process holds a connection opened before the "
+                "table existed, or a second store shadows it at runtime. "
+                "inspect: the trace below; compare this process's start time "
+                "against the migration; `m3 halt list` for other live writers. "
+            )
+        elif missing:
+            verdict = (
+                "possible: the guard and the implementation resolved DIFFERENT "
+                "stores (compare the two paths above), or the opened one "
+                "predates the orchestration migration that creates `tasks` "
+                "(memory/migrations/012_orchestration.sql). "
+                "inspect: the trace below; `m3 doctor --fix` applies pending "
+                "migrations. "
+            )
+        else:
+            verdict = "inspect: the trace below. "
+
         logger.error(
             f"observed: distillation pass failed ({type(e).__name__}: {e}). "
             f"observed: guard probed {guard_db!r} and reported work; the "
             f"implementation opened {impl_db!r}. "
-            f"possible: those are different stores, or the opened one predates "
-            f"the orchestration migration that creates `tasks` "
-            f"(memory/migrations/012_orchestration.sql). "
-            f"inspect: the trace below; compare the two paths above; "
-            f"`m3 doctor --fix` applies pending migrations. "
+            f"{verdict}"
             f"Will retry next cycle.",
             exc_info=True,
         )
