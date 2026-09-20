@@ -29,28 +29,74 @@ is *not* done.
   vocabulary. Next: collect shadow-mode logs over real traffic, build the corpus,
   measure the rate. No cutover until then.
 
+  ⚠ **"No cutover until then" no longer holds — the cutover shipped anyway.**
+  `enforce` is implemented and defaults ON wherever the native core is installed
+  (see the Route cutover item below). So this corpus is no longer a gate ahead of
+  a change; it is now *validation of a decider already serving traffic*, which
+  makes it more urgent, not less. Note also that `log` mode — the thing that
+  produces the corpus — is no longer the default, so real traffic is not
+  currently generating comparison logs on a native install.
+
 ---
 
 ## Decisions deferred to a human
 
 - [ ] **Embedded-embedder default switch.** The in-process llama.cpp path
-  (`M3_EMBED_GGUF`) is verified at cosine ≈ 0.996 against the **550**
-  `bge-m3-GGUF-Q4_K_M.gguf`-tagged rows. The **~14k** LM Studio
-  `text-embedding-bge-m3` rows are a *separate, unverified* embedding namespace.
-  Making the embedded path the *default* embedder would strand the bulk of the
-  existing index. It is intentionally opt-in. Decision needed: leave opt-in, or
-  re-embed the corpus under one tag, or verify embedded-vs-LM-Studio parity first.
+  (`M3_EMBED_GGUF`) is verified at cosine ≈ 0.996 against the
+  `bge-m3-GGUF-Q4_K_M.gguf`-tagged rows. The LM Studio `text-embedding-bge-m3`
+  rows carry a *different tag*. Making the embedded path the *default* embedder
+  would change which tag new rows get. It is intentionally opt-in. Decision
+  needed: leave opt-in, or re-embed the corpus under one tag.
 
-- [ ] **Route cutover.** Gated on the shadow corpus above *and* a branch-name
-  mapping (Python `temporal/multi_session/sharp/entity_anchored/default` vs Rust
-  `entity/lexical/semantic/temporal`). `M3_ROUTE_SHADOW_MODE=enforce` is reserved
-  but deliberately unimplemented.
+  ⚠ RE-MEASURE BEFORE DECIDING — the counts in the original note are stale, and
+  the framing has since been partly answered by code. Measured on the reference
+  install 2026-09-20: `memory_embeddings` holds 19,413 `text-embedding-bge-m3`
+  and 3,528 `bge-m3-GGUF-Q4_K_M.gguf`; `entity_embeddings` is the reverse
+  (6,226 GGUF, 1 LM Studio). So the LM Studio side is the bulk of memory rows
+  and the GGUF side is the bulk of entity rows — a switch strands neither
+  wholesale, but it does keep splitting both tables.
 
-- [ ] **`m3-rank` disposition.** The crate's `fuse` function is two-list rank-fusion;
-  m3-memory's actual FTS5+vector merge is a per-row scoring loop with no two separate
-  lists to fuse. `m3-rank` is **not applicable** to m3-memory as currently designed.
-  Decide: leave it as an unused generic primitive, repurpose it, or drop it from the
-  workspace.
+  `bin/doctor/embed_space_probe.py` now collapses both tags to one
+  cosine-comparable FAMILY (`_family`) and reports
+  `embed-space: ok (single space: bge-m3)`. That is a deliberate judgement that
+  the two are same-dimension and comparable — read it as m3's answer to
+  "verify parity first", not as evidence the tags were unified. Do NOT close
+  this item on the strength of that green line alone (it was misread that way
+  once); the tag split is real and visible in the tables above.
+
+- [x] **Route cutover.** _Shipped_ — both stated gates are resolved in code.
+  `M3_ROUTE_SHADOW_MODE=enforce` is implemented (`bin/auto_route.py:307`) and is
+  now the **default whenever `m3_core_rs` is importable** (`:51`); it falls back
+  to `off` without the native core. The branch-name mapping exists as
+  `_map_rust_to_py_branch` (`:214`), and enforce keeps the post-retrieval sharp
+  spike check ahead of the Rust decision so behaviour matches the Python decider
+  on that branch.
+
+  ⚠ This item still read "reserved but deliberately unimplemented" long after
+  the cutover had shipped AND been made the default — worth noting because the
+  corpus item below, which was supposed to GATE this, is still open. The cutover
+  did not wait for it. If that ordering was intentional, say so there; if not,
+  the corpus is now measuring a decider that is already live.
+
+- [ ] **`m3-rank` disposition — DECIDED: drop, but it is not a clean excision.**
+  The crate's `fuse` is two-list rank-fusion; m3-memory's FTS5+vector merge is a
+  per-row scoring loop with no two lists to fuse. Confirmed unused 2026-09-20 —
+  `fuse`, `fuse_then_mmr`, `RankRow` and `RankSource` each have **zero** call
+  sites in `bin/` and `tests/`. The live hybrid path is
+  `m3_core_rs.rank_hybrid_packed` (`bin/memory/search.py:1339`), which does NOT
+  come from this crate.
+
+  ⚠ The TODO framed this as "drop it from the workspace", which understates the
+  blast radius. `m3-rank` is wired into the PyO3 layer (14 references in
+  `crates/m3-core-py/src/lib.rs`, plus `pub use m3_rank`), and **`RankRow` is one
+  of the 47 symbols the built wheel exports**. Removing it therefore changes the
+  public API surface, not just an internal dependency — it needs a version bump
+  and a note, and must not ride along in an unrelated release.
+
+  Sequence when it is done: remove the PyO3 bindings and `pub use` first
+  (that is what drops the export), then the workspace member and the
+  `m3-core-py` dependency, then verify the export list shrinks by exactly the
+  expected symbols. Keep `rank_hybrid*` — different code, actively used.
 
 ---
 
@@ -97,6 +143,27 @@ is *not* done.
 
 ## Future Performance Optimization Targets (Rust)
 
+- [x] **Write-path chunking + mean-pool — MEASURED, NOT WORTH OXIDIZING.**
+  _Measured 2026-09-20._ Both are pure Python on the per-write path and both
+  look like obvious candidates. Neither is:
+
+  | path | input | cost | share of the embed it precedes |
+  |---|---|---|---|
+  | `_chunk_for_sliding_window` | 400 KB prose (156 windows) | 0.17 ms | 0.01% |
+  | `_chunk_for_sliding_window` | 400 KB dense CJK+UUID | 1.64 ms | 0.11% |
+  | `_mean_pool` | 32 sub-chunks × 1024-dim | 0.75 ms | <1% |
+
+  Every window costs one embed (~10 ms native, ~300 ms over HTTP), so the
+  chunker is three to four orders of magnitude below the work it schedules.
+  `estimate_tokens` — the hot inner call — is deliberately pure arithmetic
+  (`max(bytes/3, chars)`), not a tokenizer, so there is no expensive kernel
+  hiding inside it either.
+
+  ⚠ Recorded so this is not re-proposed from inspection. Both were proposed on
+  the strength of "nested Python loop on the write path" and both died to a
+  one-minute measurement (§12c: prefer the cheap measurement over the plausible
+  model). The write path is embed-bound; oxidizing around that does nothing.
+
 - [x] **Candidate-Assembly Loop Oxidation.** Refactored `search.py` to use
   `rank_hybrid_packed` in Rust, eliminating thousands of dictionary allocations
   per search and moving content-dedup + MMR to the Rust core.
@@ -116,7 +183,13 @@ is *not* done.
 - [ ] **Benchmark Datasets.** Restore `repo/data/longmemeval/` datasets for
   1M+ row evaluations. (Still missing from the primary repositories).
 
-- [ ] **macOS Wheel Automation.** Create a GitHub Actions workflow in `m3-core-rs` to build and publish pre-compiled macOS wheels (Apple Silicon + Intel) with `embedded-metal` support. This removes the Xcode/Rust toolchain requirement for macOS users. See `docs/OXIDATION_FIXES.md` for current status.
+- [x] **macOS Wheel Automation.** _Done_ — `m3-core-rs`'s `release.yml` builds
+  `macos-metal` on `macos-14` and publishes the wheels with the tagged release
+  (v2026.9.16 shipped 4, one per interpreter). Xcode/Rust are no longer needed
+  to install on macOS.
+  ⚠ **Apple Silicon only** (`macosx_11_0_arm64`), not the "Apple Silicon +
+  Intel" the original item asked for. An x86_64 mac still falls back to a source
+  build. Reopen as a separate item if Intel macs need to be supported.
 
 - [ ] **Full env-var reconcile re-sweep cadence.** `docs/tools/ENV_VAR_RECONCILE_REPORT.md`
   was fully re-swept 2026-05-14 (all three groups). Re-run when new `M3_*` vars are
@@ -136,6 +209,24 @@ is *not* done.
   `estimate_tokens` + `DispatcherConfig` but not the async `Dispatcher` itself
   (pyo3 + async + generics was deferred as a rabbit hole). Only needed if Python
   should *drive* the dispatcher rather than just configure it.
+
+- [ ] **Dispatcher latency histogram is a §3 false signal — fix or stop publishing.**
+  `DispatcherStats.p50_ms` / `p99_ms` are hardcoded `0.0`
+  (`m3-dispatcher/src/lib.rs:471-472`, flagged by two in-code TODOs at `:94`/`:96`)
+  and then **served on the embed server's metrics endpoint**
+  (`m3-embed-server/src/server.rs:282-283`). Verified live 2026-09-20:
+  `GET :8082/metrics` -> `{"in_flight":0,"p50_ms":0.0,"p99_ms":0.0,"queue_depth":0}`.
+
+  A metric that always reads 0.0 is indistinguishable from a genuinely idle
+  server, so it reads as observability while providing none — the §3 "declared
+  limit with no enforcement site" pattern, on a production endpoint. This
+  matters more since 3.9.16 made the per-wheel `streams` default a stated
+  throughput trade whose named signal is this same endpoint: an operator told to
+  watch latency here will watch a constant.
+
+  Either wire the histogram, or drop the two fields from the JSON until it is
+  wired. Dropping is the smaller change and is honest; keeping a 0.0 is not.
+  ⚠ `in_flight` and `queue_depth` ARE real — do not remove those.
 
 - [ ] **crates.io publishing.** Per plan §9.5, no rush — a crate publishes only
   after one stable release cycle. Likely order: `m3-error` → `m3-hash` →
