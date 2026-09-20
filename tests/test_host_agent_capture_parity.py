@@ -39,7 +39,6 @@ import chatlog_core  # noqa: E402
 import chatlog_ingest  # noqa: E402
 import chatlog_init  # noqa: E402
 
-
 # Agents whose capture is genuinely not implemented yet. An entry here is a
 # DECLARED gap with a reason, which is the opposite of the silent omission this
 # file was written after: it still shows up, it just does not fail the build.
@@ -446,7 +445,6 @@ def test_an_unknown_opencode_provider_is_normalised():
     rather than widening the enum, which would make `provider` answer two
     different questions.
     """
-    from chatlog_config import VALID_PROVIDERS
 
     routed = chatlog_ingest._opencode_item(
         {"role": "user", "providerID": "opencode", "modelID": "qwen3.6-plus-free"},

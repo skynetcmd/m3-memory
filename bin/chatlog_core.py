@@ -46,6 +46,7 @@ VALID_ROLES = frozenset({"user", "assistant", "system", "tool"})
 # error. chatlog_config owns them because it owns the dataclass whose default
 # host_agents map is built from the same set.
 from chatlog_config import VALID_HOST_AGENTS, VALID_PROVIDERS  # noqa: E402
+
 MAX_CONTENT_LEN = 50_000
 # Hard cap on search result rows. Defends the API boundary against pathological
 # `k` (DESIGN §4/§6): SQLite treats `LIMIT -1` as UNBOUNDED, so a negative k

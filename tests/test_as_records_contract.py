@@ -336,6 +336,7 @@ def test_the_cli_defaults_records_on_without_changing_the_toolspec():
     import inspect
 
     import mcp_tool_catalog as _cat
+
     from m3_memory import cli as _cli
 
     spec = {t.name: t for t in _cat.TOOLS}["task_list"]

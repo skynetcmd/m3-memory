@@ -29,8 +29,6 @@ import os
 import subprocess
 import sys
 
-import pytest
-
 _REPO = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 _BIN = os.path.join(_REPO, "bin")
 if _BIN not in sys.path:

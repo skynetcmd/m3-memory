@@ -36,6 +36,7 @@ if _BIN not in sys.path:
 
 import memory_core as mc  # noqa: E402
 import memory_maintenance as mm  # noqa: E402
+
 from memory import confidence as _conf  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("m3_sandbox")

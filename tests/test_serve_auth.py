@@ -18,9 +18,8 @@ import unittest
 _BIN = pathlib.Path(__file__).resolve().parents[1] / "bin"
 sys.path.insert(0, str(_BIN))
 
-import mcp_compat  # noqa: E402 — needs _BIN on sys.path
-
 import m3_http_auth as A  # noqa: E402
+import mcp_compat  # noqa: E402 — needs _BIN on sys.path
 
 
 class TestStaticTokenVerifier(unittest.IsolatedAsyncioTestCase):
@@ -357,8 +356,8 @@ class TestFailOpenCanary(unittest.TestCase):
     """
 
     def test_app_without_attach_does_not_401(self):
-        from mcp_compat import FastMCP
         from mcp.server.transport_security import TransportSecuritySettings
+        from mcp_compat import FastMCP
         from starlette.testclient import TestClient
 
         mcp = FastMCP("test-open")

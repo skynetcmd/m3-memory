@@ -71,7 +71,7 @@ def _preview_pdf(lines_per_page):
         buf.write((f"{n} 0 obj" + nl + objects[n] + nl + "endobj" + nl).encode())
     xref = buf.tell()
     highest = max(objects)
-    buf.write((f"xref" + nl + f"0 {highest + 1}" + nl
+    buf.write(("xref" + nl + f"0 {highest + 1}" + nl
                + "0000000000 65535 f " + nl).encode())
     for n in range(1, highest + 1):
         buf.write((f"{offsets.get(n, 0):010d} 00000 n " + nl).encode())

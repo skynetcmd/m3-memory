@@ -71,8 +71,8 @@ def test_meta_tools_are_real_catalog_tools():
     Guards a typo in the constant: the names are used for an identity check
     (`spec.name in _META_TOOLS`), which fails silently on a misspelling.
     """
-    import memory_bridge
     import mcp_tool_catalog
+    import memory_bridge
 
     catalog = {spec.name for spec in mcp_tool_catalog.TOOLS}
     missing = memory_bridge._META_TOOLS - catalog
@@ -103,8 +103,8 @@ def test_startup_surface_matches_the_documented_count():
     that docstring and the OpenClaw toolFilter both need re-deriving -- which is
     the point of failing here.
     """
-    import memory_bridge
     import mcp_tool_catalog
+    import memory_bridge
     import tool_domains
 
     essentials = {s.name for s in mcp_tool_catalog.TOOLS if tool_domains.is_essential(s.name)}
