@@ -58,6 +58,13 @@ the policy is forward-going only.
 
 ### Changed
 
+- **⚠ The CLI now returns structured records by default.** Thirteen listing and
+  search tools previously printed a rendered summary; from the CLI they now emit
+  the `{count, items}` JSON envelope, so output composes with `jq` and any other
+  parser. **A script that greps the rendered text needs `--no-as_records`**,
+  which restores the previous output byte-for-byte. Tools called over MCP are
+  unaffected — their default is unchanged.
+
 - **An autonomous maintenance pass no longer deletes.** It previously
   soft-deleted every memory under an importance threshold older than 30 days.
   Forgetting is now deranking; removal is a person's decision. The pass reports
