@@ -54,20 +54,27 @@ LFS-tracked model file and any extra wheels you'll need offline.
    does not pull it in — stage it explicitly for an air-gapped target.
 
    **Get it from the GitHub Release — that is the official channel.** The
-   Release for tag `v2026.9.16` carries every wheel (7 os/backend packages ×
-   cp311–cp314, 28 assets) plus a `SHA256SUMS` asset — 29 in total — so it is
-   complete by construction:
+   Release for tag `v2026.9.20` is intended to carry every wheel — 7 os/backend
+   packages × cp311–cp315 (a one-time cp311 courtesy set; the matrix is
+   cp312–cp315 from the next release) — plus a `SHA256SUMS` asset.
+
+   ⚠ **Verify by BACKEND, not by asset count.** `v2026.9.16` shipped 28 wheels
+   while carrying only six backends: `windows_cuda` was missing and a
+   generically-named `m3_core_rs-*` set filled the count. Because the installer
+   matches assets BY FILENAME, that was a hard miss for Windows+NVIDIA hosts,
+   not a fallback. Confirm all seven `m3_core_rs_<os>_<backend>` prefixes:
 
    ```bash
    # add -p '*linux*cuda*cp313*' to fetch only the wheel you need
-   gh release download v2026.9.16 --repo skynetcmd/m3-core-rs --dir _assets/python_wheels
+   gh release download v2026.9.20 --repo skynetcmd/m3-core-rs --dir _assets/python_wheels
    ```
 
    Do **not** treat PyPI as the source here. It cannot carry the CUDA wheels at
    all — they exceed its 100 MB per-file limit by an order of magnitude
    (windows-cuda ~244 MiB, linux-cuda ~949 MiB), so that gap is permanent rather
    than a publishing backlog — and the PyPI-eligible backends are currently
-   *stale*, still serving 3.7.4 while the Release ships 3.9.16. A PyPI-first
+   *stale*, still serving 3.7.4 while the Release ships 3.9.20 (and only three
+   of the projects resolve at all — measured 2026-09-20). A PyPI-first
    fetch would quietly stage an old core and exit 0, which is why
    `m3_memory/rust_core_install.py` cascades **GitHub Release → PyPI → source**
    in that order. Building from source (Rust ≥1.94 + maturin) is the last
