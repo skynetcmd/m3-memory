@@ -1185,10 +1185,27 @@ def _render_trigger_xml(task: dict) -> str:
         # logon machine the boot start can be deferred until the user logs in.
         # Emitting ONLY a BootTrigger therefore risks the loop not starting until
         # a real logon/reboot — a regression from the original. Keep both so the
-        # loop comes up at whichever event happens first. Both carry the same
-        # self-heal repetition (IgnoreNew makes the duplicate a harmless no-op).
+        # loop comes up at whichever event happens first. Only the BOOT trigger
+        # carries the self-heal repetition — see the note below the assignment.
         rep = _SELF_HEAL_TASKS.get(task["name"])
         rep_xml = _xml_repetition(rep) if rep else ""
+        # The repetition goes on the BOOT trigger ONLY, though both triggers
+        # stay. Putting it on both gives two independent self-heal cadences, so
+        # the task launches twice per interval and one of them exists purely to
+        # lose the single-instance lock race: it starts a process, logs
+        # "already running ... Exiting", and returns 0.
+        #
+        # IgnoreNew keeps that CORRECT, which is why it read as harmless — but
+        # a no-op still costs a real process creation. On Windows each one
+        # flashes a console window, and the duplicate launches make the task
+        # history look like a crash loop (4 launches/hour where 2 would do),
+        # which is exactly how it was misread when investigated.
+        #
+        # Both triggers are still required and must NOT be collapsed: the task
+        # runs as InteractiveToken, so on a boot-before-logon machine the boot
+        # start can be deferred until someone logs in. Boot-only would leave the
+        # loop down on a machine sitting at the lock screen — the regression the
+        # comment above this block was added to prevent.
         return (
             "<BootTrigger>"
             "<Enabled>true</Enabled>"
@@ -1196,7 +1213,6 @@ def _render_trigger_xml(task: dict) -> str:
             "</BootTrigger>"
             "<LogonTrigger>"
             "<Enabled>true</Enabled>"
-            f"{rep_xml}"
             "</LogonTrigger>"
         )
     raise ValueError(f"Unsupported schedule for XML rendering: {sched!r}")

@@ -128,17 +128,34 @@ def test_unsupported_schedule_raises():
 
 # ── Self-heal repetition is scoped to the cognitive loop only ─────────────────
 
-def test_cognitive_loop_selfheal_repetition_on_both_triggers():
-    # The loop can come up at boot OR logon (whichever is first); both triggers
-    # must carry the 30-min self-heal repetition so a dead loop revives from
-    # either path.
+def test_cognitive_loop_selfheal_repetition_on_boot_trigger_only():
+    # The loop keeps BOTH triggers (it runs as InteractiveToken, so a boot start
+    # can be deferred until logon on a machine sitting at the lock screen), but
+    # only ONE carries the self-heal repetition.
+    #
+    # This asserted BOTH until 2026-09-20, on the reasoning that a dead loop
+    # should "revive from either path". That misreads what a repetition does:
+    # it re-fires its OWN trigger on an unbounded timer for the whole OS
+    # session, so one is already sufficient. Two gave two independent cadences,
+    # and the task launched twice per interval with one launch existing purely
+    # to lose the single-instance lock race -- start a process, log
+    # "already running ... Exiting", return 0.
+    #
+    # IgnoreNew made that correct, which is why it read as harmless, but a
+    # no-op still costs a process creation: a visible console flash on Windows,
+    # and a task history that looks like a crash loop.
     root = _render(_spec("AgentOS_CognitiveLoop", "ONSTART"))
-    for trig in ("BootTrigger", "LogonTrigger"):
-        node = root.find(f".//t:{trig}", _NS)
-        interval = node.find("./t:Repetition/t:Interval", _NS)
-        assert interval is not None and interval.text == "PT30M", (
-            f"CognitiveLoop {trig} must carry the 30-min self-heal repetition"
-        )
+    boot = root.find(".//t:BootTrigger", _NS)
+    interval = boot.find("./t:Repetition/t:Interval", _NS)
+    assert interval is not None and interval.text == "PT30M", (
+        "CognitiveLoop BootTrigger must carry the 30-min self-heal repetition"
+    )
+    logon = root.find(".//t:LogonTrigger", _NS)
+    assert logon is not None, "CognitiveLoop must still emit a LogonTrigger"
+    assert logon.find("./t:Repetition", _NS) is None, (
+        "LogonTrigger must NOT repeat -- a second cadence only loses the lock "
+        "race and flashes a window"
+    )
 
 
 def test_other_onstart_task_has_no_repetition():
@@ -159,14 +176,24 @@ def test_embed_server_has_5min_self_heal_repetition():
     # re-fire was needless process churn now that Hidden makes the re-fire an
     # invisible no-op. Safe because IgnoreNew + the server's own /health
     # pre-flight guarantee a re-fire never stacks a second GPU embedder.
+    #
+    # ⚠ The repetition is on the BOOT trigger only (changed 2026-09-20). The
+    # comment above called the re-fire "an invisible no-op" because Hidden is
+    # set; that is wrong -- the duplicate launch is still a process creation and
+    # does flash. One unbounded repetition re-fires for the whole OS session,
+    # so self-heal is unaffected.
     root = _render(_spec("AgentOS_EmbedServer", "ONSTART"))
-    for trig in ("BootTrigger", "LogonTrigger"):
-        node = root.find(f".//t:{trig}", _NS)
-        assert node is not None, f"EmbedServer must emit a {trig}"
-        interval = node.find("./t:Repetition/t:Interval", _NS)
-        assert interval is not None and interval.text == "PT5M", (
-            f"EmbedServer {trig} must carry the 5-min self-heal repetition"
-        )
+    boot = root.find(".//t:BootTrigger", _NS)
+    assert boot is not None, "EmbedServer must emit a BootTrigger"
+    interval = boot.find("./t:Repetition/t:Interval", _NS)
+    assert interval is not None and interval.text == "PT5M", (
+        "EmbedServer BootTrigger must carry the 5-min self-heal repetition"
+    )
+    logon = root.find(".//t:LogonTrigger", _NS)
+    assert logon is not None, "EmbedServer must still emit a LogonTrigger"
+    assert logon.find("./t:Repetition", _NS) is None, (
+        "LogonTrigger must NOT repeat -- see the CognitiveLoop test above"
+    )
 
 
 def test_all_tasks_are_hidden():
