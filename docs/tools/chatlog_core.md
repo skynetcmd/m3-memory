@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_core.py
-sha1: a3d140539b68
-mtime_utc: 2026-09-20T05:20:21.641160+00:00
-generated_utc: 2026-09-20T05:22:41.588490+00:00
+sha1: 622953d55a47
+mtime_utc: 2026-09-20T08:10:51.865966+00:00
+generated_utc: 2026-09-20T08:23:14.283109+00:00
 private: false
 ---
 
@@ -69,6 +69,7 @@ _(no subprocess / http / sqlite calls detected)_
 ## Notable external imports
 
 - `atexit`
+- `memory.backends (active_backend)`
 - `memory.backends (active_backend, chatlog_table)`
 - `memory.backends (chatlog_table, dialect)`
 
