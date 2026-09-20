@@ -37,12 +37,19 @@ from m3_memory._platform import os_name as _os_name
 # PyPI install (by version) and the GitHub-release asset fetch (by tag).
 # 3.7.4 was the first release whose wheels bundle the m3-embed-server binary.
 #
-# 3.9.16 / v2026.9.16 (2026-09-16). Verify the Release is complete with:
-#   gh release view v2026.9.16 --repo skynetcmd/m3-core-rs
-#   (expect 29 assets: 7 (os,backend) packages x cp311-314, + SHA256SUMS)
-#   NOTE: 3.9.16 is the LAST release carrying cp311. m3-core-rs raised its
-#   requires-python to >=3.12 to match m3-memory's own floor, so releases
-#   after this one are 21 wheels (7 x cp312-314).
+# 3.9.20 / v2026.9.20. Verify the Release is complete with:
+#   gh release view v2026.9.20 --repo skynetcmd/m3-core-rs
+#   (expect 29 assets: 7 (os,backend) packages x cp312-315, + SHA256SUMS)
+#
+# ⚠ COUNT THE BACKENDS, NOT THE ASSETS. v2026.9.16 carried 28 wheels and still
+#   had only 6 of 7 backends — m3_core_rs_windows_cuda was absent and a
+#   generically-named m3_core_rs-* set filled the count. Since the cascade below
+#   matches assets BY FILENAME, a generic name is a hard miss for a
+#   Windows+NVIDIA host, not a fallback. A complete release has all seven
+#   m3_core_rs_<os>_<backend> prefixes present.
+#
+#   NOTE: 3.9.16 was the LAST release carrying cp311 (it predates the floor
+#   move to >=3.12). 3.9.20 adds cp315, so the matrix is 7 x cp312-315.
 #
 # ⚠ 3.9.16 CHANGES THE EMBED SERVER'S MEMORY FOOTPRINT PER WHEEL. Each worker
 # stream materialises its own llama.cpp compute graph on FIRST USE, sized for a
@@ -91,8 +98,8 @@ from m3_memory._platform import os_name as _os_name
 # because pip exits 0 — a stale success is worse than a clean miss. Fixing the
 # PyPI publishers (see docs) does not make PyPI-first correct again; leave the
 # Release first.
-M3_CORE_RS_VERSION = "3.9.16"
-M3_CORE_RS_GIT_TAG = "v2026.9.16"
+M3_CORE_RS_VERSION = "3.9.20"
+M3_CORE_RS_GIT_TAG = "v2026.9.20"
 
 # Cargo features per backend, mirroring build_wheel.py's _MATRIX (the source
 # fallback passes these to maturin via pip's config-settings).
