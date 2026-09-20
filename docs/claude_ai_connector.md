@@ -55,7 +55,7 @@ This starts the same 100+ tool bridge you use locally on
 `http://127.0.0.1:8080/mcp` (Streamable HTTP transport, the spec Claude
 expects). Domain-gated by default — only ~6 essentials register at session
 start, rest expand on demand via `tools_load_domain` (see the
-[lazy-loading note](../README.md#-domain-gating-the-full-catalog-without-the-context-cost)).
+[lazy-loading note](../README.md#domain-gating)).
 
 `--public-host` is **required when you use a tunnel**: the transport validates the
 `Host` header, and a tunnel forwards its own public hostname. Without it every

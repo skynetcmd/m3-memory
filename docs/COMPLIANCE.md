@@ -28,7 +28,7 @@ What m3 ships natively that's relevant here:
 |---|---|---|
 | **NIST SP 800-53 (FISMA)** | Federal information systems — agency ATO support | [FISMA / 800-53 alignment](M3_Compliance_FISMA.md) |
 | **CMMC 2.0 / NIST SP 800-171** | DoD contractors handling CUI — Level 2 controls | [CMMC 2.0 alignment](M3_Compliance_CMMC.md) |
-| **GDPR (Articles 17 & 20)** | EU data subject rights — built-in MCP tools | See [README "Why trust this"](../README.md#-why-trust-this) and [API_REFERENCE.md](API_REFERENCE.md) |
+| **GDPR (Articles 17 & 20)** | EU data subject rights — built-in MCP tools | See [README "Why trust this"](../README.md#why-trust-this) and [API_REFERENCE.md](API_REFERENCE.md) |
 
 ### What about FedRAMP?
 
