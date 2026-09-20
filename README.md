@@ -10,6 +10,8 @@
 
 **m3 fixes that.** It's a private, local-first memory your agents share and build on — so your project's knowledge accumulates instead of resetting every time the agent does. One memory store, on your machine, that your tools and agents read from and write to — whether that's Claude Code, Cursor, Gemini CLI, or any MCP-compatible agent.
 
+**Building something yourself?** m3 is a memory *backend*, not a framework, and **MCP is optional** — every tool is a JSON-in/JSON-out CLI call, scriptable from any language, hook or CI job. [Jump to the developer section ↓](#for-developers)
+
 Under the hood, m3 treats agent memory as a **distributed-systems infrastructure problem**, not a simple retrieval feature — a **shared, evolving, bitemporal, contradiction-aware knowledge base** that multiple heterogeneous agents and machines read and write, built to stay consistent over months and years.
 
 **The memory improves without being asked.** m3 is not only a store you write to and read back. An **autonomous Cognitive Loop** (`m3_cognitive_loop.py`) runs in the background and keeps working on what you already saved: **deferred enrichment** — classification, embedding, and entity extraction — runs off the hot path, so a write stays fast while the understanding of it deepens afterwards, and the loop builds an **entity relationship graph** from memories that arrived as plain text. **Curation is m3's own work, not an LLM's.** Near-duplicate detection is cosine similarity over embeddings against a threshold; decay and pruning are age-and-signal rules; and applying a curation plan — bulk deletes, merges, supersessions — is one deterministic function issuing direct SQL, with **no model in the loop**. That is deliberate: the apply step *used* to be an LLM agent, and it failed by looping single-row deletes across hundreds of IDs until it ran out of budget. An agent's judgement is still welcome for the genuinely subjective calls ("is this worth keeping?"), but it emits a *plan* and m3 executes it — one round-trip instead of N, and no model needed for the mechanical part.
@@ -62,17 +64,72 @@ Next week, in a different agent, on a different model — ask in your own words:
 
 ```console
 $ m3 memory memory_search --query "which signing algorithm did we pick for tokens?" --k 3
-Top 1 results:
-----------------------------------------
-1. [84a944fb-ef3e-403b-9240-f53ab3c015f7] score=0.7501  type: decision  title: auth-jwt-algorithm
-Content:
-The auth service uses RS256 JWTs. HS256 was rejected because we need asymmetric verification at the edge.
-----------------------------------------
+{
+  "count": 1,
+  "items": [
+    {
+      "id": "84a944fb-ef3e-403b-9240-f53ab3c015f7",
+      "score": 0.7501,
+      "type": "decision",
+      "title": "auth-jwt-algorithm",
+      "content": "The auth service uses RS256 JWTs. HS256 was rejected because we need asymmetric verification at the edge."
+    }
+  ]
+}
 ```
+
+<sub>Prefer the rendered form for reading? Add <code>--no-as_records</code>.</sub>
 
 The query shares no keywords with the stored text — no "RS256", no "JWT" — and still finds it. That's the hybrid engine: BM25 for exact terms, local BGE-M3 vectors for meaning, MMR for diversity. Your agent calls the same tools over MCP, so it recalls this automatically instead of asking you again.
 
 > New here? The **[5-Minute Getting Started Guide](docs/GETTING_STARTED.md)** walks the same path with more context, and [Core Tools](#-core-tools) lists the five you'll use most.
+
+---
+
+## <a id="for-developers"></a>🛠️ For developers: a memory backend, not a framework
+
+**MCP is optional.** m3 is a memory *layer* — it owns durable, searchable,
+multi-agent memory and stops there, so it drops into whatever you already have
+instead of asking you to adopt a stack.
+
+Every tool in the catalog reads JSON on **stdin** and writes JSON on **stdout**,
+so m3 is scriptable from **any language or runtime** — and from hooks, CI, and
+cron. No SDK, no client library, no MCP server required:
+
+```bash
+echo '{"query":"auth","k":3}' | m3 memory memory_search --json-file - | jq '.items[].id'
+```
+
+Results compose, so one tool's output drives the next:
+
+```bash
+# Pin everything matching a query — search, transform, bulk-update.
+m3 memory memory_search --query "deployment runbook" --k 20 \
+  | jq '{updates: [.items[] | {memory_id: .id, pinned: 1}]}' \
+  | m3 memory memory_update_bulk --json-file -
+```
+
+**Language-specific work stays on your side of the boundary — by design.**
+Code parsing and VCS watching are integrations, not missing features, and each
+is a few lines of your own code:
+
+```python
+# AST indexing with any parser you already trust — ast, tree-sitter, ts-morph.
+symbols = [n.name for n in ast.walk(ast.parse(src))
+           if isinstance(n, (ast.FunctionDef, ast.ClassDef))]
+subprocess.run(["m3", "memory", "memory_write", "--json-file", "-"],
+               input=json.dumps({"type": "reference", "title": path,
+                                 "content": "\n".join(symbols)}), text=True)
+```
+
+That is what keeps one memory layer serving a Python monorepo, a Rust service
+and a TypeScript frontend without forking it.
+
+> **[Using m3 for coding work →](docs/CODING_FAQ.md)** — the full integration
+> guide: composing tools, git hooks, CI steps, and where the layer boundary sits.
+
+*(`jq` is not a dependency — it just reads well in examples. m3 emits plain
+JSON, so any parser works.)*
 
 ---
 
@@ -145,12 +202,12 @@ Short version: m3 is the **local-first, MCP-native** option that stays *yours* a
 - [Overview & At a Glance](#-m3-at-a-glance)
 - [Memory Model](#-memory-model-at-a-glance)
 - [Installation & Onboarding](#-installation)
-- [Domain Gating (Token Optimization)](#-domain-gating-the-full-catalog-without-the-context-cost)
-- [Sovereign & Air-Gapped Deployments](#-sovereign--air-gapped-deployments)
+- [Domain Gating (Token Optimization)](#domain-gating)
+- [Sovereign & Air-Gapped Deployments](#sovereign-air-gapped)
 - [Interactive Features & Capabilities](#-what-m3-does)
 - [Documentation Index](#-documentation-index)
 - [Target Audience & Fit](#-who-this-is-for)
-- [Quality Assurance & Compliance](#-why-trust-this)
+- [Quality Assurance & Compliance](#why-trust-this)
 - [Benchmarks & Performance](#-benchmarks)
 - [Core Tools Reference](#-core-tools)
 - [Agent Integration Prompts](#-for-ai-agents)
@@ -166,7 +223,7 @@ Short version: m3 is the **local-first, MCP-native** option that stays *yours* a
 | **m3 Is** | A persistent memory layer · An MCP server · A hybrid retrieval engine · A bitemporal knowledge base |
 | **m3 Is Not** | An LLM · A chatbot · A plain vector database · A RAG framework · An IDE |
 | **Core Promise** | Private, offline-capable, locally owned memory shared securely across all your developer tools — with FIPS 140-3-ready crypto and atomic multi-agent writes for regulated and multi-agent environments. |
-| **Deploys In** | Homelabs and self-hosted stacks · corporate and government networks · **air-gapped and classified environments** · regulated industries (FIPS 140-3-ready, GDPR tooling, audit logs). No account, no API key, no outbound calls. See [Sovereign & Air-Gapped Deployments](#-sovereign--air-gapped-deployments). |
+| **Deploys In** | Homelabs and self-hosted stacks · corporate and government networks · **air-gapped and classified environments** · regulated industries (FIPS 140-3-ready, GDPR tooling, audit logs). No account, no API key, no outbound calls. See [Sovereign & Air-Gapped Deployments](#sovereign-air-gapped). |
 | **Speed** | A deferred write — which includes validation, bitemporal logic, contradiction checking, hashing, and storing to SQLite with WAL — takes just **~2.16 ms** (p50) / **3.66 ms** (p95). To ensure the caller never waits, m3 intentionally defers the heavy vector embedding to a background cognitive loop. The memory is immediately full-text searchable (hybrid search takes **~45 ms** p50 / **~48 ms** p95), and vector search picks it up as soon as the background pass completes. Warehouse sync upserts 3,000 rows in **25 ms**. Measured on a stock Windows desktop; see [Performance](docs/PERFORMANCE.md) for the hardware, the CPU-only numbers, and the caveats. |
 | **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10, 100% @ k=20** on LongMemEval-S (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. SHR measures the memory layer alone — no answer model, no judge — which is why it, not end-to-end QA, is the like-for-like comparison between memory systems. See [Benchmarks](#-benchmarks). |
 | **Entity & Relationship Enrichment** | **Yes.** m3 includes LLM-based entity extraction and relationship enrichment (Observer + Reflector), running as background cognitive passes over raw text — automatic once a local or cloud LLM endpoint is configured. Observer emits entities, facts and typed relationships from unstructured text; Reflector resolves contradictions and writes `supersedes` edges. Any OpenAI-compatible endpoint (LM Studio / Ollama / llama.cpp auto-probed locally, or a cloud model). See [Enrichment Guide](docs/M3_ENRICH_GUIDE.md). |
@@ -342,7 +399,7 @@ To expose m3 to any Model Context Protocol host, add it to your configuration fi
 
 ---
 
-## 🎚️ Domain Gating: the Full Catalog Without the Context Cost
+## <a id="domain-gating"></a>🎚️ Domain Gating: the Full Catalog Without the Context Cost
 
 m3 gives you the full 100+ tool surface while occupying just **2% of a 200K context window** at startup — most MCP servers make you pay for every tool in every prompt. Tools are grouped into **9 domains** (`memory`, `chatlog`, `files`, `entity`, `agent`, `tasks`, `conversations`, `diagnostics`, `admin`) and loaded lazily.
 
@@ -358,7 +415,7 @@ Only 10 schemas register at startup (~3,929 tokens). That set is chosen by measu
 
 ---
 
-## 🛡️ Sovereign & Air-Gapped Deployments
+## <a id="sovereign-air-gapped"></a>🛡️ Sovereign & Air-Gapped Deployments
 
 m3 operates completely offline by default.
 
@@ -456,7 +513,7 @@ m3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch
 
 ---
 
-## 🛡️ Why Trust This
+## <a id="why-trust-this"></a>🛡️ Why Trust This
 
 *   **Benchmarked Retrieval:** State-of-the-art for a local-first substrate — 99.2% session-hit-rate @ k=10, 100% @ k=20 on LongMemEval-S — with a published, reproducible methodology and no oracle routing. See [Benchmarks](#-benchmarks).
 *   **Robust Coverage:** Over **3,600 tests** guarding that your memories survive upgrades and schema migrations, that capture never silently stops, and that behavior is identical on SQLite and PostgreSQL. Every release runs the **full suite on every lane** — Linux, macOS and Windows × every supported Python version, each lane independent of the others. No subsets, no shortcuts. Warnings are treated as errors: a release does not pass until every warning is addressed, not just every failure.
