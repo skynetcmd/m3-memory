@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400" role="img" aria-label="Star history for skynetcmd/m3-memory: 24 stars">
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400" role="img" aria-label="Star history for skynetcmd/m3-memory: 25 stars">
   <title>Star history for skynetcmd/m3-memory</title>
   <style>
     .bg { fill: #ffffff; }
@@ -15,11 +15,11 @@
     }
   </style>
   <rect class="bg" x="0" y="0" width="800" height="400" rx="6"/>
-  <text class="title" x="60" y="20">⭐ skynetcmd/m3-memory — 24 stars</text>
-  <line x1="60" y1="360.0" x2="780" y2="360.0" class="grid"/><text x="52" y="364.0" text-anchor="end" class="tick">0</text><line x1="60" y1="195.0" x2="780" y2="195.0" class="grid"/><text x="52" y="199.0" text-anchor="end" class="tick">12</text><line x1="60" y1="30.0" x2="780" y2="30.0" class="grid"/><text x="52" y="34.0" text-anchor="end" class="tick">24</text>
-  <polygon class="area" points="60.0,360.0 60.0,360.0 60.0,346.2 129.4,332.5 129.6,318.8 131.7,305.0 133.7,291.2 134.2,277.5 158.3,263.8 167.2,250.0 167.6,236.2 207.3,222.5 347.1,208.8 385.4,195.0 386.8,181.2 505.5,167.5 589.6,153.8 604.7,140.0 612.9,126.2 619.5,112.5 626.4,98.8 656.5,85.0 664.9,71.2 696.0,57.5 741.8,43.8 780.0,30.0 780.0,360.0"/>
-  <polyline class="line" points="60.0,360.0 60.0,346.2 129.4,332.5 129.6,318.8 131.7,305.0 133.7,291.2 134.2,277.5 158.3,263.8 167.2,250.0 167.6,236.2 207.3,222.5 347.1,208.8 385.4,195.0 386.8,181.2 505.5,167.5 589.6,153.8 604.7,140.0 612.9,126.2 619.5,112.5 626.4,98.8 656.5,85.0 664.9,71.2 696.0,57.5 741.8,43.8 780.0,30.0"/>
+  <text class="title" x="60" y="20">⭐ skynetcmd/m3-memory — 25 stars</text>
+  <line x1="60" y1="360.0" x2="780" y2="360.0" class="grid"/><text x="52" y="364.0" text-anchor="end" class="tick">0</text><line x1="60" y1="201.6" x2="780" y2="201.6" class="grid"/><text x="52" y="205.6" text-anchor="end" class="tick">12</text><line x1="60" y1="30.0" x2="780" y2="30.0" class="grid"/><text x="52" y="34.0" text-anchor="end" class="tick">25</text>
+  <polygon class="area" points="60.0,360.0 60.0,360.0 60.0,346.8 126.8,333.6 127.0,320.4 129.1,307.2 131.0,294.0 131.5,280.8 154.7,267.6 163.2,254.4 163.6,241.2 201.8,228.0 336.5,214.8 373.3,201.6 374.7,188.4 489.0,175.2 569.9,162.0 584.4,148.8 592.3,135.6 598.7,122.4 605.3,109.2 634.3,96.0 642.4,82.8 672.3,69.6 716.5,56.4 753.2,43.2 780.0,30.0 780.0,360.0"/>
+  <polyline class="line" points="60.0,360.0 60.0,346.8 126.8,333.6 127.0,320.4 129.1,307.2 131.0,294.0 131.5,280.8 154.7,267.6 163.2,254.4 163.6,241.2 201.8,228.0 336.5,214.8 373.3,201.6 374.7,188.4 489.0,175.2 569.9,162.0 584.4,148.8 592.3,135.6 598.7,122.4 605.3,109.2 634.3,96.0 642.4,82.8 672.3,69.6 716.5,56.4 753.2,43.2 780.0,30.0"/>
   <text class="axis" x="60" y="388" text-anchor="start">2026-03-25</text>
-  <text class="axis" x="780" y="388" text-anchor="end">2026-09-09</text>
-  <text class="axis" x="400" y="388" text-anchor="middle">generated 2026-09-09</text>
+  <text class="axis" x="780" y="388" text-anchor="end">2026-09-15</text>
+  <text class="axis" x="400" y="388" text-anchor="middle">generated 2026-09-15</text>
 </svg>
