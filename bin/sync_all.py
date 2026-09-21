@@ -38,6 +38,15 @@ LOG_DIR = BASE / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 LOG_FILE = LOG_DIR / "sync_all.log"
 
+# "ran cleanly, replicated nothing" — EX_TEMPFAIL. Imported from pg_sync rather
+# than restated: the two processes agree on this number across a subprocess
+# boundary, and a second literal would drift the day one of them changes (§10a).
+try:
+    sys.path.insert(0, str(BASE / "bin"))
+    from pg_sync import _EXIT_SKIPPED
+except Exception:  # noqa: BLE001 — pg_sync pulls heavy deps; never block startup
+    _EXIT_SKIPPED = 75
+
 
 def _resolve_python() -> str:
     """The interpreter to run the pg_sync.py subprocess with. Use the CURRENT
@@ -147,6 +156,23 @@ def run_pg_sync_for_db(db_path: pathlib.Path, dry_run: bool) -> bool:
         for line in (result.stdout + result.stderr).splitlines():
             if line.strip():
                 log.info(f"  pg_sync[{db_path.stem}]: {line}")
+        if result.returncode == _EXIT_SKIPPED:
+            # ⚠ RAN IS NOT REPLICATED. pg_sync exits 75 (EX_TEMPFAIL) when it
+            # could not take the sync lock and moved no rows. Treating that as
+            # success is how this job reported "all systems synced" while the
+            # local and warehouse stores drifted apart — the exact failure the
+            # wrong-backend refusal further down was written to prevent. It is
+            # not an ERROR either: the next hourly run picks it up.
+            log.warning(
+                f"pg_sync SKIPPED {db_path.stem} — nothing was replicated.\n"
+                f"  observed : pg_sync exited {result.returncode} (EX_TEMPFAIL); "
+                f"its log above names the lock holder\n"
+                f"  store    : {db_path}\n"
+                f"  retry    : the next scheduled run; no data is lost\n"
+                f"  inspect  : run `python bin/pg_sync.py --db {db_path}` by hand "
+                f"to see the full reason"
+            )
+            return None  # neither success nor failure — see run_pg_sync()
         if result.returncode == 0:
             log.info(f"pg_sync completed for {db_path.stem}.")
             return True
@@ -370,7 +396,14 @@ def run_pg_sync(dry_run: bool) -> bool:
     for db in dbs:
         ok = run_pg_sync_for_db(db, dry_run)
         results.append(ok)
-    return all(results)
+    # THREE outcomes, not two. `None` means "ran, replicated nothing" (the lock
+    # was unavailable). Folding it into True reported a skip as a completed
+    # sync; folding it into False would make a routine hourly no-op look like a
+    # fault. `all()` over a list containing None is False, which is why this is
+    # spelled out rather than left to truthiness.
+    if any(r is False for r in results):
+        return False
+    return None if any(r is None for r in results) else True
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -407,6 +440,17 @@ def main():
 
     pg_ok = run_pg_sync(args.dry_run)
 
+    if pg_ok is None:
+        # Ran cleanly, replicated nothing. Say that, and exit with the same
+        # EX_TEMPFAIL pg_sync used so a wrapping cron/CI step can tell a no-op
+        # from a completed sync without parsing the log.
+        log.warning(
+            "=== sync_all complete: SKIPPED — nothing replicated ===\n"
+            "  observed : the sync lock was unavailable (reason logged above)\n"
+            "  retry    : the next scheduled run; no data is lost\n"
+            "  inspect  : logs/sync_all.log for the store and holder"
+        )
+        sys.exit(_EXIT_SKIPPED)
     if pg_ok:
         log.info("=== sync_all complete: all systems synced ===")
         sys.exit(0)

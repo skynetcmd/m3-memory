@@ -1008,6 +1008,21 @@ _SYNC_LOCK_STALE_SECONDS = 3600
 # literal so the acquire/release/probe sites cannot drift apart.
 _SYNC_LOCK_NAME = "pg_sync"
 
+# Why the last _acquire_sync_lock() call returned False, for the caller's
+# message. Two very different conditions share that return value — a live lock
+# and a database error — and reporting them identically cost a wrong diagnosis.
+_LOCK_SKIP_REASON: str = ""
+
+# Exit code for "ran cleanly, replicated nothing".
+#
+# Deliberately NOT 0 and NOT 1. Zero made a skip indistinguishable from a real
+# sync, which is how `sync_all` came to print "all systems synced" after moving
+# no rows. One would make an hourly no-op look like a fault and train operators
+# to ignore the exit code entirely — the §3 false alarm. A distinct code lets a
+# caller say "skipped" truthfully. 75 is EX_TEMPFAIL from sysexits(3): the
+# conventional "temporary failure, retry later", which is exactly this.
+_EXIT_SKIPPED = 75
+
 # Bind placeholder for the LOCAL store. The local half is SQLite today (Phase 3
 # ports it), but a literal '?' in feature code is a portability bug the moment a
 # second local backend lands — ask the seam, which knows. Falls back to the
@@ -1176,6 +1191,7 @@ def _acquire_sync_lock(sl_cur) -> bool:
     table was absent (see _ensure_sync_lock_table for the outage). A HELD lock
     whose owner process has died is reclaimed immediately (PID liveness), but
     ONLY when the lock names this host — see _sync_lock_is_stale."""
+    global _LOCK_SKIP_REASON
     # Self-heal: a missing table must never read as "held". Create-if-absent
     # BEFORE the lock check so the SELECT can't fail with 'no such table'.
     try:
@@ -1193,7 +1209,15 @@ def _acquire_sync_lock(sl_cur) -> bool:
         )
         row = sl_cur.fetchone()
         if row and row[0] and not _sync_lock_is_stale(row[0]):
-            return False  # a live sync holds it
+            # ⚠ RECORD WHY, not just that it failed. This returns False for a
+            # LIVE LOCK; the except branch below returns False for a database
+            # error. The caller reported both as "main lock found", which
+            # asserts a cause nobody checked — and when the real reason was
+            # SQLite write contention, `sync_locks` was empty, sending the
+            # operator to hunt a lock row that did not exist (§3: state what
+            # you OBSERVED).
+            _LOCK_SKIP_REASON = f"a live sync holds the lock (holder={row[0]!r})"
+            return False
 
         # Upsert rather than INSERT OR REPLACE: the latter is SQLite-only syntax.
         # ON CONFLICT ... DO UPDATE is spelled identically on both current
@@ -1208,6 +1232,7 @@ def _acquire_sync_lock(sl_cur) -> bool:
         )
         return True
     except Exception as e:
+        _LOCK_SKIP_REASON = f"{type(e).__name__}: {e}"
         logger.warning(f"Lock acquisition failed: {e}")
         return False
 
@@ -1709,11 +1734,35 @@ def main():
 
                             if target.name == "main":
                                 if not _acquire_sync_lock(sl_cur):
+                                    # ⚠ EVERYTHING NEEDED TO DIAGNOSE, HERE. The
+                                    # old text asserted "main lock found" for two
+                                    # different conditions, and when the real
+                                    # cause was SQLite write contention the lock
+                                    # table was EMPTY — so it sent the operator
+                                    # hunting a row that did not exist. Report
+                                    # the observed reason, the store, who else
+                                    # could hold a write lock, and the exact
+                                    # query that answers it (§3 evidence levels).
+                                    skipped_targets = [t.name for t in targets]
                                     logger.warning(
-                                        "Another sync is already in progress "
-                                        "(main lock found). Skipping."
+                                        "sync SKIPPED — no rows were replicated.\n"
+                                        f"  observed : {_LOCK_SKIP_REASON or 'lock unavailable, reason unrecorded'}\n"
+                                        f"  store    : {target.uri}\n"
+                                        f"  skipped  : {skipped_targets} "
+                                        f"(the whole run, not just 'main')\n"
+                                        "  possible : another sync is mid-flight, or a long-running\n"
+                                        "             writer holds the SQLite write lock — the\n"
+                                        "             cognitive loop is the usual one\n"
+                                        "  inspect  : SELECT * FROM sync_locks;  -- empty here means\n"
+                                        "             contention, NOT a held sync lock\n"
+                                        "             m3 doctor  # is the cognitive loop mid-write?\n"
+                                        "  retry    : the next hourly run picks this up; nothing is lost"
                                     )
-                                    return
+                                    # Tell the CALLER, not just the log. A bare
+                                    # return exits 0, and sync_all judges purely
+                                    # on the exit code — so a skip was reported
+                                    # as "all systems synced".
+                                    return _EXIT_SKIPPED
                                 sl_conn.commit()
 
                             with pg_conn.cursor() as pg_cur:
@@ -1800,4 +1849,9 @@ def main():
 
 if __name__ == "__main__":
     ensure_venv()
-    main()
+    # ⚠ PROPAGATE main()'s CODE. It used to be called for effect and its return
+    # discarded, so a run that skipped without replicating anything still exited
+    # 0 — and sync_all, which judges purely on the exit code, reported "all
+    # systems synced". A skip is not a failure, so it gets its own code rather
+    # than 1: callers can tell "nothing to do" from "something broke".
+    sys.exit(main() or 0)

@@ -19,6 +19,24 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.9.20.3] — 2026-09-20 — an honest sync result
+
+### Fixed
+
+- **`sync_all` reported "all systems synced" after replicating nothing.** When
+  the sync could not take its lock it returned without error, so the process
+  exited 0 and the runner — which judges on the exit code — called it a success.
+  A skip now exits 75 (`EX_TEMPFAIL`) and is reported as
+  `SKIPPED — nothing replicated`, so a scheduled or CI caller can tell a no-op
+  from a completed sync without parsing the log.
+- **The skip message named a cause nobody checked.** It said "another sync is
+  already in progress (main lock found)" for two different conditions, including
+  one where the lock table was empty and the real cause was database write
+  contention — sending the reader to hunt a row that did not exist. It now
+  reports the observed reason, the store, every target skipped, what else could
+  hold the lock, and the queries that settle it.
+
+
 ## [2026.9.20.2] — 2026-09-20 — a clearer install on macOS and Linux
 
 ### Fixed
