@@ -103,9 +103,34 @@ rapidfuzz>=3.14.6,<4
 networkx>=3.6.1,<4
 
 # --- Embedding Server ---
-sentence-transformers>=5.7.0,<6
-# transformers is transitive (sentence-transformers / peft) but pinned directly
-# so the floor is ours to set rather than whatever a resolver picks.
+# ⚠ `sentence-transformers` and `torch` are NOT here. They are declared in
+# pyproject.toml under the `embed-server` EXTRA, which is where they belong:
+# nothing in m3's core or its test suite imports either one. `bin/embed_server.py`
+# does, but it is a standalone service that no test imports, and the reranker in
+# `memory/search.py` imports `sentence_transformers` lazily and raises a named,
+# actionable error when it is absent.
+#
+# Pinning them here made this file demand ~2 GB of ML wheels to run a suite that
+# never touches them, and made CI's Python 3.15 lane die at dependency
+# resolution -- torch publishes no cp315 wheel -- so that lane tested torch's
+# release schedule rather than m3. `pip install m3-memory` was never affected;
+# the published package's 24 core dependencies have never included torch.
+#
+# To work on the embed server or the reranker:
+#     pip install -r requirements.txt "m3-memory[embed-server]"
+#
+# ⚠ Removing `sentence-transformers` also removes torch TRANSITIVELY (it
+# requires `torch>=2.2`), so the two only come out together. Re-adding either one
+# re-adds the 3.15 blocker.
+#
+# `transformers` stays. It was previously described as transitive via
+# sentence-transformers/peft; with those gone it is a DIRECT dependency, and a
+# deliberate one: `tests/test_token_budget.py::TestAgainstRealTokenizer` imports
+# it for ground-truth token counts against the bge-m3 tokenizer, and 4 tests pass
+# there today. It is guarded by `skipUnless`, so dropping it would not fail the
+# suite -- it would silently convert real coverage into a permanent skip (§3: a
+# check nobody sees reads as coverage while providing none). It also declares no
+# torch dependency of its own and supports >=3.10, so it installs on 3.15.
 #
 # FLOOR RAISED TO 5.17.0 on 2026-09-17, clearing four of the five CVEs that the
 # previous `<5` ceiling forced us to accept:
@@ -136,12 +161,16 @@ sentence-transformers>=5.7.0,<6
 #     checkpoint; m3 has no conversion path and only runs embedding inference on
 #     its own configured model.
 transformers>=5.17.0,<6
-# Floor raised to 2.14.0 on 2026-09-17. 2.11 declared `setuptools<82`, which
-# forced the setuptools ceiling below and with it CVE-2026-59890. 2.14 declares
-# `setuptools>=77.0.3` with no upper bound, so raising torch is what actually
-# unblocks the setuptools fix -- the CVE was a transitive consequence of an old
-# torch pin, not a setuptools problem.
-torch>=2.14.0,<3
+
+# torch was pinned `>=2.14.0,<3` here until 2026-09-22; see the note under
+# "Embedding Server" above for why it moved to the `embed-server` extra.
+#
+# ⚠ KEEP THE SETUPTOOLS FLOOR BELOW WHERE IT IS. The reason it could be raised
+# was torch: 2.11 declared `setuptools<82`, which forced a ceiling here and with
+# it CVE-2026-59890; torch 2.14 declares `setuptools>=77.0.3` with no upper
+# bound, which is what unblocked the fix. That history is why the floor exists,
+# and it does not depend on torch being installed -- do not "simplify" it away
+# now that the pin is gone.
 
 # REMOVED 2026-09-17 (unused, verified):
 #   pywin32 -- no module imports win32api/win32con/pythoncom/etc. The many
