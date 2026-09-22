@@ -85,14 +85,26 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    # 3.15 is NOT claimed: torch (requirements.txt:74, `torch>=2.11.0,<3`)
-    # publishes cp310-cp314 and no cp315 as of 2026-09-13, so `pip install`
-    # cannot succeed on 3.15 however green m3's own code is. Verified on CI:
-    # setup-python resolves the rc fine, then Install Dependencies dies with
-    # "No matching distribution found for torch<3,>=2.11.0".
-    # Claiming a version the dependency tree cannot install is a promise with
-    # nothing behind it. Restore this line when torch ships a cp315 wheel —
-    # the CI matrix still runs a 3.15 cell precisely so that becomes visible.
+    # 3.15 CLAIMED 2026-09-22, on the strength of a green matrix: all three OS
+    # lanes ran the full hermetic suite on 3.15.0rc2 and passed.
+    #
+    # ⚠ NOT because torch shipped cp315 — it has not. The previous note here
+    # said 3.15 could not be claimed because `pip install` would die on
+    # "No matching distribution found for torch", and that the line should be
+    # restored once torch shipped a cp315 wheel. What actually changed is that
+    # torch LEFT the equation: nothing in m3's core or its test suite imports
+    # it, so the pin moved out of requirements.txt to the `embed-server` extra.
+    # The core dependency set has never included torch, so `pip install
+    # m3-memory` already worked on 3.15 before this classifier caught up.
+    #
+    # The promise this makes is therefore about m3 and its CORE deps. The
+    # `embed-server` extra still cannot install on 3.15 until torch ships cp315,
+    # and an extra is opt-in rather than part of the base claim.
+    #
+    # ⚠ 3.15.0rc2 is a RELEASE CANDIDATE (3.15.0 final: 2026-10-01, PEP 790).
+    # If the final release breaks a lane, fix it or drop this line — do not keep
+    # the promise while the matrix is red.
+    "Programming Language :: Python :: 3.15",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Operating System :: OS Independent",

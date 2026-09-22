@@ -147,23 +147,40 @@ jobs:
   # was permanently red and three real CI failures went unnoticed until someone
   # read the Actions tab by hand.
   #
-  # THIS LIST IS A SUPERSET of pyproject's "Programming Language :: Python ::"
-  # classifiers, and the difference is deliberate:
+  # THIS LIST MATCHES pyproject's "Programming Language :: Python ::"
+  # classifiers as of 2026-09-22, when 3.15 was added to both:
   #
-  #   classifiers = what we PROMISE works (3.12, 3.13, 3.14)
-  #   this matrix = that, PLUS the next version we are watching (3.15)
+  #   classifiers = what we PROMISE works (3.12, 3.13, 3.14, 3.15)
+  #   this matrix = the same set; add the NEXT version to watch as a new cell
   #
-  # Never claim a version this matrix does not run. The reverse is fine and is
-  # the point: the 3.15 cell is an early-warning probe. It currently fails at
-  # Install Dependencies because torch publishes no cp315 wheel yet — m3's own
-  # code is fine there — so 3.15 is NOT classified as supported. When that cell
-  # goes green, torch has shipped and the classifier can be restored.
+  # Never claim a version this matrix does not run. The reverse is fine — a cell
+  # with no classifier is an early-warning probe for a version we do not yet
+  # promise.
   #
-  # A red-forever lane is otherwise worse than no lane: it trains everyone to
-  # ignore the one that matters (DESIGN_PHILOSOPHIES §3 — a false alarm is a
-  # violation, not a safe default). This one is tolerated ONLY because it is
-  # blocked upstream, the cause is named here, and its going green is the
-  # signal we want.
+  # ⚠ THE 3.15 CELL WENT GREEN FOR A DIFFERENT REASON THAN THIS COMMENT ONCE
+  # PREDICTED. It said the cell failed at Install Dependencies because torch
+  # publishes no cp315 wheel, and that its going green would mean torch had
+  # shipped one. torch has NOT shipped cp315. The lane went green because torch
+  # LEFT IT: nothing in m3's core or its test suite imports torch, so the pin
+  # moved from requirements.txt to pyproject's `embed-server` extra
+  # (2026-09-22). All three OS lanes then ran the full hermetic suite on
+  # 3.15.0rc2 and passed, which is the first time CI exercised m3's own code on
+  # 3.15 rather than testing an upstream release schedule.
+  #
+  # So do NOT read a green 3.15 cell as "torch supports 3.15". If someone needs
+  # the embed server or the reranker on 3.15, torch is still the blocker and
+  # `pip install "m3-memory[embed-server]"` will still fail there.
+  #
+  # ⚠ 3.15.0rc2 IS A RELEASE CANDIDATE (3.15.0 final: 2026-10-01, PEP 790). The
+  # classifier is claimed on the strength of a green matrix, not of a final
+  # release. If the final differs from the rc in a way that breaks a lane, the
+  # honest move is to fix it or drop the classifier — not to keep the promise
+  # while the lane is red.
+  #
+  # A red-forever lane is worse than no lane: it trains everyone to ignore the
+  # one that matters (DESIGN_PHILOSOPHIES §3 — a false alarm is a violation, not
+  # a safe default). That is why the 3.15 cell was never allowed to sit red
+  # indefinitely on the strength of "it is blocked upstream".
   matrix-setup:
     name: Resolve test matrix
     runs-on: ubuntu-latest
