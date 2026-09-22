@@ -131,7 +131,21 @@ def test_renew_requires_the_token(conn):
 
 
 def test_renew_pushes_the_deadline_out(conn):
-    rid, token = _claim(conn, ttl=1)
+    # ⚠ NOT `ttl=1`. renew_lease deliberately refuses an ALREADY-EXPIRED lease,
+    # so a 1-second claim races the test itself: any scheduling delay over a
+    # second between claim and renew makes renew_lease return False *correctly*
+    # and the assertion fail. That is a flake, not a finding -- it fired on
+    # windows-latest/py3.14 in a 22-minute suite run while 4,831 other tests
+    # passed, and it is a blocking lane.
+    #
+    # The property under test needs no near-expiry lease: the default 300s claim
+    # renewed to 600s still moves the deadline strictly outward
+    # (`claim_expires_at = now() + lease_ttl`), so this asserts exactly what it
+    # did before with no dependence on wall-clock timing. Expiry refusal is
+    # covered separately and deterministically by
+    # test_an_expired_lease_cannot_be_renewed, which ages the deadline with
+    # `_expire()` instead of waiting for one to pass.
+    rid, token = _claim(conn)
     before = _row(conn, rid)["claim_expires_at"]
     assert D.renew_lease(conn, table=T, row_id=rid, lease_token=token,
                          lease_ttl=600) is True
