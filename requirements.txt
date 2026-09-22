@@ -52,6 +52,17 @@ sqlglot>=30.18.0,<31
 # --- Security & Auth ---
 cryptography>=50.0.1,<51
 keyring>=25.7.0,<26
+# Hardened XML parsing (XXE / entity-expansion defense) for
+# bin/doctor/schedule_probe.py, which parses `schtasks` XML output.
+#
+# ⚠ Declared in pyproject's base dependencies with the note "was only
+# transitively present (via fpdf2) — pinned directly so the safe path is
+# guaranteed on a fresh install", but it was MISSING here. This file is the
+# documented install path (`pip install -r requirements.txt`) and is what CI
+# installs, so that guarantee did not hold on either: defusedxml arrived only
+# because fpdf2 happens to require it. A security dep reached by luck is not
+# pinned. Keep both files in agreement.
+defusedxml>=0.7.1,<1
 
 # --- System & Thermal ---
 psutil>=7.2.2,<8
@@ -79,6 +90,17 @@ tqdm>=4.70.1,<5
 # entity-coalesce pass falls back to difflib if absent, so this is a perf/quality
 # dep, not a hard requirement.
 rapidfuzz>=3.14.6,<4
+# Topic clustering for the Memory Wiki (bin/wiki/cluster.py, `m3 wiki generate`).
+# Imported directly, no optional extra and no in-tree fallback — the pure-Python
+# clustering path was retired 2026-07-24 when the wiki became core.
+#
+# ⚠ Declared in pyproject's base dependencies but MISSING here, so on this
+# install path it arrived only as a TORCH transitive (`torch` requires
+# `networkx>=2.5.1`). Measured 2026-09-21: installing requirements.txt without
+# torch fails 14 wiki test files at collection with
+# `ModuleNotFoundError: No module named 'networkx'`. A core dep must not depend
+# on an optional ML stack to be present. Keep both files in agreement.
+networkx>=3.6.1,<4
 
 # --- Embedding Server ---
 sentence-transformers>=5.7.0,<6
