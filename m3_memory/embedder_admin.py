@@ -305,8 +305,13 @@ def _ensure_executable(binary: Path) -> None:
         print(f"[i] could not chmod +x {binary}: {exc}", file=sys.stderr)
 
 
-def exec_bit_status(binary: "Path | None" = None) -> dict:
+def exec_bit_status(binary: "str | os.PathLike[str] | None" = None) -> dict:
     """Report whether the embed-server binary is executable. Never raises.
+
+    Takes ``str`` as well as ``Path``: the doctor probe resolves the binary with
+    ``shutil.which()``, which returns ``str | None``. ``os.stat`` and ``str()``
+    accept either, so the old ``Path``-only annotation was narrower than the
+    code and flagged an honest, working call site.
 
     Shared by `m3 setup` and `m3 doctor` so there is ONE predicate rather than
     a copy in each (§10a). Returns a dict with a stable `state`:

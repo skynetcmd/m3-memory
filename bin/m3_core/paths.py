@@ -8,7 +8,7 @@ import posixpath
 import sqlite3
 import sys
 from contextlib import contextmanager
-from typing import Optional
+from typing import Optional, Union
 
 logger = logging.getLogger("M3_SDK")
 
@@ -738,7 +738,7 @@ def active_database(path: Optional[str]):
 
 
 @contextmanager
-def scoped_db_env(path: Optional[str]):
+def scoped_db_env(path: "Optional[Union[str, os.PathLike[str]]]"):
     """Set ``M3_DATABASE`` for a block and restore it exactly on exit.
 
     PREFER :func:`active_database`. This exists for the one case it cannot
@@ -770,6 +770,11 @@ def scoped_db_env(path: Optional[str]):
     So on PostgreSQL there is nothing here to scope -- callers pass the path
     they were going to set anyway, and a DSN raises from ``resolve_db_path``
     at use, as it already would.
+
+    Accepts ``os.PathLike`` as well as ``str`` because the callers hold
+    ``Path`` objects (they iterate resolved store paths) and the body stringifies
+    anyway. Annotating this ``str``-only forced a ``str(...)`` at every call site
+    to satisfy the type checker while changing nothing at runtime.
     """
     prev = os.environ.get("M3_DATABASE")
     if path is not None:

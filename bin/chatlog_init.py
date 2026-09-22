@@ -91,8 +91,14 @@ def print_section(title: str) -> None:
     print("=" * len(title))
 
 
-def get_hook_path_for_agent(agent: str) -> tuple[str, str]:
-    """Return (sh_path, ps1_path) for a host agent."""
+def get_hook_path_for_agent(agent: str) -> tuple[str, str, str]:
+    """Return (sh_path, ps1_path, desc) for a host agent.
+
+    The annotation said ``tuple[str, str]`` while the body returned three values
+    and both call sites unpacked three. The CODE was right and the CONTRACT was
+    wrong, so a type checker flagged the honest call sites instead of the stale
+    signature -- which is how this read as two unrelated errors in `doctor/`.
+    """
     # ⚠ EVERY AGENT IN VALID_HOST_AGENTS NEEDS A ROW, or it takes the fallback
     # below and the user is handed a path to a file that has never existed.
     # tests/test_host_agent_capture_parity.py fails on a missing row rather than
