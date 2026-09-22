@@ -19,6 +19,8 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.9.21.0] — 2026-09-21 — one leaked environment variable, and the failures it was hiding
+
 ### Fixed
 
 - **The cognitive loop stopped embedding chat turns until it was restarted**
@@ -40,11 +42,50 @@ the policy is forward-going only.
   "Main". Selection is now bound per request. An explicitly set `M3_DATABASE`
   still takes precedence, so single-store deployments are unaffected.
 
+- **Type annotations narrower than their code failed the type-check lane, which
+  gates every test lane.** Three signatures rejected calls that work at runtime:
+  `scoped_db_env` and `exec_bit_status` declared `str`/`Path` where callers pass
+  the other, and `get_hook_path_for_agent` declared a 2-tuple while returning
+  three values. Because the type check gates the test matrix, this had left the
+  full 3-OS × Python matrix, the install checks and the PostgreSQL lane
+  unexecuted rather than merely unreported.
+- **A lease-fencing test raced its own lease.** It claimed a one-second lease and
+  then asserted the lease could still be renewed; renewals of an expired lease
+  are refused by design, so any scheduling delay over a second failed the build
+  on load rather than on a defect.
+- **Two dispatch tests read the wrong store under PostgreSQL.** They resolved the
+  table name once at import — before the test sandbox clears the backend
+  selection — so a schema-qualified name was queried over a SQLite connection.
+  The name is now resolved per use, and a mismatch between a qualified name and a
+  non-server connection is reported with the values, the predicted error and the
+  cause rather than surfacing as `no such table`.
+- **The public-API parity guard failed on Python 3.15 over a standard-library
+  change.** It snapshotted call signatures for every public name in
+  `memory_core`, including objects imported from the standard library, so
+  `datetime` gaining an introspectable signature in 3.15 read as an m3 API
+  change. Signatures are now captured only for objects m3 defines, decided by
+  the defining module's file location; names, kinds and values are still tracked
+  for everything, so a dropped re-export still fails.
+
 ### Added
 
 - `scoped_db_env()` — sets `M3_DATABASE` for a block and restores it exactly,
   including restoring prior absence as absence. Use `active_database()` for
   routing; this is only for influencing what a later import binds.
+
+### Changed
+
+- **The PostgreSQL lane is now required.** It shipped advisory because it had
+  never run in CI; it has since been green across consecutive runs and is the
+  only automated coverage for one of the two shipped backends, so a migration
+  can no longer merge having never been executed.
+- `networkx` and `defusedxml` are pinned directly in `requirements.txt`. Both are
+  declared dependencies but reached that install path only as another package's
+  transitive — `networkx` via `torch`, so a core feature depended on an optional
+  ML stack being present, and `defusedxml` via `fpdf2` despite being pinned
+  elsewhere precisely to guarantee the hardened XML parser.
+
+## [2026.9.20.3] — 2026-09-20 — an honest sync result
 
 ### Fixed
 
