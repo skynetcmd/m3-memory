@@ -1046,11 +1046,14 @@ def dispatch_table_for_tests() -> str:
     return _dispatch_write_table()
 
 
-def dispatch_conn_for_tests():
+def dispatch_conn_for_tests(table=None):
     """A read/write connection to the store `notify_impl` writes to.
 
     Context manager. Mirrors `_store_for_id` for ids at or above the dispatch
     floor, which is where every newly sent notification now lands.
+
+    Emits a NOTE when the table name and this connection disagree about the
+    backend -- see :func:`_warn_if_dispatch_backends_disagree`.
     """
     import sys as _sys
     from pathlib import Path as _Path
@@ -1059,4 +1062,69 @@ def dispatch_conn_for_tests():
     from m3_core.context import M3Context
     from m3_core.paths import resolve_db_path
 
+    _warn_if_dispatch_backends_disagree(table)
     return M3Context.for_db(resolve_db_path(None)).get_dispatch_conn()
+
+
+def _warn_if_dispatch_backends_disagree(table=None) -> None:
+    """Say WHY a dispatch query is about to fail, before it fails obscurely.
+
+    THE FAILURE THIS EXPLAINS. A dispatch test can hold a table name resolved by
+    one path and a connection resolved by another:
+
+        _dispatch_write_table()  -> resolve_backend_name()   (names the TABLE)
+        get_dispatch_conn()      -> active_backend()         (opens the CONN)
+
+    When they disagree, the query dies as
+    ``no such table: m3_dispatch.notification_dispatch`` -- a SQLite error
+    naming a PostgreSQL schema, which says nothing about the disagreement that
+    caused it. That message cost a long triage: the decisive facts (each side's
+    backend, and WHEN each was resolved) were all available and none were
+    reported.
+
+    The known way to produce it is binding the table name at MODULE scope, which
+    runs at COLLECTION -- before the autouse ``m3_sandbox`` fixture clears
+    ``M3_DB_BACKEND``. The name then captures ``postgres`` while the connection,
+    built per test, gets ``sqlite``.
+
+    ⚠ COMPARE THE CALLER'S NAME, NOT THE TWO RESOLVERS. A first version of this
+    guard compared ``resolve_backend_name()`` with ``active_backend()`` and was
+    silent on a planted reproduction: by TEST time both say ``sqlite`` and agree
+    perfectly. The stale value is the one the caller captured at COLLECTION, so
+    a probe that only re-resolves cannot see it. ``table`` is passed in for
+    exactly that reason.
+
+    §3 evidence levels: the qualification and the live backend are OBSERVED; the
+    import-time bind is the `possible:` cause, because this function cannot see
+    where the caller's name came from. Silent when they agree -- a note that
+    fires on a healthy run is itself a §3 violation.
+    """
+    try:
+        if table is None:
+            return
+        name = str(table)
+        qualified = "." in name
+        try:
+            from memory.backends import active_backend
+            conn_side = active_backend().name
+        except Exception as exc:  # noqa: BLE001 -- report, never raise from a probe
+            conn_side = f"unavailable ({type(exc).__name__})"
+        # A schema-qualified name only resolves on a server backend.
+        if not qualified or conn_side == "postgres":
+            return
+        table_side = "postgres"
+        print(
+            f"\n[conftest] NOTE: dispatch backend mismatch. "
+            f"observed: the table name {name!r} is schema-qualified, which "
+            f"only resolves on {table_side!r}, but this connection is "
+            f"{conn_side!r} (active_backend). The query is about to fail as "
+            f"`no such table: {name.replace(chr(34), '')}`. "
+            f"possible: the name was bound at MODULE scope, which runs at "
+            f"COLLECTION -- before m3_sandbox clears M3_DB_BACKEND -- so it "
+            f"captured a backend this test no longer has. "
+            f"inspect: resolve the name per use (see the _LazyTable note in "
+            f"tests/test_ack_respects_the_lease.py).",
+            flush=True,
+        )
+    except Exception:  # noqa: BLE001 -- a diagnostic must never break a test
+        return

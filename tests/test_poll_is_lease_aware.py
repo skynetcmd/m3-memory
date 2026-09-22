@@ -38,9 +38,23 @@ from memory.orchestration import (  # noqa: E402
     notify_impl,
 )
 
+
 # The store notify_impl writes to -- resolved by production's own
 # resolver so these tests cannot drift from the real routing.
-_T = dispatch_table_for_tests()
+#
+# ⚠ RESOLVED PER USE, NOT AT IMPORT -- see the identical block in
+# test_ack_respects_the_lease.py for the full mechanism. Short version: module
+# scope runs at COLLECTION, before the autouse `m3_sandbox` fixture clears
+# M3_DB_BACKEND, so an import-time bind captured a PG-qualified name that the
+# test then queried over a SQLite connection.
+class _LazyTable:
+    def __str__(self) -> str:
+        return dispatch_table_for_tests()
+
+    __repr__ = __str__
+
+
+_T = _LazyTable()
 
 
 @pytest.fixture

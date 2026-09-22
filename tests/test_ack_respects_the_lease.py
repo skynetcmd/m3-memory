@@ -39,9 +39,30 @@ from memory.orchestration import (  # noqa: E402
     notify_impl,
 )
 
+
 # The store notify_impl writes to -- resolved by production's own
 # resolver so these tests cannot drift from the real routing.
-_T = dispatch_table_for_tests()
+#
+# ⚠ RESOLVED PER USE, NOT AT IMPORT. Module scope runs at COLLECTION, before the
+# autouse `m3_sandbox` fixture clears M3_DB_BACKEND. Binding the name there made
+# it disagree with the connection the test actually gets:
+#
+#   at import : env=postgres  -> '"m3_dispatch".notification_dispatch'
+#   at test   : env=<cleared> -> connection is sqlite
+#
+# ...so the PG lane queried a PG-qualified name over a SQLite connection and
+# failed with `no such table: m3_dispatch.notification_dispatch` (10 failures
+# across this file and test_poll_is_lease_aware). Production is unaffected: it
+# calls _dispatch_write_table() and get_dispatch_conn() together, both live.
+# `__str__` keeps every `f"... {_T} ..."` call site unchanged.
+class _LazyTable:
+    def __str__(self) -> str:
+        return dispatch_table_for_tests()
+
+    __repr__ = __str__
+
+
+_T = _LazyTable()
 
 
 @pytest.fixture
