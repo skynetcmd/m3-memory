@@ -259,15 +259,32 @@ jobs:
   # (`now()` hand-written into a shared code path) would have failed at runtime
   # on SQLite. Neither was caught by a green suite.
   #
-  # ADVISORY TO START (`continue-on-error: true`). This lane has never run in
-  # CI; making it required on its first outing would block every PR on failures
-  # nobody has triaged yet. Flip it to required once it has been green across a
-  # few PRs — tracked in #160.
+  # REQUIRED as of 2026-09-22. It began advisory (`continue-on-error: true`)
+  # because it had never run in CI and making it blocking on its first outing
+  # would have failed every PR on untriaged defects. The bar set here was "green
+  # across a few PRs"; that is now met, and the intervening history is the
+  # argument rather than the elapsed time:
+  #
+  #   2b0c082b  skipped   <- the typecheck gate above failed, so it never ran
+  #   f1db8d29  failure   } all three the SAME pre-existing defect: the dispatch
+  #   3810899e  failure   } table name was bound at module scope, so it captured
+  #   941d3ee8  failure   } postgres while the connection resolved sqlite
+  #   cd5b5a27  success   <- that defect fixed
+  #   99d90d21  success
+  #
+  # One root cause, fixed, and every run since is green. Nothing else has ever
+  # failed in this lane. Leaving it advisory now would be the §3 failure in the
+  # other direction: a lane nobody has to care about is a lane that stops being
+  # read, and this is the only coverage m3 has for one of its two shipped
+  # backends (§0.4). A PG migration must not be able to merge unexecuted again.
+  #
+  # ⚠ If this lane starts failing for a NEW reason, fix the defect — do not
+  # restore `continue-on-error`. That silences the one gate that proves m3 still
+  # works on PostgreSQL.
   postgres:
     name: PostgreSQL lane (requires_pg)
     needs: [lint, typecheck]
     runs-on: ubuntu-latest
-    continue-on-error: true
     services:
       postgres:
         image: postgres:16
