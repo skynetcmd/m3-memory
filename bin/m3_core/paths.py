@@ -737,6 +737,52 @@ def active_database(path: Optional[str]):
         _active_db.reset(token)
 
 
+@contextmanager
+def scoped_db_env(path: Optional[str]):
+    """Set ``M3_DATABASE`` for a block and restore it exactly on exit.
+
+    PREFER :func:`active_database`. This exists for the one case it cannot
+    cover: a module that must influence what a LATER ``import`` binds at import
+    time (``memory.config.DB_PATH`` reads ``M3_DATABASE`` when first imported),
+    which a ContextVar cannot reach. Everything else -- routing reads and writes
+    at a store -- belongs in ``active_database``, which needs no env var and
+    cannot leak. Use both together when both are needed: this one for the
+    import, that one for the routing.
+
+    WHY THIS IS A SEAM PRIMITIVE RATHER THAN FOUR COPIES. An unrestored write
+    poisons every later ``resolve_db_path(None)`` in the process, and the
+    callers that need it are loops over MULTIPLE stores (core, then chatlog),
+    so the value left behind is the LAST store swept, not the main one. That
+    turned into a silent wrong-store read four separate times in this codebase
+    (#180). The save/restore is three lines and every copy got to decide
+    independently whether to bother -- exactly the duplication §10a calls the
+    defect, independent of correctness.
+
+    RESTORES ABSENCE AS ABSENCE. ``resolve_db_path`` reads
+    ``os.environ.get("M3_DATABASE") or ...``, so an empty string would fall
+    through there -- but other readers test for the KEY, so putting "" back
+    where nothing existed is not a restore.
+
+    SQLITE-SHAPED BY CONTRACT, and that is not a portability gap.
+    ``M3_DATABASE`` names a SQLite FILE: ``resolve_db_path`` raises on a DSN,
+    and a non-SQLite backend is selected by ``M3_DB_BACKEND`` with its own DSN
+    variable (e.g. ``M3_PRIMARY_PG_URL``), which this function does not touch.
+    So on PostgreSQL there is nothing here to scope -- callers pass the path
+    they were going to set anyway, and a DSN raises from ``resolve_db_path``
+    at use, as it already would.
+    """
+    prev = os.environ.get("M3_DATABASE")
+    if path is not None:
+        os.environ["M3_DATABASE"] = str(path)
+    try:
+        yield prev
+    finally:
+        if prev is None:
+            os.environ.pop("M3_DATABASE", None)
+        else:
+            os.environ["M3_DATABASE"] = prev
+
+
 def seam_backend():
     """The active storage backend, or a SQLite-only shim during bootstrap.
 

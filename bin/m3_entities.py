@@ -63,7 +63,7 @@ import httpx  # noqa: E402
 import memory_core as mc  # noqa: E402
 from agent_protocol import strip_code_fences  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
-from m3_sdk import get_m3_root
+from m3_sdk import get_m3_root, scoped_db_env
 from slm_intent import Profile, load_profile, localize_endpoint  # noqa: E402
 
 logger = logging.getLogger("m3_entities")
@@ -1063,12 +1063,18 @@ async def _main_async(args: argparse.Namespace) -> int:
     counters_total: defaultdict[str, int] = defaultdict(int)
     for label, db_path in db_targets:
         counters: defaultdict[str, int] = defaultdict(int)
-        await _run_db(
-            db_path, profile, token, valid_types, valid_predicates,
-            type_allowlist, args.source_variant, args.concurrency,
-            args.limit, not args.force, counters,
-            source_conv_list=conv_set,
-        )
+        # _run_db sets M3_DATABASE for its own late imports. Scope it: this loop
+        # spans MULTIPLE stores (core, then chatlog), so an unrestored write
+        # leaves the env pinned to the last one and every later
+        # resolve_db_path(None) in the process follows it to the wrong store
+        # (#180 -- it removed the chatlog from the loop's embed targets).
+        with scoped_db_env(db_path):
+            await _run_db(
+                db_path, profile, token, valid_types, valid_predicates,
+                type_allowlist, args.source_variant, args.concurrency,
+                args.limit, not args.force, counters,
+                source_conv_list=conv_set,
+            )
         for k, v in counters.items():
             counters_total[k] += v
 

@@ -19,7 +19,32 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-## [2026.9.20.3] — 2026-09-20 — an honest sync result
+### Fixed
+
+- **The cognitive loop stopped embedding chat turns until it was restarted**
+  ([#180](https://github.com/skynetcmd/m3-memory/issues/180)). Each embed sweep
+  set `M3_DATABASE` and left it set, so after the chatlog store was swept every
+  later database resolution in the process pointed at it. The loop's own
+  store list then collapsed to a single entry, the chatlog store dropped out of
+  the embed targets, and `unembedded` grew without bound while the loop reported
+  no work to do. The same unrestored write was present in the enrichment and
+  entity passes, which run earlier in the same cycle.
+- **Embedding writes during a sweep resolved through the environment variable
+  rather than the swept store.** They landed correctly only as a side effect of
+  the leak above; the sweep is now explicitly bound to its own database.
+- **The dashboard's database selector was process-global, so concurrent viewers
+  could read each other's store.** The selected database arrives as a
+  per-request cookie but was written to `M3_DATABASE`, which is shared by the
+  whole process; two overlapping requests could interleave and resolve to the
+  wrong store, and `/api/stats` could label another request's database as
+  "Main". Selection is now bound per request. An explicitly set `M3_DATABASE`
+  still takes precedence, so single-store deployments are unaffected.
+
+### Added
+
+- `scoped_db_env()` — sets `M3_DATABASE` for a block and restores it exactly,
+  including restoring prior absence as absence. Use `active_database()` for
+  routing; this is only for influencing what a later import binds.
 
 ### Fixed
 

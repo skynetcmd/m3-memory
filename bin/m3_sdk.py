@@ -84,6 +84,7 @@ from m3_core.paths import (  # noqa: F401
     resolve_db_path,
     resolve_primary_pg_dsn,
     resolve_venv_python,
+    scoped_db_env,
 )
 
 # Coordination-file payload SCHEMA (the shared contract for PID-registry + lock

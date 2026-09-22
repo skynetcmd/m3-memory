@@ -1,8 +1,8 @@
 ---
 tool: bin/dashboard_server.py
-sha1: 9c7468460642
-mtime_utc: 2026-09-13T19:59:20.250663+00:00
-generated_utc: 2026-09-17T23:58:53.151286+00:00
+sha1: 950452ad7d17
+mtime_utc: 2026-09-22T00:07:19.368935+00:00
+generated_utc: 2026-09-22T00:07:24.538082+00:00
 private: false
 ---
 
@@ -93,6 +93,7 @@ you intend to launch the server with (typically ``.venv``).
 - `m3_http_auth`
 - `m3_sdk (acquire_or_exit)`
 - `m3_sdk (active_database)`
+- `m3_sdk (active_database, resolve_db_path)`
 - `m3_sdk (resolve_db_path)`
 - `memory_core (memory_delete_impl)`
 - `memory_core (memory_update_impl)`
@@ -104,11 +105,11 @@ you intend to launch the server with (typically ``.venv``).
 
 **subprocess**
 
-- `subprocess.Popen()  → `[exe, script, '--foreground']`` (line 3107)
-- `subprocess.Popen()  → `[sys.executable, script, '--foreground']`` (line 3117)
-- `subprocess.Popen()  → `cmd`` (line 2778)
-- `subprocess.run()  → `['powershell', '-NoProfile', '-Command', ps]`` (line 2987)
-- `subprocess.run()  → `['taskkill', '/F', '/PID', str(pid)]`` (line 3022)
+- `subprocess.Popen()  → `[exe, script, '--foreground']`` (line 3184)
+- `subprocess.Popen()  → `[sys.executable, script, '--foreground']`` (line 3194)
+- `subprocess.Popen()  → `cmd`` (line 2855)
+- `subprocess.run()  → `['powershell', '-NoProfile', '-Command', ps]`` (line 3064)
+- `subprocess.run()  → `['taskkill', '/F', '/PID', str(pid)]`` (line 3099)
 
 
 ---

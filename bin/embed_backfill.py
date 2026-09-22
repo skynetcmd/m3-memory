@@ -142,6 +142,93 @@ def _bound_db(db_path):
             yield conn
 
 
+def _safe_db(value: str | None) -> str:
+    """Render a DB location for a LOG line without leaking a password.
+
+    `M3_DATABASE` is contractually a SQLite file path, but a misconfigured
+    deployment can put a DSN there (`resolve_db_path` raises on exactly that),
+    and a DSN carries credentials. Mirror the seam's own convention and echo a
+    connection string scheme-only; a plain path is safe to show in full.
+    """
+    if value is None:
+        return "<unset>"
+    try:
+        from m3_core.paths import _looks_like_dsn  # type: ignore
+        is_dsn = _looks_like_dsn(value)
+    except Exception:  # pragma: no cover - standalone fallback
+        is_dsn = "://" in value
+    if is_dsn:
+        return f"{value.strip().split('://', 1)[0]}://<redacted>"
+    return repr(value)
+
+
+@contextmanager
+def _scoped_db_env(db_path):
+    """`m3_sdk.scoped_db_env`, with a self-contained fallback.
+
+    The seam owns the save/restore (see its docstring for why it is shared and
+    not copied per caller). The fallback below is byte-identical in behaviour so
+    a standalone run without the payload on sys.path still cannot leak.
+    """
+    try:
+        from m3_sdk import scoped_db_env  # type: ignore
+    except Exception:  # pragma: no cover - standalone fallback
+        prev = os.environ.get("M3_DATABASE")
+        if db_path is not None:
+            os.environ["M3_DATABASE"] = str(db_path)
+        try:
+            yield prev
+        finally:
+            if prev is None:
+                os.environ.pop("M3_DATABASE", None)
+            else:
+                os.environ["M3_DATABASE"] = prev
+        return
+    with scoped_db_env(db_path) as prev:
+        yield prev
+
+
+@contextmanager
+def _sweep_binding(db_path):
+    """Bind the active database to `db_path` for a block, without a connection.
+
+    `_bound_db` binds the path AND opens a connection, which suits the read
+    queries but is the wrong shape for wrapping the whole `run_embed_loop`
+    drive: that needs only the ContextVar so the write callback's `mc._db()`
+    resolves to the swept store rather than to whatever `resolve_db_path(None)`
+    would pick. Splitting the binding out keeps a long-lived pooled connection
+    from being held open for the duration of the sweep.
+
+    A no-op when the seam is unavailable (standalone execution without the
+    payload on sys.path), mirroring `_bound_db`'s fallback: in that case the
+    module is its own first importer, so the M3_DATABASE set by `_run_sweep`
+    is still what every resolver sees.
+    """
+    try:
+        from m3_sdk import active_database  # type: ignore
+    except Exception as e:  # pragma: no cover - standalone fallback
+        # NOT a warning: this is the EXPECTED state for a standalone run with
+        # no payload on sys.path, and a warning that fires on a healthy system
+        # is itself a §3 violation. But it must not be silent either -- a
+        # genuinely broken payload takes this same branch, and the consequence
+        # is real: without the ContextVar the write callback's mc._db() routes
+        # by M3_DATABASE, which _run_sweep restores on exit. So report it at
+        # NOTE level, carrying the exception so the two cases are told apart by
+        # whoever reads the log rather than by this branch guessing.
+        _log(
+            f"NOTE: seam unavailable ({type(e).__name__}: {e}); "
+            f"observed: routing the sweep of {_safe_db(str(db_path))} by "
+            f"M3_DATABASE instead "
+            f"of active_database(). expected for a standalone run without the "
+            f"payload on sys.path. "
+            f"inspect: if m3 IS installed, bin/ is missing from sys.path."
+        )
+        yield None
+        return
+    with active_database(str(db_path)) as resolved:
+        yield resolved
+
+
 class Counters(_LibCounters):  # type: ignore[misc, valid-type]
     """Backwards-compat shim: subclass of lib Counters with one extra attr.
 
@@ -360,11 +447,55 @@ async def _run_sweep(args: argparse.Namespace, counters: Counters) -> int:
     """Delegate to embed_sweep_lib.run_embed_loop with the embed_backfill-
     specific fetch + write callbacks.
 
-    Late import: memory_core reads M3_DATABASE at import time, so we must
-    set the env var BEFORE importing. Once imported, _db() ties to that
-    path for the lifetime of the process.
+    Late import: memory_core (via memory.config.DB_PATH) reads M3_DATABASE at
+    import time, so the env var must be set BEFORE the import below — that is
+    what the assignment here is for, and only a FIRST importer benefits from it
+    (standalone `embed_backfill` runs). It is NOT the routing mechanism: the
+    sweep is bound to `args.db` by `active_database()` in the block below, which
+    outranks the env var in `resolve_db_path()` and unwinds cleanly.
+
+    ⚠ THE ENV WRITE IS RESTORED ON EXIT, AND MUST STAY THAT WAY (#180).
+    Leaking it poisons every LATER `resolve_db_path(None)` in the process. In
+    the cognitive loop that is not hypothetical: the loop sweeps each store in
+    turn, so the last value left behind was the CHATLOG db, and
+    `chatlog_config.chat_store_paths()` — whose "main store" entry comes from
+    `resolve_db_path(None)` — then returned the chatlog path as main and
+    collapsed to a single entry. `_embed_target_dbs(args.database)` substitutes
+    its own main over that entry, so the chatlog store dropped out of the list
+    entirely, `has_embed_work()` read the (clean) main db, reported False, and
+    the idle-backlog-drain never fired. Unembedded chat turns then accumulated
+    until a restart cleared the env. Note the loop imports memory_core long
+    before this pass runs, so there the assignment binds nothing and leaked
+    only the damage.
     """
-    os.environ["M3_DATABASE"] = str(args.db)
+    with _scoped_db_env(args.db) as _prev_db_env:
+        try:
+            return await _run_sweep_inner(args, counters)
+        finally:
+            # Report a value we did NOT set: we own M3_DATABASE for the
+            # duration of this call, and the restore is about to HIDE any
+            # change to it. §3 evidence levels -- we OBSERVED the value, we
+            # did NOT confirm who wrote it, so the writer is `possible:`, not
+            # `cause:`. Quiet on a healthy sweep (a false alarm is itself a §3
+            # violation).
+            _observed = os.environ.get("M3_DATABASE")
+            if _observed != str(args.db):
+                _log(
+                    f"WARNING: M3_DATABASE changed during the sweep. "
+                    f"observed: {_safe_db(_observed)}, "
+                    f"expected {_safe_db(str(args.db))}; "
+                    f"restoring to {_safe_db(_prev_db_env)}. "
+                    f"possible: a callee set the env var directly instead of "
+                    f"using active_database(); such a write outlives this call "
+                    f"and steers later resolve_db_path(None) at the wrong "
+                    f"store (#180). "
+                    f"inspect: os.environ['M3_DATABASE'] writers on the "
+                    f"embed path."
+                )
+
+
+async def _run_sweep_inner(args: argparse.Namespace, counters: Counters) -> int:
+    """Body of :func:`_run_sweep`, with M3_DATABASE set for the import below."""
     if str(BIN_DIR) not in sys.path:
         sys.path.insert(0, str(BIN_DIR))
 
@@ -418,26 +549,35 @@ async def _run_sweep(args: argparse.Namespace, counters: Counters) -> int:
         def transform(text: str, metadata) -> str:
             return mc._augment_embed_text_with_anchors(text, metadata)
 
-    # Drive the loop
-    await run_embed_loop(
-        fetch_candidates=_fetch,
-        write_embedding=_write,
-        counters=counters,
-        embed_many=mc._embed_many,
-        content_hash_fn=mc._content_hash,
-        transform_text=transform if transform is not None else (lambda t, _m: t),
-        batch_size=args.batch_size,
-        concurrency=args.concurrency,
-        timeout_s=args.timeout_s,
-        deadline_s=deadline,
-        max_consecutive_fails=args.max_consecutive_fails,
-        max_row_bytes=args.max_row_bytes,
-        oversize_mode=("subdivide" if getattr(args, "subdivide_oversize", False)
-                       else "skip"),
-        expected_dim=(args.expected_dim if args.expected_dim else None),
-        limit=args.limit,
-        log=_log,
-    )
+    # Drive the loop.
+    #
+    # Bound to args.db for the whole drive, not just the read queries: the
+    # `_write` callback below uses `mc._db()`, which resolves through the active
+    # context. Before #180 that resolution happened to land on the right store
+    # only because `_run_sweep` had leaked M3_DATABASE process-wide; now that the
+    # leak is restored on exit, the binding has to be explicit here or writes
+    # would target the MAIN db while reads came from the swept one. ContextVars
+    # propagate across `await` within a task, so this covers the whole drive.
+    with _sweep_binding(args.db):
+        await run_embed_loop(
+            fetch_candidates=_fetch,
+            write_embedding=_write,
+            counters=counters,
+            embed_many=mc._embed_many,
+            content_hash_fn=mc._content_hash,
+            transform_text=transform if transform is not None else (lambda t, _m: t),
+            batch_size=args.batch_size,
+            concurrency=args.concurrency,
+            timeout_s=args.timeout_s,
+            deadline_s=deadline,
+            max_consecutive_fails=args.max_consecutive_fails,
+            max_row_bytes=args.max_row_bytes,
+            oversize_mode=("subdivide" if getattr(args, "subdivide_oversize", False)
+                           else "skip"),
+            expected_dim=(args.expected_dim if args.expected_dim else None),
+            limit=args.limit,
+            log=_log,
+        )
     return 0
 
 

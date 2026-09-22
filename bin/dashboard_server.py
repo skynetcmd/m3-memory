@@ -128,7 +128,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 # Ensure bin/ is on path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from m3_sdk import resolve_db_path
+from m3_sdk import active_database, resolve_db_path
 from memory.db import _db
 from memory.search import memory_search_scored_impl
 from memory_maintenance import gdpr_export_impl, gdpr_forget_impl
@@ -718,6 +718,50 @@ class DashboardAuthMiddleware(BaseHTTPMiddleware):
         )
 
 
+class DbScopeMiddleware(BaseHTTPMiddleware):
+    """Bind the request's selected store for the lifetime of the request.
+
+    THE BUG THIS EXISTS TO CLOSE. `selected_db` is a per-request cookie; the
+    old `set_active_db_env` wrote it to `os.environ["M3_DATABASE"]`, which is
+    process-global. Every handler here is `async def` on a single event loop, so
+    two overlapping requests raced: A set main, awaited, B set chatlog, A
+    resumed and read B's store. Reproduced, not inferred.
+
+    `active_database` is a ContextVar, so it propagates across `await` inside
+    one task and is invisible to every other task -- which is the isolation an
+    async server needs and the isolation an env var cannot express. Doing it
+    HERE rather than per-handler means the ~18 handlers that used to call
+    `set_active_db_env` are covered once, and a handler added later is covered
+    without remembering to opt in.
+
+    ⚠ This binds ONLY when `M3_DATABASE` is unset in the environment, because
+    `resolve_db_path()` resolves `explicit > M3_DATABASE > ContextVar`: an
+    operator who pinned the env var deliberately (single-store deployment,
+    `M3_DATABASE=...` in a unit file) must keep winning. In that case the
+    selector is moot anyway -- every request already resolves to the pinned
+    store -- so yielding to it is correct rather than a silent downgrade.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if os.environ.get("M3_DATABASE"):
+            # Operator pinned it; the env var outranks us by design.
+            return await call_next(request)
+        try:
+            store = selected_db_store(request.cookies.get("selected_db", "main"))
+        except Exception:
+            # Never fail a request over store selection -- fall through to the
+            # default resolution the handler would have used anyway.
+            return await call_next(request)
+        with active_database(store):
+            return await call_next(request)
+
+
+# Registration order matters and is the REVERSE of execution order: Starlette
+# wraps each newly added middleware AROUND the previous one, so the LAST
+# registered runs OUTERMOST (verified, not assumed). Auth must run outermost, so
+# it is registered last -- a request that is about to be rejected as
+# unauthorized should not get a store bound for it first.
+app.add_middleware(DbScopeMiddleware)
 app.add_middleware(DashboardAuthMiddleware)
 
 # --- Helpers ---
@@ -742,12 +786,38 @@ def get_active_db_path(request: Request) -> str:
     paths = get_db_paths()
     return paths.get(cookie_val, paths["main"])
 
-def set_active_db_env(selected_db: str):
+def selected_db_store(selected_db: str) -> str:
+    """The memory store a `selected_db` cookie value names.
+
+    `files` maps to the MAIN store deliberately: the files database is not a
+    memory store, so a request viewing it still reads memory from main.
+    """
     paths = get_db_paths()
     if selected_db == "files":
-        os.environ["M3_DATABASE"] = paths["main"]
-    else:
-        os.environ["M3_DATABASE"] = paths.get(selected_db, paths["main"])
+        return paths["main"]
+    return paths.get(selected_db, paths["main"])
+
+
+def set_active_db_env(selected_db: str) -> None:
+    """Deprecated no-op, kept so no call site changes behaviour by vanishing.
+
+    IT USED TO WRITE ``os.environ["M3_DATABASE"]``, and that was a defect on a
+    server: the value is PROCESS-GLOBAL while `selected_db` comes from a
+    PER-REQUEST cookie, and every handler here is `async def` on one event loop.
+    Two overlapping requests therefore raced -- measured, not theorised: request
+    A (cookie `main`) set main, hit an `await`, request B (cookie `chatlog`) set
+    chatlog, and A resumed reading B's store. `/api/stats` then labelled
+    another viewer's store as "Main DB".
+
+    Worse, `resolve_db_path()` resolves ``explicit > M3_DATABASE > ContextVar``,
+    so this write also OVERRODE the ten `active_database(...)` blocks already in
+    this file -- the correct pattern was being defeated by this one.
+
+    `DbScopeMiddleware` now binds the store per request via the ContextVar,
+    which propagates across `await` within a task and does not leak across
+    tasks. Nothing needs to be set here, so this does nothing.
+    """
+    return None
 
 def build_db_selector_html(selected_db: str) -> str:
     paths = get_db_paths()
@@ -1513,10 +1583,14 @@ async def get_stats(request: Request):
     file_lines = 0
 
     from chatlog_config import DEFAULT_DB_PATH
-    from m3_sdk import resolve_db_path
     from memory.config import FILES_DB_PATH
 
-    main_db = resolve_db_path(None)
+    # This panel reports all three stores SIDE BY SIDE, so "main" here means the
+    # actual main store -- not the one the selector happens to be pointing at.
+    # Ask for it explicitly: `resolve_db_path(None)` now answers with the
+    # request-scoped store bound by DbScopeMiddleware, which is right for a
+    # handler that follows the selector and wrong for this one.
+    main_db = get_db_paths()["main"]
     chatlog_db = DEFAULT_DB_PATH
     files_db = FILES_DB_PATH
 
@@ -2707,7 +2781,10 @@ async def trigger_maintenance_task(action: str):
             status_code=400
         )
 
-    main_db = os.path.abspath(resolve_db_path(None))
+    # Explicitly the MAIN store, never the selector's. This task mutates data,
+    # and it resolves chatlog separately below (falling back to main), so it must
+    # not inherit whichever store a viewer happened to have selected.
+    main_db = os.path.abspath(get_db_paths()["main"])
 
     # Resolve Chatlog DB path
     try:

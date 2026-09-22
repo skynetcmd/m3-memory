@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_backfill.py
-sha1: e3ce8aa26c67
-mtime_utc: 2026-09-17T11:03:39.503491+00:00
-generated_utc: 2026-09-17T11:13:49.106200+00:00
+sha1: 864d570382a9
+mtime_utc: 2026-09-21T23:52:26.722969+00:00
+generated_utc: 2026-09-21T23:59:06.693867+00:00
 private: false
 ---
 
@@ -60,7 +60,7 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 
 ## Entry points
 
-- `def main()` (line 585)
+- `def main()` (line 725)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -104,6 +104,7 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 - `embed_sweep_lib (Counters)`
 - `embed_sweep_lib (run_embed_loop)`
 - `m3_sdk (active_database)`
+- `m3_sdk (scoped_db_env)`
 - `memory_core`
 
 ---
@@ -120,6 +121,7 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 ## Notable external imports
 
 - `m3_core.context (M3Context)`
+- `m3_core.paths (_looks_like_dsn)`
 - `memory.backends.sqlite_backend (SqliteDialect)`
 
 ---

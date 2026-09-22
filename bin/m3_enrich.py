@@ -73,6 +73,7 @@ from enrich.report import (
     _print_dry_run,
     _print_run_summary,
 )  # noqa: E402
+from m3_core.paths import scoped_db_env  # noqa: E402
 from slm_intent import (  # noqa: E402
     Profile,
 )
@@ -681,26 +682,32 @@ async def _drain_queue_mode(args, profile, token: str) -> int:
     # own summary and there's nothing to aggregate at this scope. Removed
     # the unused init in 2026-05-01 cleanup.
     for label, db_path in db_targets:
-        os.environ["M3_DATABASE"] = str(db_path)
-        # Ensure migration 025 (observation_queue/reflector_queue) exists (cheap
-        # idempotent check; no-op on PG where the schema is migration-managed).
-        _ensure_migration_025(db_path)
-        # Count pending rows up-front so we can show what we're about to do.
-        # Read-only via the seam (SQLite honors db_path ?mode=ro, PG pools).
-        from memory.backends import active_backend as _ab
-        pending = 0
-        try:
-            with _ab().open_readonly(str(db_path)) as conn:
-                pending = conn.execute(
-                    "SELECT COUNT(*) FROM observation_queue WHERE attempts < 5"
-                ).fetchone()[0]
-        except Exception:
+        # Scoped, not assigned: this iterates MULTIPLE stores (core, then
+        # chatlog), so a bare write leaves the env pinned to the LAST one for
+        # the rest of the process. Under the cognitive loop that made
+        # chat_store_paths() report the chatlog store as "main", dropping it
+        # from the embed targets and stalling the unembedded backlog (#180).
+        # The `continue` below is why this wraps the body rather than one call.
+        with scoped_db_env(db_path):
+            # Ensure migration 025 (observation_queue/reflector_queue) exists (cheap
+            # idempotent check; no-op on PG where the schema is migration-managed).
+            _ensure_migration_025(db_path)
+            # Count pending rows up-front so we can show what we're about to do.
+            # Read-only via the seam (SQLite honors db_path ?mode=ro, PG pools).
+            from memory.backends import active_backend as _ab
             pending = 0
-        if pending == 0:
-            print(f"[m3-enrich] {db_path.name}: queue empty -- skipping", flush=True)
-            continue
-        print(f"[m3-enrich] {db_path.name}: {pending} pending rows", flush=True)
-        await observer.drain_queue_mode(drainer_args, profile, token)
+            try:
+                with _ab().open_readonly(str(db_path)) as conn:
+                    pending = conn.execute(
+                        "SELECT COUNT(*) FROM observation_queue WHERE attempts < 5"
+                    ).fetchone()[0]
+            except Exception:
+                pending = 0
+            if pending == 0:
+                print(f"[m3-enrich] {db_path.name}: queue empty -- skipping", flush=True)
+                continue
+            print(f"[m3-enrich] {db_path.name}: {pending} pending rows", flush=True)
+            await observer.drain_queue_mode(drainer_args, profile, token)
         # observer.drain_queue_mode prints its own summary; we don't re-aggregate
         # here because it doesn't return counters — Phase E3 future work if
         # needed for tests.
@@ -892,25 +899,32 @@ async def _main_async(args) -> int:
             _sc.close()
             print(f"[m3-enrich] {label} run_id={per_db_run_id}", flush=True)
 
-        abort_reason = await _run_db(
-            db_path, profile, args.target_variant, type_allowlist,
-            args.concurrency, args.limit, counters,
-            source_variant=args.source_variant,
-            conv_filter=conv_filter,
-            track_state=args.track_state,
-            resume=args.resume,
-            enrich_run_id=per_db_run_id,
-            max_attempts=args.max_attempts,
-            include_dead_letter=args.include_dead_letter,
-            budget_usd=args.budget_usd,
-            sample=args.sample,
-            sample_strategy=args.sample_strategy,
-            min_size_k=args.min_size_k,
-            max_size_k=args.max_size_k,
-            send_to=args.send_to,
-            cascade_threshold=args.cascade_threshold,
-            cascade_window_s=args.cascade_window_s,
-        )
+        # _run_db sets M3_DATABASE for its own late imports. Scope it here: this
+        # is a loop over MULTIPLE stores (core, then chatlog), so an unrestored
+        # write leaves the env pinned to the LAST one, and every later
+        # resolve_db_path(None) in the process then resolves to the chatlog
+        # store -- which silently removed it from the cognitive loop's embed
+        # targets and stalled the unembedded backlog (#180).
+        with scoped_db_env(db_path):
+            abort_reason = await _run_db(
+                db_path, profile, args.target_variant, type_allowlist,
+                args.concurrency, args.limit, counters,
+                source_variant=args.source_variant,
+                conv_filter=conv_filter,
+                track_state=args.track_state,
+                resume=args.resume,
+                enrich_run_id=per_db_run_id,
+                max_attempts=args.max_attempts,
+                include_dead_letter=args.include_dead_letter,
+                budget_usd=args.budget_usd,
+                sample=args.sample,
+                sample_strategy=args.sample_strategy,
+                min_size_k=args.min_size_k,
+                max_size_k=args.max_size_k,
+                send_to=args.send_to,
+                cascade_threshold=args.cascade_threshold,
+                cascade_window_s=args.cascade_window_s,
+            )
         if abort_reason:
             abort_reasons[label] = abort_reason
 
@@ -940,9 +954,12 @@ async def _main_async(args) -> int:
     # Optional Reflector pass.
     if not args.no_reflect:
         for label, db_path in db_targets:
-            r_counters = await _run_reflector_pass(
-                db_path, reflector_profile, args.reflector_threshold, args.concurrency,
-            )
+            # Same multi-store scoping as the _run_db loop above (#180).
+            with scoped_db_env(db_path):
+                r_counters = await _run_reflector_pass(
+                    db_path, reflector_profile, args.reflector_threshold,
+                    args.concurrency,
+                )
             print(f"[m3-enrich] reflector {label}: "
                   f"{r_counters['processed']} groups, "
                   f"{r_counters['sup_written']} supersedes edges written", flush=True)

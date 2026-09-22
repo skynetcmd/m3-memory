@@ -617,3 +617,83 @@ def test_parse_args_repeatable_filters():
     ])
     assert args.variant == ["A", "B"]
     assert args.type == ["note", "decision"]
+
+
+# ── M3_DATABASE must not leak out of a sweep (#180) ────────────────────────
+# _run_sweep sets M3_DATABASE before its late import of memory_core. Leaking
+# it poisons every later resolve_db_path(None) in the process: in the cognitive
+# loop the value left behind was the CHATLOG db, so chat_store_paths() returned
+# the chatlog path as its "main store", collapsed to one entry, and the chatlog
+# store dropped out of _embed_target_dbs() entirely -- unembedded chat turns
+# then grew without bound until a restart. These pin the restore, not the sweep.
+
+@pytest.mark.asyncio
+async def test_run_sweep_restores_m3_database(tmp_path, monkeypatch):
+    """A sweep must leave M3_DATABASE exactly as it found it."""
+    import embed_backfill as eb
+
+    sentinel = str(tmp_path / "main.db")
+    monkeypatch.setenv("M3_DATABASE", sentinel)
+
+    swept = tmp_path / "chatlog.db"
+    _make_min_schema(swept)  # no rows: sweep is a no-op, restore still required
+
+    await eb._run_sweep(_make_args(swept), eb.Counters())
+
+    assert os.environ["M3_DATABASE"] == sentinel, (
+        "M3_DATABASE leaked the swept db; see #180"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_sweep_restores_m3_database_absence(tmp_path, monkeypatch):
+    """Previously UNSET must come back unset, not as an empty string.
+
+    resolve_db_path() uses `os.environ.get("M3_DATABASE") or ...`, so "" would
+    fall through -- but chat_store_paths()/_main_path_from_env() and any
+    truthiness check elsewhere would still see a key that did not exist before.
+    Restoring absence as absence is the only faithful restore.
+    """
+    import embed_backfill as eb
+
+    monkeypatch.delenv("M3_DATABASE", raising=False)
+
+    swept = tmp_path / "chatlog.db"
+    _make_min_schema(swept)
+
+    await eb._run_sweep(_make_args(swept), eb.Counters())
+
+    assert "M3_DATABASE" not in os.environ, (
+        "absence must be restored as absence, not as an empty string; see #180"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_sweep_restores_m3_database_on_exception(tmp_path, monkeypatch):
+    """The restore is in a finally: a failing sweep must not leak either.
+
+    A locked or unreadable store is exactly when a sweep raises, and exactly
+    when the loop goes on to sweep the next store -- so the error path is the
+    one that matters most for #180.
+    """
+    import embed_backfill as eb
+
+    sentinel = str(tmp_path / "main.db")
+    monkeypatch.setenv("M3_DATABASE", sentinel)
+
+    swept = tmp_path / "chatlog.db"
+    _make_min_schema(swept)
+
+    boom = RuntimeError("sweep exploded")
+
+    async def _explode(*_a, **_k):
+        raise boom
+
+    monkeypatch.setattr(eb, "_run_sweep_inner", _explode)
+
+    with pytest.raises(RuntimeError):
+        await eb._run_sweep(_make_args(swept), eb.Counters())
+
+    assert os.environ["M3_DATABASE"] == sentinel, (
+        "M3_DATABASE leaked after a failing sweep; see #180"
+    )
