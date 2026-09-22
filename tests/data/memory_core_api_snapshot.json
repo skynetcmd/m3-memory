@@ -1,7 +1,7 @@
 {
   "module": "memory_core",
   "module_doc_present": true,
-  "n_symbols": 321,
+  "n_symbols": 322,
   "symbols": {
     "ARCHIVE_DB_PATH": {
       "kind": "constant",
@@ -20,12 +20,12 @@
     },
     "Any": {
       "kind": "class",
-      "signature": "(*args, **kwargs)",
+      "signature": null,
       "value_repr": null
     },
     "Awaitable": {
       "kind": "constant",
-      "signature": "(*args, **kwargs)",
+      "signature": null,
       "value_repr": null
     },
     "BASE_DIR": {
@@ -50,7 +50,7 @@
     },
     "Callable": {
       "kind": "constant",
-      "signature": "(*args, **kwargs)",
+      "signature": null,
       "value_repr": null
     },
     "DB_PATH": {
@@ -186,7 +186,7 @@
     "ENTITY_SEED_STOPLIST": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'this', 'thank', 'that', 'thanks', 'there', 'they', 'hello', 'ok', 'hi', 'its', 'their', 'okay', 'yes', 'the', 'it', 'them', 'no'})"
+      "value_repr": "frozenset({'hello', 'hi', 'it', 'its', 'no', 'ok', 'okay', 'thank', 'thanks', 'that', 'the', 'their', 'them', 'there', 'they', 'this', 'yes'})"
     },
     "EXPANSION_DISPLACEMENT_MARGIN": {
       "kind": "constant",
@@ -356,12 +356,12 @@
     "TASK_STATE_TRANSITIONS": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "{'pending': {'blocked', 'cancelled', 'in_progress'}, 'in_progress': {'blocked', 'cancelled', 'completed', 'failed'}, 'blocked': {'cancelled', 'in_progress'}, 'completed': set(), 'failed': set(), 'cancelled': set()}"
+      "value_repr": "{'pending': set({'blocked', 'cancelled', 'in_progress'}), 'in_progress': set({'blocked', 'cancelled', 'completed', 'failed'}), 'blocked': set({'cancelled', 'in_progress'}), 'completed': set(), 'failed': set(), 'cancelled': set()}"
     },
     "TERMINAL_TASK_STATES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'completed', 'cancelled', 'failed'})"
+      "value_repr": "frozenset({'cancelled', 'completed', 'failed'})"
     },
     "TITLE_MATCH_BOOST": {
       "kind": "constant",
@@ -371,37 +371,37 @@
     "VALID_AGENT_STATUSES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'idle', 'offline', 'active'})"
+      "value_repr": "frozenset({'active', 'idle', 'offline'})"
     },
     "VALID_CHANGE_AGENTS": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "{'gemini', 'legacy', 'claude', 'aider', 'grok', 'unknown', 'manual', 'openclaw', 'system', 'deepseek'}"
+      "value_repr": "set({'aider', 'claude', 'deepseek', 'gemini', 'grok', 'legacy', 'manual', 'openclaw', 'system', 'unknown'})"
     },
     "VALID_ENTITY_PREDICATES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'runs_on', 'assigned_ip', 'after', 'fails_over_to', 'supersedes', 'calls', 'measured_on', 'imports', 'listens_on', 'located_in', 'before', 'references', 'judged_by', 'source_of', 'mentions', 'introduced_in', 'affects_category', 'defined_in', 'owns', 'authorizes_budget', 'has_participant', 'hosts', 'family_of', 'same_as', 'has_quantity', 'works_at', 'knows', 'on_vlan', 'prefers', 'uses_model', 'has_location', 'produced_artifact', 'deprecates', 'has_time'})"
+      "value_repr": "frozenset({'affects_category', 'after', 'assigned_ip', 'authorizes_budget', 'before', 'calls', 'defined_in', 'deprecates', 'fails_over_to', 'family_of', 'has_location', 'has_participant', 'has_quantity', 'has_time', 'hosts', 'imports', 'introduced_in', 'judged_by', 'knows', 'listens_on', 'located_in', 'measured_on', 'mentions', 'on_vlan', 'owns', 'prefers', 'produced_artifact', 'references', 'runs_on', 'same_as', 'source_of', 'supersedes', 'uses_model', 'works_at'})"
     },
     "VALID_ENTITY_TYPES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'migration', 'env_var', 'bench_artifact', 'device', 'task_category', 'datetime', 'port', 'ip_address', 'quantity', 'variant', 'container', 'preference', 'event', 'topic', 'vlan', 'task_id', 'module', 'model', 'place', 'metric', 'service', 'legacy_object', 'class_or_table', 'cli_flag', 'protocol', 'function', 'file_path', 'legacy_concept', 'mac_address', 'endpoint_url', 'memory_id', 'benchmark', 'person', 'host', 'date', 'dataset_field', 'firewall_rule', 'product', 'memory_type', 'organization', 'bench_run_id', 'commit_or_branch'})"
+      "value_repr": "frozenset({'bench_artifact', 'bench_run_id', 'benchmark', 'class_or_table', 'cli_flag', 'commit_or_branch', 'container', 'dataset_field', 'date', 'datetime', 'device', 'endpoint_url', 'env_var', 'event', 'file_path', 'firewall_rule', 'function', 'host', 'ip_address', 'legacy_concept', 'legacy_object', 'mac_address', 'memory_id', 'memory_type', 'metric', 'migration', 'model', 'module', 'organization', 'person', 'place', 'port', 'preference', 'product', 'protocol', 'quantity', 'service', 'task_category', 'task_id', 'topic', 'variant', 'vlan'})"
     },
     "VALID_RELATIONSHIP_TYPES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "{'extends', 'consolidates', 'supersedes', 'contradicts', 'supports', 'follows', 'references', 'precedes', 'message', 'related', 'handoff'}"
+      "value_repr": "set({'consolidates', 'contradicts', 'extends', 'follows', 'handoff', 'message', 'precedes', 'references', 'related', 'supersedes', 'supports'})"
     },
     "VALID_SCOPES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "{'user', 'org', 'agent', 'session'}"
+      "value_repr": "set({'agent', 'org', 'session', 'user'})"
     },
     "VALID_TASK_STATES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'cancelled', 'in_progress', 'completed', 'failed', 'blocked', 'pending'})"
+      "value_repr": "frozenset({'blocked', 'cancelled', 'completed', 'failed', 'in_progress', 'pending'})"
     },
     "_ACCESS_FLUSH_INTERVAL": {
       "kind": "constant",
@@ -441,12 +441,12 @@
     "_DEFAULT_VALID_ENTITY_PREDICATES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'runs_on', 'assigned_ip', 'after', 'fails_over_to', 'supersedes', 'calls', 'measured_on', 'imports', 'listens_on', 'located_in', 'before', 'references', 'judged_by', 'source_of', 'mentions', 'introduced_in', 'affects_category', 'defined_in', 'owns', 'authorizes_budget', 'has_participant', 'hosts', 'family_of', 'same_as', 'has_quantity', 'works_at', 'knows', 'on_vlan', 'prefers', 'uses_model', 'has_location', 'produced_artifact', 'deprecates', 'has_time'})"
+      "value_repr": "frozenset({'affects_category', 'after', 'assigned_ip', 'authorizes_budget', 'before', 'calls', 'defined_in', 'deprecates', 'fails_over_to', 'family_of', 'has_location', 'has_participant', 'has_quantity', 'has_time', 'hosts', 'imports', 'introduced_in', 'judged_by', 'knows', 'listens_on', 'located_in', 'measured_on', 'mentions', 'on_vlan', 'owns', 'prefers', 'produced_artifact', 'references', 'runs_on', 'same_as', 'source_of', 'supersedes', 'uses_model', 'works_at'})"
     },
     "_DEFAULT_VALID_ENTITY_TYPES": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "frozenset({'migration', 'env_var', 'bench_artifact', 'device', 'task_category', 'datetime', 'port', 'ip_address', 'quantity', 'variant', 'container', 'preference', 'event', 'topic', 'vlan', 'task_id', 'module', 'model', 'place', 'metric', 'service', 'legacy_object', 'class_or_table', 'cli_flag', 'protocol', 'function', 'file_path', 'legacy_concept', 'mac_address', 'endpoint_url', 'memory_id', 'benchmark', 'person', 'host', 'date', 'dataset_field', 'firewall_rule', 'product', 'memory_type', 'organization', 'bench_run_id', 'commit_or_branch'})"
+      "value_repr": "frozenset({'bench_artifact', 'bench_run_id', 'benchmark', 'class_or_table', 'cli_flag', 'commit_or_branch', 'container', 'dataset_field', 'date', 'datetime', 'device', 'endpoint_url', 'env_var', 'event', 'file_path', 'firewall_rule', 'function', 'host', 'ip_address', 'legacy_concept', 'legacy_object', 'mac_address', 'memory_id', 'memory_type', 'metric', 'migration', 'model', 'module', 'organization', 'person', 'place', 'port', 'preference', 'product', 'protocol', 'quantity', 'service', 'task_category', 'task_id', 'topic', 'variant', 'vlan'})"
     },
     "_DENSE_ERR_RE": {
       "kind": "constant",
@@ -466,12 +466,12 @@
     "_EMBED_BACKEND_STATS_LOCK": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<unlocked _thread.lock object at 0x0000024BF3D70950>"
+      "value_repr": "<unlocked _thread.lock object at 0x<ADDR>>"
     },
     "_EMBED_BULK_SEM": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<asyncio.locks.Semaphore object at 0x0000024BF3C7BC50 [unlocked, value:4]>"
+      "value_repr": "<asyncio.locks.Semaphore object at 0x<ADDR> [unlocked, value:4]>"
     },
     "_EMBED_CLIENT": {
       "kind": "constant",
@@ -481,7 +481,7 @@
     "_EMBED_CLIENT_LOCK": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<unlocked _thread.lock object at 0x0000024BF3C056D0>"
+      "value_repr": "<unlocked _thread.lock object at 0x<ADDR>>"
     },
     "_EMBED_CLIENT_LOOP_ID": {
       "kind": "constant",
@@ -501,7 +501,7 @@
     "_EMBED_GGUF_MODEL_TAG": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "'bge-m3-GGUF-Q4_K_M.gguf'"
+      "value_repr": "'text-embedding-bge-m3'"
     },
     "_EMBED_GGUF_PATH": {
       "kind": "constant",
@@ -531,7 +531,7 @@
     "_EMBED_SEM": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<asyncio.locks.Semaphore object at 0x0000024BF3CCA7B0 [unlocked, value:4]>"
+      "value_repr": "<asyncio.locks.Semaphore object at 0x<ADDR> [unlocked, value:4]>"
     },
     "_EMBED_URL_OVERRIDE": {
       "kind": "constant",
@@ -546,7 +546,7 @@
     "_ENTITY_EXTRACT_SEM": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<memory.entity.LoopScopedSemaphoreProxy object at 0x0000024BF3DD86E0>"
+      "value_repr": "<memory.entity.LoopScopedSemaphoreProxy object at 0x<ADDR>>"
     },
     "_ENTITY_MENTION_PATTERNS": {
       "kind": "constant",
@@ -596,7 +596,7 @@
     "_FACT_ENRICH_SEM": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<asyncio.locks.Semaphore object at 0x0000024BF3EA0C30 [unlocked, value:2]>"
+      "value_repr": "<asyncio.locks.Semaphore object at 0x<ADDR> [unlocked, value:2]>"
     },
     "_FTS_OPERATORS": {
       "kind": "constant",
@@ -621,7 +621,7 @@
     "_LAZY_IMPORTS": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "{'_DEFAULT_VALID_ENTITY_PREDICATES': 'memory.config', '_DEFAULT_VALID_ENTITY_TYPES': 'memory.config', '_EMBED_MODEL_OVERRIDE': 'memory.config', '_EMBED_URL_OVERRIDE': 'memory.config', '_ENV_ENTITY_VOCAB_YAML': 'memory.config', '_OXIDATION_DISABLED': 'memory.config', 'ARCHIVE_DB_PATH': 'memory.config', 'AUTO_RELATED_LINK': 'memory.config', 'AUTO_RELATED_LINK_SCOPE_BY_VARIANT': 'memory.config', 'BASE_DIR': 'memory.config', 'CONTRADICTION_THRESHOLD': 'memory.config', 'CONTRADICTION_TITLE_GATE': 'memory.config', 'CONTRADICTION_TYPE_EXCLUSIONS': 'memory.config', 'DB_PATH': 'memory.config', 'DEDUP_LIMIT': 'memory.config', 'DEDUP_THRESHOLD': 'memory.config', 'DEFAULT_CHANGE_AGENT': 'memory.config', 'DEFAULT_ENTITY_VOCAB_YAML': 'memory.config', 'DEFAULT_RERANK_MODEL': 'memory.config', 'ELBOW_ABS_THRESHOLD': 'memory.config', 'ELBOW_MIN_INPUT': 'memory.config', 'ELBOW_MIN_RETURN': 'memory.config', 'EMBED_BREAKER_CLOUD_RESET_SECS': 'memory.config', 'EMBED_BREAKER_CLOUD_THRESHOLD': 'memory.config', 'EMBED_DIM': 'memory.config', 'EMBED_MODEL': 'memory.config', 'EMBED_TIMEOUT_READ': 'memory.config', 'ENABLE_ENTITY_GRAPH': 'memory.config', 'ENABLE_FACT_ENRICHED': 'memory.config', 'ENTITY_EXTRACT_CONCURRENCY': 'memory.config', 'ENTITY_EXTRACT_MAX_ATTEMPTS': 'memory.config', 'ENTITY_RESOLVE_COSINE_MIN': 'memory.config', 'ENTITY_RESOLVE_FUZZY_MIN': 'memory.config', 'ENTITY_SEED_STOPLIST': 'memory.config', 'EXPANSION_DISPLACEMENT_MARGIN': 'memory.config', 'EXPANSION_PROTECTED_RANKS': 'memory.config', 'FACT_ENRICH_CONCURRENCY': 'memory.config', 'FACT_ENRICH_MAX_ATTEMPTS': 'memory.config', 'IMPORTANCE_WEIGHT': 'memory.config', 'INGEST_EVENT_ROWS': 'memory.config', 'INGEST_GIST_MIN_TURNS': 'memory.config', 'INGEST_GIST_ROWS': 'memory.config', 'INGEST_GIST_STRIDE': 'memory.config', 'INGEST_WINDOW_CHUNKS': 'memory.config', 'INGEST_WINDOW_SIZE': 'memory.config', 'INTENT_ROUTING': 'memory.config', 'INTENT_USER_FACT_BOOST': 'memory.config', 'LLM_TIMEOUT': 'memory.config', 'M3_ALLOW_CLOUD_FALLBACK': 'memory.config', 'M3_CLOUD_AUTH_TOKEN_KEYRING': 'memory.config', 'M3_CLOUD_ENCLAVE_URL': 'memory.config', 'M3_CLOUD_MINIMIZATION_LEVEL': 'memory.config', 'ORIGIN_DEVICE': 'memory.config', 'QUERY_TYPE_ROUTING': 'memory.config', 'SEARCH_ROW_CAP': 'memory.config', 'SHORT_TURN_THRESHOLD': 'memory.config', 'SPEAKER_IN_TITLE': 'memory.config', 'SUPERSEDES_PENALTY': 'memory.config', 'TITLE_MATCH_BOOST': 'memory.config', 'm3_core_rs': 'memory.config', '_mc_config': 'memory', '_ACCESS_FLUSH_INTERVAL': 'memory.db', '_ENTITY_COUNT_QUERY': 'memory.db', '_GATE_CACHE': 'memory.db', '_GATE_CACHE_TTL': 'memory.db', '_OBS_COUNT_QUERY': 'memory.db', '_access_flusher_task': 'memory.db', '_access_lock': 'memory.db', '_access_pending': 'memory.db', '_access_stamp_flusher': 'memory.db', '_backfill_change_agent': 'memory.db', '_conn': 'memory.db', '_db': 'memory.db', '_enqueue_access_stamps': 'memory.db', '_ensure_sync_tables': 'memory.db', '_gate_active': 'memory.db', '_gate_count_query': 'memory.db', '_init_lock': 'memory.db', '_initialized': 'memory.db', '_initialized_dbs': 'memory.db', '_lazy_init': 'memory.db', '_local': 'memory.db', '_record_history': 'memory.db', 'memory_history_impl': 'memory.db', '_mc_db': 'memory', 'memory_doctor_impl': 'memory.doctor', 'memory_doctor_fix_impl': 'memory.doctor', '_CPU_FALLBACK_BREAKER': 'memory.embed', '_DENSE_ERR_RE': 'memory.embed', '_EMBED_BACKEND_STATS': 'memory.embed', '_EMBED_BACKEND_STATS_LOCK': 'memory.embed', '_EMBED_BULK_SEM': 'memory.embed', '_EMBED_CLIENT': 'memory.embed', '_EMBED_CLIENT_LOCK': 'memory.embed', '_EMBED_CLIENT_LOOP_ID': 'memory.embed', '_EMBED_DIM_VALIDATED': 'memory.embed', '_EMBED_FALLBACK_URL': 'memory.embed', '_EMBED_GGUF_MODEL_TAG': 'memory.embed', '_EMBED_GGUF_PATH': 'memory.embed', '_EMBED_HTTP_KEEPALIVE_EXPIRY': 'memory.embed', '_EMBED_HTTP_MAX_CONNS': 'memory.embed', '_EMBED_HTTP_MAX_KEEPALIVE': 'memory.embed', '_EMBED_SEM': 'memory.embed', '_EMBEDDED_BREAKER': 'memory.embed', '_ENTITY_NAME_EMBED_CACHE': 'memory.embed', '_PRIMARY_BREAKER': 'memory.embed', 'DENSE_MIN_SUB_CHARS': 'memory.embed', 'DENSE_TARGET_TOKENS': 'memory.embed', 'DENSE_TOKEN_OVERLAP': 'memory.embed', 'EMBED_BULK_CHUNK': 'memory.embed', 'EMBED_BULK_CONCURRENCY': 'memory.embed', 'ENTITY_NAME_EMBED_CACHE_MAX': 'memory.embed', 'MAX_CHARS_PER_CHUNK': 'memory.embed', 'MIN_OVERLAP_CHARS': 'memory.embed', 'STRIDE_CHARS': 'memory.embed', 'EmbeddedBackendError': 'memory.embed', 'EmbedError': 'memory.embed', 'EmbedFallbackError': 'memory.embed', 'EmbedPrimaryError': 'memory.embed', 'EmbedSemaphoreTimeout': 'memory.embed', '_augment_embed_text_with_anchors': 'memory.embed', '_chunk_for_sliding_window': 'memory.embed', '_content_hash': 'memory.embed', '_embed': 'memory.embed', '_embed_canonical_cached': 'memory.embed', '_embed_many': 'memory.embed', '_embedded_embed_checked': 'memory.embed', '_embedded_embedder': 'memory.embed', '_embedded_label': 'memory.embed', '_get_embed_client': 'memory.embed', '_get_embedded_embedder': 'memory.embed', '_record_embed_backend': 'memory.embed', '_shared_embed_client': 'memory.embed', '_subdivide_dense_chunk': 'memory.embed', 'embedder_status_impl': 'memory.embed', 'get_embed_backend_stats': 'memory.embed', 'get_embed_breaker_state': 'memory.embed', 'reset_embed_backend_stats': 'memory.embed', 'reset_embed_breakers': 'memory.embed', 'set_embed_override': 'memory.embed', '_mc_embed': 'memory', '_select_pending_fact_enrichment': 'memory.enrich', '_try_enrich_or_enqueue': 'memory.enrich', 'enrich_pending_impl': 'memory.enrich', '_ENTITY_EXTRACT_SEM': 'memory.entity', '_PENDING_ENTITY_TASKS': 'memory.entity', '_TOKEN_PUNCT_RE': 'memory.entity', 'VALID_ENTITY_PREDICATES': 'memory.entity', 'VALID_ENTITY_TYPES': 'memory.entity', '_create_entity': 'memory.entity', '_enqueue_entity_extraction': 'memory.entity', '_link_entity_relationship': 'memory.entity', '_link_memory_to_entity': 'memory.entity', '_resolve_entity': 'memory.entity', '_resolve_entity_async': 'memory.entity', '_run_entity_extractor': 'memory.entity', '_select_pending_entity_extraction': 'memory.entity', '_token_jaccard': 'memory.entity', '_try_extract_or_enqueue': 'memory.entity', 'entity_extractor_health': 'memory.entity', 'entity_get_impl': 'memory.entity', 'entity_search_impl': 'memory.entity', 'extract_pending_impl': 'memory.entity', 'load_entity_vocab': 'memory.entity', '_mc_entity': 'memory', 'count_entities_impl': 'memory.entity_count', 'count_mentions_impl': 'memory.entity_count', 'list_mentions_impl': 'memory.entity_count', '_EVENT_DATE_HINT': 'memory.fts', '_EVENT_PROPER_NOUN': 'memory.fts', '_EVENT_SENT_SPLIT': 'memory.fts', '_EVENT_VERB_LIST': 'memory.fts', '_EVENT_VERB_RE': 'memory.fts', '_FTS_OPERATORS': 'memory.fts', '_SEARCHABLE_PUNCT': 'memory.fts', '_TOKEN_SPLIT': 'memory.fts', '_augment_title_with_role': 'memory.fts', '_compile_fts_query': 'memory.fts', '_query_title_overlap': 'memory.fts', '_query_title_token_set': 'memory.fts', '_sanitize_for_searchable': 'memory.fts', '_sanitize_fts': 'memory.fts', '_title_overlap_from_qset': 'memory.fts', '_entity_graph_neighbor_ids': 'memory.graph', '_graph_neighbor_ids': 'memory.graph', '_score_extra_rows': 'memory.graph', '_session_neighbor_ids': 'memory.graph', 'memory_graph_impl': 'memory.graph', 'compute_bitemporal_diffs_impl': 'memory.history', 'get_bitemporal_timeline_impl': 'memory.history', '_DATE_MONTHS': 'memory.search', '_DATE_RE_ISO': 'memory.search', '_DATE_RE_LONG': 'memory.search', '_ENTITY_MENTION_PATTERNS': 'memory.search', '_ENTITY_MENTION_RE': 'memory.search', '_RERANKER_MODEL': 'memory.search', '_RERANKER_MODEL_NAME': 'memory.search', '_TEMPORAL_QUERY_RE': 'memory.search', '_TEMPORAL_ROUTER_PATTERNS': 'memory.search', '_TEMPORAL_ROUTER_RE': 'memory.search', '_UNSET': 'memory.search', '_apply_auto_layer': 'memory.search', '_apply_recency_bonus': 'memory.search', '_apply_rerank': 'memory.search', '_apply_sharp_trim': 'memory.search', '_apply_temporal_boost': 'memory.search', '_cosine_batch_packed': 'memory.search', '_enforce_expansion_displacement_guard': 'memory.search', '_extract_caller_overrides': 'memory.search', '_get_reranker': 'memory.search', '_hybrid_score_batch': 'memory.search', '_maybe_expand_routed': 'memory.search', '_maybe_route_query': 'memory.search', '_pull_predecessor_turns': 'memory.search', '_recency_bonus_ranks': 'memory.search', '_trim_by_elbow': 'memory.search', 'is_temporal_query': 'memory.search', 'memory_search_impl': 'memory.search', 'memory_search_multi_db_impl': 'memory.search', 'memory_search_routed_impl': 'memory.search', 'memory_search_scored_impl': 'memory.search', '_mc_search': 'memory', '_batch_cosine': 'memory.util', '_cosine': 'memory.util', '_sha256_hex': 'memory.util', '_check_contradictions': 'memory.write', 'memory_link_impl': 'memory.write', 'memory_supersede_impl': 'memory.write', 'memory_write_batch_impl': 'memory.write', 'memory_write_bulk_impl': 'memory.write', 'memory_write_from_file_impl': 'memory.write', 'memory_write_impl': 'memory.write', '_FACT_ENRICH_SEM': 'lazy_sem'}"
+      "value_repr": "{'_DEFAULT_VALID_ENTITY_PREDICATES': 'memory.config', '_DEFAULT_VALID_ENTITY_TYPES': 'memory.config', '_EMBED_MODEL_OVERRIDE': 'memory.config', '_EMBED_URL_OVERRIDE': 'memory.config', '_ENV_ENTITY_VOCAB_YAML': 'memory.config', '_OXIDATION_DISABLED': 'memory.config', 'ARCHIVE_DB_PATH': 'memory.config', 'AUTO_RELATED_LINK': 'memory.config', 'AUTO_RELATED_LINK_SCOPE_BY_VARIANT': 'memory.config', 'BASE_DIR': 'memory.config', 'CONTRADICTION_THRESHOLD': 'memory.config', 'CONTRADICTION_TITLE_GATE': 'memory.config', 'CONTRADICTION_TYPE_EXCLUSIONS': 'memory.config', 'DB_PATH': 'memory.config', 'DEDUP_LIMIT': 'memory.config', 'DEDUP_THRESHOLD': 'memory.config', 'DEFAULT_CHANGE_AGENT': 'memory.config', 'DEFAULT_ENTITY_VOCAB_YAML': 'memory.config', 'DEFAULT_RERANK_MODEL': 'memory.config', 'ELBOW_ABS_THRESHOLD': 'memory.config', 'ELBOW_MIN_INPUT': 'memory.config', 'ELBOW_MIN_RETURN': 'memory.config', 'EMBED_BREAKER_CLOUD_RESET_SECS': 'memory.config', 'EMBED_BREAKER_CLOUD_THRESHOLD': 'memory.config', 'EMBED_DIM': 'memory.config', 'EMBED_MODEL': 'memory.config', 'EMBED_TIMEOUT_READ': 'memory.config', 'ENABLE_ENTITY_GRAPH': 'memory.config', 'ENABLE_FACT_ENRICHED': 'memory.config', 'ENTITY_EXTRACT_CONCURRENCY': 'memory.config', 'ENTITY_EXTRACT_MAX_ATTEMPTS': 'memory.config', 'ENTITY_RESOLVE_COSINE_MIN': 'memory.config', 'ENTITY_RESOLVE_FUZZY_MIN': 'memory.config', 'ENTITY_SEED_STOPLIST': 'memory.config', 'EXPANSION_DISPLACEMENT_MARGIN': 'memory.config', 'EXPANSION_PROTECTED_RANKS': 'memory.config', 'FACT_ENRICH_CONCURRENCY': 'memory.config', 'FACT_ENRICH_MAX_ATTEMPTS': 'memory.config', 'IMPORTANCE_WEIGHT': 'memory.config', 'INGEST_EVENT_ROWS': 'memory.config', 'INGEST_GIST_MIN_TURNS': 'memory.config', 'INGEST_GIST_ROWS': 'memory.config', 'INGEST_GIST_STRIDE': 'memory.config', 'INGEST_WINDOW_CHUNKS': 'memory.config', 'INGEST_WINDOW_SIZE': 'memory.config', 'INTENT_ROUTING': 'memory.config', 'INTENT_USER_FACT_BOOST': 'memory.config', 'LLM_TIMEOUT': 'memory.config', 'M3_ALLOW_CLOUD_FALLBACK': 'memory.config', 'M3_CLOUD_AUTH_TOKEN_KEYRING': 'memory.config', 'M3_CLOUD_ENCLAVE_URL': 'memory.config', 'M3_CLOUD_MINIMIZATION_LEVEL': 'memory.config', 'ORIGIN_DEVICE': 'memory.config', 'QUERY_TYPE_ROUTING': 'memory.config', 'SEARCH_ROW_CAP': 'memory.config', 'SHORT_TURN_THRESHOLD': 'memory.config', 'SPEAKER_IN_TITLE': 'memory.config', 'SUPERSEDES_PENALTY': 'memory.config', 'TITLE_MATCH_BOOST': 'memory.config', 'm3_core_rs': 'memory.config', '_mc_config': 'memory', '_ACCESS_FLUSH_INTERVAL': 'memory.db', '_ENTITY_COUNT_QUERY': 'memory.db', '_GATE_CACHE': 'memory.db', '_GATE_CACHE_TTL': 'memory.db', '_OBS_COUNT_QUERY': 'memory.db', '_access_flusher_task': 'memory.db', '_access_lock': 'memory.db', '_access_pending': 'memory.db', '_access_stamp_flusher': 'memory.db', '_backfill_change_agent': 'memory.db', '_conn': 'memory.db', '_db': 'memory.db', '_enqueue_access_stamps': 'memory.db', 'flush_access_stamps_now': 'memory.db', '_ensure_sync_tables': 'memory.db', '_gate_active': 'memory.db', '_gate_count_query': 'memory.db', '_init_lock': 'memory.db', '_initialized': 'memory.db', '_initialized_dbs': 'memory.db', '_lazy_init': 'memory.db', '_local': 'memory.db', '_record_history': 'memory.db', 'memory_history_impl': 'memory.db', '_mc_db': 'memory', 'memory_doctor_impl': 'memory.doctor', 'memory_doctor_fix_impl': 'memory.doctor', '_CPU_FALLBACK_BREAKER': 'memory.embed', '_DENSE_ERR_RE': 'memory.embed', '_EMBED_BACKEND_STATS': 'memory.embed', '_EMBED_BACKEND_STATS_LOCK': 'memory.embed', '_EMBED_BULK_SEM': 'memory.embed', '_EMBED_CLIENT': 'memory.embed', '_EMBED_CLIENT_LOCK': 'memory.embed', '_EMBED_CLIENT_LOOP_ID': 'memory.embed', '_EMBED_DIM_VALIDATED': 'memory.embed', '_EMBED_FALLBACK_URL': 'memory.embed', '_EMBED_GGUF_MODEL_TAG': 'memory.embed', '_EMBED_GGUF_PATH': 'memory.embed', '_EMBED_HTTP_KEEPALIVE_EXPIRY': 'memory.embed', '_EMBED_HTTP_MAX_CONNS': 'memory.embed', '_EMBED_HTTP_MAX_KEEPALIVE': 'memory.embed', '_EMBED_SEM': 'memory.embed', '_EMBEDDED_BREAKER': 'memory.embed', '_ENTITY_NAME_EMBED_CACHE': 'memory.embed', '_PRIMARY_BREAKER': 'memory.embed', 'DENSE_MIN_SUB_CHARS': 'memory.embed', 'DENSE_TARGET_TOKENS': 'memory.embed', 'DENSE_TOKEN_OVERLAP': 'memory.embed', 'EMBED_BULK_CHUNK': 'memory.embed', 'EMBED_BULK_CONCURRENCY': 'memory.embed', 'ENTITY_NAME_EMBED_CACHE_MAX': 'memory.embed', 'MAX_CHARS_PER_CHUNK': 'memory.embed', 'MIN_OVERLAP_CHARS': 'memory.embed', 'STRIDE_CHARS': 'memory.embed', 'EmbeddedBackendError': 'memory.embed', 'EmbedError': 'memory.embed', 'EmbedFallbackError': 'memory.embed', 'EmbedPrimaryError': 'memory.embed', 'EmbedSemaphoreTimeout': 'memory.embed', '_augment_embed_text_with_anchors': 'memory.embed', '_chunk_for_sliding_window': 'memory.embed', '_content_hash': 'memory.embed', '_embed': 'memory.embed', '_embed_canonical_cached': 'memory.embed', '_embed_many': 'memory.embed', '_embedded_embed_checked': 'memory.embed', '_embedded_embedder': 'memory.embed', '_embedded_label': 'memory.embed', '_get_embed_client': 'memory.embed', '_get_embedded_embedder': 'memory.embed', '_record_embed_backend': 'memory.embed', '_shared_embed_client': 'memory.embed', '_subdivide_dense_chunk': 'memory.embed', 'embedder_status_impl': 'memory.embed', 'get_embed_backend_stats': 'memory.embed', 'get_embed_breaker_state': 'memory.embed', 'reset_embed_backend_stats': 'memory.embed', 'reset_embed_breakers': 'memory.embed', 'set_embed_override': 'memory.embed', '_mc_embed': 'memory', '_select_pending_fact_enrichment': 'memory.enrich', '_try_enrich_or_enqueue': 'memory.enrich', 'enrich_pending_impl': 'memory.enrich', '_ENTITY_EXTRACT_SEM': 'memory.entity', '_PENDING_ENTITY_TASKS': 'memory.entity', '_TOKEN_PUNCT_RE': 'memory.entity', 'VALID_ENTITY_PREDICATES': 'memory.entity', 'VALID_ENTITY_TYPES': 'memory.entity', '_create_entity': 'memory.entity', '_enqueue_entity_extraction': 'memory.entity', '_link_entity_relationship': 'memory.entity', '_link_memory_to_entity': 'memory.entity', '_resolve_entity': 'memory.entity', '_resolve_entity_async': 'memory.entity', '_run_entity_extractor': 'memory.entity', '_select_pending_entity_extraction': 'memory.entity', '_token_jaccard': 'memory.entity', '_try_extract_or_enqueue': 'memory.entity', 'entity_extractor_health': 'memory.entity', 'entity_get_impl': 'memory.entity', 'entity_search_impl': 'memory.entity', 'extract_pending_impl': 'memory.entity', 'load_entity_vocab': 'memory.entity', '_mc_entity': 'memory', 'count_entities_impl': 'memory.entity_count', 'count_mentions_impl': 'memory.entity_count', 'list_mentions_impl': 'memory.entity_count', '_EVENT_DATE_HINT': 'memory.fts', '_EVENT_PROPER_NOUN': 'memory.fts', '_EVENT_SENT_SPLIT': 'memory.fts', '_EVENT_VERB_LIST': 'memory.fts', '_EVENT_VERB_RE': 'memory.fts', '_FTS_OPERATORS': 'memory.fts', '_SEARCHABLE_PUNCT': 'memory.fts', '_TOKEN_SPLIT': 'memory.fts', '_augment_title_with_role': 'memory.fts', '_compile_fts_query': 'memory.fts', '_query_title_overlap': 'memory.fts', '_query_title_token_set': 'memory.fts', '_sanitize_for_searchable': 'memory.fts', '_sanitize_fts': 'memory.fts', '_title_overlap_from_qset': 'memory.fts', '_entity_graph_neighbor_ids': 'memory.graph', '_graph_neighbor_ids': 'memory.graph', '_score_extra_rows': 'memory.graph', '_session_neighbor_ids': 'memory.graph', 'memory_graph_impl': 'memory.graph', 'compute_bitemporal_diffs_impl': 'memory.history', 'get_bitemporal_timeline_impl': 'memory.history', '_DATE_MONTHS': 'memory.search', '_DATE_RE_ISO': 'memory.search', '_DATE_RE_LONG': 'memory.search', '_ENTITY_MENTION_PATTERNS': 'memory.search', '_ENTITY_MENTION_RE': 'memory.search', '_RERANKER_MODEL': 'memory.search', '_RERANKER_MODEL_NAME': 'memory.search', '_TEMPORAL_QUERY_RE': 'memory.search', '_TEMPORAL_ROUTER_PATTERNS': 'memory.search', '_TEMPORAL_ROUTER_RE': 'memory.search', '_UNSET': 'memory.search', '_apply_auto_layer': 'memory.search', '_apply_recency_bonus': 'memory.search', '_apply_rerank': 'memory.search', '_apply_sharp_trim': 'memory.search', '_apply_temporal_boost': 'memory.search', '_cosine_batch_packed': 'memory.search', '_enforce_expansion_displacement_guard': 'memory.search', '_extract_caller_overrides': 'memory.search', '_get_reranker': 'memory.search', '_hybrid_score_batch': 'memory.search', '_maybe_expand_routed': 'memory.search', '_maybe_route_query': 'memory.search', '_pull_predecessor_turns': 'memory.search', '_recency_bonus_ranks': 'memory.search', '_trim_by_elbow': 'memory.search', 'is_temporal_query': 'memory.search', 'memory_search_impl': 'memory.search', 'memory_search_multi_db_impl': 'memory.search', 'memory_search_routed_impl': 'memory.search', 'memory_search_scored_impl': 'memory.search', '_mc_search': 'memory', '_batch_cosine': 'memory.util', '_cosine': 'memory.util', '_sha256_hex': 'memory.util', '_check_contradictions': 'memory.write', 'memory_link_impl': 'memory.write', 'memory_supersede_impl': 'memory.write', 'memory_write_batch_impl': 'memory.write', 'memory_write_bulk_impl': 'memory.write', 'memory_write_from_file_impl': 'memory.write', 'memory_write_impl': 'memory.write', '_FACT_ENRICH_SEM': 'lazy_sem'}"
     },
     "_MEMORY_DELETE_BULK_CHUNK": {
       "kind": "constant",
@@ -711,7 +711,7 @@
     "_UNSET": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<object object at 0x0000024BF3A81140>"
+      "value_repr": "<object object at 0x<ADDR>>"
     },
     "_access_flusher_task": {
       "kind": "constant",
@@ -721,7 +721,7 @@
     "_access_lock": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<asyncio.locks.Lock object at 0x0000024BF3CC81A0 [unlocked]>"
+      "value_repr": "<asyncio.locks.Lock object at 0x<ADDR> [unlocked]>"
     },
     "_access_pending": {
       "kind": "constant",
@@ -951,7 +951,7 @@
     "_init_lock": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<unlocked _thread.RLock object owner=0 count=0 at 0x0000024BF3CBCC30>"
+      "value_repr": "<unlocked _thread.RLock object owner=0 count=0 at 0x<ADDR>>"
     },
     "_initialized": {
       "kind": "constant",
@@ -981,11 +981,11 @@
     "_local": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<_thread._local object at 0x0000024BE5A04F40>"
+      "value_repr": "<_thread._local object at 0x<ADDR>>"
     },
     "_lru_cache": {
       "kind": "function",
-      "signature": "(maxsize=128, typed=False)",
+      "signature": null,
       "value_repr": null
     },
     "_maybe_expand_routed": {
@@ -1260,7 +1260,7 @@
     "ctx": {
       "kind": "constant",
       "signature": null,
-      "value_repr": "<m3_core.context.M3Context object at 0x0000024BF3DDA660>"
+      "value_repr": "<m3_core.context.M3Context object at 0x<ADDR>>"
     },
     "datetime": {
       "kind": "class",
@@ -1295,6 +1295,11 @@
     "extract_pending_impl": {
       "kind": "async_function",
       "signature": "(dry_run: 'bool' = True, limit: 'int' = 0, allowed_variants: 'list[str] | None' = None, *, valid_types: 'frozenset | None' = None, valid_predicates: 'frozenset | None' = None) -> 'dict'",
+      "value_repr": null
+    },
+    "flush_access_stamps_now": {
+      "kind": "function",
+      "signature": "() -> 'int'",
       "value_repr": null
     },
     "get_best_llm": {
