@@ -121,22 +121,43 @@ def _ensure_fdw_wired(pg_cur, warehouse_dsn: str) -> None:
     # Foreign server + user mapping (idempotent). Server options can't be changed
     # by CREATE IF NOT EXISTS if they drift, but for our fixed warehouse they're
     # stable; a drop/recreate would invalidate imported tables, so keep IF NOT EXISTS.
+    # Omit `host` entirely when the DSN carries none — a unix-socket DSN
+    # (`postgresql:///db`, the default for a local cluster with peer auth) has
+    # no host component, and passing host=NULL is a SQL syntax error, exactly
+    # as it is for password below. Without the option postgres_fdw connects
+    # over the local socket, which is what a host-less DSN means.
+    server_opts = ["dbname %s", "port %s"]
+    server_args: list = [dbname, port]
+    if host:
+        server_opts.insert(0, "host %s")
+        server_args.insert(0, host)
     pg_cur.execute(
         f"CREATE SERVER IF NOT EXISTS {FDW_SERVER} FOREIGN DATA WRAPPER postgres_fdw "
-        f"OPTIONS (host %s, dbname %s, port %s)", (host, dbname, port))
+        f"OPTIONS ({', '.join(server_opts)})", tuple(server_args))
     # User mapping: recreate to pick up a rotated password. current_user maps to
     # the warehouse role. Omit the password option entirely when the DSN carries
     # none (e.g. trust/peer/.pgpass auth) — passing password=NULL is a SQL syntax
     # error, and an empty-string password is not the same as "no password".
+    # `user` gets the same treatment: a socket DSN relying on peer auth names no
+    # user either, and OPTIONS (user NULL) fails the same way. With neither
+    # option the OPTIONS clause is dropped altogether — an empty `OPTIONS ()`
+    # is itself a syntax error — and the mapping defaults to the local role.
     pg_cur.execute(f"DROP USER MAPPING IF EXISTS FOR CURRENT_USER SERVER {FDW_SERVER}")
+    map_opts = []
+    map_args: list = []
+    if user:
+        map_opts.append("user %s")
+        map_args.append(user)
     if password:
+        map_opts.append("password %s")
+        map_args.append(password)
+    if map_opts:
         pg_cur.execute(
             f"CREATE USER MAPPING FOR CURRENT_USER SERVER {FDW_SERVER} "
-            f"OPTIONS (user %s, password %s)", (user, password))
+            f"OPTIONS ({', '.join(map_opts)})", tuple(map_args))
     else:
         pg_cur.execute(
-            f"CREATE USER MAPPING FOR CURRENT_USER SERVER {FDW_SERVER} "
-            f"OPTIONS (user %s)", (user,))
+            f"CREATE USER MAPPING FOR CURRENT_USER SERVER {FDW_SERVER}")
 
     pg_cur.execute(f"CREATE SCHEMA IF NOT EXISTS {FDW_SCHEMA}")
     # (Re)import the warehouse tables as foreign tables. IMPORT FOREIGN SCHEMA is
