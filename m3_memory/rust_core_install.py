@@ -37,9 +37,15 @@ from m3_memory._platform import os_name as _os_name
 # PyPI install (by version) and the GitHub-release asset fetch (by tag).
 # 3.7.4 was the first release whose wheels bundle the m3-embed-server binary.
 #
-# 3.9.20 / v2026.9.20. Verify the Release is complete with:
-#   gh release view v2026.9.20 --repo skynetcmd/m3-core-rs
+# 3.10.1 / v2026.10.1. Verify the Release is complete with:
+#   gh release view v2026.10.1 --repo skynetcmd/m3-core-rs
 #   (expect 29 assets: 7 (os,backend) packages x cp312-315, + SHA256SUMS)
+#
+# 3.10.1 is the fix for 3.9.20, whose wheels ALL stored m3-embed-server
+# non-executable (0600 linux/macos, 0644 windows), so the shared embed server
+# could not start on a fresh install. The wheel is the fix: a well-formed
+# 0o100755 entry installs executable under every pip tested (25.1.1+) and uv.
+# repair_exec_bit() stays for users already on a 3.9.20 wheel.
 #
 # ⚠ COUNT THE BACKENDS, NOT THE ASSETS. v2026.9.16 carried 28 wheels and still
 #   had only 6 of 7 backends — m3_core_rs_windows_cuda was absent and a
@@ -49,7 +55,7 @@ from m3_memory._platform import os_name as _os_name
 #   m3_core_rs_<os>_<backend> prefixes present.
 #
 #   NOTE: 3.9.16 was the LAST release carrying cp311 (it predates the floor
-#   move to >=3.12). 3.9.20 adds cp315, so the matrix is 7 x cp312-315.
+#   move to >=3.12). 3.10.1 is 7 x cp312-315; cp311 is gone for good.
 #
 # ⚠ 3.9.16 CHANGES THE EMBED SERVER'S MEMORY FOOTPRINT PER WHEEL. Each worker
 # stream materialises its own llama.cpp compute graph on FIRST USE, sized for a
@@ -98,7 +104,7 @@ from m3_memory._platform import os_name as _os_name
 # Windows+NVIDIA host, not a fallback. Do not treat a tag's existence as proof
 # its assets are complete, and do not restate the matrix as a fixed count — the
 # interpreter set moves (cp311-314 -> cp312-315, plus a one-time cp311 set in
-# 3.9.20). The property that matters is that all seven
+# 3.10.1). The property that matters is that all seven
 # m3_core_rs_<os>_<backend> prefixes are present.
 #
 # It is also the only channel that is CURRENT. The PyPI-eligible backends are
@@ -119,8 +125,8 @@ from m3_memory._platform import os_name as _os_name
 # signal they are five versions behind. Fixing the publishers does not make
 # PyPI-first correct again; leave the Release first. PyPI publishing is opt-in
 # and off by default in release.yml.
-M3_CORE_RS_VERSION = "3.9.20"
-M3_CORE_RS_GIT_TAG = "v2026.9.20"
+M3_CORE_RS_VERSION = "3.10.1"
+M3_CORE_RS_GIT_TAG = "v2026.10.1"
 
 # Cargo features per backend, mirroring build_wheel.py's _MATRIX (the source
 # fallback passes these to maturin via pip's config-settings).

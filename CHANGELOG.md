@@ -19,6 +19,25 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.10.1.1] — 2026-10-01 — the embed-server binary ships executable
+
+### Fixed
+
+- **The bundled `m3-embed-server` binary is executable again.** Every wheel in
+  m3-core-rs `3.9.20` stored it non-executable (mode `0600` on Linux and macOS,
+  `0644` on Windows), so on a fresh install the shared embed server could not
+  start — surfacing as an `EACCES` that named no cause. The Rust-core pin moves
+  to **`3.10.1` / `v2026.10.1`**, whose wheels store it correctly and install
+  executable under every pip tested (25.1.1 through 26.2.1) and uv.
+  `m3 doctor --fix` continues to repair the mode in place for anyone already on
+  a `3.9.20` wheel.
+
+### Changed
+
+- The Rust-core wheel matrix is 7 os/backend packages × CPython 3.12–3.15.
+  CPython 3.11 is no longer built; the floor is `>=3.12`, matching m3-memory.
+
+
 ## [2026.10.1.0] — 2026-10-01 — four commands that reported success they had not checked
 
 ### Fixed

@@ -123,7 +123,7 @@ def run(brief: bool = False) -> int:
         # upgrade — the native wheel is a SEPARATE distribution, so
         # `pipx upgrade m3-memory` advances the Python code and leaves the
         # extension behind (observed 2026-09-30: m3-memory 2026.9.21.0 against
-        # m3_core_rs 3.9.7, expected 3.9.20) — so this line is on a common path,
+        # m3_core_rs 3.9.7, expected 3.10.1) — so this line is on a common path,
         # not an edge case. One line, because brief mode must stay one line.
         print(f"⚠️  oxidation: STALE ({len(present)}/{len(_EXPECTED)} paths"
               f"{', version behind' if version_stale else ''})"

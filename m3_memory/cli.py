@@ -312,7 +312,7 @@ def _offer_rust_core_upgrade(
 
     ⚠ That "should" is doing real work, and it is the releaser's job to make it
     true. Do NOT restate it as a fixed count: the set changes (v2026.9.16 was
-    7 x cp311-314; 3.9.20 is 7 x cp312-315 plus a one-time cp311 courtesy set),
+    7 x cp311-314; 3.10.1 is 7 x cp312-315, no cp311),
     and a count is not the property that matters anyway. v2026.9.16 shipped 28
     assets while carrying only SIX backends -- windows_cuda was missing and a
     generically-named m3_core_rs-* set filled the count. Since the cascade
