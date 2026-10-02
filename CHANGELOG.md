@@ -19,6 +19,17 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The LangChain adapter's shared event loop is now shut down cleanly at exit.**
+  `M3Client` runs one process-wide asyncio loop on a daemon thread (correct, and
+  unchanged — m3's connection pool and embedder are affinity-bound to it), but
+  nothing ever stopped it, so the thread was still inside `run_forever` when
+  CPython finalized. The loop and its default executor are now stopped and
+  closed via `atexit`, while the interpreter is still intact. This is resource
+  cleanup; it is not known to change any user-visible behaviour.
+
+
 ## [2026.10.1.1] — 2026-10-01 — the embed-server binary ships executable
 
 ### Fixed

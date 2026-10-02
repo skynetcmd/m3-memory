@@ -41,6 +41,7 @@ preserved regardless of seam (§8).
 from __future__ import annotations
 
 import asyncio
+import atexit
 import threading
 from concurrent.futures import Future
 from contextlib import nullcontext as _nullcontext
@@ -111,6 +112,7 @@ class M3Client:
     _loop: asyncio.AbstractEventLoop | None = None
     _thread: threading.Thread | None = None
     _lock = threading.Lock()
+    _atexit_registered = False
 
     def __init__(self, agent_id: str = "langchain", call_timeout: float = 30.0):
         self._agent_id = agent_id
@@ -131,6 +133,63 @@ class M3Client:
             )
             t.start()
             cls._loop, cls._thread = loop, t
+            # Shut the loop down while the interpreter is still intact. Without
+            # this the daemon thread is still inside run_forever when CPython
+            # finalizes, and on Windows that is a crash, not a tidy teardown —
+            # see _shutdown_loop.
+            if not cls._atexit_registered:
+                atexit.register(cls._shutdown_loop)
+                cls._atexit_registered = True
+
+    @classmethod
+    def _shutdown_loop(cls) -> None:
+        """Stop and close the shared loop BEFORE interpreter finalization.
+
+        The loop thread is a daemon by design (one loop process-wide, reused
+        across calls), and the design is right. What was missing is the exit
+        path: nothing ever stopped the loop, so the thread sat in run_forever
+        until CPython tore it down during finalization.
+
+        ⚠ This is RESOURCE CLEANUP, not a crash fix. It was written while
+        chasing an intermittent 0xC0000005 that the Windows suite throws during
+        finalization (27 such APPCRASH events, all python314.dll, 2026-09-13 to
+        2026-10-01). This loop sitting in run_forever looked like the cause —
+        a Windows-only ProactorEventLoop (IOCP) torn down mid-completion fits
+        the signature exactly. **It is not the cause: the suite still crashed
+        with this handler in place.** That investigation is still open; do not
+        cite this function as its resolution.
+
+        What remains true regardless is that a process-wide loop and its
+        executor were never closed, and now are.
+
+        atexit runs before daemon-thread teardown, so stopping and closing here
+        removes the window entirely. Every step is best-effort: an atexit
+        handler that raises is worse than the condition it fixes.
+        """
+        with cls._lock:
+            loop, thread = cls._loop, cls._thread
+            cls._loop, cls._thread = None, None
+        if loop is None:
+            return
+        try:
+            if loop.is_running():
+                # Drain async generators and the default executor ON the loop
+                # (that `asyncio_0` ThreadPoolExecutor worker is the loop's own
+                # default executor and outlives the loop otherwise).
+                for factory in (loop.shutdown_asyncgens, loop.shutdown_default_executor):
+                    try:
+                        asyncio.run_coroutine_threadsafe(factory(), loop).result(timeout=5)
+                    except Exception:
+                        pass
+                loop.call_soon_threadsafe(loop.stop)
+            if thread is not None:
+                thread.join(timeout=5)
+            if not loop.is_closed():
+                loop.close()
+        except Exception:
+            # Interpreter shutdown is already in progress; there is nowhere
+            # useful to report to and nothing left to salvage.
+            pass
 
     def _run(self, coro: Awaitable[Any]) -> Any:
         """Run a coroutine on the shared loop from a sync caller and block."""

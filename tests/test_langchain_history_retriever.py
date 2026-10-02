@@ -38,9 +38,19 @@ from m3_memory.langchain import (  # noqa: E402
 #   1. ".*non-main thread.*" — pytest notes that M3Client's shared asyncio event-loop
 #      thread ("m3client-langchain-loop") is still alive at test end. That thread is a
 #      process-wide DAEMON by design (M3Client._ensure_loop): all m3 dispatch lands on
-#      one loop-thread, reused across tests and torn down at interpreter exit. Benign —
-#      not a leak; do NOT "fix" by killing the shared loop per test (that defeats its
-#      purpose and slows every adapter call).
+#      one loop-thread, reused across tests. Still correct — do NOT "fix" by killing
+#      the shared loop per test (that defeats its purpose and slows every adapter call).
+#
+#      ⚠ CORRECTED 2026-10-02: this note used to add "torn down at interpreter exit.
+#      Benign — not a leak". The SHARING is benign; "not a leak" was wrong. Nothing
+#      stopped the loop, so the daemon thread sat in run_forever until CPython
+#      finalized it. `M3Client._shutdown_loop` (atexit) now closes it, and its default
+#      executor, while the interpreter is intact — see
+#      tests/test_m3client_loop_shutdown.py.
+#
+#      ⚠ That cleanup is NOT a fix for the intermittent 0xC0000005 the Windows suite
+#      throws at finalization. This loop looked like the cause and is not: the suite
+#      still crashed with the handler in place. That issue is open and tracked in m3.
 #
 #   2. ".*Pydantic V1.*" — langchain_core still imports pydantic.v1 shims, which warn on
 #      Python 3.14 ("Core Pydantic V1 functionality isn't compatible with 3.14+"). This
