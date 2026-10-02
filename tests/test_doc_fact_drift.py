@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -156,15 +157,45 @@ def test_contradiction_title_gate_is_not_documented_as_strict() -> None:
 
 
 def _collected_test_count() -> int:
-    out = subprocess.run(
+    """Count collected cases by asking pytest, and do NOT ignore how it exited.
+
+    This previously read only ``.stdout`` and never looked at ``returncode``,
+    which made it swallow a hard crash in the child: on Windows this nested
+    collection exits ``0xC0000005`` (an access violation during interpreter
+    finalization, reproducible 5/5 on `tests/test_token_budget.py` alone) AFTER
+    writing a correct count. The outer test then passed, and the only trace was
+    an entry in the Windows event log. A step consuming a result it never
+    checked is the exact defect class this suite exists to catch.
+
+    The stdout is still usable when the count parses — collection finished; the
+    fault is at exit — so this does not fail the drift check for an unrelated
+    crash. It refuses to stay silent about it either.
+    """
+    proc = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/", "-q", "--collect-only"],
         cwd=REPO,
         capture_output=True,
         text=True,
-    ).stdout
-    m = re.search(r"(\d+) tests? collected", out)
+        timeout=600,
+    )
+    m = re.search(r"(\d+) tests? collected", proc.stdout)
     if not m:  # pragma: no cover - collection itself is broken; other tests say so
-        pytest.skip("could not parse pytest collection output")
+        pytest.skip(
+            "could not parse pytest collection output "
+            f"(child exit {proc.returncode}); stderr tail: "
+            f"{proc.stderr.strip()[-300:]!r}"
+        )
+    if proc.returncode != 0:
+        # Visible, attributed, and not fatal: the count is good, the child is not.
+        warnings.warn(
+            f"nested pytest collection exited {proc.returncode} "
+            f"({hex(proc.returncode & 0xFFFFFFFF)}) after reporting a usable "
+            "count. On Windows this is the known 0xC0000005 at interpreter "
+            "finalization; reproduce with "
+            "`pytest tests/test_token_budget.py -q --collect-only`.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
     return int(m.group(1))
 
 
