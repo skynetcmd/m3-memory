@@ -19,7 +19,6 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-import warnings
 from pathlib import Path
 
 import pytest
@@ -186,15 +185,19 @@ def _collected_test_count() -> int:
             f"{proc.stderr.strip()[-300:]!r}"
         )
     if proc.returncode != 0:
-        # Visible, attributed, and not fatal: the count is good, the child is not.
-        warnings.warn(
-            f"nested pytest collection exited {proc.returncode} "
-            f"({hex(proc.returncode & 0xFFFFFFFF)}) after reporting a usable "
-            "count. On Windows this is the known 0xC0000005 at interpreter "
-            "finalization; reproduce with "
-            "`pytest tests/test_token_budget.py -q --collect-only`.",
-            RuntimeWarning,
-            stacklevel=2,
+        # Visible and attributed, but NOT via `warnings.warn`: this project sets
+        # `filterwarnings = ["error", ...]`, so a warning here fails THIS test —
+        # a docs-drift check going red for an unrelated interpreter crash, which
+        # names the wrong cause and would keep the Windows leg red until that
+        # crash is fixed. stderr is surfaced by pytest without that coupling.
+        print(
+            f"\n[drift] WARNING: nested pytest collection exited "
+            f"{proc.returncode} ({hex(proc.returncode & 0xFFFFFFFF)}) after "
+            "reporting a usable count. On Windows this is the known "
+            "0xC0000005 at interpreter finalization; reproduce with "
+            "`pytest tests/test_token_budget.py -q --collect-only`. The count "
+            "below is still trustworthy — collection finished before the fault.",
+            file=sys.stderr,
         )
     return int(m.group(1))
 
