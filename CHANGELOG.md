@@ -15,6 +15,26 @@ stay in private development. Published benchmark **results**
 (README/CHANGELOG/registry descriptions) are intentional public positioning;
 the policy is forward-going only.
 
+**Impact headers (forward-going from 2026-10-02):** every bullet in a release
+section ABOVE the `impact-headers` marker below carries a one-line footer:
+
+```
+  **Affected:** <platforms / configurations that can reach this> ·
+  **Action:** <what an operator must do> · **Data status:** <none | ...>
+```
+
+`Data status` is mandatory and `none` must be stated explicitly — an explicit
+"none" distinguishes *verified no data impact* from *nobody looked*, and for a
+memory system that is the question an operator actually needs answered.
+
+Entries BELOW the marker predate the convention. They were deliberately **not**
+backfilled wholesale: writing a scope or data-status claim for a historical
+entry means asserting something nobody re-verified, and a confident header that
+is wrong is worse than no header. Backfill is done only where it still changes
+a decision — anything with a non-`none` data status, a security item, or a
+breaking change / migration. `tests/test_changelog_impact_headers.py` enforces
+the convention above the marker only, so it never fails on history.
+
 ---
 
 ## [Unreleased]
@@ -29,6 +49,9 @@ the policy is forward-going only.
   dangerous stored, not merely executed — and the matched text is deliberately
   **not** echoed back, since for the prompt-injection pattern the match is the
   payload and error strings are read by agents.
+  **Affected:** all installs; only writes that trip the guard · **Action:**
+  none · **Data status:** none — no write that previously succeeded is now
+  rejected, and none that was rejected is now stored.
 
 - **The LangChain adapter's shared event loop is now shut down cleanly at exit.**
   `M3Client` runs one process-wide asyncio loop on a daemon thread (correct, and
@@ -37,7 +60,13 @@ the policy is forward-going only.
   CPython finalized. The loop and its default executor are now stopped and
   closed via `atexit`, while the interpreter is still intact. This is resource
   cleanup; it is not known to change any user-visible behaviour.
+  **Affected:** installs using the LangChain/LangGraph adapter · **Action:**
+  none · **Data status:** none.
 
+
+<!-- impact-headers: required for every release section ABOVE this line.
+     Sections below predate the convention (see Repo policy notes).
+     Enforced by tests/test_changelog_impact_headers.py -->
 
 ## [2026.10.1.1] — 2026-10-01 — the embed-server binary ships executable
 
