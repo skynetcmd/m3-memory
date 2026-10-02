@@ -127,18 +127,25 @@ def test_data_status_is_never_left_blank():
     assert not blank, "empty `Data status:` in:\n  " + "\n  ".join(blank)
 
 
+# The backfill stops at 2026-09-01 by decision: entries older than that would
+# need scope and data-impact claims nobody has re-verified, and a confident
+# header that is wrong is worse than none.
+PRE_CONVENTION_SECTION = "## [2026.8.30.1]"
+
+
 def test_history_below_the_marker_is_not_required_to_comply():
-    """Pins the scoping decision itself: the released sections below the marker
-    have no headers and that must stay a passing state, or the next person will
-    'fix' it by inventing claims about entries nobody re-verified."""
+    """Pins the scoping decision itself. Pre-September sections have no headers
+    and that must stay a PASSING state, or the next person 'fixes' the gap by
+    inventing claims about entries nobody re-verified."""
     text = _text()
     below = text[text.find(MARKER) :]
-    assert "## [2026.10.1.1]" in below, (
-        "2026.10.1.1 is expected to sit BELOW the marker as pre-convention "
-        "history; if it moved above, it now needs real verified headers"
+    assert PRE_CONVENTION_SECTION in below, (
+        f"{PRE_CONVENTION_SECTION} is expected to sit BELOW the marker as "
+        "pre-convention history; if the marker moved past it, those entries "
+        "now need real verified headers rather than invented ones"
     )
     # It genuinely has none — that is the point.
-    section = below.split("## [2026.10.1.1]", 1)[1].split("\n## [", 1)[0]
+    section = below.split(PRE_CONVENTION_SECTION, 1)[1].split("\n## [", 1)[0]
     assert "**Affected:**" not in section
 
 

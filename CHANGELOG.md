@@ -64,9 +64,6 @@ the convention above the marker only, so it never fails on history.
   none · **Data status:** none.
 
 
-<!-- impact-headers: required for every release section ABOVE this line.
-     Sections below predate the convention (see Repo policy notes).
-     Enforced by tests/test_changelog_impact_headers.py -->
 
 ## [2026.10.1.1] — 2026-10-01 — the embed-server binary ships executable
 
@@ -80,17 +77,29 @@ the convention above the marker only, so it never fails on history.
   executable under every pip tested (25.1.1 through 26.2.1) and uv.
   `m3 doctor --fix` continues to repair the mode in place for anyone already on
   a `3.9.20` wheel.
+  **Affected:** installs that fetched a `3.9.20` Rust-core wheel, all platforms ·
+  **Action:** upgrade; `m3 doctor --fix` repairs an already-installed `3.9.20`
+  wheel in place · **Data status:** no loss — writes were still accepted and
+  searchable via FTS while the shared embedder was down, and their vectors
+  backfill asynchronously once it starts.
 - **PostgreSQL warehouse sync failed against a unix-socket DSN.**
   `postgresql:///mydb` — the usual shape for a local cluster using peer auth —
   carries no host and no user, and those were written into `postgres_fdw`'s
   `CREATE SERVER` options as SQL `NULL`, which PostgreSQL rejects outright
   (`syntax error at or near "NULL"`). Both options are now omitted when absent.
   A DSN with an explicit host was unaffected.
+  **Affected:** PostgreSQL warehouse sync, and only with a host-less DSN
+  (`postgresql:///db`, i.e. peer auth over the unix socket) · **Action:**
+  upgrade · **Data status:** no loss — the sync failed closed while creating the
+  foreign server, before any rows were read or written.
 
 ### Changed
 
 - The Rust-core wheel matrix is 7 os/backend packages × CPython 3.12–3.15.
   CPython 3.11 is no longer built; the floor is `>=3.12`, matching m3-memory.
+  **Affected:** CPython 3.11 users of the prebuilt Rust core — m3-memory itself
+  already required `>=3.12`, so 3.11 could not run m3 regardless · **Action:**
+  none on 3.12+; on 3.11, move to 3.12+ · **Data status:** none.
 
 
 ## [2026.10.1.0] — 2026-10-01 — four commands that reported success they had not checked
@@ -104,28 +113,27 @@ the convention above the marker only, so it never fails on history.
   contain them, so the first schema load died pointing at the driver rather than
   at the encoding. The pool now requests UTF-8, which is correct against any
   server encoding; an explicit `client_encoding` in the DSN still wins.
-
+  **Affected:** PostgreSQL backend against a cluster whose encoding is not UTF-8 (e.g. `SQL_ASCII`) · **Action:** upgrade · **Data status:** no loss — affected writes failed outright with a `UnicodeEncodeError` rather than being stored mangled.
 - **`m3 doctor` told you the native extension was stale without telling you how
   to fix it.** The default (brief) output said only "reinstall"; the command
   lived in `--verbose`, and `--fix` cannot repair this probe. A stale extension
   is reached by an ordinary upgrade, because the native wheel is a separate
   distribution that `pip`/`pipx` does not touch. The line now names
   `m3 embedder install-gpu`.
-
+  **Affected:** installs whose native extension is older than the pin · **Action:** none · **Data status:** none — diagnostic wording only.
 - **`m3 doctor` could report a broken embedding cascade in reassuring words.**
   In shared-embedder mode it printed "shared tier-2 embedder online (tier-1
   appropriately offline)" regardless of health, so a failure arrived as a ❌
   beside the word "online", naming no cause and no remedy. That phrasing is now
   used only when the cascade is actually healthy; otherwise it reports the
   failing tier and names `m3 doctor --fix`.
-
+  **Affected:** shared-embedder installs running `m3 doctor` · **Action:** none · **Data status:** none — diagnostic wording only.
 - **`m3 setup` reported a background service as restarted when it had only
   requested a start.** On a host where the service was not installed, setup
   printed "[OK] cognitive-loop: restarted" immediately followed by
   "[!] cognitive-loop: NOT running". It now reports the attempt, and the verdict
   comes from re-reading the service registry.
-
-
+  **Affected:** hosts where the cognitive-loop service was not installed · **Action:** re-run `m3 setup`; confirm with `m3 status` · **Data status:** no loss — background enrichment and embedding were deferred while the loop was not running, and backfill once it is.
 - **`m3 embedder install` and `m3 embedder start` reported a stopped embed server
   as running, and exited 0.** A zero exit from the service manager means only that
   it accepted the start request — launchd, systemd and the Windows SCM all return
@@ -142,6 +150,7 @@ the convention above the marker only, so it never fails on history.
   holder, rather than generic start advice; setup no longer folds this state into
   its benign "SKIPPED (not installed)" message; and the messages honour
   `M3_EMBED_SERVER_PORT` instead of hardcoding 8082.
+  **Affected:** all platforms, any install using the shared embed server · **Action:** upgrade · **Data status:** no loss — writes stayed searchable via FTS and their vectors backfill once the embedder runs.
 - **A stopped service could be read as running because the status check matched a
   bare substring.** `"running"` also matches "not running", so the one probe whose
   job is to refuse to claim health without evidence could do exactly the opposite.
@@ -149,6 +158,7 @@ the convention above the marker only, so it never fails on history.
   registered", which would have re-installed over a service that was still coming
   up. Negative states are now matched before positive ones, and an unrecognised
   status is treated as not running.
+  **Affected:** service status probes on all platforms · **Action:** upgrade · **Data status:** none — the probe reported wrongly; it changed no data.
 - **`chatlog_rescrub` reported a partial sweep as a complete one.** It examines at
   most `limit` rows (default 10,000) and said nothing about the remainder, so on a
   larger store the result read as "nothing left to scrub" while most rows had
@@ -158,6 +168,7 @@ the convention above the marker only, so it never fails on history.
   number of rows left and the limit that would cover them; rows are examined
   oldest-first so a larger re-run makes progress. Truncation is detected without
   an extra aggregate query, so a complete sweep costs nothing more than before.
+  **Affected:** chat-log stores larger than the rescrub `limit` (default 10,000 rows) · **Action:** re-run `chatlog_rescrub` with a limit that covers the store — the result now names the limit that would · **Data status:** **redaction may be incomplete.** Rows beyond the limit were never examined, and with no `ORDER BY` successive runs did not necessarily extend coverage, so unscrubbed content may remain. Re-run to completion; rows are now examined oldest-first so a larger re-run makes progress.
 - **Running the test suite overwrote the developer's own `.mcp.json`.** The
   config generator writes that file into the repository root unconditionally, and
   three tests reach the generator — directly or through the Claude settings
@@ -166,6 +177,7 @@ the convention above the marker only, so it never fails on history.
   elsewhere still happen, so the tests keep the output they assert on. It had been
   invisible because the file is git-ignored and already exists on a developer
   machine; it surfaced only on a fresh clone.
+  **Affected:** developers running the test suite; not end users · **Action:** none for users · **Data status:** no memory data affected — a developer's `.mcp.json` was overwritten; restore it or re-run `m3 setup`.
 - **A test left a directory in the repository when run on Windows.** A mocked
   `subprocess.run` treated the last argument of every intercepted command as a
   path to create; on Windows the installer also queries a scheduled task, whose
@@ -174,6 +186,7 @@ the convention above the marker only, so it never fails on history.
   it sees only one call, and the suite fails if a run leaves new entries in the
   repository root — previously nothing checked, so this was found by looking at
   `git status` rather than by any test.
+  **Affected:** developers running the test suite on Windows · **Action:** none · **Data status:** none — a stray directory in the checkout.
 - **Three tests reported a state the machine was not in, on any host without a
   full build toolchain.** `test_elbow_trim` errored at setup with a missing
   `torch` in a full run while passing alone: its fixture calls `hasattr` on every
@@ -187,6 +200,7 @@ the convention above the marker only, so it never fails on history.
   `pyvenv.cfg` rather than by name. None of these were product defects, and all
   three were invisible on a developer machine that happened to have the missing
   pieces installed.
+  **Affected:** developers running the suite without a full build toolchain · **Action:** none · **Data status:** none — test-reporting only.
 - **Iterating a query result raised `RecursionError` on PostgreSQL.** The cursor
   wrapper's `__iter__` delegated to the driver's, which returns the cursor itself,
   so iteration re-entered the wrapper until the interpreter stopped it.
@@ -195,6 +209,7 @@ the convention above the marker only, so it never fails on history.
   backend-agnostic maintenance paths. Iteration now drives the driver's own
   batched fetch, keeps both index and key access on each row, and is covered by
   backend-conformance tests that assert iteration and `fetchall` agree.
+  **Affected:** PostgreSQL backend, any path that iterates a query result · **Action:** upgrade · **Data status:** no loss — the read raised instead of returning a partial result set.
 - **Promoting a chat log entry could silently drop a column, and re-read every
   row to do it.** The SQLite cross-file path selected all columns, rebuilt each
   row in Python, and inserted them one at a time — substituting NULL for any
@@ -203,6 +218,7 @@ the convention above the marker only, so it never fails on history.
   promoted column names the column and points at `m3 doctor` instead. The column
   list, previously written out three times, now has one owner, so the writer and
   both promote paths cannot drift apart.
+  **Affected:** SQLite cross-file chat-log promotion · **Action:** upgrade; a store missing a promoted column is now named instead of silently filled · **Data status:** **verify.** The old path substituted `NULL` per row for any column it could not match, without reporting it, so rows promoted before this release may carry an unexpected `NULL`. The source chat-log rows are unaffected.
 - **PostgreSQL parity tests could connect to the production warehouse.** They
   accepted the warehouse DSN as a fallback when no test DSN was configured, and
   treated the variable being *present* as the cluster being *reachable* — so an
@@ -211,6 +227,7 @@ the convention above the marker only, so it never fails on history.
   warehouse variable, and a new check fails the suite if any test reads one at
   import time, in a class body, or in class setup, where the environment sandbox
   cannot reach.
+  **Affected:** developers running the suite with a warehouse DSN exported; not end users · **Action:** none for users · **Data status:** tests could open connections to the production warehouse. No write path was identified in the fix, and whether any run wrote to it was **not re-verified** — inspect that cluster if the suite was ever run with a warehouse variable set.
 - **A live-PostgreSQL test reported a cleanup error instead of why it skipped,
   and never exercised the code it covers.** Its cleanup reassigned `autocommit`
   while an aborted transaction was still open, so a second error replaced the
@@ -219,12 +236,14 @@ the convention above the marker only, so it never fails on history.
   client-side address, so on any host reached through a tunnel or proxy the
   foreign-server path was never run. It now gets an address the server can reach,
   and reads a real foreign table.
+  **Affected:** developers running the live-PostgreSQL tests · **Action:** none · **Data status:** none — the test covered nothing and reported confusingly.
 - **A schema guard failed on a schema that was correct.** The test asserting the
   notification sweeper uses its partial index built a fixture in which every row
   was a sweep candidate, so the index covered the whole table and a full scan was
   genuinely the cheaper plan. The fixture now models the queue's real shape —
   candidates are a small minority — and also checks that premise, so it cannot
   quietly go back to asserting nothing.
+  **Affected:** developers running the suite · **Action:** none · **Data status:** none — a false test failure.
 - **Two FIPS tests reported a missing crypto library on a machine where it was
   present.** A test that simulates another OS sets `sys.platform` process-wide,
   and the suite restored `os.name` before a test's teardown but never
@@ -232,6 +251,7 @@ the convention above the marker only, so it never fails on history.
   and sent the library resolver after the wrong per-OS filename. POSIX hosts
   only. Both guards now cover `sys.platform`, and both restore the identity
   captured at startup rather than whatever the previous test left behind.
+  **Affected:** developers running the suite · **Action:** none · **Data status:** none — a false test failure.
 - **Running the test suite could redirect the developer's own chatlog capture.**
   `chatlog_config.CONFIG_PATH` is resolved when the module is imported, so it is
   not covered by the environment-variable half of the test sandbox: a test that
@@ -241,12 +261,13 @@ the convention above the marker only, so it never fails on history.
   that is later deleted — with nothing failing and the suite green. The sandbox
   now re-points that constant per test, as it already did for the migration
   config.
+  **Affected:** developers running the test suite; not end users · **Action:** developers re-point `db_path` in `~/.m3/config/.chatlog_config.json`, or run `m3 doctor --fix --fix-hooks` · **Data status:** **developer capture loss.** A run rewrote the real chat-log config with a temporary `db_path`, so capture afterwards went to a pytest temp directory that is later deleted; `m3 chat status` showed the live chat log as empty. Stored memories were not affected.
 - **The redaction warning's own fix command did not run.** It printed
   `chatlog_set_redaction --enabled true`, which argparse rejects with
   "unrecognized arguments: true" because `--enabled` is a boolean flag, and it
   recommended a bare `chatlog_rescrub` — the capped call described above. It now
   emits a command that works, with a limit sized from the store's row count.
-
+  **Affected:** anyone who followed the printed remediation command · **Action:** re-run the corrected command the warning now prints · **Data status:** the recommended remediation never executed, so redaction may not have been enabled when it was expected to be — see the `chatlog_rescrub` entry above for coverage limits.
 ### Changed
 
 - **Scripted installs now enable the cognitive loop by default.** `install.sh`
@@ -255,7 +276,7 @@ the convention above the marker only, so it never fails on history.
   search stayed empty, and the only hint was an `m3 doctor` warning. This now
   matches the interactive wizard, which has always recommended it. Pass
   `--no-cognitive-loop` to decline.
-
+  **Affected:** unattended/scripted installs via `install.sh` · **Action:** none; pass `--no-cognitive-loop` to opt out · **Data status:** none — it enables background processing that was previously absent.
 - **`m3 upgrade` now repairs as well as verifies, and cannot leave a daemon on
   the old code.** The final step was a report-only `m3 doctor`, which left
   self-repairable state broken behind a warning — and hook entries still
@@ -264,7 +285,7 @@ the convention above the marker only, so it never fails on history.
   writing). A second stop was added after the package is replaced: anything
   still running at that point is the old code, and the previous flow only
   restarted services it found stopped, so a survivor kept serving stale code.
-
+  **Affected:** all upgrades · **Action:** none · **Data status:** none.
 ### Security
 
 - **Pinned the Pillow floor.** Pillow reaches m3 only transitively, and the
@@ -272,11 +293,12 @@ the convention above the marker only, so it never fails on history.
   `Pillow>=8.3.2` — a resolver taking the lowest satisfying version lands on a
   release with 37 known CVEs. `pip install` takes the newest and was never
   affected; this closes the constrained-resolver and stale-lockfile cases.
-
+  **Affected:** installs whose resolver picked the lowest satisfying Pillow · **Action:** upgrade · **Data status:** none.
 - **Restored a scanner that had never run on this repository.** The security
   pipeline passes `--config <repo>/trivy.yaml`; both config files were absent,
   so trivy exited fatally and wrote no report while the run still reported
   success. The configs are now committed, with no suppressions.
+  **Affected:** the project's own security pipeline; not user installs · **Action:** none · **Data status:** none.
 
 ## [2026.9.21.0] — 2026-09-21 — one leaked environment variable, and the failures it was hiding
 
@@ -290,9 +312,11 @@ the convention above the marker only, so it never fails on history.
   the embed targets, and `unembedded` grew without bound while the loop reported
   no work to do. The same unrestored write was present in the enrichment and
   entity passes, which run earlier in the same cycle.
+  **Affected:** all installs running the cognitive loop · **Action:** upgrade; restarting the loop was the interim workaround · **Data status:** no loss — chat turns were still captured and searchable via FTS. Their vectors were not generated while the leak persisted, and the `unembedded` backlog backfills once the loop runs on this version.
 - **Embedding writes during a sweep resolved through the environment variable
   rather than the swept store.** They landed correctly only as a side effect of
   the leak above; the sweep is now explicitly bound to its own database.
+  **Affected:** all installs running the cognitive loop · **Action:** upgrade · **Data status:** no loss — the writes did land in the intended store, but only as a side effect of the leak above; the binding is now explicit rather than accidental.
 - **The dashboard's database selector was process-global, so concurrent viewers
   could read each other's store.** The selected database arrives as a
   per-request cookie but was written to `M3_DATABASE`, which is shared by the
@@ -300,7 +324,7 @@ the convention above the marker only, so it never fails on history.
   wrong store, and `/api/stats` could label another request's database as
   "Main". Selection is now bound per request. An explicitly set `M3_DATABASE`
   still takes precedence, so single-store deployments are unaffected.
-
+  **Affected:** dashboard deployments serving concurrent viewers across MORE THAN ONE store; single-store deployments and any deployment with `M3_DATABASE` set explicitly are unaffected · **Action:** upgrade · **Data status:** no data was modified, but a **cross-store read** was possible — two overlapping requests could resolve to the wrong store, and `/api/stats` could label another request's database as "Main".
 - **Type annotations narrower than their code failed the type-check lane, which
   gates every test lane.** Three signatures rejected calls that work at runtime:
   `scoped_db_env` and `exec_bit_status` declared `str`/`Path` where callers pass
@@ -308,16 +332,19 @@ the convention above the marker only, so it never fails on history.
   three values. Because the type check gates the test matrix, this had left the
   full 3-OS × Python matrix, the install checks and the PostgreSQL lane
   unexecuted rather than merely unreported.
+  **Affected:** the project's own type-check lane; not user installs · **Action:** none · **Data status:** none.
 - **A lease-fencing test raced its own lease.** It claimed a one-second lease and
   then asserted the lease could still be renewed; renewals of an expired lease
   are refused by design, so any scheduling delay over a second failed the build
   on load rather than on a defect.
+  **Affected:** the project's CI under load; not user installs · **Action:** none · **Data status:** none — a false build failure.
 - **Two dispatch tests read the wrong store under PostgreSQL.** They resolved the
   table name once at import — before the test sandbox clears the backend
   selection — so a schema-qualified name was queried over a SQLite connection.
   The name is now resolved per use, and a mismatch between a qualified name and a
   non-server connection is reported with the values, the predicted error and the
   cause rather than surfacing as `no such table`.
+  **Affected:** developers running the dispatch tests against PostgreSQL · **Action:** none · **Data status:** none — the misread was confined to the tests.
 - **The public-API parity guard failed on Python 3.15 over a standard-library
   change.** It snapshotted call signatures for every public name in
   `memory_core`, including objects imported from the standard library, so
@@ -325,24 +352,26 @@ the convention above the marker only, so it never fails on history.
   change. Signatures are now captured only for objects m3 defines, decided by
   the defining module's file location; names, kinds and values are still tracked
   for everything, so a dropped re-export still fails.
-
+  **Affected:** the project's CI on Python 3.15; not user installs · **Action:** none · **Data status:** none — a false build failure.
 ### Added
 
 - `scoped_db_env()` — sets `M3_DATABASE` for a block and restores it exactly,
   including restoring prior absence as absence. Use `active_database()` for
   routing; this is only for influencing what a later import binds.
-
+  **Affected:** callers that need to influence what a later import binds · **Action:** none; use `active_database()` for routing · **Data status:** none.
 ### Changed
 
 - **The PostgreSQL lane is now required.** It shipped advisory because it had
   never run in CI; it has since been green across consecutive runs and is the
   only automated coverage for one of the two shipped backends, so a migration
   can no longer merge having never been executed.
+  **Affected:** the project's own CI; not user installs · **Action:** none · **Data status:** none.
 - `networkx` and `defusedxml` are pinned directly in `requirements.txt`. Both are
   declared dependencies but reached that install path only as another package's
   transitive — `networkx` via `torch`, so a core feature depended on an optional
   ML stack being present, and `defusedxml` via `fpdf2` despite being pinned
   elsewhere precisely to guarantee the hardened XML parser.
+  **Affected:** installs that received these only transitively — `networkx` arrived via `torch`, so a core feature depended on an optional ML stack being present · **Action:** upgrade, which installs them directly · **Data status:** none — the dependency was either present or the feature was unavailable; nothing was written differently.
 
 ## [2026.9.20.3] — 2026-09-20 — an honest sync result
 
@@ -354,14 +383,14 @@ the convention above the marker only, so it never fails on history.
   A skip now exits 75 (`EX_TEMPFAIL`) and is reported as
   `SKIPPED — nothing replicated`, so a scheduled or CI caller can tell a no-op
   from a completed sync without parsing the log.
+  **Affected:** multi-machine sync deployments · **Action:** upgrade; re-run the sync · **Data status:** no loss, but **no replication either** — a run that could not take its lock replicated nothing while reporting success, so a target may still be stale.
 - **The skip message named a cause nobody checked.** It said "another sync is
   already in progress (main lock found)" for two different conditions, including
   one where the lock table was empty and the real cause was database write
   contention — sending the reader to hunt a row that did not exist. It now
   reports the observed reason, the store, every target skipped, what else could
   hold the lock, and the queries that settle it.
-
-
+  **Affected:** anyone reading a sync skip message · **Action:** upgrade · **Data status:** none directly, but the message could present a **database write failure** as a benign lock skip, hiding a real fault.
 ## [2026.9.20.2] — 2026-09-20 — a clearer install on macOS and Linux
 
 ### Fixed
@@ -371,10 +400,11 @@ the convention above the marker only, so it never fails on history.
   a broken embedding cascade, an embed-server error, two shared-embedder
   issues, and nothing listening on `:8082` — none of which named the cause.
   The binary is now made executable before it is run.
+  **Affected:** macOS and Linux installs whose Rust-core wheel shipped the binary non-executable · **Action:** upgrade, or run `m3 doctor --fix` · **Data status:** no loss — setup failed and the shared embedder was unavailable, so writes stayed searchable via FTS with vectors deferred.
 - **`doctor` reported `embed-server: ok (not installed)`.** The exit code only
   says the status query worked, not that a service exists. It now reports the
   state.
-
+  **Affected:** all installs running `doctor` · **Action:** none · **Data status:** none — diagnostic wording only.
 ### Added
 
 - **`doctor` reports a non-executable embed-server binary, and `doctor --fix`
@@ -382,13 +412,13 @@ the convention above the marker only, so it never fails on history.
   `sudo -n` only for a root-owned install; it never prompts, so it is safe from
   a scheduled task, and a refusal prints the manual command. Windows reports ok
   and says why — it has no exec bit.
+  **Affected:** installs whose embed-server binary is not executable · **Action:** run `m3 doctor --fix` · **Data status:** none — it repairs a file mode; it never prompts, so it is safe in a non-interactive run.
 - **`doctor --fix --fix-hooks` updates a stale Claude Code plugin.** Refreshing
   the marketplace clone alone leaves the pinned copy that actually loads on its
   old commit, so both supported CLI commands run in order. The plugin's own MCP
   servers are verified to stay disabled afterwards, since re-enabling them would
   leave two memory servers competing.
-
-
+  **Affected:** Claude Code plugin users whose pinned copy is behind the marketplace clone · **Action:** run `m3 doctor --fix --fix-hooks` · **Data status:** none.
 ## [2026.9.20.1] — 2026-09-20 — native core 3.9.20, honest install reporting
 
 ### Fixed
@@ -396,33 +426,41 @@ the convention above the marker only, so it never fails on history.
   upgrade over a working wheel printed the pure-Python fallback notice and
   toolchain instructions while the native core was still loaded and serving.
   The message now probes the live embedder tier and marks evidence levels.
+  **Affected:** upgrades performed over an already-working native wheel · **Action:** none; the notice was wrong, not the install · **Data status:** none — the native core remained loaded and serving throughout.
 - The native-core installer falls back across backends (cuda → vulkan → cpu)
   when a wheel is missing for the preferred one, instead of dropping to
   pure-Python. An explicit `--backend` override never substitutes.
+  **Affected:** hosts with no wheel for their preferred GPU backend · **Action:** none; an explicit `--backend` is still never substituted · **Data status:** none.
 - Setup waited for a restarted service to register before grading it; the
   registry entry is written by the child after its interpreter boots, so an
   immediate re-read reported a correctly-starting service as down.
+  **Affected:** all installs running setup · **Action:** none · **Data status:** none — a correctly-starting service was graded as down.
 - All bge-m3 embedder tiers now write one canonical `embed_model` tag. The
   GGUF tiers previously tagged wheels by model filename, splitting the embed
   cache across two tags for one vector space. Retired tags stay readable.
+  **Affected:** installs using the GGUF embedder tiers · **Action:** upgrade · **Data status:** no loss — retired tags stay readable, so previously written rows remain usable. The split tag did mean some vectors were recomputed rather than served from the embed cache.
 - `m3 doctor` reports stored embedding tags that are excluded from search by
   the compatibility set — rows that are present and valid but never scored.
+  **Affected:** installs holding embeddings under a tag outside the search compatibility set · **Action:** run `m3 doctor` to list them · **Data status:** no loss, but a **retrieval gap** — those rows are present and valid yet never scored in search, so results can be incomplete without any error.
 - The cognitive loop's distillation error names both store resolutions,
   attaches a traceback, and rules out causes its own data disproves.
+  **Affected:** installs running the cognitive loop · **Action:** none · **Data status:** none — diagnostics only.
 - Scheduled tasks carry the self-heal repetition on the boot trigger only.
   Emitting it on both triggers gave two cadences, so each interval launched a
   process that existed only to lose the single-instance lock race.
-
+  **Affected:** Windows scheduled-task installs · **Action:** none · **Data status:** none — the duplicate cadence launched processes that only lost a lock race.
 ### Added
 - `M3Context` logs the first bind of each store, with the requested path beside
   the resolved one.
+  **Affected:** anyone diagnosing store resolution · **Action:** none · **Data status:** none.
 - Index on `memory_embeddings(content_hash, embed_model)` — the pair the embed
   cache probes by. PostgreSQL already had it.
-
+  **Affected:** SQLite installs; PostgreSQL already had it · **Action:** upgrade, which applies the index · **Data status:** none — an index addition.
 ### Changed
 - Pins native core `m3-core-rs` **3.9.20** (`v2026.9.20`): dispatcher latency
   percentiles are now measured rather than hardcoded zero, Windows Vulkan
   builds again, and the wheel matrix covers CPython 3.11–3.15.
+  **Affected:** all installs · **Action:** upgrade · **Data status:** none. ⚠ Note that the `3.9.20` wheels shipped the embed-server binary non-executable; that defect is fixed in `2026.10.1.1` / Rust core `3.10.1`.
 
 ## [2026.9.20.0] — 2026-09-20 — memories that strengthen with use
 
@@ -433,6 +471,7 @@ the convention above the marker only, so it never fails on history.
   frequently-retrieved memories fade more slowly, and pinned rows are unchanged.
   A memory retrieved hundreds of times previously decayed at exactly the same
   rate as one nobody had touched in a year.
+  **Affected:** all installs · **Action:** upgrade, which migrates · **Data status:** no loss — decay overwrites `importance` in place, and the new `importance_raw` column preserves the undecayed baseline from this release onward.
 - **`memory_grade`** — after answering, an agent can report which retrieved
   memories it actually relied on. Helpful and unhelpful verdicts are stored as
   two separate counts, never netted, so a contested memory stays distinguishable
@@ -440,13 +479,17 @@ the convention above the marker only, so it never fails on history.
   within the feedback window (default five minutes, configurable in
   `.governor_config.json`, capped at 24 hours); a late grade reports
   `applied: false` with a reason rather than being dropped.
+  **Affected:** agents that want to report which memories they used · **Action:** none · **Data status:** none — a new tool.
 - **`memory_feedback_stats`** — the in-window and out-of-window grade counts, so
   the feedback window can be tuned on evidence rather than guessed.
+  **Affected:** operators tuning the feedback window · **Action:** none · **Data status:** none — a new read-only tool.
 - **`memory_restore`** — brings back memories an autonomous pass removed. It
   refuses to touch deliberate deletions.
+  **Affected:** installs where the earlier autonomous pass soft-deleted memories · **Action:** run `memory_restore` to recover them · **Data status:** **recovery available.** Memories removed by the old autonomous pass can be brought back; it refuses to touch deliberate deletions.
 - **`importance_raw`**, the undecayed baseline, and `apply_decay=False` for
   point-in-time and audit reads. Decay overwrites importance in place, so
   without it a faded memory carried no record of its original weight.
+  **Affected:** point-in-time and audit reads · **Action:** none · **Data status:** rows that had already been decayed before this release carry **no recorded undecayed baseline** — it was overwritten in place and cannot be reconstructed. Rows written from here on do.
 - **Every CLI tool accepts a piped JSON object.** `--json` and `--json-file`
   were limited to the ten tools with an object parameter; they now sit beside
   `--database` and `--dry-run` on every generated subcommand:
@@ -458,9 +501,10 @@ the convention above the marker only, so it never fails on history.
   A piped object merges with any flags rather than replacing them, and an
   explicit flag wins, so a script can pipe a base object and override one field
   per call.
+  **Affected:** CLI and scripted callers · **Action:** none · **Data status:** none.
 - **[Using m3 for coding work](docs/CODING_FAQ.md)** — what m3 does for a coding
   agent, what it leaves to the agent, and how to wire the parts it leaves out.
-
+  **Affected:** readers · **Action:** none · **Data status:** none — documentation.
 ### Changed
 
 - **⚠ The CLI now returns structured records by default.** Thirteen listing and
@@ -469,74 +513,92 @@ the convention above the marker only, so it never fails on history.
   parser. **A script that greps the rendered text needs `--no-as_records`**,
   which restores the previous output byte-for-byte. Tools called over MCP are
   unaffected — their default is unchanged.
-
+  **Affected:** ⚠ **breaking for scripts** — thirteen listing and search tools that previously printed a rendered summary · **Action:** update any script that parsed the rendered text to consume the `{count, items}` JSON · **Data status:** none — an output-format change.
 - **An autonomous maintenance pass no longer deletes.** It previously
   soft-deleted every memory under an importance threshold older than 30 days.
   Forgetting is now deranking; removal is a person's decision. The pass reports
   candidates instead, and `memory_restore` recovers what earlier passes took.
+  **Affected:** all installs · **Action:** upgrade; use `memory_restore` to recover anything the old pass removed · **Data status:** **recoverable loss.** The previous pass soft-deleted every memory under an importance threshold older than 30 days; forgetting is now deranking, and the removals are restorable.
 - **`memory_feedback` honours every verdict it advertises.** `not_useful` and
   `misleading` were accepted, reported as applied, and discarded. The three now
   act as the distinct claims they are: `useful` raises importance, `misleading`
   lowers it, and `not_useful` records the verdict without changing importance,
   because a retrieval miss is the ranker's failure rather than the memory's.
+  **Affected:** anyone who submitted `not_useful` or `misleading` verdicts before this release · **Action:** re-submit those verdicts if you relied on them · **Data status:** **feedback was lost.** Both were accepted, reported as applied, and then discarded; the discarded grades cannot be recovered.
 - Retrieval is treated as weak evidence throughout: the lift from being
   retrieved is logarithmic, hard-capped, and bounded below what a single
   explicit helpful verdict earns. Being matched often cannot become being
   useful.
+  **Affected:** ranking on all installs · **Action:** none · **Data status:** none — a scoring change; stored rows are untouched.
 - `decay_rate` is recorded per row. It was declared in the first migration and
   never written.
-
+  **Affected:** all installs · **Action:** none · **Data status:** none — the column was declared in the first migration and never written; it is now populated on write.
 ### Fixed
 
 - **A forensic read ranked on the decayed importance.** The search path resolved
   its projected columns in three places, and two of them — the exact-phrase
   short-circuit and the no-embedder fallback — never learned about
   `importance_raw`, so the result depended on which path served the query.
+  **Affected:** audit and point-in-time reads · **Action:** upgrade · **Data status:** none — a read-path ranking error; nothing stored was wrong.
 - **PostgreSQL:** migration 058 reached `memory_items` but not its chatlog
   clone, leaving the chatlog half of the store without the new columns.
+  **Affected:** PostgreSQL installs that ran migration 058 · **Action:** upgrade, which applies the missing columns · **Data status:** the chatlog half of the store was left **schema-incomplete**; no rows were lost, and the upgrade completes it.
 - The feedback window compared timestamps as strings. m3 writes several
   timestamp formats to these columns, so a fresh grade was occasionally
   rejected; the comparison now parses instants through the dialect seam.
+  **Affected:** all installs submitting grades · **Action:** re-submit any grade you believe was dropped · **Data status:** some fresh grades were **rejected** because m3 writes several timestamp formats to these columns; rejected grades were not stored.
 - Three memories held an importance of 5.0–8.0. The field is documented 0.0–1.0
   and nothing clamped on write, which distorted every floor computation.
+  **Affected:** installs holding importance values outside the documented 0.0–1.0 range · **Action:** upgrade, which clamps on write · **Data status:** out-of-range values **distorted every floor computation** while present; writes are now clamped so new rows cannot reintroduce it.
 - **Spilled chat turns never drained on PostgreSQL.** The drain activated the
   captured database path before writing, but on a pooled backend that value
   is a DSN label rather than a file path, so the resolver refused it and the
   batch was retried and kept. Turns accumulated on disk indefinitely.
+  **Affected:** PostgreSQL chat-log installs · **Action:** upgrade; the spill drains afterwards · **Data status:** no loss — captured turns sat undrained in the spill rather than being discarded, and are ingested once this version runs.
 - **Access stamps were never written on PostgreSQL.** The batched update
   carried a SQLite placeholder, which PostgreSQL rejects, and the failure was
   logged at debug level. `last_accessed_at` and `access_count` therefore never
   moved on that backend, so decay reinforcement had no signal to read and
   `memory_grade` rejected every verdict as stale.
+  **Affected:** PostgreSQL installs · **Action:** upgrade · **Data status:** **`last_accessed` was never recorded**, so any recency-dependent behaviour was working from missing data. The historical stamps cannot be reconstructed; recording starts from this release.
 - **A search answered by the exact-phrase or no-embedder path recorded no
   retrieval.** Those paths return before the stamping step, and the step itself
   skipped rows without a keyword score — so the most precise results were the
   least likely to be gradeable.
+  **Affected:** searches answered by the exact-phrase or no-embedder path · **Action:** upgrade · **Data status:** retrieval counts were **under-recorded** for those paths and cannot be reconstructed; counting is correct from this release.
 - **CLI output was double-encoded.** `--as_records` produced JSON inside a JSON
   string, so `| jq '.items[].id'` silently returned nothing.
+  **Affected:** scripts using `--as_records` · **Action:** none; `| jq` works now · **Data status:** none — `jq` silently returned nothing rather than wrong data.
 - **Automatic migrations printed to stdout.** A command run against a fresh
   database emitted the migration plan ahead of its own JSON, breaking any
   parser downstream. Migration output now goes to stderr.
+  **Affected:** any command run against a fresh database by a downstream parser · **Action:** none · **Data status:** none — migration output moved off stdout.
 - A search run from the CLI now records retrieval before the process exits, so
   `memory_search | memory_grade` works from a shell.
+  **Affected:** shell pipelines such as `memory_search | memory_grade` · **Action:** none · **Data status:** none going forward; retrievals that exited before stamping were not recorded.
 - Background liveness and shutdown checks ran `tasklist` and `taskkill` without
   suppressing the console, flashing a window on Windows every few minutes.
+  **Affected:** Windows installs · **Action:** none · **Data status:** none — a console window flashed every few minutes.
 - **Chat log capture now works for OpenClaw, OpenCode and Aider.** All three
   were registered host agents whose hooks invoked the ingest CLI with an
   argument it does not accept, so capture never ran. OpenCode is read from
   its SQLite store (v1.2.0+) or the legacy JSON tree, whichever is present,
   and its store is located per platform rather than at a fixed path.
+  **Affected:** OpenClaw, OpenCode and Aider hosts · **Action:** upgrade, then `m3 doctor --fix --fix-hooks` · **Data status:** **capture loss.** Their hooks invoked the ingest CLI with an argument it does not accept, so nothing was captured on those hosts; turns from that period are **unrecoverable**.
 - **Chat log capture now works for OpenClaw.** It was a registered host agent
   with no transcript parser and no hook. The hook finds the newest session
   transcript under `~/.openclaw/agents/<agent>/sessions/` itself, since OpenClaw
   passes no envelope.
+  **Affected:** OpenClaw hosts · **Action:** upgrade, then `m3 doctor --fix --fix-hooks` · **Data status:** **capture loss.** OpenClaw was a registered host agent with no parser and no hook, so nothing was ever captured; those turns are **unrecoverable**.
 - **`doctor` reports an enabled host agent whose capture cannot run.** The check
   that corroborated the config against reality covered Claude Code only, so on
   any other host `--fix` and `--fix-hooks` reported clean. Where capture is not
   yet supported for an agent, `doctor` now says so instead of staying silent.
+  **Affected:** every host other than Claude Code · **Action:** run `m3 doctor` · **Data status:** none itself — but it is what let the capture loss above stay silent.
 - Consolidated the list of valid host agents, which existed in three copies, and
   mapped every registered agent to its hook so an unmapped one can no longer
   resolve to a path that does not exist.
+  **Affected:** host-agent resolution on all installs · **Action:** none · **Data status:** none.
 
 ## [2026.9.19.0] — 2026-09-19 — OpenClaw speaks MCP natively
 
@@ -546,7 +608,7 @@ the convention above the marker only, so it never fails on history.
   `m3 setup` detects OpenClaw and registers a roots-pinned stdio server with
   `openclaw mcp set`, exposing the same 10-tool startup surface every other MCP
   client gets. Requires OpenClaw `2026.3.22` or newer.
-
+  **Affected:** OpenClaw users · **Action:** re-run `m3 setup` to register the stdio server · **Data status:** none.
 ### Changed
 
 - OpenClaw no longer needs the OpenAI-compatible proxy on `localhost:9000` or an
@@ -554,28 +616,34 @@ the convention above the marker only, so it never fails on history.
   completions are unaffected and m3 itself remains fully usable through the `m3`
   CLI — the same store, every function available — until the server is
   restarted or reconnected.
+  **Affected:** OpenClaw users running the proxy · **Action:** none; the proxy is no longer required · **Data status:** none.
 - Setup refuses to wire OpenClaw builds older than `2026.3.22`, which have no
   MCP client, and prints the upgrade command instead of writing a config that
   would be ignored. The OpenClaw prompt is now offered only when OpenClaw is
   detected.
+  **Affected:** OpenClaw builds before `2026.3.22`, which have no MCP client · **Action:** upgrade OpenClaw; setup prints the command · **Data status:** none — it refuses rather than writing a config that would be ignored.
 - The setup summary no longer tells OpenClaw users to run `m3 proxy start`,
   which was not a command.
+  **Affected:** OpenClaw users reading the setup summary · **Action:** none · **Data status:** none — the command did not exist.
 - The Docker sandbox in `examples/sandbox-openclaw/` reaches m3 on the host over
   `streamable-http` and runs `openclaw@2026.9.4` on Node 24. `.env.example`
   documents the bearer token and drops a reference to a configuration path that
   no longer exists.
+  **Affected:** users of the example sandbox · **Action:** none · **Data status:** none — example material.
 - `bin/mcp_proxy.py` is unchanged and still serves Aider and other
   OpenAI-compatible clients.
-
+  **Affected:** Aider and other OpenAI-compatible clients · **Action:** none · **Data status:** none.
 ### Fixed
 
 - The shell helper in `config/zshrc.example` pointed at a sandbox directory that
   does not exist, so every `claw-*` function failed.
+  **Affected:** anyone who copied the example zshrc · **Action:** re-copy the corrected example · **Data status:** none — every `claw-*` function simply failed.
 - Install-log tests asserted a non-macOS path, so they failed on macOS while the
   behaviour they cover worked correctly.
+  **Affected:** developers running the suite on macOS · **Action:** none · **Data status:** none — a false test failure.
 - Elbow-trim tests now skip with a reason, instead of erroring, in environments
   where an optional machine-learning dependency is unavailable.
-
+  **Affected:** developers without the optional ML dependency · **Action:** none · **Data status:** none — an error became an honest skip.
 ## [2026.9.17.0] — 2026-09-17 — a lighter startup surface
 
 ### Changed
@@ -584,12 +652,14 @@ the convention above the marker only, so it never fails on history.
   context window, down from 3%. Every other tool is reached as before, through
   `tools_load_domain` or by name with `m3_call`; `M3_TOOLS_LAZY=0` still
   registers the full catalog.
+  **Affected:** all MCP hosts · **Action:** none; every other tool is still reached via `tools_load_domain` · **Data status:** none — a startup-surface change.
 - `chatlog_status` and `files_health` moved into the `diagnostics` domain, so
   that domain now covers all three stores.
+  **Affected:** callers loading tools by domain · **Action:** none · **Data status:** none.
 - Corrected tool counts and context percentages across the documentation, and
   documented that an MCP disconnect is not a memory outage: the `m3` CLI
   reaches the same database while the client reconnects.
-
+  **Affected:** readers · **Action:** none · **Data status:** none — documentation, including that an MCP disconnect is not a memory outage.
 ## [2026.9.16.0] — 2026-09-17 — documents of every common format are readable
 
 ### Added
@@ -606,22 +676,23 @@ the convention above the marker only, so it never fails on history.
 
   Full-fidelity iWork extraction is available as the `iwork` extra; without it,
   documents saved without a preview are skipped rather than indexed incorrectly.
-
+  **Affected:** installs ingesting documents · **Action:** none · **Data status:** none — new formats become readable; previously-indexed files are unchanged.
 ### Changed
 
 - **Installing m3 registers only the `memory` MCP server.** Previous versions
   also registered `custom_pc_tool`, `grok_intel`, `web_research` and
   `debug_agent`, which are not part of m3. Upgrading removes them from managed
   configuration; MCP servers you added yourself are left untouched.
+  **Affected:** installs from previous versions, which also registered `custom_pc_tool`, `grok_intel`, `web_research` and `debug_agent` · **Action:** re-run `m3 setup`; remove the stale servers from your host config if they remain · **Data status:** none.
 - PDF reading no longer depends on a library that happened to be installed
   alongside something else, so PDFs are read on every install rather than
   silently indexed as plain text on some.
-
+  **Affected:** installs without the incidental PDF library · **Action:** upgrade, then re-ingest any PDF indexed before it · **Data status:** PDFs were **silently indexed as plain text**, so their extracted content was wrong rather than absent; re-ingest to correct it.
 ### Fixed
 
 - Updating Gemini configuration no longer discards MCP servers you added
   yourself. It previously replaced the whole server list on every setup run.
-
+  **Affected:** Gemini users with their own MCP servers configured · **Action:** re-add any server a previous setup run removed · **Data status:** **host config loss** — the whole server list was replaced on every setup run. No memory data was affected.
 ### Changed — Rust core and embedder
 
 - The Rust core pin moves to 3.9.16 (`v2026.9.16`). **The sovereign embedder now
@@ -643,10 +714,11 @@ the convention above the marker only, so it never fails on history.
   `config.toml` to run two (or more) streams on any system with the memory for
   them. The resolved value is logged at startup, and `queue_depth` on the
   server's `/metrics` shows whether callers are waiting on a stream.
+  **Affected:** all installs; CPU-only systems most · **Action:** none · **Data status:** none. A deliberate trade — one embed stream instead of two on CPU-only systems frees roughly 4 GiB, at the cost of seconds during bulk ingest because concurrent callers queue.
 - The embed server logs its backend, model path, config file and every embed
   parameter at startup, and reports oversized input as HTTP 413 with the token
   and context counts rather than an opaque 500.
-
+  **Affected:** anyone diagnosing the embed server · **Action:** none · **Data status:** none — oversized input is now an HTTP 413 naming token and context counts.
 ### Added
 
 - A Rust core wheel downloaded from a GitHub Release is verified against the
@@ -656,30 +728,30 @@ the convention above the marker only, so it never fails on history.
   `SHA256SUMS` and still install, with a note. pip rejects a truncated wheel
   but does not check member CRCs, so a wheel corrupted in transit previously
   installed cleanly and failed later as an import crash.
-
+  **Affected:** all Rust-core wheel installs from a GitHub Release · **Action:** none · **Data status:** none — it prevents installing a truncated or altered wheel.
 - Rust core installs and upgrades append the version transition, the channel
   used, and any verification failure with its expected and actual values to
   `~/.m3/logs/m3_rust_core_install.log` (`~/Library/Logs` on macOS). Writing it
   never fails an install.
-
+  **Affected:** anyone auditing a native-core install · **Action:** none · **Data status:** none — adds a log at `~/.m3/logs/`.
 ### Fixed
 
 - The embedder's GGUF discovery probes m3's own models root before LM Studio's.
   The LM Studio path was hardcoded, so removing or pruning that install left the
   embed server unable to load its model on the next restart. The LM Studio
   location is retained as a fallback.
-
+  **Affected:** installs that had an LM Studio model path · **Action:** none · **Data status:** none — removing or pruning LM Studio previously left the embed server unable to start, deferring vectors rather than losing writes.
 - `resolve_db_path()` rejects a DSN instead of turning it into a path. A DSN in
   `M3_DATABASE` was passed through `abspath()` and became a path rooted at the
   working directory: on Windows that raised WinError 123, and on POSIX the
   mangled name is legal, so SQLite created an empty database and every read
   returned nothing while the configured store went untouched. It now raises,
   naming the source and the backend setting and echoing only the scheme.
-
+  **Affected:** installs with a DSN in `M3_DATABASE` while on the SQLite path · **Action:** upgrade, which now raises instead of inventing a path; look for a stray empty `.db` under the working directory and migrate any rows written while it was in use · **Data status:** **the configured store went untouched** — but the mangled name was a legal POSIX path, so SQLite created an **empty database**, every read returned nothing, and any write in that state landed in the stray file. On Windows it raised WinError 123 instead.
 - `AgentOS_NotificationWaiter` re-fires every 10 minutes. The task exits cleanly
   each hour by design but had no repetition, so that exit was terminal until the
   next reboot.
-
+  **Affected:** Windows scheduled-task installs · **Action:** none · **Data status:** none — the task's hourly exit was terminal until reboot, so notifications stopped firing.
 - The enrich drain resolves its default databases from the engine root. The
   default was built relative to the repository, a pre-Homecoming location, so the
   result depended on the working directory: a scheduled task matched nothing and
@@ -687,19 +759,19 @@ the convention above the marker only, so it never fails on history.
   leftover stub and report success against an empty queue while the real store
   went untouched. The legacy location remains a fallback for pre-Homecoming
   installs.
-
+  **Affected:** installs relying on the default database location · **Action:** none · **Data status:** none — the default was built relative to the repository, a pre-Homecoming location, so the target depended on the working directory.
 - Migration 025 is skipped on a store with no `memory_items` table. The migration
   creates the observation and reflector queues and then indexes `memory_items`,
   so against a chatlog-only store it committed the queues and then failed the run
   with "no such table: main.memory_items".
-
+  **Affected:** chatlog-only stores running migrations · **Action:** upgrade · **Data status:** no rows lost — the migration committed its queues and then failed the run with "no such table", leaving the migration **partially applied**; it is now skipped where it does not apply.
 - Scheduled-task logs carry an ISO-8601 UTC timestamp on every line. Print output
   was previously unstamped and mixed with timestamped logging records, so a
   traceback could only be attributed to a run by counting lines. UTC rather than
   local: these logs are correlated against the embed server and a warehouse on
   another host, and a local stamp with no offset repeats an hour during the
   daylight-saving fold.
-
+  **Affected:** anyone reading scheduled-task logs · **Action:** none · **Data status:** none.
 - Diagnostic errors across the enrich, crypto/auth and server/backend subsystems
   separate what was observed from what is inferred and name the setting to
   inspect. `cause:` is reserved for a mechanism verified at the throw site; where
@@ -707,11 +779,15 @@ the convention above the marker only, so it never fails on history.
   violations are unchanged — there the observed value is the argument and the
   knob is the parameter name. A ratchet test pins the count of unlabelled
   diagnostic sites so the debt can shrink but not grow.
-
+  **Affected:** anyone reading enrich, crypto/auth or server/backend diagnostics · **Action:** none · **Data status:** none — error wording only.
 - Four advisories in the Rust core's transitive dependencies (`rustls`, `h2`,
   `crossbeam-epoch`, `anyhow`).
 
 ---
+  **Affected:** all installs carrying the Rust core · **Action:** upgrade · **Data status:** none.
+<!-- impact-headers: required for every release section ABOVE this line.
+     Sections below predate the convention (see Repo policy notes).
+     Enforced by tests/test_changelog_impact_headers.py -->
 
 ## [2026.9.14.4] — 2026-09-14 — the message lease is enforced on read and on ack
 
