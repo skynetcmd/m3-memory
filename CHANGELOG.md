@@ -31,6 +31,12 @@ the policy is forward-going only.
   executable under every pip tested (25.1.1 through 26.2.1) and uv.
   `m3 doctor --fix` continues to repair the mode in place for anyone already on
   a `3.9.20` wheel.
+- **PostgreSQL warehouse sync failed against a unix-socket DSN.**
+  `postgresql:///mydb` — the usual shape for a local cluster using peer auth —
+  carries no host and no user, and those were written into `postgres_fdw`'s
+  `CREATE SERVER` options as SQL `NULL`, which PostgreSQL rejects outright
+  (`syntax error at or near "NULL"`). Both options are now omitted when absent.
+  A DSN with an explicit host was unaffected.
 
 ### Changed
 
