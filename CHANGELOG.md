@@ -785,9 +785,6 @@ the convention above the marker only, so it never fails on history.
 
 ---
   **Affected:** all installs carrying the Rust core · **Action:** upgrade · **Data status:** none.
-<!-- impact-headers: required for every release section ABOVE this line.
-     Sections below predate the convention (see Repo policy notes).
-     Enforced by tests/test_changelog_impact_headers.py -->
 
 ## [2026.9.14.4] — 2026-09-14 — the message lease is enforced on read and on ack
 
@@ -797,19 +794,24 @@ the convention above the marker only, so it never fails on history.
   offered to every poller, so two agents could do the same work. The unread path
   now selects PENDING through `message_state_sql`; the audit view
   (`unread_only=False`) still shows claimed work.
+  **Affected:** multi-agent installs using notifications · **Action:** upgrade · **Data status:** no rows lost, but **duplicate work was possible** — an in-flight message was offered to every poller, so two agents could do the same job.
 - `notifications_ack` and `notifications_ack_all` no longer complete a row held
   under another agent's lease. Both skip claimed rows and report what they left
   behind; ack by id distinguishes a claimed row from a missing one.
+  **Affected:** multi-agent installs using notifications · **Action:** upgrade · **Data status:** a message could be **marked complete by an agent that did not hold its lease**, so work could be recorded done without being done. Both paths now skip claimed rows and report what they left behind.
 - `read_at` is written by the database clock in both ack paths, matching
   `complete_message`.
+  **Affected:** multi-agent installs · **Action:** none · **Data status:** none — a clock-source correction.
 - `memory.backends.dialect` is pinned to the accessor function. A package
   observed part-way through initialisation bound the attribute to the submodule,
   and every `dialect()` call site then raised `'module' object is not callable`.
+  **Affected:** any install where the package was observed part-way through initialisation · **Action:** upgrade · **Data status:** none — the mis-bound attribute made call sites fail rather than read wrongly.
 - The wiki compile ledger propagates `TypeError`, `AttributeError`,
   `ImportError` and `NameError` instead of logging them as non-fatal.
   Environmental failures still degrade quietly.
+  **Affected:** installs compiling the wiki · **Action:** upgrade; re-run any compile you believe reported success · **Data status:** real failures were previously **logged as non-fatal**, so a compile could report success having skipped work. Environmental failures still degrade quietly by design.
 - The `agent_id` refusal error names `--agent_id`, the flag `m3 admin` accepts.
-
+  **Affected:** `m3 admin` callers · **Action:** none · **Data status:** none — error wording only.
 ### Changed
 
 - `docs/ROADMAP_DISPATCHER.md` records the dispatch design: constraints, store
@@ -817,7 +819,7 @@ the convention above the marker only, so it never fails on history.
   mapping across backends.
 
 ---
-
+  **Affected:** readers · **Action:** none · **Data status:** none — documentation.
 ## [2026.9.14.3] — 2026-09-14 — a healthy scheduled task no longer reads as broken
 
 ### Fixed
@@ -825,45 +827,57 @@ the convention above the marker only, so it never fails on history.
   schedule probe read the first argument token as the script path, so a task
   invoked as `-u script.py` was reported as `script '-u' (missing)` while running
   correctly. Interpreter flags are now skipped; `-c`/`-m` consume their value.
-
+  **Affected:** Windows scheduled tasks invoked with an interpreter flag before the script (e.g. `-u script.py`) · **Action:** none · **Data status:** none — a false alarm in `doctor`.
 ### Added
 - Tests for the Windows dual `:8082` embed-server registration guard, which keeps
   `AgentOS_EmbedServer` from being registered beside the Rust SCM service.
 
 ---
-
+  **Affected:** developers running the suite · **Action:** none · **Data status:** none — test coverage.
 ## [2026.9.14.2] - 2026-09-14
 
 ### Added
 - Atomic claim seam for sister-agent work-stealing: `Dialect.claim_message`
   renders `FOR UPDATE SKIP LOCKED` on Postgres and a `BEGIN IMMEDIATE` claim
   token on SQLite, with claim-then-release as a documented contract.
+  **Affected:** multi-agent work-stealing deployments · **Action:** none · **Data status:** none — a new seam; `FOR UPDATE SKIP LOCKED` on PostgreSQL, a `BEGIN IMMEDIATE` claim token on SQLite.
 - Renewable leases with per-attempt fencing. `claim_message` returns
   `(id, lease_token)`; complete, fail and renew each require that token.
   `sweep_expired_leases` returns lapsed claims to the queue and dead-letters a
   message past `max_attempts`.
+  **Affected:** multi-agent message handling · **Action:** none · **Data status:** none — complete, fail and renew now each require the lease token.
 - Message state derived from existing columns — `message_state_sql` /
   `message_state_of` own the PENDING/CLAIMED/COMPLETED/FAILED predicate.
+  **Affected:** multi-agent message handling · **Action:** none · **Data status:** none — one owner for the PENDING/CLAIMED/COMPLETED/FAILED predicate.
 - Conversation threading columns (`conversation_id`, `reply_to_id`).
+  **Affected:** all installs · **Action:** upgrade, which migrates · **Data status:** none — two columns added.
 - `Dialect.now_plus_seconds`.
+  **Affected:** backend dialect callers · **Action:** none · **Data status:** none.
 - `--json-file` for tool arguments, for payloads a shell will not carry.
+  **Affected:** CLI callers with payloads a shell will not carry · **Action:** none · **Data status:** none.
 - Implicit agent heartbeat: polling notifications records the poller's
   `last_seen`, so no separate heartbeat loop is needed.
-
+  **Affected:** multi-agent installs · **Action:** none · **Data status:** none — polling now records the poller's `last_seen`, so no separate heartbeat loop is needed.
 ### Fixed
 - The handoff inbox obeys the instance-addressing rule; a qualified agent id
   no longer misses its own type's handoffs.
+  **Affected:** installs using instance-qualified agent ids · **Action:** upgrade, then re-poll · **Data status:** no rows lost, but **handoffs could be missed** — a qualified agent id did not see its own type's handoffs, so they sat undelivered.
 - The handoff ack is scoped to the caller's own mail.
+  **Affected:** multi-agent installs · **Action:** upgrade · **Data status:** an ack could affect **another agent's mail**.
 - A failed handoff dispatch is reported to the caller instead of only logged.
+  **Affected:** multi-agent installs · **Action:** upgrade · **Data status:** a dispatch could fail **silently**, so a handoff the caller believed sent was never delivered.
 - Claim and heartbeat timestamps come from the database clock.
+  **Affected:** multi-agent installs · **Action:** none · **Data status:** none — a clock-source correction.
 - `received_at` is surfaced in poll output.
+  **Affected:** notification pollers · **Action:** none · **Data status:** none.
 - Tool-count drift fails the build instead of printing a warning.
+  **Affected:** the project's own CI · **Action:** none · **Data status:** none.
 - Scheduler and hardware subprocess calls are bounded by a timeout. Reads
   degrade to their existing "unknown" answer, writes report failure, and an
   uninstall leaves a unit file in place when it cannot unload it.
 
 ---
-
+  **Affected:** installs where those subprocesses can hang · **Action:** none · **Data status:** none — reads degrade to their existing "unknown" answer and writes report failure; note an uninstall may leave a unit file in place.
 ## [2026.9.14.1] — 2026-09-14 — Smaller startup surface, structured returns
 
 ### Added
@@ -872,30 +886,39 @@ the convention above the marker only, so it never fails on history.
   `chatlog_search_slim`, `memory_supersede_slim`. Same implementations as the
   full tools, fewer parameters. Default startup set is ~2,216 tokens of schema
   against ~33,686 for the whole catalog.
+  **Affected:** MCP hosts wanting a smaller schema surface · **Action:** none; default output is unchanged · **Data status:** none.
 - **`as_records`** on twelve display-string tools: opt-in JSON records instead
   of the display string. Default output is unchanged. Errors return
   `{error, ...}` without `count`/`items`.
+  **Affected:** callers wanting JSON instead of a display string · **Action:** none; opt-in and default output is unchanged · **Data status:** none.
 - **User-owned startup tool set** via `M3_TOOLS_STARTUP` or
   `.tools_config.json`. Unknown tool names and sets missing `m3_call` /
   `tools_list_domains` / `tools_load_domain` are refused. `m3 doctor` reports
   the resolved set and its source.
+  **Affected:** installs customising the startup tool set · **Action:** none · **Data status:** none — unknown names and sets missing the loader tools are refused.
 - **Unix keep-alive for the shared embed server**: launchd agent, systemd user
   unit, and a watchdog.
+  **Affected:** macOS and Linux installs running the shared embed server · **Action:** none · **Data status:** none.
 - **`bin/measure_tool_usage.py`**: tool-usage counts across direct,
   proxy-delegated and CLI calls.
-
+  **Affected:** operators measuring tool usage · **Action:** none · **Data status:** none — a new read-only script.
 ### Fixed
 
 - `agent_register`, `memory_handoff` and `memory_search_scored` rejected calls
   their schemas described as valid. Added a catalog-wide parity guard.
+  **Affected:** callers of `agent_register`, `memory_handoff` and `memory_search_scored` · **Action:** upgrade · **Data status:** none — the calls were **refused**, not mis-handled, and a catalog-wide parity guard now prevents the class.
 - The installer refuses to register the Python embed-server unit when the Rust
   service is registered, or when that cannot be determined.
+  **Affected:** installs that have both the Rust service and the Python unit · **Action:** none · **Data status:** none — it prevents a dual registration on `:8082`.
 - The embed-server health probe is restricted to `http`/`https`.
+  **Affected:** all installs · **Action:** none · **Data status:** none — scheme hardening on the probe.
 - The security scan orchestrator refuses to upload when scanners are missing;
   added `--check-only` and `--force-partial-upload`.
+  **Affected:** the project's own security pipeline; not user installs · **Action:** none · **Data status:** none — a partial scan can no longer upload as if complete.
 - Notification payloads stored double-encoded are decoded on read.
 
 ---
+  **Affected:** installs holding double-encoded notification payloads · **Action:** upgrade · **Data status:** no loss — the stored rows are intact and are now decoded on read.
 
 ## [2026.9.13.0] — 2026-09-13 — Python floor raised to 3.12
 
@@ -924,13 +947,13 @@ the convention above the marker only, so it never fails on history.
   security-fix-only maintenance upstream (security support until 2028-10-31,
   no further bug fixes), so a future release will raise the floor again —
   announced at least one minor release in advance.
-
+  **Affected:** ⚠ **breaking** — Python 3.11 installs; `2026.9.12.0` was the last release supporting 3.11 · **Action:** move to Python 3.12+ before upgrading m3 · **Data status:** none — your store is unaffected by the interpreter change.
 - Docs corrected to match the shipped floor: the install guides, contributing
   guide, upgrade guide and testing doc had continued to state "Python 3.11+"
   after the requirement changed.
 
 ---
-
+  **Affected:** readers of the install, contributing, upgrade and testing docs · **Action:** none · **Data status:** none — the docs had continued to say "Python 3.11+" after the floor moved.
 ## [2026.9.13.1] — 2026-09-13 — no more console flashes on Windows
 
 ### Fixed
@@ -973,7 +996,7 @@ the convention above the marker only, so it never fails on history.
   child processes run in the **foreground** with output the user is reading, and
   there `pythonw.exe` genuinely has no stdout. Two different situations; only one
   of them wanted this.
-
+  **Affected:** Windows installs where an agent client spawns m3 processes · **Action:** none · **Data status:** none — cosmetic, but constant.
 ### Verified
 
 Across the supported matrix by execution, not inference:
@@ -1046,7 +1069,7 @@ and each had been reporting green.
   `m3 stop` and `m3 update` help text, `docs/HOW-TO-UPGRADE.md`, `docs/FAQ.md`
   and `docs/TROUBLESHOOTING.md` now all point here instead of at a specific
   package manager.
-
+  **Affected:** all installs · **Action:** none; `m3 upgrade` is now the supported path and `--dry-run` prints the plan · **Data status:** none.
 ### Fixed
 
 - **`m3 setup` crashed on Linux and left the cognitive loop down** (#166).
@@ -1068,7 +1091,7 @@ and each had been reporting green.
   real Debian 13 / systemd 257 host: zero `schtasks` calls, zero Windows names
   leaked, `embed-server` correctly skipped (it self-manages on Linux), and a
   genuinely absent unit reported loudly instead of as "Started".
-
+  **Affected:** Linux installs running `m3 setup` · **Action:** re-run `m3 setup` · **Data status:** no loss — the cognitive loop was down, so enrichment and embedding were deferred and backfill once it runs.
 - **N sessions of one agent shared ONE inbox, and silently stole each other's
   work** (#170). `agent_id` was one flat identity with one row per agent *type*,
   so three sister Claude sessions all addressed `claude-code`:
@@ -1092,7 +1115,7 @@ and each had been reporting green.
   (`claude-code` would parse as type `claude`), and `:` on NTFS creates an
   **alternate data stream** rather than a file — m3 names spill files after
   agents, so such an id would write data that is simply invisible.
-
+  **Affected:** deployments running more than one session of the same agent type · **Action:** upgrade, which introduces instance addressing · **Data status:** no rows lost, but **work was mis-delivered** — `agent_id` was one flat identity with a single row per agent *type*, so sibling sessions took each other's messages.
 - **`pg_sync` sent PostgreSQL syntax to a SQLite cursor** (#171). `_LOCAL_PARAM`
   was a module constant bound **once at import** from `M3_DB_BACKEND`. Sync
   legitimately holds two stores at once — a local SQLite store and the
@@ -1103,40 +1126,40 @@ and each had been reporting green.
   answers "which backend is this driver object?", so adding a backend means
   teaching one function rather than editing every module that holds a
   connection.
-
+  **Affected:** installs running `pg_sync` · **Action:** upgrade · **Data status:** no loss — `_LOCAL_PARAM` was bound once at import, so the statement was rejected and the sync failed rather than writing wrongly.
 - **The notification waiter inferred its backend instead of asking** (#163).
   It read `M3_DB_BACKEND` directly, but the selector resolves through both that
   name and the still-supported `DB_BACKEND` alias — so the two could disagree,
   and the waiter would watch `agent_memory.db-wal`, a file PostgreSQL never
   writes, polling forever with no error. A blind waiter that looks healthy.
-
+  **Affected:** installs running the notification waiter · **Action:** upgrade · **Data status:** no loss, but **notifications could go unseen** — the waiter could resolve a different store than the selector.
 - **The waiter watched a dead agent and missed the live one** (#167). It was
   launched with an agent last seen in May while a live agent went unwatched:
   36 notifications delivered to it, **zero with receipt recorded**, for hours.
   Now filters by last-seen (30-day window, **fails open** — watching a dead
   inbox costs one poll; missing a live one is the failure this feature exists
   to prevent).
-
+  **Affected:** installs running the notification waiter · **Action:** upgrade · **Data status:** **notifications went unreceipted** — 36 were delivered to an agent last seen in May with **zero receipts recorded**, for hours, while a live agent went unwatched. It now filters on last-seen over a 30-day window and **fails open**, because watching a dead inbox costs one poll while missing a live one is the failure the feature exists to prevent.
 - **An empty `agent_id` reported an empty inbox.** The anti-spoofing guard
   blanks an LLM-supplied id — correct — and five implementations then rendered
   that blank as "no mail". An agent that trusts the answer silently drops work
   addressed to it. Now refuses loudly, through a single shared owner rather
   than the same check copied five times.
-
+  **Affected:** agents whose supplied id was blanked by the anti-spoofing guard · **Action:** upgrade · **Data status:** no loss, but **a non-empty inbox was reported empty** — five implementations rendered the blanked id as "no messages", so messages sat unread.
 - **The chatlog lane was missing the `vector_kind` port** (#165), so every
   embedding write routed there raised `OperationalError`. 55 turns sat in spill
   quarantine unnoticed on macOS. A new parity test guards the whole class,
   diffing shared-table columns across both migration lanes.
-
+  **Affected:** chat-log embedding writes · **Action:** upgrade; the spill drains afterwards · **Data status:** no loss — every embedding write routed there raised `OperationalError` and the turns were quarantined in the spill rather than discarded (**55 observed on macOS**). A parity test now diffs shared-table columns across both migration lanes.
 - **A pre-#142 nested venv survived upgrades and silently killed services**
   (#164). It is a `--copies` venv pinned to an exact interpreter patch version,
   so a Homebrew point-release moved out from under it and two launchd services
   died on every launch with `dyld: Library not loaded`, exit signal 6 —
   silently, while status reported HEALTHY.
-
+  **Affected:** macOS installs carrying a pre-#142 nested `--copies` venv pinned to an exact interpreter patch · **Action:** upgrade · **Data status:** no loss — but **two launchd services died on every launch** (`dyld: Library not loaded`, signal 6) after a Homebrew point release moved out from under the venv, **while status reported HEALTHY**. Background work did not run during that window.
 - **Task registration trusted `schtasks`' exit code** without verifying the
   task exists (#161).
-
+  **Affected:** Windows scheduled-task installs · **Action:** upgrade · **Data status:** no loss, but a task could be **absent while reported registered**, so the work it was meant to run never happened.
 ### Changed
 
 - **The PostgreSQL CI lane now actually runs PostgreSQL** (#160). It set the
@@ -1155,9 +1178,9 @@ and each had been reporting green.
   not) and runs the full suite: **4,200 collected, a 41× increase.** It stays
   advisory for now — it surfaced 16 real failures on its first honest run, and
   making it blocking in the same change invites disabling it on the first flake.
-
+  **Affected:** the project's own CI; not user installs · **Action:** none · **Data status:** none — a lane titled "PostgreSQL" had been resolving the SQLite seam, so one of the two shipped backends had no real coverage.
 - **CI runs on `main` pushes, not only pull requests** (#147).
-
+  **Affected:** the project's own CI · **Action:** none · **Data status:** none.
 ### Security
 
 - **Bandit reported "No issues identified" over code it never read.** A single
@@ -1165,20 +1188,20 @@ and each had been reporting green.
   hides the "Files skipped" line entirely. CI gated on that exit code. The step
   now parses the JSON report and fails on any scan error: an unscanned file is
   not a clean file.
-
+  **Affected:** the project's own security scanning; not user installs · **Action:** none · **Data status:** none — but findings may have been missed while a single unparseable file was skipped silently with exit code 0.
 - **Example manifests: 20 OSV findings → 0.** They declared only open version
   floors, so the scanner resolved and reported vulnerable transitive versions
   that appear nowhere in the repo — a finding nobody could act on, recurring on
   every scan. Security floors added to both manifests, with each pin verified
   installable and the full resolution re-checked.
-
+  **Affected:** the example manifests only · **Action:** none · **Data status:** none — open version floors made the scanner resolve vulnerable transitive versions that ship nowhere.
 - **`CVE-2026-59890` (setuptools) assessed and accepted.** It surfaced only
   after the scanner pipeline stopped auditing a single manifest chosen by
   `find | head -1` (which was an example, never the root manifest — coverage
   went from 8 to 261 packages). The flaw affects `MANIFEST.in` handling when
   **building an sdist on macOS**; m3's releases are built on `ubuntu-latest`, so
   it cannot reach a shipped artifact. Revisit trigger recorded in-file.
-
+  **Affected:** all installs, transitively · **Action:** none · **Data status:** none — assessed and accepted; it surfaced only once the pipeline stopped auditing a single manifest chosen arbitrarily.
 ### Verification
 
 Both backends we ship by contract, not just the convenient one:
@@ -1197,6 +1220,7 @@ indistinguishable from one that is blind.
 
 ---
 
+
 ## [2026.9.12.0] — 2026-09-12 — the waiter, and the console flashes
 
 ### Added
@@ -1206,23 +1230,26 @@ indistinguishable from one that is blind.
   activity instead of polling, with heartbeat-based wedge detection and a
   child process that owns the database framework — so the supervisor itself
   stays stdlib-only and survives a `pipx upgrade`.
-
+  **Affected:** all installs after setup · **Action:** re-run `m3 setup` to register the task · **Data status:** none — it wakes on store activity instead of polling.
 ### Fixed
 
 - **`--help` crashed on a literal `%` in the `--ack` help text.**
+  **Affected:** anyone running `--help` on that command · **Action:** none · **Data status:** none.
 - **Console-window flashes on Windows**: `run_cmd` now passes
   `CREATE_NO_WINDOW` (#154).
-
+  **Affected:** Windows installs · **Action:** none · **Data status:** none — cosmetic.
 ### Changed
 
 - **The tool-catalog drift gate covers every `bin/` and `scripts/` source**
   (#152, #156), so a generated page can no longer silently lag its source.
+  **Affected:** the project's own CI · **Action:** none · **Data status:** none — a generated page can no longer silently lag its source.
 - **Example dependency pins updated** for the mac-agent sample (#155).
+  **Affected:** the mac-agent example only · **Action:** none · **Data status:** none.
 - **Multi-agent notification delivery documented with measured numbers**
   (#157).
 
 ---
-
+  **Affected:** readers · **Action:** none · **Data status:** none — documentation.
 ## [2026.9.11.1] — 2026-09-12 — upgrading, and the handoffs that were silently dropping
 
 One new tool, three silent-failure fixes, and the docs correction that
@@ -1248,7 +1275,7 @@ prompted all of it. No search or memory-behaviour change.
   Standalone rather than a subcommand because the upgrade replaces the very
   package a subcommand would be running from — on Windows that is a
   file-locking failure, not a theoretical one.
-
+  **Affected:** all installs · **Action:** none; use the script rather than a bare `pipx upgrade` · **Data status:** none.
 ### Fixed
 
 - **Agent-to-agent handoffs could not be read.** `notifications_poll` and
@@ -1266,20 +1293,20 @@ prompted all of it. No search or memory-behaviour change.
   belongs to the entry point — trusted, non-model surfaces opt in explicitly and
   everything else keeps the forced-empty behaviour, which is the safe default
   for a caller that has not considered the question.
-
+  **Affected:** multi-agent installs using handoffs · **Action:** upgrade, then re-poll · **Data status:** no loss, but **handoffs sat undelivered** — the rows plainly existed while `notifications_poll` and `notifications_ack_all` reported an empty inbox.
 - **`--json` silently discarded keys that were not real parameters.**
   `task_create --json '{"owner": "..."}'` returned ok and created a task with
   **no owner** — the parameter is `owner_agent` — so a handoff looked complete
   while nothing had been assigned. The flag path has always validated against
   the tool's schema; `--json` passed the object straight through. It now
   rejects unknown keys and names the likely intended one.
-
+  **Affected:** CLI callers using `--json` · **Action:** upgrade; inspect records created that way and re-set the missing fields · **Data status:** **records were created with fields silently dropped** — `task_create --json '{"owner": ...}'` returned ok and created a task with no owner.
 - **A task could complete carrying nothing.** Reaching `completed` with no
   `result_memory_id` meant the work looked finished and its findings were
   nowhere. Now warned in the update result and flagged in `task_get`. A warning,
   not a block: `failed` and `cancelled` legitimately have no result, and so does
   an honest "nothing was needed".
-
+  **Affected:** installs using tasks · **Action:** upgrade; check completed tasks for a missing `result_memory_id` · **Data status:** a task could reach `completed` with **no findings attached**, so the work looked finished and its result was nowhere.
 - **The pre-push leak scan blocked on anonymized test fixtures.** Placeholder
   paths match the shape of a real home directory, so correct work tripped the
   gate — and a gate that fires on correct work teaches people to bypass it,
@@ -1288,20 +1315,20 @@ prompted all of it. No search or memory-behaviour change.
   still blocks. The forbidden-pattern list itself now lives outside the public
   repo, because enumerating what you consider sensitive is its own disclosure;
   a missing list falls back to credential/PII patterns and says so loudly.
-
+  **Affected:** the project's own pre-push gate · **Action:** none · **Data status:** none — correct work tripped the gate.
 ### Changed
 
 - **`INSTALL.md` no longer claims upgrades are a one-liner.** It described
   `pipx upgrade m3-memory` as the whole story, which is wrong for pip installs
   and for plugin-managed ones. Replaced with an **Upgrading M3** section, plus a
   troubleshooting entry for "I ran `pipx upgrade` and nothing changed".
-
+  **Affected:** readers upgrading a pip or plugin install · **Action:** none · **Data status:** none — the one-liner was wrong for those layouts.
 - Lint and type checking pass repo-wide again, which matters more than it
   sounds: both gate the test jobs, so the test matrix had been reporting
   *skipped* rather than passing on every pull request.
 
 ---
-
+  **Affected:** the project's own CI · **Action:** none · **Data status:** none — but both gate the test jobs, so the matrix had been reporting *skipped* rather than passing.
 ## [2026.9.11.0] — 2026-09-11 — the installer builds one environment, not two
 
 One install fix and the CI hygiene needed to prove it. No search, API, or
@@ -1329,7 +1356,7 @@ behaviour change.
 
   Existing installs keep the stray `<site-packages>/m3_memory/.venv` until it is
   deleted by hand — it is inert, and nothing recreates it after this release.
-
+  **Affected:** installs created by that installer · **Action:** upgrade, which builds one environment · **Data status:** none — an environment-layout defect, not a data one.
 ### Changed
 
 - **Lint and type checking now pass on `main`, which unblocked the test matrix.**
@@ -1343,13 +1370,13 @@ behaviour change.
   loop was already correctly guarded — only the type checker's Windows view was
   wrong, so the attribute lookups are ignored rather than the working
   cross-platform code restructured.
-
+  **Affected:** the project's own CI · **Action:** none · **Data status:** none — Ruff (4) and Mypy (16) were failing repo-wide and both gate the test jobs.
 - **Two false-positive Bandit B104 findings annotated.** Both compare
   `resolved_host` to `"0.0.0.0"` to decide what to *print*; neither binds a
   socket (the real bind passes a variable, which B104 does not flag). They failed
   the security job before `pip-audit` could run, so no pull request could pass it.
   Annotated with the idiom already used elsewhere in the same file.
-
+  **Affected:** the project's own scanning · **Action:** none · **Data status:** none — neither site binds a socket.
 ### Added
 
 - **`docs/MCP_DISCONNECTS.md`** — why an agent sometimes reports m3 as
@@ -1359,7 +1386,7 @@ behaviour change.
   that the client owns the stdio pipe so only the client can restore it, and
   records why the HTTP transport remains opt-in rather than the default. Linked
   from the FAQ and TROUBLESHOOTING.
-
+  **Affected:** readers · **Action:** none · **Data status:** none — documents why memory is not at risk when an agent reports m3 unreachable mid-session.
 - **`tests/test_setup_memory_interpreter.py`** — eleven tests pinning interpreter
   resolution under both layouts. They drive the module as a *script*, because the
   defect lived in module-level control flow that importing a helper would never
@@ -1367,7 +1394,7 @@ behaviour change.
   passes on a crash, which fooled an earlier draft of this fix.
 
 ---
-
+  **Affected:** developers · **Action:** none · **Data status:** none — eleven tests pinning interpreter resolution under both layouts.
 ## [2026.9.10.2] — 2026-09-11 — the install papercuts
 
 Three install/config fixes, all found by running a real upgrade rather than a
@@ -1385,7 +1412,7 @@ test. No search, API, or behaviour change.
   (`M3_OS_INSTALL_TIMEOUT_S`) for anything else that blocks. Note the existing
   `isatty()` guard elsewhere is **not sufficient** for this: an inherited
   console reports `isatty() == True` with nobody typing into it.
-
+  **Affected:** non-interactive and CI installs · **Action:** upgrade · **Data status:** none — the install hung on inherited stdin with no timeout.
 - **`m3 update` printed a red multi-line error that looked like a failed
   install.** The pip self-upgrade ran `pip.exe install --upgrade pip`; on
   Windows pip refuses to replace its own running executable and exits non-zero,
@@ -1394,7 +1421,7 @@ test. No search, API, or behaviour change.
   pip` (the form pip's own error message names) and treats the step as
   non-critical: one quiet line instead of a dump. **The default for every other
   command stays fatal.**
-
+  **Affected:** Windows installs running `m3 update` · **Action:** none · **Data status:** none — the install had in fact succeeded.
 - **`m3 doctor --fix` and `--fix-hooks` disagreed about Claude's
   `settings.json`.** `--fix` wrote an `mcpServers` entry there and
   `--fix-hooks` removed it. Claude Code does not read that key (only
@@ -1406,7 +1433,7 @@ test. No search, API, or behaviour change.
 
 
 ---
-
+  **Affected:** Claude Code users running both `--fix` and `--fix-hooks` · **Action:** run `m3 doctor --fix --fix-hooks` to converge · **Data status:** none — host config churn only; Claude Code does not read `mcpServers` from `settings.json`.
 ## [2026.9.10.1] — 2026-09-11 — the search that answered with fewer rows than you asked for
 
 ### ⚠ Behaviour change
@@ -1423,7 +1450,7 @@ test. No search, API, or behaviour change.
   the store genuinely holds fewer rows. The cost is one embed call on a
   highly-specific lexical query that previously skipped it; a query with `k` or
   more exact matches still answers with no embedding at all.
-
+  **Affected:** ⚠ **behaviour change** for every search caller · **Action:** none; expect up to `k` rows where you previously got fewer · **Data status:** none — a retrieval change, not a storage one.
 ### Performance
 
 - **Search no longer slows down as the store grows.** `bm25()` must rank every
@@ -1438,7 +1465,7 @@ test. No search, API, or behaviour change.
   rows as the store grows, which is why it looked like a scaling problem.
   PostgreSQL is unaffected (it ranks with `ts_rank` through its own seam
   implementation).
-
+  **Affected:** all installs, most visibly large stores · **Action:** none · **Data status:** none — `bm25()` was ranked inside a join at all four call sites.
 ### Fixed
 
 - **A search asking for N rows could silently receive fewer.** The bm25 CTE
@@ -1449,14 +1476,14 @@ test. No search, API, or behaviour change.
   depends on. The CTE now over-fetches and the outer query trims after
   filtering. No isolation leak: the filter always applied and rows were only
   ever dropped, never exposed.
-
+  **Affected:** all searches · **Action:** upgrade · **Data status:** no loss, but **results were silently incomplete** — the bm25 CTE ranks over the FTS table, which cannot see `is_deleted` or the tenancy predicates.
 ### Added
 
 - `bin/search_differential.py` — compares this tree's search results against a
   known-good m3 build (pipx install, git rev, or an explicit path) and reports
   rows lost, gained, or reordered. The unit suite can be entirely green while
   search returns different rows; this catches that.
-
+  **Affected:** developers comparing search output against a known-good build · **Action:** none · **Data status:** none — a diagnostic script.
 ### Fixed
 
 - **The dashboard no longer breaks when pointed at the chatlog database.**
@@ -1493,7 +1520,7 @@ test. No search, API, or behaviour change.
   steps and screenshots that pinned it to the DB switcher immediately.
 
 ---
-
+  **Affected:** dashboard users switching the selector to the chat-log store · **Action:** none · **Data status:** none — two panels errored.
 ## [2026.9.10.0] — 2026-09-10 — the sync that reported success while moving nothing
 
 ### ⚠ Breaking
@@ -1510,7 +1537,7 @@ test. No search, API, or behaviour change.
   database it then "synced". A PG deployment that was reporting green hourly
   syncs will now fail loudly and name the fix (`M3_PRIMARY_PG_URL`). **SQLite
   deployments are unaffected.** See [SYNC_PG_TO_PG.md](docs/SYNC_PG_TO_PG.md).
-
+  **Affected:** ⚠ **breaking** — PostgreSQL primaries using the generic bridge (`pg_sync.py`), which opens the local store as SQLite · **Action:** use the FDW fast path; re-sync · **Data status:** **targets may be stale.** The bridge previously replicated **nothing** on a PG primary while reporting success.
 - **`m3 serve` now requires a bearer token and refuses to start without one.**
   The HTTP transport publishes the whole catalog — `memory_delete` and
   `gdpr_forget` included — and Claude's custom connectors reach it *from
@@ -1522,7 +1549,7 @@ test. No search, API, or behaviour change.
   publish it, so a loopback bind is not evidence of a private deployment.
   Existing scripted `m3 serve` invocations will exit 1 until a token is set; the
   error names the exact command.
-
+  **Affected:** ⚠ **breaking, security** — anyone running `m3 serve`, including scripted invocations · **Action:** generate a token and update any script that starts the transport · **Data status:** none, but the HTTP transport previously published the **whole catalog without authentication**, `memory_delete` and `gdpr_forget` included. Treat any store that was exposed as potentially reachable by anyone who could route to it.
 ### Added
 
 - **The FDW fast path now syncs all five tables**, matching the generic bridge.
@@ -1533,33 +1560,37 @@ test. No search, API, or behaviour change.
   `synchronized_secrets` keeps VERSION precedence rather than timestamp
   last-writer-wins; giving it the default guard would have mis-merged the
   highest-value rows in the store.
+  **Affected:** PostgreSQL deployments using the FDW fast path · **Action:** re-sync to replicate the missing tables · **Data status:** **incomplete replication.** The fast path covered three of five tables, so a deployment where it was *working* silently never replicated the other two.
 - **`sync_watermarks` and the sync lock are declared by migrations** (044 /
   pg_053) instead of created at runtime by whichever code path ran first. The
   lock previously squatted in `sync_state`, a ChromaDB table that migration 040
   legitimately dropped — after which every sync silently skipped, for good. Its
   holder is now `host|pid`, so on a shared store one machine cannot judge
   another's live lock stale and steal it.
+  **Affected:** all installs using sync · **Action:** upgrade, which migrates · **Data status:** none — they were previously created at runtime by whichever code path ran first.
 - **Seam primitives** `bulk_upsert`, `bulk_insert_ignore` and `list_tables` on
   `StorageBackend`, plus `backend_for(uri)` and a path-bindable `SqliteBackend`.
   `bulk_upsert` uses `execute_values` on PostgreSQL: psycopg2's `executemany`
   runs the statement once per row, measured at **26.7x slower** for 3,000 rows
   over a local bridge, and worse with network latency.
-
+  **Affected:** backend implementors · **Action:** none · **Data status:** none.
 - `m3 serve --public-host HOST` (repeatable) — allowlists the hostname a tunnel
   presents. Without it the transport rejected tunnelled requests with `421`
   *before* auth ran, which read as a broken tunnel rather than a host-allowlist
   rejection. Pre-existing; surfaced while adding auth.
+  **Affected:** tunnelled `m3 serve` deployments · **Action:** pass the hostname the tunnel presents · **Data status:** none — the transport previously rejected tunnelled requests with `421` before auth ran.
 - Dashboard authentication using the same token: `Authorization: Bearer`, a
   session cookie, or a one-time `?token=` handoff that exchanges the token for an
   `HttpOnly` cookie and drops it from the URL. `dashboard_server.py --show-url`
   prints that link for signing in on another device. **A loopback dashboard with
   no token configured is unchanged**; the gate engages when a token exists or the
   bind is non-loopback.
+  **Affected:** dashboard deployments · **Action:** configure the token · **Data status:** none — security hardening.
 - `StorageBackend.list_tables()` seam primitive — enumerating tables is one of
   the least portable questions in SQL (`sqlite_master` vs `information_schema`
   vs `table_schema = DATABASE()`), and it is now asked through the seam. A future
   backend that omits it fails the protocol conformance test.
-
+  **Affected:** backend implementors · **Action:** none · **Data status:** none.
 ### Fixed
 
 - **`synchronized_secrets` was missing from the PostgreSQL primary schema**
@@ -1569,15 +1600,22 @@ test. No search, API, or behaviour change.
   `None`** — only env vars and the OS keyring worked. Four more tables
   (`activity_logs`, `project_decisions`, `system_focus`, `hardware_specs`) had
   the same gap and are ported in `pg_052`.
+  **Affected:** PostgreSQL primaries using the encrypted-vault tier of secret resolution · **Action:** upgrade, which applies `pg_051` · **Data status:** no loss — the tier queried a table that did not exist, so resolution failed rather than returning wrong secrets.
 - Schema-parity and tool-count gates were **freshness checks, not completeness
   checks** — both iterated hand-maintained allowlists, so anything nobody
   remembered to list was invisible. Both now enumerate the source of truth; each
   found real drift on its first run.
+  **Affected:** the project's own schema-parity and tool-count gates · **Action:** none · **Data status:** none — both iterated hand-maintained allowlists, so anything unlisted was unchecked.
 - Stale `87-tool` counts in `claude_ai_connector.md` / `claude_code_plugin.md`,
   and a stale `96 tools` in `examples/AGENT_RULES.md`, none of which the drift
   gate could see (hyphenated and interposed-qualifier forms were not matched).
+  **Affected:** readers of the connector, plugin and example-rules docs · **Action:** none · **Data status:** none — stale counts the drift gate could not see.
 - `docs/MCP_TOOLS.md` is generated but never said so, leaving no way to tell its
   counts from hand-written prose.
+  **Affected:** readers · **Action:** none · **Data status:** none.
+<!-- impact-headers: required for every release section ABOVE this line.
+     Sections below predate the convention (see Repo policy notes).
+     Enforced by tests/test_changelog_impact_headers.py -->
 
 ## [2026.8.30.1] — 2026-08-30 — the console nothing could suppress
 
