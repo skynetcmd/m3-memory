@@ -21,6 +21,15 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **A rejected `memory_write` now says what tripped the content guard, and
+  where.** The message printed only the regex, so a writer facing a long note
+  had no way to tell which span was at fault. It now names a human-readable
+  reason and the offset and line. The guard itself is unchanged — memory text is
+  rendered in UIs and read by downstream enrichment LLMs, so these payloads are
+  dangerous stored, not merely executed — and the matched text is deliberately
+  **not** echoed back, since for the prompt-injection pattern the match is the
+  payload and error strings are read by agents.
+
 - **The LangChain adapter's shared event loop is now shut down cleanly at exit.**
   `M3Client` runs one process-wide asyncio loop on a daemon thread (correct, and
   unchanged — m3's connection pool and embedder are affinity-bound to it), but

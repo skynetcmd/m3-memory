@@ -43,14 +43,49 @@ _POISON_PATTERNS = [
     re.compile(r"(?:ignore|disregard)\s+(?:all\s+)?(?:previous|prior)\s+instructions", re.IGNORECASE),
 ]
 
+# Human-readable reason per pattern, keyed by pattern string. Kept SEPARATE from
+# _POISON_PATTERNS because that name is re-exported from memory_core for
+# backwards compatibility and must keep its shape (a list of compiled regexes).
+_POISON_LABELS = {
+    r"<script\b": "HTML script tag (stored-XSS risk in any UI that renders this)",
+    r"javascript:": "javascript: URI (stored-XSS risk)",
+    r"__import__|\bexec\s*\(|\beval\s*\(": "Python code-execution token",
+    r"(?:ignore|disregard)\s+(?:all\s+)?(?:previous|prior)\s+instructions":
+        "prompt-injection phrase (downstream enrichment LLMs read this text)",
+}
+
 
 def _check_content_safety(content: str) -> str | None:
-    """Returns error message if content appears malicious, None if safe."""
+    """Returns error message if content appears malicious, None if safe.
+
+    The guard itself is deliberately unchanged: memory text is rendered in UIs
+    and read by downstream enrichment LLMs (see the call site in write.py), so
+    these payloads are dangerous stored, not merely executed.
+
+    What IS improved is diagnosability (§ error/log idiom: an error names the
+    cause AND where to look). The message used to print only the regex, so a
+    writer facing 50k chars could not tell what tripped it. Hit 2026-10-02 by a
+    legitimate engineering note that merely MENTIONED an HTML script tag as an
+    example; the reject was correct, the message was not actionable.
+
+    ⚠ The matched text is deliberately NOT echoed back. For the
+    prompt-injection pattern the match IS the injection phrase, and error
+    strings are read by agents — quoting it would turn this guard's own output
+    into the injection channel. The label plus the offset locate it without
+    repeating it.
+    """
     if not content:
         return None
     for pattern in _POISON_PATTERNS:
-        if pattern.search(content):
-            return f"Error: content rejected — matches safety pattern: {pattern.pattern[:50]}"
+        m = pattern.search(content)
+        if m:
+            label = _POISON_LABELS.get(pattern.pattern, "disallowed pattern")
+            line = content.count("\n", 0, m.start()) + 1
+            return (
+                f"Error: content rejected — {label}; found at offset "
+                f"{m.start()} (line {line}) of {len(content)} chars. "
+                f"Pattern: {pattern.pattern[:50]}"
+            )
 
     # SQLGlot AST SQL Injection Guard
     try:
