@@ -1,5 +1,12 @@
 """The conftest detector must fire on an incoherent namespace, and blame fairly.
 
+Touches NO real `memory.*` module. Two earlier tests here did, and both were
+wrong to: one asserted the live namespace was healthy, which is a global claim
+that depends on every test that ran before it (it failed on the second PG run,
+reporting the real namespace as present-without-`backends`), and the package
+guard it checked is already covered by
+`tests/test_backends_dialect_not_rebound.py`.
+
 Exercised against a SYNTHETIC package, never the real `memory.*`. Churning the
 real modules to test this is the very hazard the detector is about: m3 memory
 `25df967b` records that `memory.*` sys.modules manipulation leaks across tests,
@@ -80,22 +87,3 @@ def test_the_message_names_where_to_look():
     with pytest.raises(RuntimeError) as e:
         _report(entered_coherent=True, package=PKG)
     assert ".claude/rules/test-sandbox.md" in str(e.value)
-
-
-def test_the_real_memory_namespace_is_left_alone_by_this_file():
-    """Guard against this file regressing to churning the live package."""
-    import memory.backends  # noqa: F401
-
-    assert _problem() is None
-    assert callable(sys.modules["memory.backends"].dialect)
-
-
-def test_the_package_guard_blocks_a_plain_setattr_on_the_real_package():
-    """The package's own defence, checked without leaving damage behind."""
-    import memory.backends  # noqa: F401
-
-    mod = sys.modules["memory.backends"]
-    original = mod.dialect
-    mod.dialect = ModuleType("memory.backends.dialect")   # refused + logged
-    assert mod.dialect is original
-    assert callable(mod.dialect)
