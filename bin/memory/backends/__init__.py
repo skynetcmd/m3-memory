@@ -25,6 +25,9 @@ Cycle-break rule (§2): modules in this package must NOT top-level-import
 """
 from __future__ import annotations
 
+import sys as _sys
+from types import ModuleType as _ModuleType
+
 from .base import (
     BackendName,
     Capabilities,
@@ -80,6 +83,52 @@ if not callable(dialect):  # pragma: no cover - guards a reordering mistake
         "the selector import would shadow it and every `dialect()` call site "
         "would raise \"'module' object is not callable\"."
     )
+
+# The import-time check above catches a REORDERING of the lines above it. It
+# cannot catch a LATER rebind: anything that imports the `dialect` SUBMODULE
+# while this package is already loaded makes the import machinery `setattr` the
+# MODULE onto this package, and every `dialect()` call site then raises
+# "'module' object is not callable" somewhere far away, with nothing naming the
+# cause. That shipped twice -- 96 of that TypeError across 89 tests on
+# 2026-09-14, and 141 across 135 tests on the Windows PostgreSQL lane on
+# 2026-10-02 -- and on both occasions the message gave the reader nothing to go
+# on.
+#
+# So refuse the rebind at the source, and say who attempted it. This both
+# prevents the failure and converts a silent far-away TypeError into one line
+# naming the file that did it.
+class _BackendsModule(_ModuleType):
+    """This package, with ``dialect`` protected against submodule shadowing."""
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if (
+            name == "dialect"
+            and isinstance(value, _ModuleType)
+            and callable(self.__dict__.get("dialect"))
+        ):
+            import logging
+            import traceback
+
+            # The frame that triggered the import, not this frame.
+            where = "unknown"
+            for fr in reversed(traceback.extract_stack()[:-1]):
+                if "importlib" not in fr.filename and __file__ != fr.filename:
+                    where = f"{fr.filename}:{fr.lineno}"
+                    break
+            logging.getLogger(__name__).warning(
+                "refused to rebind memory.backends.dialect from the accessor "
+                "FUNCTION to the SUBMODULE; the rebind came from %s. The "
+                "accessor is kept, so dialect() keeps working. Import the "
+                "module as `from memory.backends.dialect import ...` and the "
+                "accessor as `from memory.backends import dialect` -- do not "
+                "bind the submodule onto this package.",
+                where,
+            )
+            return
+        super().__setattr__(name, value)
+
+
+_sys.modules[__name__].__class__ = _BackendsModule
 
 __all__ = [
     "BackendName",
