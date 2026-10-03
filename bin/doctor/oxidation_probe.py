@@ -51,10 +51,26 @@ def run(brief: bool = False) -> int:
     try:
         from memory import config
     except Exception as e:  # noqa: BLE001 — probe must never crash the doctor
+        # Name WHERE it failed, not just that it did. `memory/__init__` imports
+        # a dozen submodules, so the statement that raised is rarely the module
+        # at fault: on 2026-10-02 this printed "could not import memory.config:
+        # AttributeError: 'object' object has no attribute 'CircuitBreaker'",
+        # which is accurate about what was OBSERVED and says nothing about the
+        # submodule whose import-time code actually raised (memory/embed.py).
+        tb = e.__traceback__
+        where = ""
+        while tb is not None:  # walk to the deepest frame
+            f = tb.tb_frame.f_code.co_filename
+            where = f"{f}:{tb.tb_lineno}"
+            tb = tb.tb_next
         if brief:
             _b("oxidation: unknown (memory.config not importable)")
         else:
             print(f"  could not import memory.config: {type(e).__name__}: {e}")
+            if where:
+                print(f"  raised at : {where}")
+                print("  note     : importing `memory` pulls in its submodules, "
+                      "so the file above is the one to look at, not config.py")
         return 0
 
     if getattr(config, "_OXIDATION_DISABLED", False):

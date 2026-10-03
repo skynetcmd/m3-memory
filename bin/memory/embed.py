@@ -127,10 +127,40 @@ class EmbedSemaphoreTimeout(EmbedError):
 # the call sites fall through to the pre-breaker "try every call" behavior.
 # This preserves the Python-only fallback path for ops who disable Rust.
 def _maybe_make_breaker(threshold: int, reset_after_secs: float):
-    """Construct a Rust CircuitBreaker if Rust is available and threshold > 0."""
-    if config.m3_core_rs is None or threshold <= 0:
+    """Construct a Rust CircuitBreaker if Rust is available and threshold > 0.
+
+    Resolves `CircuitBreaker` with `getattr` rather than attribute access, so an
+    object that is not None but is not a real core yields a None breaker instead
+    of raising. These four constructions run at MODULE level, so an exception
+    here makes `memory.embed` un-importable — and because `memory/__init__`
+    imports it, that surfaces far away as "could not import memory.config".
+
+    Seen 2026-10-02: a test stubs `config.m3_core_rs` with `object()` to
+    simulate the disabled state while another pops `memory.embed` from
+    `sys.modules`; the re-import then raised
+    `AttributeError: 'object' object has no attribute 'CircuitBreaker'` and five
+    unrelated probe tests failed. Returning None is the fallback this module
+    already documents — "the breaker is None and the call sites fall through to
+    the pre-breaker behavior".
+    """
+    rs = config.m3_core_rs
+    if rs is None or threshold <= 0:
+        return None  # documented, expected fallback — no breaker, no noise
+    factory = getattr(rs, "CircuitBreaker", None)
+    if factory is None:
+        # Degrade rather than make this module un-importable, but NEVER
+        # silently: a core that is present and lacks CircuitBreaker is a broken
+        # or partial install, and running with no breakers is a real change in
+        # behaviour the operator has to be able to see.
+        logger.warning(
+            "m3_core_rs is loaded (%s) but exposes no CircuitBreaker — embed "
+            "circuit breakers are DISABLED and every call will be retried "
+            "(pre-breaker behaviour). A real wheel provides it, so this is a "
+            "partial or stubbed install; check `m3 doctor` oxidation status.",
+            type(rs).__name__,
+        )
         return None
-    return config.m3_core_rs.CircuitBreaker(
+    return factory(
         threshold=int(threshold),
         reset_after_secs=float(reset_after_secs),
     )
