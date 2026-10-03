@@ -21,6 +21,17 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **A shadowed `dialect` accessor no longer fails far from its cause.** When
+  the `memory.backends` package had its `dialect` accessor replaced by the
+  same-named submodule, every call site raised `'module' object is not
+  callable` with nothing naming the package or the attribute. The package now
+  refuses that rebind and logs where it came from, and the test suite fails the
+  test that leaves the namespace in such a state instead of a later, unrelated
+  one.
+  **Affected:** nothing in a normal install — the condition is reached by code
+  that replaces or reloads `memory.*` modules, which in practice means test
+  runs · **Action:** none · **Data status:** none.
+
 - **The pre-push leakage gate could report a clean scan it had not run.** A
   pattern the platform's `grep` could not compile disabled the whole policy, and
   the swallowed compile error read as "no leakage detected". The scan now

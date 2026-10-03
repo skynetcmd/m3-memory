@@ -487,6 +487,45 @@ def _restore_platform_identity():
             sys.platform = _REAL_SYS_PLATFORM
 
 
+def _assert_memory_namespace_is_coherent() -> None:
+    """Fail the test that leaves `memory.*` in a state later tests cannot use.
+
+    An incoherent namespace is silent here and loud somewhere else: a `memory`
+    without a `backends` attribute surfaces as `AttributeError: module 'memory'
+    has no attribute 'backends'` in an unrelated test, and a `dialect` shadowed
+    by its submodule as `TypeError: 'module' object is not callable` at every
+    call site (141 of those across 135 tests on one lane, 96 across 89 on
+    another). Both point nowhere near the test that caused them.
+
+    So check it where the cause still is. `memory` absent is fine -- that is the
+    purge above doing its job.
+    """
+    mod = sys.modules.get("memory")
+    if mod is None:
+        return
+
+    backends = getattr(mod, "backends", None)
+    if backends is None:
+        raise RuntimeError(
+            "this test left `memory` in sys.modules WITHOUT a `backends` "
+            "attribute. Later tests resolving `memory.backends` by name — a "
+            "dotted-path monkeypatch target, or `import memory.backends` once "
+            "the submodule is already cached — will raise AttributeError far "
+            "from here. Purge the namespace or restore what you replaced; see "
+            ".claude/rules/test-sandbox.md."
+        )
+
+    dialect = getattr(backends, "dialect", None)
+    if not callable(dialect):
+        raise RuntimeError(
+            "this test left `memory.backends.dialect` bound to "
+            f"{type(dialect).__name__}, not the accessor function. Every "
+            "`from memory.backends import dialect; dialect()` call site will "
+            "raise \"'module' object is not callable\". Do not replace or stub "
+            "`sys.modules['memory.backends']`; see .claude/rules/backend-seam.md."
+        )
+
+
 @pytest.fixture(autouse=True)
 def _restore_memory_modules():
     """Heal `sys.modules` pollution of the memory.* namespace after each test.
@@ -550,7 +589,9 @@ def _restore_memory_modules():
         for name in list(sys.modules):
             if name == "memory_core" or name == "memory" or name.startswith("memory."):
                 del sys.modules[name]
+        _assert_memory_namespace_is_coherent()
         return
+    _assert_memory_namespace_is_coherent()
     # No replacement: drop only what the test ADDED, restore the originals.
     for name in set(after) - set(before):
         del sys.modules[name]
