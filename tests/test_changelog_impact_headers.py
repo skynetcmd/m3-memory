@@ -149,11 +149,20 @@ def test_history_below_the_marker_is_not_required_to_comply():
     assert "**Affected:**" not in section
 
 
+CONVENTION_DOC = REPO / ".claude/rules/changelog-impact-headers.md"
+
+
 @pytest.mark.parametrize("field", REQUIRED_FIELDS)
-def test_the_policy_note_documents_each_required_field(field):
-    """The enforced fields and the documented fields must not drift apart."""
-    head = _text().split(MARKER, 1)[0]
-    assert "Impact headers (forward-going" in head, (
-        "the Repo policy notes no longer explain the impact-header convention"
+def test_the_convention_doc_names_each_required_field(field):
+    """The enforced fields and the documented fields must not drift apart.
+
+    The convention is documented for contributors, NOT in the public changelog:
+    a release note about the changelog's own format is noise to a reader
+    deciding whether to upgrade.
+    """
+    assert CONVENTION_DOC.is_file(), f"{CONVENTION_DOC} is missing"
+    text = CONVENTION_DOC.read_text(encoding="utf-8")
+    assert field in text, (
+        f"{field} is enforced by this test but not documented in "
+        f"{CONVENTION_DOC.name}"
     )
-    assert field in head, f"{field} is enforced but not documented in the policy note"

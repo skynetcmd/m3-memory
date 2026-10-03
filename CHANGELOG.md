@@ -15,26 +15,6 @@ stay in private development. Published benchmark **results**
 (README/CHANGELOG/registry descriptions) are intentional public positioning;
 the policy is forward-going only.
 
-**Impact headers (forward-going from 2026-10-02):** every bullet in a release
-section ABOVE the `impact-headers` marker below carries a one-line footer:
-
-```
-  **Affected:** <platforms / configurations that can reach this> ·
-  **Action:** <what an operator must do> · **Data status:** <none | ...>
-```
-
-`Data status` is mandatory and `none` must be stated explicitly — an explicit
-"none" distinguishes *verified no data impact* from *nobody looked*, and for a
-memory system that is the question an operator actually needs answered.
-
-Entries BELOW the marker predate the convention. They were deliberately **not**
-backfilled wholesale: writing a scope or data-status claim for a historical
-entry means asserting something nobody re-verified, and a confident header that
-is wrong is worse than no header. Backfill is done only where it still changes
-a decision — anything with a non-`none` data status, a security item, or a
-breaking change / migration. `tests/test_changelog_impact_headers.py` enforces
-the convention above the marker only, so it never fails on history.
-
 ---
 
 ## [Unreleased]
@@ -1613,9 +1593,7 @@ test. No search, API, or behaviour change.
 - `docs/MCP_TOOLS.md` is generated but never said so, leaving no way to tell its
   counts from hand-written prose.
   **Affected:** readers · **Action:** none · **Data status:** none.
-<!-- impact-headers: required for every release section ABOVE this line.
-     Sections below predate the convention (see Repo policy notes).
-     Enforced by tests/test_changelog_impact_headers.py -->
+<!-- impact-headers: required above this line -->
 
 ## [2026.8.30.1] — 2026-08-30 — the console nothing could suppress
 
