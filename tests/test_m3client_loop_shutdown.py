@@ -38,11 +38,25 @@ def _loop_threads() -> list[threading.Thread]:
 
 
 @pytest.fixture(autouse=True)
-def _restore_shared_loop():
-    """Leave the shared loop running for whatever runs after us."""
+def _leave_no_unclosed_loop():
+    """Leave the shared loop CLOSED, not running.
+
+    Leaving a live loop behind meant the last one was garbage-collected while
+    unclosed, and `BaseEventLoop.__del__` then raised an unraisable exception
+    that pytest attributed to whatever unrelated test happened to be running
+    when GC fired — reported once as a failure in
+    `test_python_floor_compat.py`. This project escalates warnings to errors,
+    so that is a hard failure with a misleading name.
+
+    Shutting down here is safe for everything after us: `_ensure_loop` is
+    idempotent and restarts a closed loop, and `M3Client.__init__` calls it. It
+    does NOT contradict the note in test_langchain_history_retriever.py about
+    not killing the shared loop per test — that is about the adapter tests,
+    which rely on loop reuse for speed; this file owns the shutdown path.
+    """
     yield
     try:
-        M3Client._ensure_loop()
+        M3Client._shutdown_loop()
     except Exception:
         pass
 
