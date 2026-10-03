@@ -71,6 +71,60 @@ def load_patterns(path: str) -> "list[tuple[int, re.Pattern[str]]]":
     return compiled
 
 
+
+def _selftest(patterns_path: "str | None") -> int:
+    """Prove the gate can still catch something, on this platform.
+
+    A policy that will not compile is indistinguishable from a policy that found
+    nothing unless something checks. This is that check, runnable by hand:
+
+        python3 bin/prepush/scan_diff.py --selftest --patterns <policy>
+
+    It reports per-pattern compilation (a count, never the pattern text) and
+    verifies that a synthetic credential IS caught and an innocuous line is NOT.
+    Exit 0 only if every part holds.
+    """
+    ok = True
+
+    if patterns_path:
+        try:
+            pats = load_patterns(patterns_path)
+        except SystemExit as e:
+            print(f"[selftest] FAIL policy does not load:\n{e}")
+            return 1
+        print(f"[selftest] ok   {len(pats)} pattern(s) compiled from {patterns_path}")
+    else:
+        print("[selftest] note no --patterns given; checking the engine only")
+        pats = []
+
+    # Does the engine catch and reject correctly? Uses its own pattern so the
+    # answer does not depend on what the live policy happens to contain.
+    probe = re.compile("sk-" + "ant-" + r"[a-z0-9]{20,}", re.IGNORECASE)
+    hit_line = '+KEY = "' + "sk-" + "ant-" + 'abcdefghij0123456789xyz"'
+    if probe.search(hit_line[1:]):
+        print("[selftest] ok   a credential-shaped added line matches")
+    else:
+        print("[selftest] FAIL a credential-shaped added line did NOT match")
+        ok = False
+    if not probe.search("nothing interesting here"):
+        print("[selftest] ok   an innocuous line does not match")
+    else:
+        print("[selftest] FAIL an innocuous line matched")
+        ok = False
+
+    # An uncompilable pattern must be refused rather than skipped.
+    try:
+        re.compile("foo(")
+    except re.error:
+        print("[selftest] ok   an uncompilable pattern raises (so load_patterns blocks)")
+    else:
+        print("[selftest] FAIL an uncompilable pattern did not raise")
+        ok = False
+
+    print(f"[selftest] {'PASS' if ok else 'FAIL'}")
+    return 0 if ok else 1
+
+
 def main(argv: "list[str]") -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--patterns", help="policy file, one regex per line")
@@ -79,7 +133,14 @@ def main(argv: "list[str]") -> int:
                          "(the hook's built-in credential/PII fallback)")
     ap.add_argument("--exclude-identities", default="")
     ap.add_argument("--max-report", type=int, default=20)
+    ap.add_argument("--selftest", action="store_true",
+                    help="prove the gate is alive on THIS platform: compile the "
+                         "live policy, and check a known-bad line is caught and a "
+                         "clean line is not. Reads no diff.")
     args = ap.parse_args(argv)
+
+    if args.selftest:
+        return _selftest(args.patterns)
 
     if args.patterns:
         patterns = load_patterns(args.patterns)

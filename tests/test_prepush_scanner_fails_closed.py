@@ -130,3 +130,20 @@ def test_an_uncompilable_allow_list_blocks(tmp_path):
     r = _run("+nothing\n", "--patterns", str(pats), "--exclude-identities", "foo(")
     assert r.returncode == 1
     assert "allow-list" in r.stderr
+
+
+def test_selftest_passes_on_a_good_policy(tmp_path):
+    pats = tmp_path / "p.txt"
+    pats.write_text(_PATTERN + "\n")
+    r = _run("", "--selftest", "--patterns", str(pats))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "PASS" in r.stdout
+
+
+def test_selftest_fails_on_a_policy_that_will_not_compile(tmp_path):
+    """The whole point: a gate that cannot run must not report that it ran."""
+    pats = tmp_path / "p.txt"
+    pats.write_text("foo(\n")
+    r = _run("", "--selftest", "--patterns", str(pats))
+    assert r.returncode == 1
+    assert "does not load" in r.stdout or "BLOCKED" in r.stdout + r.stderr
