@@ -21,6 +21,40 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **The pre-push leakage gate could report a clean scan it had not run.** A
+  pattern the platform's `grep` could not compile disabled the whole policy, and
+  the swallowed compile error read as "no leakage detected". The scan now
+  compiles each pattern independently and **blocks the push** whenever the policy
+  cannot be evaluated, and the patterns now mean the same thing on all three
+  supported platforms.
+  **Affected:** contributors pushing with the repo's `.githooks` installed; the
+  published package and its runtime are unaffected · **Action:** reinstall hooks
+  with `python bin/setup_hooks.py` if yours predate this change; a push now fails
+  loudly on an unreadable or malformed pattern file instead of passing ·
+  **Data status:** history was re-scanned with the repaired gate; no credentials
+  or internal data were found.
+
+- **A shipped backend could report itself unregistered after an unrelated
+  module reimport.** Code holding a registry reference captured before the
+  `memory.*` namespace was reimported saw an empty registry and raised `no
+  dialect registered for backend 'sqlite'` (or `'postgres'`) for a backend that
+  is shipped and importable. The lookup now adopts the live registration.
+  **Affected:** PostgreSQL and SQLite lookups after a `memory.*` reimport;
+  reached in test runs and by an embedder that reloads the namespace, not by a
+  steady-state install · **Action:** none · **Data status:** none.
+
+- **A partial native-core install no longer disables embed circuit breakers
+  silently.** The breakers are built when `memory.embed` is imported; a core
+  that is present but missing `CircuitBreaker` made that import fail, which
+  surfaced as an unrelated `memory.config` import error. It now degrades to no
+  breakers **and logs a warning** naming what it found and that retries are
+  unbounded as a result. A core that is simply absent is unchanged and stays
+  quiet. `m3 doctor`'s oxidation probe also now prints the frame that actually
+  raised, instead of blaming `config.py`.
+  **Affected:** installs with a partial or stubbed `m3_core_rs`; a normal
+  install or a normal absence is unaffected · **Action:** none; if the new
+  warning appears, reinstall the native core · **Data status:** none.
+
 - **The test suite no longer crashes the interpreter at exit on Windows.**
   Collecting `tests/test_token_budget.py` imported `transformers` — and through
   it the `sentencepiece` native extension — only to probe whether a tokenizer
