@@ -5,10 +5,10 @@ SAME contract on real PostgreSQL, because a merge primitive that diverges
 between backends is the worst kind of bug: both stores "work", and their rows
 quietly disagree. A mock cannot catch that — it agrees with whatever we wrote.
 
-Also measures the batching claim rather than trusting it. psycopg2's
+Also checks the batching claim rather than trusting it. psycopg2's
 `cursor.executemany` runs the statement once per row; `execute_values` expands
 one multi-row statement. The primitive exists FOR that difference, so the
-difference is asserted.
+statement count is asserted.
 
 Skips cleanly without a reachable cluster. DSN from M3_PRIMARY_PG_URL/M3_PG_URL
 (never PG_URL -- that is the warehouse var).
@@ -165,38 +165,49 @@ def test_batches_beyond_one_page(pg):
         assert cur.fetchone()[0] == n_rows
 
 
-def test_bulk_upsert_is_materially_faster_than_executemany(pg):
-    """The reason this primitive exists, measured rather than asserted.
+def test_bulk_upsert_sends_one_statement_per_page(pg):
+    """The reason this primitive exists: one multi-row statement per page, not
+    one per row. Counted at the driver, not timed.
 
-    psycopg2's executemany issues one round trip per row. Over the local WSL
-    bridge this measured ~27x for 3000 rows; over a real network the gap widens
-    with latency. The threshold here is deliberately loose (>3x) — the point is
-    to catch a regression to per-row behaviour, not to pin a machine-specific
-    number, which would be a flaky test on someone else's hardware.
+    ⚠ A wall-clock ratio (bulk vs executemany > 3x) used to stand here. Its gap
+    is round-trip latency, so it held over TCP (~27x over the WSL bridge) and
+    failed 5/5 over a local Unix socket (~1.5x) on unchanged code. Counting the
+    statements the cursor sends is latency-independent and still fails on a
+    regression to per-row behaviour.
     """
-    import time
+    import math
+
+    import psycopg2.extensions
+
+    from memory.backends import postgres_backend
+
+    sent: list[int] = []
+
+    class _CountingCursor(psycopg2.extensions.cursor):
+        def execute(self, query, vars=None):  # noqa: A002 - psycopg2's name
+            sent.append(1)
+            return super().execute(query, vars)
 
     backend, table = pg
-    rows = [(f"p{i}", f"v{i}", "2026-01-01") for i in range(2000)]
-    sql = (
-        f"INSERT INTO {table} (id, val, updated_at) VALUES (%s, %s, %s) "
-        "ON CONFLICT (id) DO UPDATE SET val = EXCLUDED.val"
+    n_rows = 2000
+    rows = [(f"p{i}", f"v{i}", "2026-01-01") for i in range(n_rows)]
+    with backend.connection() as conn:
+        raw = conn._raw
+        saved = raw.cursor_factory
+        raw.cursor_factory = _CountingCursor
+        try:
+            backend.bulk_upsert(conn, table, _COLS, rows,
+                                conflict_target="(id)", update_columns=["val"])
+        finally:
+            raw.cursor_factory = saved  # a pooled connection outlives the test
+
+    pages = math.ceil(n_rows / postgres_backend._UPSERT_PAGE_SIZE)
+    assert len(sent) == pages, (
+        f"bulk_upsert sent {len(sent)} statements for {n_rows} rows; expected "
+        f"{pages} (page size {postgres_backend._UPSERT_PAGE_SIZE}). The batching "
+        "has regressed; check that execute_values is still in use"
     )
     with backend.connection() as conn:
         cur = conn.cursor()
-        t0 = time.perf_counter()
-        backend.bulk_upsert(conn, table, _COLS, rows,
-                            conflict_target="(id)", update_columns=["val"])
-        bulk = time.perf_counter() - t0
-
-        cur.execute(f"DELETE FROM {table}")
-        t0 = time.perf_counter()
-        cur.executemany(sql, rows)
-        many = time.perf_counter() - t0
-        conn.commit()
-
-    assert bulk > 0
-    assert many / bulk > 3.0, (
-        f"bulk_upsert {bulk:.3f}s vs executemany {many:.3f}s — the batching "
-        "advantage has regressed; check that execute_values is still in use"
-    )
+        cur.execute(f"SELECT COUNT(*) FROM {table}")
+        assert cur.fetchone()[0] == n_rows
