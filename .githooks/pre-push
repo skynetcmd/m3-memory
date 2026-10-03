@@ -325,6 +325,7 @@ else
   _SCAN_SOURCE=(--inline-pattern "$LEAK_PATTERN")
 fi
 _scan_rc=0
+_scanned=0
 for r in "${RANGES[@]}"; do
   # Only addition lines matter -- deletions cannot leak to the remote. The
   # scanner skips `+++` headers itself.
@@ -332,7 +333,17 @@ for r in "${RANGES[@]}"; do
     | python3 "$_SCANNER" "${_SCAN_SOURCE[@]}" \
         --exclude-identities "$PLACEHOLDER_IDENTITIES" \
     || _scan_rc=1
+  _scanned=$((_scanned + 1))
 done
+# Zero ranges means zero scanning, and the loop would leave _scan_rc=0 -- i.e.
+# "no leakage detected" from a gate that looked at nothing. A fallback above
+# keeps RANGES non-empty today; this makes that a checked fact rather than an
+# assumption a later edit can quietly remove.
+if [ "$_scanned" -eq 0 ]; then
+  echo "[pre-push] BLOCKED: no push range was scanned (RANGES was empty)." >&2
+  echo "[pre-push]          Refusing to report a clean scan of nothing." >&2
+  exit 1
+fi
 if [ "$_scan_rc" -ne 0 ]; then
   echo "[pre-push] Investigate before pushing (see CLAUDE.md / AGENT_INSTRUCTIONS.md bench-data rules)." >&2
   exit 1
