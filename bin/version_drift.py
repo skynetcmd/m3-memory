@@ -173,5 +173,12 @@ def _pid_is_alive(pid: int) -> bool:
             # Unix: kill(pid, 0) signals nothing but raises on no-such-process
             os.kill(pid, 0)
             return True
-    except (OSError, subprocess.TimeoutExpired, Exception):
+    except Exception:
+        # NOT `(OSError, subprocess.TimeoutExpired, Exception)`: `subprocess` is
+        # imported inside the Windows branch only, so on Unix evaluating that
+        # tuple raised UnboundLocalError the moment `os.kill` reported a dead
+        # PID. That propagated out of `check_and_record`, whose caller swallows
+        # it at DEBUG -- so the boot record silently stopped updating and the
+        # drift warning named a PID that had been dead for months, on every
+        # boot. `Exception` already covers both of the others.
         return False

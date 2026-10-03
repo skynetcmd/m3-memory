@@ -21,6 +21,16 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **The version-drift warning no longer repeats forever naming a dead process.**
+  The boot record stopped being written on macOS and Linux, so every start
+  warned that an older server might still be running and named a PID from the
+  last successful record — advice that could not become unnecessary, because the
+  record could not advance. The liveness probe no longer raises on a dead PID,
+  so the boot is recorded and the warning clears.
+  **Affected:** macOS and Linux installs; Windows was unaffected ·
+  **Action:** none · **Data status:** `~/.m3-memory/version_state.json` resumes
+  updating on the next start.
+
 - **A shadowed `dialect` accessor no longer fails far from its cause.** When
   the `memory.backends` package had its `dialect` accessor replaced by the
   same-named submodule, every call site raised `'module' object is not
