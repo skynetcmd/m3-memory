@@ -17,26 +17,37 @@ import importlib
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 
 
-def _parent_without_the_attribute(monkeypatch):
-    """`memory` present but missing `backends`; `memory.backends` still cached."""
+@pytest.fixture
+def parent_without_the_attribute():
+    """`memory` present but missing `backends`; `memory.backends` still cached.
+
+    A FIXTURE, not a monkeypatch call: conftest's autouse namespace-coherence
+    check tears down AFTER monkeypatch undoes its changes, so a
+    `monkeypatch.delattr` here would still look like breakage at that point and
+    error this file's own tests. A test-local fixture finalizes first.
+    """
     import memory.backends  # noqa: F401  (ensure both are in sys.modules)
 
     parent = sys.modules["memory"]
-    # raising=False: an earlier test may have ALREADY left the attribute absent
-    # -- that is the state this helper exists to create, so finding it is not an
-    # error. Without this the file failed intermittently on the PG lane, which is
-    # the flakiness this whole area is about.
-    monkeypatch.delattr(parent, "backends", raising=False)
+    saved = getattr(parent, "backends", None)
+    if saved is not None:
+        delattr(parent, "backends")
     assert not hasattr(parent, "backends"), "precondition not established"
-    return parent
+    try:
+        yield parent
+    finally:
+        if saved is not None:
+            parent.backends = saved
+            sys.modules.setdefault("memory", parent)
 
 
-def test_the_attribute_path_really_does_break(monkeypatch):
+def test_the_attribute_path_really_does_break(parent_without_the_attribute):
     """Without this, the test below proves nothing."""
-    _parent_without_the_attribute(monkeypatch)
 
     import memory  # the cached, attribute-less parent
 
@@ -48,16 +59,14 @@ def test_the_attribute_path_really_does_break(monkeypatch):
         raise AssertionError("expected the attribute path to fail")
 
 
-def test_importlib_reaches_the_submodule_anyway(monkeypatch):
-    _parent_without_the_attribute(monkeypatch)
+def test_importlib_reaches_the_submodule_anyway(parent_without_the_attribute):
 
     mod = importlib.import_module("memory.backends")
     assert mod is sys.modules["memory.backends"]
     assert callable(mod.active_backend)
 
 
-def test_the_dialect_accessor_survives_that_state(monkeypatch):
-    _parent_without_the_attribute(monkeypatch)
+def test_the_dialect_accessor_survives_that_state(parent_without_the_attribute):
 
     mod = importlib.import_module("memory.backends")
     assert callable(mod.dialect), type(mod.dialect).__name__

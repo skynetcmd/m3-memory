@@ -18,13 +18,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 
-from conftest import _assert_memory_namespace_is_coherent as _check  # noqa: E402
+from conftest import _memory_namespace_problem as _problem  # noqa: E402
+from conftest import _report_namespace_breakage as _report  # noqa: E402
 
 
 def test_a_healthy_namespace_passes():
     import memory.backends  # noqa: F401
 
-    _check()
+    assert _problem() is None
 
 
 def test_an_absent_memory_is_fine():
@@ -33,7 +34,7 @@ def test_an_absent_memory_is_fine():
 
     saved = sys.modules.pop("memory")
     try:
-        _check()
+        assert _problem() is None
     finally:
         sys.modules["memory"] = saved
 
@@ -46,7 +47,7 @@ def test_a_missing_backends_attribute_is_caught():
     delattr(parent, "backends")
     try:
         with pytest.raises(RuntimeError, match="WITHOUT a `backends` attribute"):
-            _check()
+            _report(True)
     finally:
         parent.backends = saved
 
@@ -57,13 +58,14 @@ def test_the_message_names_where_to_look():
 
     parent = sys.modules["memory"]
     saved = parent.backends
-    delattr(parent, "backends")
     try:
+        delattr(parent, "backends")
         with pytest.raises(RuntimeError) as e:
-            _check()
+            _report(entered_coherent=True)
         assert ".claude/rules/test-sandbox.md" in str(e.value)
     finally:
         parent.backends = saved
+        sys.modules.setdefault("memory", parent)
 
 
 def test_a_shadowed_dialect_is_caught():
@@ -77,12 +79,13 @@ def test_a_shadowed_dialect_is_caught():
 
     mod = sys.modules["memory.backends"]
     saved = mod.dialect
-    mod.__dict__["dialect"] = ModuleType("memory.backends.dialect")
     try:
+        mod.__dict__["dialect"] = ModuleType("memory.backends.dialect")
         with pytest.raises(RuntimeError, match="not the accessor function"):
-            _check()
+            _report(entered_coherent=True)
     finally:
         mod.__dict__["dialect"] = saved
+        sys.modules.setdefault("memory.backends", mod)
 
 
 def test_the_package_guard_blocks_the_plain_setattr_path():
@@ -94,3 +97,23 @@ def test_the_package_guard_blocks_the_plain_setattr_path():
     mod.dialect = ModuleType("memory.backends.dialect")   # refused + logged
     assert mod.dialect is original
     assert callable(mod.dialect)
+
+
+def test_a_test_that_INHERITED_the_breakage_is_not_blamed():
+    """One breakage must not fail every test that follows it.
+
+    The first version blamed whichever test was running, which turned a single
+    cause into 2819 teardown errors on the SQLite lane.
+    """
+    import memory.backends  # noqa: F401
+
+    parent = sys.modules["memory"]
+    saved = parent.backends
+    try:
+        delattr(parent, "backends")
+        assert _problem() is not None
+        _report(entered_coherent=False)      # inherited: must NOT raise
+        assert "memory" not in sys.modules, "it must still repair the namespace"
+    finally:
+        parent.backends = saved
+        sys.modules.setdefault("memory", parent)

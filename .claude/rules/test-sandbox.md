@@ -59,3 +59,34 @@ the behaviour under test.
 Related: a fixture that POPS a `memory.*` submodule on teardown counts as a
 replacement to that safety net and triggers the whole-namespace purge. Restore
 the object you were handed instead.
+
+# conftest's namespace check tears down AFTER monkeypatch
+
+`tests/conftest.py` has an autouse teardown that fails the test which leaves
+`memory.*` incoherent (no `backends` attribute, or `dialect` shadowed by its
+submodule). Conftest autouse fixtures are instantiated first, so they finalize
+LAST — after `monkeypatch` has undone its changes.
+
+So a test that uses `monkeypatch.delattr`/`setattr` to create such a state is
+still holding it when that check runs, and errors on itself. Undo it in a
+test-local fixture (which finalizes first) or an explicit `try/finally`:
+
+```python
+@pytest.fixture
+def parent_without_the_attribute():
+    parent = sys.modules["memory"]
+    saved = parent.backends
+    delattr(parent, "backends")
+    try:
+        yield parent
+    finally:
+        parent.backends = saved
+```
+
+Note also that mutating a cached module object cannot be undone by the restore
+path — conftest puts the same mutated object back.
+
+The check blames only the test that BROKE the namespace, never one that
+inherited it, and purges afterwards so a single breakage cannot cascade. The
+first version blamed whichever test was running and turned one cause into 2819
+teardown errors.

@@ -487,42 +487,63 @@ def _restore_platform_identity():
             sys.platform = _REAL_SYS_PLATFORM
 
 
-def _assert_memory_namespace_is_coherent() -> None:
-    """Fail the test that leaves `memory.*` in a state later tests cannot use.
+def _memory_namespace_problem() -> "str | None":
+    """Describe why `memory.*` is unusable by later tests, or None if it is fine.
 
-    An incoherent namespace is silent here and loud somewhere else: a `memory`
-    without a `backends` attribute surfaces as `AttributeError: module 'memory'
-    has no attribute 'backends'` in an unrelated test, and a `dialect` shadowed
-    by its submodule as `TypeError: 'module' object is not callable` at every
-    call site (141 of those across 135 tests on one lane, 96 across 89 on
-    another). Both point nowhere near the test that caused them.
+    An incoherent namespace is silent at the cause and loud elsewhere: a
+    `memory` without a `backends` attribute surfaces as `AttributeError: module
+    'memory' has no attribute 'backends'` in an unrelated test, and a `dialect`
+    shadowed by its submodule as `TypeError: 'module' object is not callable` at
+    every call site (141 across 135 tests on one lane, 96 across 89 on another).
 
-    So check it where the cause still is. `memory` absent is fine -- that is the
-    purge above doing its job.
+    `memory` absent is fine -- that is the purge doing its job.
     """
     mod = sys.modules.get("memory")
     if mod is None:
-        return
+        return None
 
-    backends = getattr(mod, "backends", None)
-    if backends is None:
-        raise RuntimeError(
-            "this test left `memory` in sys.modules WITHOUT a `backends` "
-            "attribute. Later tests resolving `memory.backends` by name — a "
-            "dotted-path monkeypatch target, or `import memory.backends` once "
-            "the submodule is already cached — will raise AttributeError far "
-            "from here. Purge the namespace or restore what you replaced; see "
+    if getattr(mod, "backends", None) is None:
+        return (
+            "left `memory` in sys.modules WITHOUT a `backends` attribute. Later "
+            "tests resolving `memory.backends` by name -- a dotted-path "
+            "monkeypatch target, or `import memory.backends` once the submodule "
+            "is cached -- raise AttributeError far from here. See "
             ".claude/rules/test-sandbox.md."
         )
 
-    dialect = getattr(backends, "dialect", None)
+    dialect = getattr(sys.modules["memory"].backends, "dialect", None)
     if not callable(dialect):
+        return (
+            f"left `memory.backends.dialect` bound to {type(dialect).__name__}, "
+            "not the accessor function, so every `dialect()` call site raises "
+            "\"'module' object is not callable\". Do not replace or stub "
+            "`sys.modules['memory.backends']`. See "
+            ".claude/rules/backend-seam.md."
+        )
+    return None
+
+
+def _purge_memory_namespace() -> None:
+    for name in list(sys.modules):
+        if name == "memory_core" or name == "memory" or name.startswith("memory."):
+            del sys.modules[name]
+
+
+def _report_namespace_breakage(entered_coherent: bool) -> None:
+    """Purge a broken namespace, and fail the test only if it broke it.
+
+    Repair first, unconditionally: leaving it broken makes every later test fail
+    for a cause that is not theirs. Then attribute -- a test that INHERITED the
+    breakage is not at fault and must not be failed for it.
+    """
+    problem = _memory_namespace_problem()
+    if problem is None:
+        return
+    _purge_memory_namespace()
+    if entered_coherent:
         raise RuntimeError(
-            "this test left `memory.backends.dialect` bound to "
-            f"{type(dialect).__name__}, not the accessor function. Every "
-            "`from memory.backends import dialect; dialect()` call site will "
-            "raise \"'module' object is not callable\". Do not replace or stub "
-            "`sys.modules['memory.backends']`; see .claude/rules/backend-seam.md."
+            "this test " + problem
+            + " The namespace has been purged so later tests are unaffected."
         )
 
 
@@ -552,6 +573,10 @@ def _restore_memory_modules():
         }
 
     before = _snapshot()
+    # Whether the namespace was already unusable when this test STARTED. Without
+    # this, a single breakage is blamed on every test that follows it -- measured
+    # as 2819 teardown errors from one cause.
+    _entered_coherent = _memory_namespace_problem() is None
     yield
     after = {
         name: sys.modules[name] for name in list(sys.modules)
@@ -589,14 +614,14 @@ def _restore_memory_modules():
         for name in list(sys.modules):
             if name == "memory_core" or name == "memory" or name.startswith("memory."):
                 del sys.modules[name]
-        _assert_memory_namespace_is_coherent()
+        _report_namespace_breakage(_entered_coherent)
         return
-    _assert_memory_namespace_is_coherent()
     # No replacement: drop only what the test ADDED, restore the originals.
     for name in set(after) - set(before):
         del sys.modules[name]
     for name, mod in before.items():
         sys.modules[name] = mod
+    _report_namespace_breakage(_entered_coherent)
 
 
 @pytest.fixture(autouse=True)
