@@ -334,12 +334,11 @@ def _backend_diagnosis(item, call) -> "str | None":
 
     This adds the missing context to the report instead of changing behaviour,
     which matters for two reasons:
-      * It CANNOT create a false failure. A pre-emptive assertion would have to
-        call `resolve_backend_name()`, and that MEMOIZES — forcing resolution
-        from a hook would itself cache a backend and break the dual-backend
-        parity tests that deliberately flip `M3_DB_BACKEND` mid-test.
-      * It is read-only: the env and the selector's already-resolved name are
-        inspected without importing or resolving anything.
+      * It CANNOT create a false failure: it only annotates a failure that
+        already happened.
+      * It is read-only: it never imports the selector, and
+        `resolve_backend_name()` is a pure env read (no memo), so asking the
+        already-loaded selector caches nothing.
     """
     import sqlite3 as _sqlite3
 
@@ -351,11 +350,14 @@ def _backend_diagnosis(item, call) -> "str | None":
     exc = call.excinfo.value
     on_sqlite = isinstance(exc, _sqlite3.Error) or type(exc).__module__ == "sqlite3"
 
-    # Never import or resolve — read what is already there.
+    # Never import — ask only a selector that is already loaded.
     env_backend = (_os.environ.get("M3_DB_BACKEND")
                    or _os.environ.get("DB_BACKEND") or "").strip() or "(unset -> default sqlite)"
     _sel = sys.modules.get("memory.backends.selector")
-    resolved = getattr(_sel, "_resolved_name", None) if _sel is not None else None
+    try:
+        resolved = _sel.resolve_backend_name() if _sel is not None else None
+    except Exception as e:  # an invalid M3_DB_BACKEND is itself the answer
+        resolved = f"<error: {e}>"
     dsn = pg_dsn()
     dsn_shown = "present" if dsn else "ABSENT"
 

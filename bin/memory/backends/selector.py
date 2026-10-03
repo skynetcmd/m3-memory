@@ -24,37 +24,28 @@ _VALID: tuple[BackendName, ...] = ("sqlite", "postgres")
 _backends: dict[str, StorageBackend] = {}
 _lock = threading.Lock()
 
-# Memoized backend NAME. The backend KIND (sqlite vs postgres) is fixed for a
-# process — `active_database()` overrides the DB *path/resolver*, never
-# M3_DB_BACKEND — so re-reading the env on every call (getenv_compat, ~0.9µs)
-# was pure waste across 100+ hot-path dispatch sites. Resolve once, then serve
-# from this cache. `_reset_for_tests()` clears it so a test can flip the env.
-_resolved_name: "BackendName | None" = None
+# ⚠ The backend NAME is deliberately NOT memoized. A module-global memo lives
+# per module INSTANCE, and this module can be loaded twice in one process; two
+# memos then disagree and there is no correct winner — the seam served sqlite to
+# code under M3_DB_BACKEND=postgres. Resolution is an env read plus a membership
+# check, so the memo bought nothing measurable. Consequence: an in-process
+# M3_DB_BACKEND change takes effect on the next call (installer relies on this).
 
 
 def resolve_backend_name() -> BackendName:
-    """Resolve the configured backend name (memoized after first call).
+    """Resolve the configured backend name from the environment, on every call.
 
     Precedence mirrors every other m3 flag: ``M3_DB_BACKEND`` env, then the
     legacy ``DB_BACKEND`` alias (via ``getenv_compat``), then ``sqlite``.
     An unrecognized value raises rather than defaulting — a typo like
     ``postgre`` must not silently run SQLite.
-
-    The result is cached process-wide: the backend kind cannot change within a
-    process (unlike the active DB path, which ``active_database()`` can override).
-    Tests that flip ``M3_DB_BACKEND`` must call ``_reset_for_tests()`` first.
     """
-    global _resolved_name
-    cached = _resolved_name
-    if cached is not None:
-        return cached
     raw = (getenv_compat("M3_DB_BACKEND", "DB_BACKEND", "sqlite") or "sqlite").strip().lower()
     if raw not in _VALID:
         raise ValueError(
             f"M3_DB_BACKEND={raw!r} is not recognized; expected one of {_VALID}. "
             f"Unset it to use the default 'sqlite'."
         )
-    _resolved_name = raw  # type: ignore[assignment]
     return raw  # type: ignore[return-value]
 
 
@@ -90,11 +81,10 @@ def dialect() -> "Dialect":
 
     Convenience over ``active_backend().dialect()`` — the form ~96 call sites
     repeat. A per-CALL function, deliberately NOT a module-global bound at import:
-    the backend *kind* is fixed per process, but ``active_database()`` overrides
-    the DB *path* and ``_reset_for_tests()`` flips ``M3_DB_BACKEND`` in tests, so a
-    global captured at import would serve a stale dialect. Every call is cache-hits
-    only (memoized name -> cached backend -> frozen dialect singleton), so it is
-    the same ~1µs the old chained form cost.
+    ``active_database()`` overrides the DB *path* and ``M3_DB_BACKEND`` is re-read
+    on every call, so a global captured at import would serve a stale dialect.
+    Each call is an env read plus cache hits (cached backend -> frozen dialect
+    singleton).
     """
     return active_backend().dialect()
 
@@ -127,8 +117,8 @@ def require_sqlite_backend(tool: str) -> None:
 def backend_for(uri: str) -> StorageBackend:
     """A backend addressing ONE SPECIFIC store, chosen by the shape of `uri`.
 
-    Distinct from `active_backend()`, which is deliberately singular: the backend
-    KIND is fixed per process and its instance is memoized. Some callers legitimately
+    Distinct from `active_backend()`, which is deliberately singular: one backend
+    per configured KIND, its instance memoized. Some callers legitimately
     need a SECOND store at the same time — sync holds a local store and a remote
     warehouse open together — and neither `active_backend()` nor
     `open_readonly(path)` can express that (the latter discards the path on
@@ -182,9 +172,8 @@ def backend_for(uri: str) -> StorageBackend:
 
 
 def _reset_for_tests() -> None:
-    """Clear the backend + resolved-name caches. Test-only — lets a test flip the
-    env (M3_DB_BACKEND) and re-resolve on the next call."""
-    global _resolved_name
+    """Clear the backend cache. Test-only — drops backend instances (and their
+    pools) built under an earlier env. The name needs no reset; it is re-read
+    on every call."""
     with _lock:
         _backends.clear()
-        _resolved_name = None

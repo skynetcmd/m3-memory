@@ -19,10 +19,14 @@ paths:
 - **`requires_pg` gates on REACHABILITY**, not on the seam being PG. A DSN being
   *present* is not the cluster being *up*; treating it as such costs a connect
   timeout per test instead of a skip.
-- **Selector memoization** (`_resolved_name`, `_backends`) is cleared by
-  `_reset_for_tests()`. Anything that resolves a backend at import — module
-  constants, class bodies, class setup — runs before the test sandbox can reach
-  it and will bind the wrong store.
+- **The backend NAME is not memoized** — `resolve_backend_name()` re-reads the
+  env on every call. A module-global memo lives per module instance, and two
+  selector instances with disagreeing memos sent PG-marked tests to SQLite ("the
+  23"); do not reintroduce one. Backend INSTANCES (`_backends`) are still cached
+  and cleared by `_reset_for_tests()`. Anything that resolves a backend at
+  import — module constants, class bodies, class setup — runs before the test
+  sandbox can reach it and will bind the wrong store.
+  `tests/test_selector_instances_agree.py` pins this.
 - **Vary the DSN SHAPE, not just the host.** Socket vs TCP, user vs no user,
   password vs peer are different code paths. `postgresql:///db` carries no host
   and no user; writing either into SQL as `NULL` is a syntax error. Three TCP

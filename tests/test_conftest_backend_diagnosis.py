@@ -66,12 +66,12 @@ def test_a_requires_pg_failure_on_sqlite_is_explained():
         assert label in msg, f"missing {label!r} — the error/log idiom"
 
 
-def test_it_reports_the_resolved_backend_when_one_is_cached(monkeypatch):
-    """The decisive field: what the seam actually resolved to."""
+def test_it_reports_the_resolved_backend(monkeypatch):
+    """The decisive field: what the seam actually resolves to."""
     sel = sys.modules.get("memory.backends.selector")
     if sel is None:
         pytest.skip("selector not imported in this session; nothing to read")
-    monkeypatch.setattr(sel, "_resolved_name", "sqlite", raising=False)
+    monkeypatch.setenv("M3_DB_BACKEND", "sqlite")
     msg = ct._backend_diagnosis(_Item("requires_pg"), _Call(exc=_sqlite_error()))
     assert "'sqlite'" in msg and "NOT postgres" in msg
 
