@@ -168,13 +168,36 @@ class TestCountTokensCascade(unittest.TestCase):
 #   python314!Py_Dealloc x4  ...  Py_RunMain
 #
 # An access violation (0xC0000005) AFTER pytest has written its summary, so the
-# suite reported "0 failed" while the process died. Reproducible 5/5 with
-# `pytest tests/test_token_budget.py -q --collect-only`, and clean 0/5 when the
-# tests actually RUN. The fault is upstream in sentencepiece's teardown; not
-# importing it during collection is what removes our exposure to it.
+# suite reported "0 failed" while the process died. The fault is upstream in
+# sentencepiece's teardown.
 #
-# The real import still happens in setUpClass, where the test genuinely needs it.
+# ⚠ Not importing it during collection was NOT enough: once the bge-m3 tokenizer
+# is in the local HF cache, RUNNING these tests loads sentencepiece too, and
+# `pytest tests/test_token_budget.py` then exits 0xC0000005 10/10 on Windows.
+# So the tokenizer never enters the pytest process: a child computes the token
+# counts and returns them. Measured 2026-10-03 on Windows: the file alone went
+# from 10/10 crashing to 0/10. The bare child exits cleanly even without its
+# os._exit (10/10), so the fault needs the pytest process's larger teardown, not
+# sentencepiece alone; os._exit stays as a cheap precaution, not the fix.
 _HAVE_TOKENIZER = importlib.util.find_spec("transformers") is not None
+
+_TOKENIZER_CHILD = r"""
+import json, os, sys
+texts = json.loads(sys.stdin.read())
+try:
+    from transformers import AutoTokenizer
+    tok = AutoTokenizer.from_pretrained("BAAI/bge-m3")
+except Exception as exc:  # offline / no HF cache / broken install
+    out = {"skip": f"bge-m3 tokenizer unavailable: {exc}"}
+else:
+    out = {
+        "lens": {k: len(tok.encode(v)) for k, v in texts.items()},
+        "special_overhead": len(tok.encode("")) - len(tok.encode("", add_special_tokens=False)),
+    }
+sys.stdout.write(json.dumps(out))
+sys.stdout.flush()
+os._exit(0)  # precaution: skip finalization, where sentencepiece has faulted
+"""
 
 
 @unittest.skipUnless(_HAVE_TOKENIZER, "transformers not installed")
@@ -185,16 +208,26 @@ class TestAgainstRealTokenizer(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # The import is INSIDE the try: find_spec only proves the package is
-        # present, so a broken install must still skip rather than error.
-        try:
-            from transformers import AutoTokenizer
+        import json
+        import subprocess
 
-            cls.tok = AutoTokenizer.from_pretrained("BAAI/bge-m3")
-        except Exception as exc:  # noqa: BLE001 - offline / no HF cache / broken install
-            raise unittest.SkipTest(f"bge-m3 tokenizer unavailable: {exc}")
+        cls.samples = cls._samples()
+        r = subprocess.run(
+            [sys.executable, "-c", _TOKENIZER_CHILD],
+            input=json.dumps(cls.samples), capture_output=True,
+            text=True, encoding="utf-8", timeout=600,
+        )
+        if r.returncode != 0:
+            raise RuntimeError(
+                f"tokenizer child exited {r.returncode}; stderr tail:\n{r.stderr[-2000:]}")
+        out = json.loads(r.stdout)
+        if "skip" in out:
+            raise unittest.SkipTest(out["skip"])
+        cls.lens = out["lens"]
+        cls.special_overhead = out["special_overhead"]
 
-    def _samples(self):
+    @staticmethod
+    def _samples():
         import base64 as b64
         import json
         import random
@@ -219,8 +252,8 @@ class TestAgainstRealTokenizer(unittest.TestCase):
         """THE contract. A single under-estimate here means rows overflow
         n_ctx again."""
         under = []
-        for name, text in self._samples().items():
-            actual = len(self.tok.encode(text))
+        for name, text in self.samples.items():
+            actual = self.lens[name]
             est = T.estimate_tokens(text)
             if est < actual:
                 under.append(f"{name}: est={est} < actual={actual}")
@@ -230,17 +263,14 @@ class TestAgainstRealTokenizer(unittest.TestCase):
         """base64 is ~1.00 tokens/char -- the case that makes the `chars` term
         load-bearing, and the one that exposed the missing BOS/EOS (an estimate
         of 12,000 against 12,002 actual)."""
-        import base64 as b64
-        text = b64.b64encode(b"x" * 9000).decode()
-        actual = len(self.tok.encode(text))
-        self.assertGreaterEqual(T.estimate_tokens(text), actual)
+        text = self.samples["base64"]
+        self.assertEqual(len(text), 12000, "precondition: the 9000-byte base64 sample")
+        self.assertGreaterEqual(T.estimate_tokens(text), self.lens["base64"])
 
     def test_special_token_count_is_still_two(self):
         """SPECIAL_TOKENS is measured, not assumed. If bge-m3's framing changes,
         the bound shifts and this fails rather than silently under-estimating."""
-        overhead = len(self.tok.encode("")) - len(
-            self.tok.encode("", add_special_tokens=False))
-        self.assertEqual(overhead, T.SPECIAL_TOKENS)
+        self.assertEqual(self.special_overhead, T.SPECIAL_TOKENS)
 
     def test_model_assumption_is_documented(self):
         """The `chars` ceiling holds for SentencePiece, NOT for byte-level BPE.
