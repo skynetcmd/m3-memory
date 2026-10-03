@@ -26,3 +26,29 @@ production DSN as a fallback.
 Prefer a capability marker that skips over a test that silently exercises
 nothing — a test reporting a state the machine is not in is worse than an
 honest skip.
+
+# Do not monkeypatch a `memory.*` attribute by dotted string
+
+`monkeypatch.setattr("memory.backends.active_backend", ...)` resolves
+`backends` as a PACKAGE ATTRIBUTE. `memory/__init__.py` imports its submodules
+eagerly but NOT `backends`, and conftest's `_restore_memory_modules` purges the
+whole `memory.*` namespace whenever a test replaced a module in it — so a
+rebuilt `memory` may not carry the attribute and the patch raises
+`AttributeError`. A module-level `import memory.backends` does not fix it: that
+runs at collection time and does not survive the purge.
+
+Import inside the test and patch the module object:
+
+```python
+import memory.backends
+monkeypatch.setattr(memory.backends, "active_backend", lambda: _Backend())
+```
+
+This is also the correct target on its merits — the code under test resolves
+these names from `sys.modules` at call time, so the live module object is what
+it reads. A dotted string adds a resolution step that can fail independently of
+the behaviour under test.
+
+Related: a fixture that POPS a `memory.*` submodule on teardown counts as a
+replacement to that safety net and triggers the whole-namespace purge. Restore
+the object you were handed instead.
