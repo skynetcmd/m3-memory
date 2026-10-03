@@ -44,6 +44,10 @@ def resolve_backend_name() -> BackendName:
     process (unlike the active DB path, which ``active_database()`` can override).
     Tests that flip ``M3_DB_BACKEND`` must call ``_reset_for_tests()`` first.
     """
+    live = _live_instance()
+    if live is not None:
+        return live.resolve_backend_name()
+
     global _resolved_name
     cached = _resolved_name
     if cached is not None:
@@ -181,9 +185,30 @@ def backend_for(uri: str) -> StorageBackend:
     return SqliteBackend(db_path=uri)
 
 
+def _live_instance() -> "object | None":
+    """The selector instance this process actually resolves through.
+
+    A caller can hold an EARLIER instance of this module: the test namespace
+    purge discards it while a fixture keeps its reference. Resolution and the
+    test reset must agree on one memo, or a fixture clears a cache the code
+    under test never reads -- and PG-marked tests then run against SQLite with
+    nothing reporting it.
+    """
+    import sys
+
+    live = sys.modules.get(__name__)
+    if live is None or live.__dict__ is globals():
+        return None
+    return live
+
+
 def _reset_for_tests() -> None:
     """Clear the backend + resolved-name caches. Test-only — lets a test flip the
     env (M3_DB_BACKEND) and re-resolve on the next call."""
+    live = _live_instance()
+    if live is not None:
+        live._reset_for_tests()
+
     global _resolved_name
     with _lock:
         _backends.clear()
