@@ -145,6 +145,22 @@ def _ensure_registered(name: str) -> None:
     else:
         importlib.import_module(module_name)
 
+    if name in _REGISTRY:
+        return
+
+    # Importing ran ``@register_backend`` -- but not necessarily against THIS
+    # registry. The decorator resolves ``register_backend`` through
+    # ``sys.modules[__name__]``, so if this module object was discarded while a
+    # caller still holds it, the import populates a FRESH registry instead. The
+    # reload above shares that blind spot. Adopt the live entry so a held
+    # reference agrees with the process.
+    live = sys.modules.get(__name__)
+    live_registry = getattr(live, "_REGISTRY", None) if live is not None else None
+    if live_registry is not None and live_registry is not _REGISTRY:
+        entry = live_registry.get(name)
+        if entry is not None:
+            _REGISTRY[name] = entry
+
 
 def backend_factory_for(name: "BackendName") -> "Callable[[], StorageBackend]":
     """The registered factory (class) that builds the backend for ``name``.
