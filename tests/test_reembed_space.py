@@ -228,8 +228,15 @@ def test_pooled_backend_uses_the_seam_not_a_file_handle(tmp_path, monkeypatch):
     # import does not survive conftest's `memory.*` purge. The code under test
     # resolves `active_backend` from `sys.modules` at call time, so the live
     # module object is also the correct patch target.
-    import memory.backends
-    monkeypatch.setattr(memory.backends, "active_backend", lambda: _Backend())
+    import importlib
+
+    # `importlib.import_module` returns the module from `sys.modules` directly.
+    # `import memory.backends` would NOT do: it is a no-op when the submodule is
+    # already cached, so it never rebinds the attribute on a rebuilt `memory`,
+    # and the following `memory.backends` access then raises AttributeError.
+    # Same reason a dotted-string monkeypatch target fails here.
+    mb = importlib.import_module("memory.backends")
+    monkeypatch.setattr(mb, "active_backend", lambda: _Backend())
     import sqlite3 as _s
     monkeypatch.setattr(_s, "connect", lambda *a, **k: pytest.fail(
         "pooled backend must not open a sqlite file"))

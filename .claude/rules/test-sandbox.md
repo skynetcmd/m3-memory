@@ -37,12 +37,19 @@ rebuilt `memory` may not carry the attribute and the patch raises
 `AttributeError`. A module-level `import memory.backends` does not fix it: that
 runs at collection time and does not survive the purge.
 
-Import inside the test and patch the module object:
+Reach the module with `importlib.import_module` and patch that object:
 
 ```python
-import memory.backends
-monkeypatch.setattr(memory.backends, "active_backend", lambda: _Backend())
+import importlib
+mb = importlib.import_module("memory.backends")
+monkeypatch.setattr(mb, "active_backend", lambda: _Backend())
 ```
+
+`import memory.backends` is NOT good enough, in or out of a test function: it is
+a no-op when the submodule is already in `sys.modules`, so it never rebinds the
+attribute on a rebuilt parent, and the following `memory.backends` access raises
+the same `AttributeError`. `importlib.import_module` reads `sys.modules`
+directly. Pinned by `tests/test_memory_submodule_access_is_attribute_free.py`.
 
 This is also the correct target on its merits — the code under test resolves
 these names from `sys.modules` at call time, so the live module object is what
