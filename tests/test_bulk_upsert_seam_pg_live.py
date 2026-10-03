@@ -178,7 +178,6 @@ def test_bulk_upsert_sends_one_statement_per_page(pg):
     import math
 
     import psycopg2.extensions
-
     from memory.backends import postgres_backend
 
     sent: list[int] = []
