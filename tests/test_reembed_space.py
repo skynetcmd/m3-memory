@@ -19,14 +19,6 @@ if BIN not in sys.path:
 
 import reembed_space  # noqa: E402
 
-# `memory/__init__.py` imports its submodules eagerly but NOT `backends`, and
-# every `memory.backends` import in the codebase is function-local. So the
-# package grows a `backends` attribute only once one of those functions has
-# run. `monkeypatch.setattr("memory.backends.active_backend", ...)` resolves
-# that attribute by name, so without this import the patch raises
-# AttributeError whenever no earlier test happened to touch the seam.
-import memory.backends  # noqa: E402,F401
-
 
 def _store(tmp_path, rows):
     """(vector_kind, embed_model, dim, count) -> a temp agent_memory.db."""
@@ -227,7 +219,17 @@ def test_pooled_backend_uses_the_seam_not_a_file_handle(tmp_path, monkeypatch):
             return _Dialect()
 
     monkeypatch.setattr(reembed_space, "_is_file_backend", lambda: False)
-    monkeypatch.setattr("memory.backends.active_backend", lambda: _Backend())
+    # Import HERE, not at module level, and patch the module OBJECT rather than
+    # a dotted string. `memory/__init__.py` imports its submodules eagerly but
+    # NOT `backends`, and every `memory.backends` import in the codebase is
+    # function-local -- so the package only grows a `backends` attribute once
+    # one of those functions has run. A string path resolves that attribute by
+    # name and raises AttributeError when it is absent, and a collection-time
+    # import does not survive conftest's `memory.*` purge. The code under test
+    # resolves `active_backend` from `sys.modules` at call time, so the live
+    # module object is also the correct patch target.
+    import memory.backends
+    monkeypatch.setattr(memory.backends, "active_backend", lambda: _Backend())
     import sqlite3 as _s
     monkeypatch.setattr(_s, "connect", lambda *a, **k: pytest.fail(
         "pooled backend must not open a sqlite file"))
