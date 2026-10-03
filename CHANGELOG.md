@@ -21,6 +21,17 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **The test suite no longer crashes the interpreter at exit on Windows.**
+  Collecting `tests/test_token_budget.py` imported `transformers` — and through
+  it the `sentencepiece` native extension — only to probe whether a tokenizer
+  was available. That extension's teardown faults during interpreter
+  finalization, so the suite printed its summary and then the process died with
+  an access violation. The probe now uses `importlib.util.find_spec`, which
+  imports nothing.
+  **Affected:** developers running the suite on Windows; no shipped code path ·
+  **Action:** none · **Data status:** none.
+
+
 - **A rejected `memory_write` now says what tripped the content guard, and
   where.** The message printed only the regex, so a writer facing a long note
   had no way to tell which span was at fault. It now names a human-readable
