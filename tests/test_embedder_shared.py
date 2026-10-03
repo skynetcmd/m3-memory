@@ -10,6 +10,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from m3_memory import embedder_admin as EA  # noqa: E402
@@ -55,6 +57,32 @@ def test_unshared_is_idempotent(monkeypatch, tmp_path):
     monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path))
     # no config present -> clean no-op, rc 0, no raise
     assert EA.cmd_unshared(types.SimpleNamespace()) == 0
+
+
+@pytest.fixture(autouse=True)
+def _leave_no_stale_embed_module():
+    """Do not leave a `memory.embed` built from a temp environment cached.
+
+    The test below imports it fresh while `M3_CONFIG_ROOT` points at a tmp_path
+    and the GGUF env vars are deleted. monkeypatch restores the environment, but
+    the imported MODULE keeps the constants it read at import time.
+
+    RESTORE the object that was cached before this test; do not merely pop it.
+    Popping is safe for module identity (the import machinery rebinds the package
+    attribute along with `sys.modules`), but it discards the module's state: the
+    next importer rebuilds embed.py's constants and memoized breakers from
+    whatever environment is current, at an arbitrary point in an arbitrary later
+    test. It also counts as a REPLACEMENT to conftest's `_restore_memory_modules`,
+    which then purges the whole `memory.*` namespace.
+    """
+    saved = sys.modules.get("memory.embed")
+    yield
+    if saved is None:
+        sys.modules.pop("memory.embed", None)
+        return
+    sys.modules["memory.embed"] = saved
+    import memory
+    memory.embed = saved  # keep the package attribute and sys.modules in agreement
 
 
 def test_shared_config_is_read_by_embed_cascade(monkeypatch, tmp_path):

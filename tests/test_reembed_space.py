@@ -19,6 +19,14 @@ if BIN not in sys.path:
 
 import reembed_space  # noqa: E402
 
+# `memory/__init__.py` imports its submodules eagerly but NOT `backends`, and
+# every `memory.backends` import in the codebase is function-local. So the
+# package grows a `backends` attribute only once one of those functions has
+# run. `monkeypatch.setattr("memory.backends.active_backend", ...)` resolves
+# that attribute by name, so without this import the patch raises
+# AttributeError whenever no earlier test happened to touch the seam.
+import memory.backends  # noqa: E402,F401
+
 
 def _store(tmp_path, rows):
     """(vector_kind, embed_model, dim, count) -> a temp agent_memory.db."""
