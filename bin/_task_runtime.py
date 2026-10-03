@@ -92,19 +92,20 @@ def add_log_file_arg(parser) -> None:
         default=None,
         metavar="PATH",
         help="Write stdout/stderr/logging to this file (scheduled-task mode). "
-        "Defaults to <repo>/logs/<script>.log.",
+        "Defaults to <logs root>/<script>.log (~/.m3/logs).",
     )
 
 
 def _resolve_log_file(log_file) -> pathlib.Path:
-    """Resolution order: explicit arg -> $M3_TASK_LOG_FILE -> repo/logs/<stem>.log."""
+    """Resolution order: explicit arg -> $M3_TASK_LOG_FILE -> <logs root>/<stem>.log."""
     if log_file:
         resolved = pathlib.Path(log_file)
     elif os.environ.get("M3_TASK_LOG_FILE"):
         resolved = pathlib.Path(os.environ["M3_TASK_LOG_FILE"])
     else:
         stem = pathlib.Path(sys.argv[0]).stem or "task"
-        resolved = REPO_ROOT / "logs" / f"{stem}.log"
+        from m3_core.paths import get_m3_logs_root
+        resolved = pathlib.Path(get_m3_logs_root()) / f"{stem}.log"
     resolved.parent.mkdir(parents=True, exist_ok=True)
     return resolved
 

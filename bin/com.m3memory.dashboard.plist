@@ -24,7 +24,7 @@
         <string>--port</string>
         <string>[M3_DASHBOARD_PORT]</string>
         <string>--log-file</string>
-        <string>[M3_MEMORY_ROOT]/logs/dashboard.log</string>
+        <string>[M3_LOGS_ROOT]/dashboard.log</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -39,8 +39,8 @@
         <true/>
     </dict>
     <key>StandardOutPath</key>
-    <string>[M3_MEMORY_ROOT]/logs/dashboard.log</string>
+    <string>[M3_LOGS_ROOT]/dashboard.log</string>
     <key>StandardErrorPath</key>
-    <string>[M3_MEMORY_ROOT]/logs/dashboard.log</string>
+    <string>[M3_LOGS_ROOT]/dashboard.log</string>
 </dict>
 </plist>

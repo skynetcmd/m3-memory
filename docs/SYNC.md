@@ -76,7 +76,7 @@ What it does:
 
 1. TCP-probes `$POSTGRES_SERVER` (3-second timeout).
 2. If reachable, runs `bin/pg_sync.py` for `agent_memory.db`.
-3. Logs to `logs/sync_all.log`.
+3. Logs to `~/.m3/logs/sync_all.log` (`M3_LOGS_ROOT` overrides).
 
 Dry-run (just check connectivity, don't write):
 
@@ -138,7 +138,7 @@ the newer one wins. This means:
 - Is your warehouse running?
 
 **"Another sync is already in progress"** → A previous sync hung. Look in
-`logs/sync_all.log` for orphaned PIDs. The lock file is at
+`~/.m3/logs/sync_all.log` for orphaned PIDs. The lock file is at
 `memory/.pg_sync.lock`; remove it manually if stale.
 
 **"Schema mismatch / missing column"** → You haven't applied the latest

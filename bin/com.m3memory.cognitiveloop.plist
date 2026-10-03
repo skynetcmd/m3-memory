@@ -22,7 +22,7 @@
         <string>--interval</string>
         <string>300</string>
         <string>--log-file</string>
-        <string>[M3_MEMORY_ROOT]/logs/cognitive_loop.log</string>
+        <string>[M3_LOGS_ROOT]/cognitive_loop.log</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -59,8 +59,8 @@
     <key>ThrottleInterval</key>
     <integer>60</integer>
     <key>StandardOutPath</key>
-    <string>[M3_MEMORY_ROOT]/logs/cognitive_loop.log</string>
+    <string>[M3_LOGS_ROOT]/cognitive_loop.log</string>
     <key>StandardErrorPath</key>
-    <string>[M3_MEMORY_ROOT]/logs/cognitive_loop.log</string>
+    <string>[M3_LOGS_ROOT]/cognitive_loop.log</string>
 </dict>
 </plist>

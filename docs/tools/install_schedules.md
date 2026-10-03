@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: 6a51fe859545
-mtime_utc: 2026-09-20T21:20:05.638162+00:00
-generated_utc: 2026-09-20T21:23:26.768148+00:00
+sha1: 8d41f90a8749
+mtime_utc: 2026-10-03T19:01:30.613961+00:00
+generated_utc: 2026-10-03T19:02:39.228754+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 2143)
+- `def main()` (line 2157)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -66,6 +66,7 @@ Uses project virtual environment paths and ensures log directories exist.
 ## Notable external imports
 
 - `m3_core.autonomy (ensure_autonomy_config)`
+- `m3_core.paths (get_m3_logs_root)`
 - `memory.backends (dialect)`
 - `memory.orchestration (_db)`
 - `memory.orchestration (agent_list_impl)`

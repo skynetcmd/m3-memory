@@ -78,6 +78,7 @@ from m3_core.paths import (  # noqa: F401
     deprecated_env_in_use,
     get_m3_config_root,
     get_m3_engine_root,
+    get_m3_logs_root,
     get_m3_root,
     getenv_compat,
     resolve_cdw_pg_dsn,

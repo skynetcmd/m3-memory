@@ -30,8 +30,8 @@
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>[M3_MEMORY_ROOT]/logs/m3_loop_watchdog.log</string>
+    <string>[M3_LOGS_ROOT]/m3_loop_watchdog.log</string>
     <key>StandardErrorPath</key>
-    <string>[M3_MEMORY_ROOT]/logs/m3_loop_watchdog.log</string>
+    <string>[M3_LOGS_ROOT]/m3_loop_watchdog.log</string>
 </dict>
 </plist>

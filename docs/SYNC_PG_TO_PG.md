@@ -198,7 +198,7 @@ These are the real traps (some we hit building it):
 - **There is no fallback on a PostgreSQL primary — it fails instead.** Earlier
   releases fell back to the generic bridge here, which was worse than failing:
   that bridge is SQLite-only on the local side, so it synced nothing and still
-  reported success. Check `logs/sync_all.log` for the `FdwUnavailable` reason; the
+  reported success. Check `~/.m3/logs/sync_all.log` for the `FdwUnavailable` reason; the
   refusal message names it. (A **SQLite** primary uses the generic bridge as its
   normal path and is unaffected.)
 - **Vector search on a PG primary is currently brute-force cosine.** (Unrelated to

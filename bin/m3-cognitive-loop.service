@@ -20,7 +20,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=[M3_PYTHON] [M3_MEMORY_ROOT]/bin/m3_cognitive_loop.py --interval 300 --log-file [M3_MEMORY_ROOT]/logs/cognitive_loop.log
+ExecStart=[M3_PYTHON] [M3_MEMORY_ROOT]/bin/m3_cognitive_loop.py --interval 300 --log-file [M3_LOGS_ROOT]/cognitive_loop.log
 Restart=always
 RestartSec=10
 # File-descriptor headroom (defense-in-depth; the real fix is connection-pool

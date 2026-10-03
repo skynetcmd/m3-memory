@@ -23,9 +23,13 @@ the configuration can live and be secured independently:
 - **`M3_ENGINE_ROOT`** — databases + runtime state. Default `~/.m3/engine`.
   Resolution: `M3_ENGINE_ROOT` env > `M3_MEMORY_ROOT/engine` > `~/.m3/engine`.
   Holds `agent_memory.db`, `agent_chatlog.db`, chatlog state/cursor, spill dir.
+- **`M3_LOGS_ROOT`** — scheduled-task and service logs. Default `~/.m3/logs`.
+  Resolution: `M3_LOGS_ROOT` env > `M3_MEMORY_ROOT/logs` > `~/.m3/logs`
+  (`m3_core.paths.get_m3_logs_root`). Never under the payload — a reinstall
+  wipes it.
 - **`M3_MEMORY_ROOT`** — the repo/payload (code), and a *master override*: if set,
-  config and engine derive from it (`/config`, `/engine`) unless their own env
-  vars are set.
+  config, engine and logs derive from it (`/config`, `/engine`, `/logs`) unless
+  their own env vars are set.
 
 ### Migration
 `bin/homecoming.py` relocates legacy state (repo-relative `memory/*` or the old

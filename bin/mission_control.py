@@ -63,8 +63,10 @@ try:
     DB_PATH = pathlib.Path(_resolve_db(None))
 except ImportError:
     DB_PATH = BASE / "memory" / "agent_memory.db"
-LOG_DIR  = BASE / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+from m3_core.paths import get_m3_logs_root  # noqa: E402
+
+LOG_DIR  = pathlib.Path(get_m3_logs_root())
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(

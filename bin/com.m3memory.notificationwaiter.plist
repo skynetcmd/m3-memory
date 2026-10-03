@@ -68,8 +68,8 @@
     <key>ThrottleInterval</key>
     <integer>60</integer>
     <key>StandardOutPath</key>
-    <string>[M3_MEMORY_ROOT]/logs/m3_notification_waiter.log</string>
+    <string>[M3_LOGS_ROOT]/m3_notification_waiter.log</string>
     <key>StandardErrorPath</key>
-    <string>[M3_MEMORY_ROOT]/logs/m3_notification_waiter.log</string>
+    <string>[M3_LOGS_ROOT]/m3_notification_waiter.log</string>
 </dict>
 </plist>

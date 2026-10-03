@@ -365,6 +365,23 @@ def get_m3_models_root() -> str:
     return os.path.join(os.path.expanduser("~"), ".m3", "models")
 
 
+def get_m3_logs_root() -> str:
+    """Returns the M3 log directory for scheduled tasks and services.
+    Precedence: M3_LOGS_ROOT > M3_MEMORY_ROOT/logs > ~/.m3/logs
+
+    Logs are user state, not payload. Deriving them from the install root put
+    them inside the pipx venv (site-packages/m3_memory/logs), where nobody
+    looks and a reinstall deletes them.
+    """
+    root = os.getenv("M3_LOGS_ROOT")
+    if root:
+        return _abs_root(root)
+    m3_mem_root = os.getenv("M3_MEMORY_ROOT")
+    if m3_mem_root:
+        return posixpath.join(_abs_root(m3_mem_root), "logs")
+    return os.path.join(os.path.expanduser("~"), ".m3", "logs")
+
+
 def resolve_engine_file(filename: str) -> str:
     """Resolve a path under the engine root, honoring the legacy fallback.
 

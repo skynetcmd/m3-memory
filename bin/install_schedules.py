@@ -55,6 +55,17 @@ def _safe_print(msg: str) -> None:
         print(msg.encode(enc, errors="replace").decode(enc, errors="replace"))
 
 
+def _logs_dir() -> str:
+    """Where scheduled tasks and services write their logs: the user-state logs
+    root (m3_core.paths.get_m3_logs_root), never the install payload. Deriving
+    it from m3_memory_root put every log inside the pipx venv."""
+    bin_dir = os.path.dirname(os.path.abspath(__file__))
+    if bin_dir not in sys.path:
+        sys.path.insert(0, bin_dir)
+    from m3_core.paths import get_m3_logs_root
+    return get_m3_logs_root()
+
+
 OK = "[OK]"
 FAIL = "[FAIL]"
 WARN = "[WARN]"
@@ -69,11 +80,13 @@ def install_unix_crontab(m3_memory_root):
         template_content = f.read()
 
     # Create logs directory if it doesn't exist
-    log_dir = os.path.join(m3_memory_root, "logs")
+    log_dir = _logs_dir()
     os.makedirs(log_dir, exist_ok=True)
 
     # Replace placeholder with absolute path
-    cron_content = template_content.replace("[M3_MEMORY_ROOT]", m3_memory_root)
+    cron_content = (template_content
+                    .replace("[M3_LOGS_ROOT]", log_dir)
+                    .replace("[M3_MEMORY_ROOT]", m3_memory_root))
 
     # Get current crontab
     current_cron = ""
@@ -148,12 +161,13 @@ def install_unix_crontab(m3_memory_root):
 
 def _render_template(template_path: str, m3_memory_root: str, python_exe: str,
                      port: "int | None" = None) -> str:
-    """Read a template file and substitute the [M3_MEMORY_ROOT] / [M3_PYTHON]
+    """Read a template file and substitute the [M3_MEMORY_ROOT] / [M3_LOGS_ROOT] / [M3_PYTHON]
     (and optional [M3_DASHBOARD_PORT]) placeholders. Used for the launchd plist
     and systemd unit templates."""
     with open(template_path, "r", encoding="utf-8") as f:
         content = f.read()
     content = (content
+               .replace("[M3_LOGS_ROOT]", _logs_dir())
                .replace("[M3_MEMORY_ROOT]", m3_memory_root)
                .replace("[M3_PYTHON]", python_exe))
     if port is not None:
@@ -173,7 +187,7 @@ def install_unix_dashboard(m3_memory_root, port: int = 8088):
     os_name = _os_name()
     python_exe = _venv_python(m3_memory_root)
     bin_dir = os.path.join(m3_memory_root, "bin")
-    os.makedirs(os.path.join(m3_memory_root, "logs"), exist_ok=True)
+    os.makedirs(_logs_dir(), exist_ok=True)
 
     if os_name == "Darwin":
         template = os.path.join(bin_dir, "com.m3memory.dashboard.plist")
@@ -224,7 +238,7 @@ def install_unix_cognitive_loop(m3_memory_root):
     os_name = _os_name()
     python_exe = _venv_python(m3_memory_root)
     bin_dir = os.path.join(m3_memory_root, "bin")
-    os.makedirs(os.path.join(m3_memory_root, "logs"), exist_ok=True)
+    os.makedirs(_logs_dir(), exist_ok=True)
 
     if os_name == "Darwin":
         template = os.path.join(bin_dir, "com.m3memory.cognitiveloop.plist")
@@ -467,7 +481,7 @@ def install_unix_embed_server(m3_memory_root: str, python_exe: "str | None" = No
             return
         python_exe = python_exe or _venv_python(m3_memory_root)
         bin_dir = os.path.join(m3_memory_root, "bin")
-        os.makedirs(os.path.join(m3_memory_root, "logs"), exist_ok=True)
+        os.makedirs(_logs_dir(), exist_ok=True)
 
         if os_name == "Darwin":
             template = os.path.join(bin_dir, "com.m3memory.embedserver.plist")
@@ -580,7 +594,7 @@ def _install_unix_notification_waiter(m3_memory_root: str, python_exe: str) -> N
     osn = _os_name()
     try:
         bin_dir = os.path.join(m3_memory_root, "bin")
-        os.makedirs(os.path.join(m3_memory_root, "logs"), exist_ok=True)
+        os.makedirs(_logs_dir(), exist_ok=True)
 
         if osn == "Darwin":
             template = os.path.join(bin_dir, "com.m3memory.notificationwaiter.plist")
@@ -810,7 +824,7 @@ def get_schedule_specs(m3_memory_root, dashboard_port: int = 8088):
     the cognitive loop is installed as a launchd/systemd service instead — see
     install_unix_cognitive_loop().
     """
-    log_dir = os.path.join(m3_memory_root, "logs")
+    log_dir = _logs_dir()
     bin_dir = os.path.join(m3_memory_root, "bin")
 
     def _log(name):
@@ -1797,7 +1811,7 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard
     if python_exe == sys.executable and not os.path.exists(os.path.join(m3_memory_root, ".venv")):
         _safe_print(f"{WARN} Using system Python {python_exe} because .venv was not found.")
 
-    log_dir = os.path.join(m3_memory_root, "logs")
+    log_dir = _logs_dir()
     os.makedirs(log_dir, exist_ok=True)
 
     tasks = _filter_tasks(get_schedule_specs(m3_memory_root, dashboard_port), selector)

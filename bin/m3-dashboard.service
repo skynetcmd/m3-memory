@@ -21,7 +21,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=[M3_PYTHON] [M3_MEMORY_ROOT]/bin/dashboard_server.py --foreground --port [M3_DASHBOARD_PORT] --log-file [M3_MEMORY_ROOT]/logs/dashboard.log
+ExecStart=[M3_PYTHON] [M3_MEMORY_ROOT]/bin/dashboard_server.py --foreground --port [M3_DASHBOARD_PORT] --log-file [M3_LOGS_ROOT]/dashboard.log
 Restart=always
 RestartSec=10
 # Exit code 4 = EXIT_ALREADY_RUNNING (another instance already holds the

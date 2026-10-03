@@ -49,8 +49,8 @@
     <key>ThrottleInterval</key>
     <integer>60</integer>
     <key>StandardOutPath</key>
-    <string>[M3_MEMORY_ROOT]/logs/embed_server_inproc.log</string>
+    <string>[M3_LOGS_ROOT]/embed_server_inproc.log</string>
     <key>StandardErrorPath</key>
-    <string>[M3_MEMORY_ROOT]/logs/embed_server_inproc.log</string>
+    <string>[M3_LOGS_ROOT]/embed_server_inproc.log</string>
 </dict>
 </plist>
