@@ -25,7 +25,12 @@ def _parent_without_the_attribute(monkeypatch):
     import memory.backends  # noqa: F401  (ensure both are in sys.modules)
 
     parent = sys.modules["memory"]
-    monkeypatch.delattr(parent, "backends")
+    # raising=False: an earlier test may have ALREADY left the attribute absent
+    # -- that is the state this helper exists to create, so finding it is not an
+    # error. Without this the file failed intermittently on the PG lane, which is
+    # the flakiness this whole area is about.
+    monkeypatch.delattr(parent, "backends", raising=False)
+    assert not hasattr(parent, "backends"), "precondition not established"
     return parent
 
 
