@@ -1,12 +1,10 @@
-"""The conftest detector must fire on an incoherent `memory.*` namespace.
+"""The conftest detector must fire on an incoherent namespace, and blame fairly.
 
-A test that leaves `memory` without a `backends` attribute, or `dialect` bound
-to its submodule, breaks LATER tests with errors that point nowhere near the
-cause. The detector exists so the blame lands on the test that did it.
-
-Breakage here is undone in `finally`, NOT via monkeypatch: the autouse teardown
-that runs the detector fires BEFORE monkeypatch undoes its changes, so a
-monkeypatch-based break would trip the detector on this file's own tests.
+Exercised against a SYNTHETIC package, never the real `memory.*`. Churning the
+real modules to test this is the very hazard the detector is about: m3 memory
+`25df967b` records that `memory.*` sys.modules manipulation leaks across tests,
+and an earlier version of this file did exactly that and crashed the Windows
+interpreter at exit (`0xC0000005`) after a clean summary line.
 """
 from __future__ import annotations
 
@@ -21,75 +19,79 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 from conftest import _memory_namespace_problem as _problem  # noqa: E402
 from conftest import _report_namespace_breakage as _report  # noqa: E402
 
+PKG = "_m3_probe_pkg"
+
+
+def _install(*, with_backends: bool, dialect_callable: bool) -> None:
+    pkg = ModuleType(PKG)
+    if with_backends:
+        backends = ModuleType(f"{PKG}.backends")
+        backends.dialect = (lambda: "dialect") if dialect_callable else ModuleType("d")
+        pkg.backends = backends
+        sys.modules[f"{PKG}.backends"] = backends
+    sys.modules[PKG] = pkg
+
+
+@pytest.fixture(autouse=True)
+def _clean_probe():
+    yield
+    for name in [n for n in list(sys.modules) if n == PKG or n.startswith(PKG + ".")]:
+        del sys.modules[name]
+
 
 def test_a_healthy_namespace_passes():
-    import memory.backends  # noqa: F401
+    _install(with_backends=True, dialect_callable=True)
+    assert _problem(PKG) is None
 
-    assert _problem() is None
 
-
-def test_an_absent_memory_is_fine():
+def test_an_absent_package_is_fine():
     """That is the purge having done its job, not a fault."""
-    import memory.backends  # noqa: F401
-
-    saved = sys.modules.pop("memory")
-    try:
-        assert _problem() is None
-    finally:
-        sys.modules["memory"] = saved
+    assert _problem(PKG) is None
 
 
 def test_a_missing_backends_attribute_is_caught():
-    import memory.backends  # noqa: F401
+    _install(with_backends=False, dialect_callable=True)
+    assert _problem(PKG) is not None
+    with pytest.raises(RuntimeError, match="WITHOUT a `backends` attribute"):
+        _report(entered_coherent=True, package=PKG)
+    assert PKG not in sys.modules, "must purge so the breakage cannot cascade"
 
-    parent = sys.modules["memory"]
-    saved = parent.backends
-    delattr(parent, "backends")
-    try:
-        with pytest.raises(RuntimeError, match="WITHOUT a `backends` attribute"):
-            _report(True)
-    finally:
-        parent.backends = saved
+
+def test_a_shadowed_dialect_is_caught():
+    _install(with_backends=True, dialect_callable=False)
+    with pytest.raises(RuntimeError, match="not the accessor function"):
+        _report(entered_coherent=True, package=PKG)
+
+
+def test_a_test_that_INHERITED_the_breakage_is_not_blamed():
+    """One breakage must not fail every test that follows it.
+
+    The first version blamed whichever test was running, turning a single cause
+    into 2819 teardown errors on the SQLite lane.
+    """
+    _install(with_backends=False, dialect_callable=True)
+    _report(entered_coherent=False, package=PKG)      # inherited: must NOT raise
+    assert PKG not in sys.modules, "it must still repair the namespace"
 
 
 def test_the_message_names_where_to_look():
     """A diagnostic that does not say what to change costs a second round."""
+    _install(with_backends=False, dialect_callable=True)
+    with pytest.raises(RuntimeError) as e:
+        _report(entered_coherent=True, package=PKG)
+    assert ".claude/rules/test-sandbox.md" in str(e.value)
+
+
+def test_the_real_memory_namespace_is_left_alone_by_this_file():
+    """Guard against this file regressing to churning the live package."""
     import memory.backends  # noqa: F401
 
-    parent = sys.modules["memory"]
-    saved = parent.backends
-    try:
-        delattr(parent, "backends")
-        with pytest.raises(RuntimeError) as e:
-            _report(entered_coherent=True)
-        assert ".claude/rules/test-sandbox.md" in str(e.value)
-    finally:
-        parent.backends = saved
-        sys.modules.setdefault("memory", parent)
+    assert _problem() is None
+    assert callable(sys.modules["memory.backends"].dialect)
 
 
-def test_a_shadowed_dialect_is_caught():
-    """Written through `__dict__` on purpose.
-
-    `_BackendsModule.__setattr__` REFUSES this rebind, so a plain `setattr`
-    cannot produce the state -- which is the package guard working. The detector
-    is the second line of defence, for a shadow that arrives some other way.
-    """
-    import memory.backends  # noqa: F401
-
-    mod = sys.modules["memory.backends"]
-    saved = mod.dialect
-    try:
-        mod.__dict__["dialect"] = ModuleType("memory.backends.dialect")
-        with pytest.raises(RuntimeError, match="not the accessor function"):
-            _report(entered_coherent=True)
-    finally:
-        mod.__dict__["dialect"] = saved
-        sys.modules.setdefault("memory.backends", mod)
-
-
-def test_the_package_guard_blocks_the_plain_setattr_path():
-    """Belt and braces: the two defences cover different entry points."""
+def test_the_package_guard_blocks_a_plain_setattr_on_the_real_package():
+    """The package's own defence, checked without leaving damage behind."""
     import memory.backends  # noqa: F401
 
     mod = sys.modules["memory.backends"]
@@ -97,23 +99,3 @@ def test_the_package_guard_blocks_the_plain_setattr_path():
     mod.dialect = ModuleType("memory.backends.dialect")   # refused + logged
     assert mod.dialect is original
     assert callable(mod.dialect)
-
-
-def test_a_test_that_INHERITED_the_breakage_is_not_blamed():
-    """One breakage must not fail every test that follows it.
-
-    The first version blamed whichever test was running, which turned a single
-    cause into 2819 teardown errors on the SQLite lane.
-    """
-    import memory.backends  # noqa: F401
-
-    parent = sys.modules["memory"]
-    saved = parent.backends
-    try:
-        delattr(parent, "backends")
-        assert _problem() is not None
-        _report(entered_coherent=False)      # inherited: must NOT raise
-        assert "memory" not in sys.modules, "it must still repair the namespace"
-    finally:
-        parent.backends = saved
-        sys.modules.setdefault("memory", parent)

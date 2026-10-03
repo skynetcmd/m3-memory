@@ -49,7 +49,7 @@ monkeypatch.setattr(mb, "active_backend", lambda: _Backend())
 a no-op when the submodule is already in `sys.modules`, so it never rebinds the
 attribute on a rebuilt parent, and the following `memory.backends` access raises
 the same `AttributeError`. `importlib.import_module` reads `sys.modules`
-directly. Pinned by `tests/test_memory_submodule_access_is_attribute_free.py`.
+directly. Demonstrated: with `memory` cached but missing the attribute and `memory.backends` cached, `import memory.backends` + attribute access raises `AttributeError: module 'memory' has no attribute 'backends'` while `importlib.import_module` returns the module. (A test that reproduced this had to be removed: creating that state churns the live `memory.*` modules, which is the hazard above.)
 
 This is also the correct target on its merits — the code under test resolves
 these names from `sys.modules` at call time, so the live module object is what

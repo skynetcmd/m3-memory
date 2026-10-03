@@ -487,7 +487,7 @@ def _restore_platform_identity():
             sys.platform = _REAL_SYS_PLATFORM
 
 
-def _memory_namespace_problem() -> "str | None":
+def _memory_namespace_problem(package: str = "memory") -> "str | None":
     """Describe why `memory.*` is unusable by later tests, or None if it is fine.
 
     An incoherent namespace is silent at the cause and loud elsewhere: a
@@ -497,8 +497,13 @@ def _memory_namespace_problem() -> "str | None":
     every call site (141 across 135 tests on one lane, 96 across 89 on another).
 
     `memory` absent is fine -- that is the purge doing its job.
+
+    ``package`` is a seam for the tests: churning the real ``memory.*`` modules
+    to exercise this is itself the hazard (m3 memory 25df967b -- it leaks across
+    tests and has crashed the Windows interpreter at exit), so they point this at
+    a synthetic package instead.
     """
-    mod = sys.modules.get("memory")
+    mod = sys.modules.get(package)
     if mod is None:
         return None
 
@@ -511,7 +516,7 @@ def _memory_namespace_problem() -> "str | None":
             ".claude/rules/test-sandbox.md."
         )
 
-    dialect = getattr(sys.modules["memory"].backends, "dialect", None)
+    dialect = getattr(mod.backends, "dialect", None)
     if not callable(dialect):
         return (
             f"left `memory.backends.dialect` bound to {type(dialect).__name__}, "
@@ -523,23 +528,24 @@ def _memory_namespace_problem() -> "str | None":
     return None
 
 
-def _purge_memory_namespace() -> None:
+def _purge_memory_namespace(package: str = "memory") -> None:
+    roots = (package, "memory_core") if package == "memory" else (package,)
     for name in list(sys.modules):
-        if name == "memory_core" or name == "memory" or name.startswith("memory."):
+        if name in roots or name.startswith(package + "."):
             del sys.modules[name]
 
 
-def _report_namespace_breakage(entered_coherent: bool) -> None:
+def _report_namespace_breakage(entered_coherent: bool, package: str = "memory") -> None:
     """Purge a broken namespace, and fail the test only if it broke it.
 
     Repair first, unconditionally: leaving it broken makes every later test fail
     for a cause that is not theirs. Then attribute -- a test that INHERITED the
     breakage is not at fault and must not be failed for it.
     """
-    problem = _memory_namespace_problem()
+    problem = _memory_namespace_problem(package)
     if problem is None:
         return
-    _purge_memory_namespace()
+    _purge_memory_namespace(package)
     if entered_coherent:
         raise RuntimeError(
             "this test " + problem
