@@ -25,6 +25,7 @@ from bge-m3 without this file being revisited.
 """
 from __future__ import annotations
 
+import importlib.util
 import pathlib
 import sys
 import unittest
@@ -157,11 +158,23 @@ class TestCountTokensCascade(unittest.TestCase):
         self.assertFalse(T.fits("x" * (T.TOKEN_BUDGET + 10)))
 
 
-try:  # pragma: no cover - ground truth needs the HF tokenizer
-    from transformers import AutoTokenizer  # noqa: F401
-    _HAVE_TOKENIZER = True
-except Exception:  # noqa: BLE001
-    _HAVE_TOKENIZER = False
+# Availability is probed WITHOUT importing: `find_spec` consults the finders and
+# executes no module code. The previous `from transformers import AutoTokenizer`
+# ran at COLLECTION time, which pulled in the `sentencepiece` native extension,
+# and that extension crashes the interpreter during finalization on Windows:
+#
+#   python314!PyObject_New+0xd                  <- reads type+0x20, already freed
+#   _sentencepiece_cp314_win_amd64+0x294f       <- its deallocator
+#   python314!Py_Dealloc x4  ...  Py_RunMain
+#
+# An access violation (0xC0000005) AFTER pytest has written its summary, so the
+# suite reported "0 failed" while the process died. Reproducible 5/5 with
+# `pytest tests/test_token_budget.py -q --collect-only`, and clean 0/5 when the
+# tests actually RUN. The fault is upstream in sentencepiece's teardown; not
+# importing it during collection is what removes our exposure to it.
+#
+# The real import still happens in setUpClass, where the test genuinely needs it.
+_HAVE_TOKENIZER = importlib.util.find_spec("transformers") is not None
 
 
 @unittest.skipUnless(_HAVE_TOKENIZER, "transformers not installed")
@@ -172,10 +185,13 @@ class TestAgainstRealTokenizer(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from transformers import AutoTokenizer
+        # The import is INSIDE the try: find_spec only proves the package is
+        # present, so a broken install must still skip rather than error.
         try:
+            from transformers import AutoTokenizer
+
             cls.tok = AutoTokenizer.from_pretrained("BAAI/bge-m3")
-        except Exception as exc:  # noqa: BLE001 - offline / no HF cache
+        except Exception as exc:  # noqa: BLE001 - offline / no HF cache / broken install
             raise unittest.SkipTest(f"bge-m3 tokenizer unavailable: {exc}")
 
     def _samples(self):
