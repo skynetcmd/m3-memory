@@ -252,7 +252,12 @@ LEAK=""
 # in a test file, and excluding the directory would create a blind spot. Only
 # these specific placeholder users are forgiven, and only as whole path
 # segments, so `/Users/ursula` still trips the scan.
-PLACEHOLDER_IDENTITIES='(/Users/(u|user|you|someone)|/home/(u|user|you|someone)|C:[\\/]+Users[\\/]+(u|user|you|someone))([\\/]|$)'
+# The published docs use alice / bob / clawuser / <USER> as home-path
+# placeholders, so those are forgiven too. Still whole-segment and still an
+# explicit list of NAMES: `/Users/ursula` and `/home/bobby` keep tripping the
+# scan. Both directions are asserted in
+# tests/test_prepush_placeholder_whitelist.py.
+PLACEHOLDER_IDENTITIES='(/Users/(u|user|you|someone|alice|bob|clawuser|<USER>)|/home/(u|user|you|someone|alice|bob|clawuser|<USER>)|C:[\\/]+Users[\\/]+(u|user|you|someone|alice|bob|clawuser|<USER>))([\\/]|$)'
 # The test that proves this scan still catches real leaks must, by construction,
 # contain home-path-shaped strings — that is its entire point. Exclude that one
 # file by path rather than widening the pattern, which would create a real blind
@@ -293,18 +298,42 @@ else
   echo "[pre-push]            falling back to the built-in credential/PII set;" >&2
   echo "[pre-push]            BENCH-DATA PATTERNS ARE NOT BEING CHECKED." >&2
 fi
+# The scan runs in python3, which compiles each pattern on its own and means the
+# same thing on all three supported platforms. Do NOT fold this back into a
+# single `grep -E`: joining the patterns takes the whole policy down with its
+# weakest line, and a `|| true` on the pipeline turns a compile error into an
+# empty result that reads as "no leakage detected".
+#
+# Fails CLOSED: an unreadable file, an empty policy or any uncompilable pattern
+# BLOCKS the push. A policy we cannot evaluate is not a policy that found
+# nothing.
+_SCANNER="$ROOT/bin/prepush/scan_diff.py"
+if [ ! -f "$_SCANNER" ]; then
+  echo "[pre-push] BLOCKED: leakage scanner missing at $_SCANNER" >&2
+  echo "[pre-push]          Refusing to push with the bench-data/PII gate absent." >&2
+  exit 1
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "[pre-push] BLOCKED: python3 not found; the leakage scan cannot run." >&2
+  exit 1
+fi
+# Which pattern source: the private policy file when the loader accepted it
+# (_n_pat > 0), else the built-in fallback the warnings above already announced.
+if [ "${_n_pat:-0}" -gt 0 ]; then
+  _SCAN_SOURCE=(--patterns "$PROHIBITED_FILE")
+else
+  _SCAN_SOURCE=(--inline-pattern "$LEAK_PATTERN")
+fi
+_scan_rc=0
 for r in "${RANGES[@]}"; do
-  # Only scan addition lines (^+) — deletions can't leak to the remote.
-  # Exclude the +++ file header lines to avoid false matches on file paths.
-  hit="$(git diff "$r" -- '**' "${EXCLUDES[@]}" "$SCANNER_SELFTEST" \
-    2>/dev/null | grep '^+' | grep -v '^+++' \
-    | grep -ivE "$PLACEHOLDER_IDENTITIES" | grep -iE "$LEAK_PATTERN" \
-    || true)"
-  [ -n "$hit" ] && LEAK="$LEAK$hit"$'\n'
+  # Only addition lines matter -- deletions cannot leak to the remote. The
+  # scanner skips `+++` headers itself.
+  git diff "$r" -- '**' "${EXCLUDES[@]}" "$SCANNER_SELFTEST" 2>/dev/null \
+    | python3 "$_SCANNER" "${_SCAN_SOURCE[@]}" \
+        --exclude-identities "$PLACEHOLDER_IDENTITIES" \
+    || _scan_rc=1
 done
-if [ -n "$LEAK" ]; then
-  echo "[pre-push] BLOCKED: possible bench-data / secret leakage in the push diff:" >&2
-  echo "$LEAK" | head -20 >&2
+if [ "$_scan_rc" -ne 0 ]; then
   echo "[pre-push] Investigate before pushing (see CLAUDE.md / AGENT_INSTRUCTIONS.md bench-data rules)." >&2
   exit 1
 fi

@@ -49,6 +49,13 @@ def _blocked(line: str) -> bool:
         r'+    (r"C:\Users\u\pipx\venvs\m3-memory", True),',
         '+    ("/home/user/.local/lib/python3.12/site-packages", False),',
         '+    ("/Users/someone/Library/Python/3.12", True),',
+        # Added 2026-10-02: names the PUBLISHED docs actually use. They went
+        # unnoticed while the scan was dead on macOS; with it live they would
+        # block legitimate doc edits.
+        '+All state now lives under `/home/bob/.m3-memory/` and',
+        '+gguf = "C:/Users/<USER>/.lmstudio/models/bge-m3-GGUF-Q4_K_M.gguf"',
+        '+  shown as `/home/alice/...` on Linux or `C:\\Users\\Alice\\...` on Windows',
+        '+    home = "/home/clawuser/.m3"',
     ],
 )
 def test_anonymized_fixtures_are_allowed(line):
@@ -66,6 +73,10 @@ def test_anonymized_fixtures_are_allowed(line):
         ('+  KEY = "' + "sk-ant-" + 'abcdefghij0123456789xyz"', "api key"),
         ('+  contact = "realperson@' + 'gmail.com"', "email"),
         ('+  d = "/home/realperson/secrets/"', "real POSIX home"),
+        # The widened list is still whole-segment and still a list of NAMES:
+        # a real home that merely starts with a placeholder name must not pass.
+        ('+  h = "/home/bobby/work"', "near-miss on the placeholder 'bob'"),
+        ('+  h = "/Users/alicia/work"', "near-miss on the placeholder 'alice'"),
     ],
 )
 def test_real_leaks_are_still_blocked(line, why):
