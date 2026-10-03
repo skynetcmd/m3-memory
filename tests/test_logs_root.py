@@ -67,7 +67,8 @@ def test_render_template_substitutes_the_logs_root(monkeypatch, tmp_path):
     tpl.write_text("ExecStart=[M3_PYTHON] x --log-file [M3_LOGS_ROOT]/a.log\n", encoding="utf-8")
     out = install_schedules._render_template(str(tpl), "/payload", "/py")
     assert "[M3_LOGS_ROOT]" not in out
-    assert str(tmp_path / "logs") in out
+    # get_m3_logs_root() normalises an env-supplied root to forward slashes.
+    assert (tmp_path / "logs").as_posix() in out.replace("\\", "/"), out
 
 
 def test_task_runtime_default_log_is_under_the_logs_root(monkeypatch, tmp_path):
