@@ -21,6 +21,22 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **`M3_DB_BACKEND` is read on every call instead of once per process.** Two
+  loaded copies of the backend selector could disagree about the active
+  backend, so code could reach SQLite while PostgreSQL was selected. A change
+  to `M3_DB_BACKEND` inside a running process now takes effect on the next call.
+  **Affected:** PostgreSQL deployments · **Action:** none ·
+  **Data status:** observed only in the test suite; rows written to SQLite
+  under a PostgreSQL selection are not migrated.
+
+- **Scheduled-task and service logs are written to `~/.m3/logs`.** They were
+  written inside the installed package, where a reinstall deletes them. New
+  `M3_LOGS_ROOT` overrides the location (default `~/.m3/logs`, or
+  `M3_MEMORY_ROOT/logs`). **Affected:** all installs ·
+  **Action:** re-register scheduled tasks (`m3 setup`) so they pick up the new
+  path; existing logs under the package's `logs/` can be moved by hand ·
+  **Data status:** none (log files only).
+
 - **The version-drift warning no longer repeats forever naming a dead process.**
   The boot record stopped being written on macOS and Linux, so every start
   warned that an older server might still be running and named a PID from the
