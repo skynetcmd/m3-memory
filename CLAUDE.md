@@ -1,4 +1,9 @@
-docs/AGENT_INSTRUCTIONS.md
+<!-- `docs/AGENT_INSTRUCTIONS.md` is PUBLISHED MATERIAL FOR ADOPTERS: a menu of
+     agent-setup guidance for people installing m3, to cut and choose from. It is
+     NOT instructions for the agent working in this repo, and it is deliberately
+     NOT an `@`-import - at 750+ lines it would load into every session for no
+     benefit and push this file far past the 200-line target. Mentioned here in a
+     comment so the path cannot be mistaken for a directive. -->
 
 ## Git Standards
 - **Commit Messages:** Do NOT include "Co-Authored-By" lines in commit messages. Focus on clear, concise descriptions of "why" and "what".
