@@ -1469,7 +1469,9 @@ def test_aborted_setup_restarts_the_services_it_stopped(monkeypatch):
     sched.stop_unix_services = lambda: ["m3-cognitive-loop.service"]
     restarted = []
     sched.start_unix_services = lambda names: restarted.extend(names) or list(names)
+    sched.service_running = lambda name: True
     monkeypatch.setitem(sys.modules, "install_schedules", sched)
+    monkeypatch.setattr("time.sleep", lambda s: None)
     monkeypatch.setattr(setup_wizard, "_STOPPED_SERVICES", [])
     setup_wizard._stop_supervised_services()
     monkeypatch.setattr(setup_wizard, "_should_use_gui", lambda a: False)
@@ -1504,3 +1506,19 @@ def test_start_unix_services_starts_only_what_is_down(monkeypatch):
     started = sched.start_unix_services(["m3-dashboard.service", "m3-cognitive-loop.service"])
     assert started == ["m3-cognitive-loop.service"]
     assert ["systemctl", "--user", "start", "m3-dashboard.service"] not in calls
+
+
+def test_restore_reports_a_started_but_not_running_service_honestly(monkeypatch, capsys):
+    """A start request accepted by the service manager is not a running service."""
+    import types
+
+    sched = types.ModuleType("install_schedules")
+    sched.start_unix_services = lambda names: list(names)
+    sched.service_running = lambda name: False
+    monkeypatch.setitem(sys.modules, "install_schedules", sched)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    monkeypatch.setattr(setup_wizard, "_STOPPED_SERVICES", ["m3-dashboard.service"])
+    setup_wizard._restore_stopped_services()
+    out = capsys.readouterr().out
+    assert "not running yet" in out
+    assert "restarted m3-dashboard.service" not in out

@@ -854,8 +854,16 @@ def _restore_stopped_services() -> None:
         return
     finally:
         _STOPPED_SERVICES.clear()
+    # A start request is not a running service; report what the manager says.
+    if started:
+        import time
+        time.sleep(3)  # let launchd/systemd bring the process up before asking
     for name in started:
-        _say(f"  restarted {name} (stopped for the update)")
+        if install_schedules.service_running(name):
+            _ok(f"  restarted {name} (stopped for the update)")
+        else:
+            _warn(f"  start requested for {name}, but it is not running yet. "
+                  f"inspect: m3 doctor")
 
 
 def _quiesce_db_writers(args: argparse.Namespace) -> bool:

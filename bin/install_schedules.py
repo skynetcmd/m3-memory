@@ -1504,6 +1504,22 @@ def stop_unix_services() -> list:
     return stopped
 
 
+def service_running(name: str) -> bool:
+    """Whether the service manager reports the service RUNNING (not merely
+    registered or accepted a start request)."""
+    key = _platform_key()
+    try:
+        if key == "linux":
+            r = _run(["systemctl", "--user", "is-active", name], capture_output=True, text=True)
+            return (r.stdout or "").strip() == "active"
+        if key == "darwin":
+            r = _run(["launchctl", "list", name], capture_output=True, text=True)
+            return r.returncode == 0 and '"PID" =' in (r.stdout or "")
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return False
+
+
 def start_unix_services(names: list) -> list:
     """Start the named services if they are not running; the inverse of
     stop_unix_services. Returns the names it started."""
@@ -2279,11 +2295,22 @@ def _verify_or_explain_absence(task: dict) -> bool:
         except Exception:  # noqa: BLE001
             governed = ()
         if name in governed:
-            _safe_print(f"{OK} {name}: runs as a cognitive-loop pass (no task needed)")
-            return True
+            # The pass only runs if the loop that hosts it is installed.
+            try:
+                from governor_migration import cognitive_loop_installed
+                loop = cognitive_loop_installed()
+            except Exception:  # noqa: BLE001
+                loop = False
+            if loop:
+                _safe_print(f"{OK} {name}: runs as a cognitive-loop pass (no task needed)")
+                return True
+            _safe_print(f"{FAIL} {name}: not registered, and the cognitive loop that "
+                        f"would run it is not installed either. fix: m3 schedules add "
+                        f"cognitive-loop")
+            return False
         if name == _ROLE_TO_SERVICE["embed-server"]["win"] and _rust_embed_service_loaded() is True:
-            _safe_print(f"{OK} {name}: not needed — the Rust m3-embed-server "
-                        f"service keeps :8082 up")
+            _safe_print(f"{OK} {name}: not needed — the Rust m3-embed-server service "
+                        f"is registered and owns :8082")
             return True
     return _verify_windows_task(name, _task_arguments(task))
 

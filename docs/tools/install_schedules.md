@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: 1f9da4cb59bb
-mtime_utc: 2026-10-04T23:08:34.395169+00:00
-generated_utc: 2026-10-04T23:08:50.093546+00:00
+sha1: 177154b538f5
+mtime_utc: 2026-10-04T23:52:13.316390+00:00
+generated_utc: 2026-10-04T23:52:37.610538+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 2326)
+- `def main()` (line 2353)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -49,6 +49,7 @@ Uses project virtual environment paths and ensures log directories exist.
 ## Calls INTO this repo (intra-repo imports)
 
 - `governor_migration (GOVERNOR_ELIGIBLE)`
+- `governor_migration (cognitive_loop_installed)`
 - `m3_halt (base_role)`
 - `m3_sdk (ensure_governor_config)`
 - `m3_sdk (get_m3_engine_root)`

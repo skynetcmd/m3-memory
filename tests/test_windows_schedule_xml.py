@@ -506,6 +506,9 @@ def test_every_real_spec_gets_a_working_directory():
 
 def test_verify_accepts_a_governor_task_that_is_absent(monkeypatch):
     """Tasks the governor took over run as loop passes; absence is correct."""
+    import governor_migration
+
+    monkeypatch.setattr(governor_migration, "cognitive_loop_installed", lambda: True)
     monkeypatch.setattr(isch, "_windows_task_registered", lambda n: False)
     monkeypatch.setattr(isch, "_verify_windows_task",
                         lambda *a, **k: pytest.fail("absent governor task must not be verified"))
@@ -522,3 +525,12 @@ def test_verify_still_fails_a_task_missing_for_no_reason(monkeypatch):
     monkeypatch.setattr(isch, "_windows_task_registered", lambda n: False)
     monkeypatch.setattr(isch, "_verify_windows_task", lambda *a, **k: False)
     assert isch._verify_or_explain_absence({"name": "AgentOS_CognitiveLoop", "args": []}) is False
+
+
+def test_verify_fails_an_absent_governor_task_when_the_loop_is_missing(monkeypatch):
+    """No task and no loop means the pass never runs."""
+    import governor_migration
+
+    monkeypatch.setattr(governor_migration, "cognitive_loop_installed", lambda: False)
+    monkeypatch.setattr(isch, "_windows_task_registered", lambda n: False)
+    assert isch._verify_or_explain_absence({"name": "AgentOS_Maintenance", "args": []}) is False
