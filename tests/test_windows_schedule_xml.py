@@ -303,6 +303,26 @@ def test_verify_windows_pass(monkeypatch):
     assert isch._verify_windows_task("AgentOS_CognitiveLoop") is True
 
 
+def test_verify_windows_flags_arguments_from_an_older_payload(monkeypatch):
+    """A pip/pipx upgrade keeps the registered task, whose <Arguments> still
+    name the old script and log paths."""
+    task = {"args": ["C:/new/bin/m3_cognitive_loop.py", "--log-file", "C:/new/logs/x.log"]}
+    expected = isch._task_arguments(task)
+    live_xml = _query_xml().replace(
+        "</Task>",
+        "<Actions><Exec><Arguments>&quot;C:/old/bin/m3_cognitive_loop.py&quot;"
+        "</Arguments></Exec></Actions></Task>")
+    monkeypatch.setattr(isch, "_os_name", lambda: "Windows")
+    monkeypatch.setattr(isch.subprocess, "run", lambda *a, **k: _FakeProc(0, live_xml))
+    assert isch._verify_windows_task("AgentOS_CognitiveLoop", expected) is False
+
+    same_xml = _query_xml().replace(
+        "</Task>", f"<Actions><Exec><Arguments>{isch._xml_escape(expected)}"
+                   "</Arguments></Exec></Actions></Task>")
+    monkeypatch.setattr(isch.subprocess, "run", lambda *a, **k: _FakeProc(0, same_xml))
+    assert isch._verify_windows_task("AgentOS_CognitiveLoop", expected) is True
+
+
 def test_verify_windows_not_hidden_fails(monkeypatch):
     # A registered task missing <Hidden>true</Hidden> must fail verify — it would
     # flash a console window on every self-heal fire (the 2026-07-19 regression).

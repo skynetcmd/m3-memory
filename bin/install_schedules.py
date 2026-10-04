@@ -8,6 +8,7 @@ Uses project virtual environment paths and ensures log directories exist.
 import argparse
 import os
 import pathlib
+import html
 import re
 import subprocess
 
@@ -1249,11 +1250,15 @@ def _render_trigger_xml(task: dict) -> str:
     raise ValueError(f"Unsupported schedule for XML rendering: {sched!r}")
 
 
+def _task_arguments(task: dict) -> str:
+    """A spec's <Arguments> string: one space-joined string with each part
+    quoted, so paths with spaces survive. Shared by render and verify."""
+    return " ".join(f'"{part}"' for part in task["args"])
+
+
 def _render_task_xml(task: dict, python_exe: str, user_id: str, m3_memory_root: str) -> str:
     """Render one spec to a complete Task Scheduler XML document string."""
-    # <Arguments> is one space-joined string; each path is quoted so paths with
-    # spaces survive, mirroring the previous /TR construction.
-    arguments = " ".join(f'"{part}"' for part in task["args"])
+    arguments = _task_arguments(task)
     triggers = _render_trigger_xml(task)
     esc = _xml_escape
     return (
@@ -2071,7 +2076,7 @@ def remove_windows_tasks(selector: str | None, m3_memory_root: str):
         else:
             _safe_print(f"{WARN} Could not remove {task['name']} (may not exist): {r.stderr.strip()}")
 
-def _verify_windows_task(name: str) -> bool:
+def _verify_windows_task(name: str, expected_args: "str | None" = None) -> bool:
     """Read the registered Windows task's XML and confirm the properties the
     installer set actually took (self-heal Repetition where expected,
     MultipleInstances=IgnoreNew). Cross-checks the LIVE task, not the spec, so it
@@ -2134,6 +2139,16 @@ def _verify_windows_task(name: str) -> bool:
             ok = False
         else:
             _safe_print(f"{OK} {name}: self-heal Repetition {expected_rep} present (unbounded)")
+    # Arguments carry the script and log paths. A task registered by an older
+    # payload keeps them across a pip/pipx upgrade, so it runs the old paths.
+    if expected_args is not None:
+        m = re.search(r"<Arguments>(.*?)</Arguments>", xml, re.S)
+        live = html.unescape(m.group(1)) if m else ""
+        if live != expected_args:
+            _safe_print(f"{WARN} {name}: arguments differ from this payload's spec "
+                        f"(older script or log paths). Re-register with --repair "
+                        f"(needs an elevated shell on Windows).")
+            ok = False
     if ok:
         _safe_print(f"{OK} {name}: registered and matches spec")
     return ok
@@ -2220,7 +2235,7 @@ def verify_schedules(selector: str | None, m3_memory_root: str) -> bool:
             return False
         # Check EVERY task (don't short-circuit) so all failures are reported at
         # once, not just the first — a verify tool should surface the full picture.
-        results = [_verify_windows_task(t["name"]) for t in tasks]
+        results = [_verify_windows_task(t["name"], _task_arguments(t)) for t in tasks]
         return all(results)
     # On Unix only the cognitive loop is a managed service; the rest are cron
     # lines. Verify the loop (the one with the self-heal semantics).
