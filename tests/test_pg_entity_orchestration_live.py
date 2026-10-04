@@ -194,3 +194,78 @@ def test_orchestration_notify_returning_and_task_tree_on_pg(pg_backend, monkeypa
             cur.execute("DELETE FROM notifications WHERE agent_id=%s", (agent_id,))
             cur.execute("DELETE FROM tasks WHERE created_by=%s", (agent_id,))
             cur.execute("DELETE FROM agents WHERE agent_id=%s", (agent_id,))
+
+
+def test_entity_writer_holds_no_connection_across_embedding_awaits_on_pg(pg_backend, monkeypatch):
+    """On PostgreSQL even a read leaves a pooled connection idle in transaction
+    (psycopg2 is not autocommit), pinning a snapshot and holding back VACUUM.
+    `_run_entity_extractor` must hold NO `_db()` connection across an embedding
+    await, and must still write the entities and links. Real PG, real `_db()`;
+    only the embedder is faked (see test_entity_write_lock.py for SQLite)."""
+    import asyncio
+    import contextlib
+    import hashlib
+    import importlib
+
+    monkeypatch.setenv("M3_DB_BACKEND", "postgres")
+    monkeypatch.setenv("M3_PG_URL", _DSN)
+    monkeypatch.setenv("M3_ENABLE_ENTITY_GRAPH", "true")
+    from memory.backends import selector as _selector
+    _selector._reset_for_tests()
+
+    tag = uuid.uuid4().hex[:8]
+    mem_id = f"m-{tag}"
+    names = [f"Alpha {tag} Industries", f"Beta {tag} Logistics"]
+    with pg_backend.connection() as c:
+        cur = c.cursor()
+        cur.execute("INSERT INTO memory_items (id, type, content, scope) VALUES (%s,'note','x','agent')",
+                    (mem_id,))
+        # An existing same-type entity so resolution reaches the embedding tier.
+        cur.execute("INSERT INTO entities (id, canonical_name, entity_type) VALUES (%s,%s,'organization')",
+                    (f"e-{tag}", f"Zeta {tag} Holdings"))
+
+    ent = importlib.import_module("memory.entity")
+    real_db = ent._db
+    open_now = [0]
+    seen: list[int] = []
+
+    @contextlib.contextmanager
+    def counting_db(*a, **k):
+        open_now[0] += 1
+        try:
+            with real_db(*a, **k) as conn:
+                yield conn
+        finally:
+            open_now[0] -= 1
+
+    async def embed(name):
+        seen.append(open_now[0])
+        await asyncio.sleep(0)
+        i = int(hashlib.sha256(name.encode()).hexdigest(), 16) % 64
+        return [1.0 if k == i else 0.0 for k in range(64)]
+
+    async def extractor(_text):
+        return {"entities": [{"canonical_name": n, "entity_type": "organization"} for n in names],
+                "relationships": []}
+
+    monkeypatch.setattr(ent, "_db", counting_db)
+    monkeypatch.setattr(ent, "_embed_canonical_cached", embed)
+    try:
+        asyncio.run(ent._run_entity_extractor(mem_id, "x", extractor))
+        assert seen, "precondition: resolution never reached the embedding tier"
+        assert all(n == 0 for n in seen), f"connections open during embedding awaits: {seen}"
+        with pg_backend.connection() as c:
+            cur = c.cursor()
+            cur.execute("SELECT canonical_name FROM entities WHERE canonical_name = ANY(%s)", (names,))
+            assert {r[0] for r in cur.fetchall()} == set(names)
+            cur.execute("SELECT COUNT(*) FROM memory_item_entities WHERE memory_id=%s", (mem_id,))
+            assert cur.fetchone()[0] == 2
+    finally:
+        with pg_backend.connection() as c:
+            cur = c.cursor()
+            cur.execute("DELETE FROM memory_item_entities WHERE memory_id=%s", (mem_id,))
+            cur.execute("DELETE FROM entity_embeddings WHERE entity_id IN "
+                        "(SELECT id FROM entities WHERE canonical_name LIKE %s)", (f"%{tag}%",))
+            cur.execute("DELETE FROM entities WHERE canonical_name LIKE %s", (f"%{tag}%",))
+            cur.execute("DELETE FROM memory_items WHERE id=%s", (mem_id,))
+        _selector._reset_for_tests()
