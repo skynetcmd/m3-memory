@@ -1375,3 +1375,51 @@ def test_settle_wait_outlasts_the_launchd_respawn_throttle():
         m = re.search(r"<key>ThrottleInterval</key>\s*<integer>(\d+)</integer>", text)
         throttles.append(int(m.group(1)) if m else 10)
     assert setup_wizard._REGISTER_SETTLE_S > max(throttles)
+
+
+def _setup_args(**over):
+    p = argparse.ArgumentParser()
+    setup_wizard.add_arguments(p)
+    ns = p.parse_args([])
+    for k, v in over.items():
+        setattr(ns, k, v)
+    return ns
+
+
+def test_existing_install_keeps_settings_with_one_question(monkeypatch):
+    """On a configured host, keeping the current settings takes one question,
+    not the ~15-question first-install questionnaire."""
+    asked = []
+    monkeypatch.setattr(setup_wizard, "_existing_install", lambda: "/e/agent_memory.db")
+    monkeypatch.setattr(setup_wizard, "_cognitive_loop_installed", lambda: True)
+    monkeypatch.setattr(setup_wizard, "_ask_yes_no", lambda q, default=True: asked.append(q) or True)
+    detected = setup_wizard.AgentTargets()
+    detected.claude = True
+    plan = setup_wizard._gather_plan(detected, _setup_args())
+    assert len(asked) == 1
+    assert plan.cognitive_loop is True
+    assert plan.targets.claude is False, "existing wiring must be left untouched"
+
+
+def test_existing_install_can_still_change_settings(monkeypatch):
+    answers = iter([False])  # 'n' to keep -> full questionnaire
+    asked = []
+
+    def ask(q, default=True):
+        asked.append(q)
+        return next(answers, default)
+
+    monkeypatch.setattr(setup_wizard, "_existing_install", lambda: "/e/agent_memory.db")
+    monkeypatch.setattr(setup_wizard, "_ask_yes_no", ask)
+    monkeypatch.setattr("builtins.input", lambda *a: "")
+    setup_wizard._gather_plan(setup_wizard.AgentTargets(), _setup_args())
+    assert len(asked) > 1
+
+
+def test_first_install_skips_the_keep_question(monkeypatch):
+    asked = []
+    monkeypatch.setattr(setup_wizard, "_existing_install", lambda: None)
+    monkeypatch.setattr(setup_wizard, "_ask_yes_no", lambda q, default=True: asked.append(q) or default)
+    monkeypatch.setattr("builtins.input", lambda *a: "")
+    setup_wizard._gather_plan(setup_wizard.AgentTargets(), _setup_args())
+    assert not any("Keep the current settings" in q for q in asked)

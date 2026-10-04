@@ -144,6 +144,8 @@ def cognitive_loop_installed(exe: str) -> "bool | None":
     pkg = find_m3_package(exe)
     if pkg is None:
         return None
+    # Inline rather than governor_migration.cognitive_loop_installed(): this runs
+    # against the payload being REPLACED, which may predate that function.
     for bd in (pkg / "bin", pkg.parent / "bin"):
         if (bd / "governor_migration.py").is_file():
             code = (

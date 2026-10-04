@@ -94,6 +94,11 @@ def _os_name() -> str:
     return "Linux"
 
 
+def cognitive_loop_installed() -> bool:
+    """Whether the cognitive loop is registered as a service or task here."""
+    return "AgentOS_CognitiveLoop" in (detect_scheduled_tasks().get("not_migratable_present") or [])
+
+
 def detect_scheduled_tasks() -> dict[str, list[str]]:
     """Return {"eligible": [...], "not_migratable_present": [...]}.
 

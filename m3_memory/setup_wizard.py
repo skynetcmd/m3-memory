@@ -391,6 +391,21 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
             plan.dashboard_port = int(args.dashboard_port)
         return plan
 
+    # ── existing install: one question instead of the full questionnaire ──────
+    existing = _existing_install()
+    if existing:
+        print()
+        _say(f"m3 is already set up here (store: {existing}).")
+        if _ask_yes_no("  Keep the current settings and just update this install?",
+                       default=True):
+            keep = argparse.Namespace(**vars(args))
+            keep.non_interactive = True
+            keep.agents = ""           # leave agent wiring exactly as it is
+            keep.cognitive_loop = plan.cognitive_loop or bool(_cognitive_loop_installed())
+            kept = _gather_plan(AgentTargets(), keep)
+            _say("  Keeping current settings. Run `m3 setup` and answer 'n' to change them.")
+            return kept
+
     # ── interactive prompts ───────────────────────────────────────────────────
     print()
     _say("m3-memory setup — answer a few quick questions, then sit back.")
@@ -693,6 +708,28 @@ def _detect_governor_eligible_tasks() -> list[str]:
         return governor_migration.detect_scheduled_tasks().get("eligible", [])
     except Exception:
         return []
+
+
+def _cognitive_loop_installed() -> "bool | None":
+    """Whether the loop is registered here; None when it cannot be told."""
+    try:
+        sys.path.insert(0, str(_bin_dir()))
+        import governor_migration
+        return governor_migration.cognitive_loop_installed()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _existing_install() -> "str | None":
+    """The existing store or capture config, or None on a first install."""
+    try:
+        sys.path.insert(0, str(_bin_dir()))
+        from m3_core.paths import get_m3_config_root, get_m3_engine_root
+        candidates = (os.path.join(get_m3_engine_root(), "agent_memory.db"),
+                      os.path.join(get_m3_config_root(), ".chatlog_config.json"))
+    except Exception:  # noqa: BLE001
+        return None
+    return next((c for c in candidates if os.path.exists(c)), None)
 
 
 # ── execution phase ───────────────────────────────────────────────────────────

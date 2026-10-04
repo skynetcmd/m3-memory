@@ -463,6 +463,17 @@ def _service_files_state() -> dict:
 
 
 @pytest.fixture(autouse=True)
+def _no_existing_install_by_default(monkeypatch):
+    """setup's "keep current settings?" prompt keys off the developer's real
+    store, which CI does not have; default it off so interactive-setup tests
+    behave the same everywhere. Tests of that prompt patch it back on."""
+    wiz = sys.modules.get("m3_memory.setup_wizard")
+    if wiz is not None and hasattr(wiz, "_existing_install"):
+        monkeypatch.setattr(wiz, "_existing_install", lambda: None)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _real_service_units_untouched():
     """Fail the test that creates, rewrites or deletes a REAL m3 service unit.
 
