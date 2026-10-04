@@ -63,8 +63,14 @@ import httpx  # noqa: E402
 import memory_core as mc  # noqa: E402
 from agent_protocol import strip_code_fences  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
+from llm_failover import (  # noqa: E402
+    LLMUnavailable,
+    report_available,
+    report_unavailable,
+    require_usable_endpoint,
+)
 from m3_sdk import get_m3_root, scoped_db_env
-from slm_intent import Profile, load_profile, localize_endpoint  # noqa: E402
+from slm_intent import Profile, _is_loopback, load_profile, localize_endpoint  # noqa: E402
 
 logger = logging.getLogger("m3_entities")
 
@@ -809,10 +815,33 @@ async def _run_db(
     _limits = httpx.Limits(max_keepalive_connections=0)
     _timeout = httpx.Timeout(profile.timeout_s, connect=10.0)
     async with httpx.AsyncClient(limits=_limits, timeout=_timeout) as client:
+        # A local server that cannot answer is a SYSTEM state. Failing every row
+        # anyway charged each one a retry attempt, and MAX_ENTITY_ATTEMPTS then
+        # excluded it for good (127 rows lost to "No models loaded" by
+        # 2026-10-03). After a failed call, a FRESH probe tells "the server is
+        # gone" (defer the row and the rest of the pass, no attempt charged) from
+        # "this row failed" (normal failure path). The healthy path pays nothing.
+        local = _is_loopback(profile.url)
+        outage = {"down": False}
+
+        async def _server_went_down() -> bool:
+            if not local:
+                return False
+            try:
+                await require_usable_endpoint(client, token, fresh=True)
+                return False
+            except LLMUnavailable as e:
+                outage["down"] = True
+                report_unavailable(logger, "entity extraction", e)
+                return True
+
         extractor = _build_extractor(profile, token, valid_types, valid_predicates, client)
 
         async def gated(memory_id: str, text: str) -> None:
             async with sem:
+                if outage["down"]:
+                    counters["deferred"] += 1
+                    return
                 # Retry-on-failure with backoff. First attempt uses full
                 # truncation (profile.input_max_chars). On timeout / 500,
                 # retry once with halved input to clear the long-input
@@ -827,6 +856,7 @@ async def _run_db(
                     try:
                         body = text[: int(profile.input_max_chars * slice_ratio)] if profile.input_max_chars else text
                         out = await extractor(body)
+                        report_available(logger, "entity extraction")
                         break
                     except ContextOverflowError as e:
                         # Terminal, not transient: a 'Context size has been
@@ -845,6 +875,9 @@ async def _run_db(
                         return
                     except Exception as e:
                         last_err = e
+                        if outage["down"] or await _server_went_down():
+                            counters["deferred"] += 1
+                            return
                         if attempt == 1:
                             print(f"[m3-entities] retry {memory_id[:8]}: {type(e).__name__}", flush=True)
                 if out is None:
@@ -902,17 +935,19 @@ async def _run_db(
         f"{counters['empty']} empty, "
         f"{counters['ctx_error']} ctx-error, "
         f"{counters['failed']} HTTP-fail, "
-        f"{counters['write_failed']} write-fail",
+        f"{counters['write_failed']} write-fail, "
+        f"{counters['deferred']} deferred (LLM unavailable)",
         flush=True,
     )
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────
 
-def _print_dry_run(plan: dict) -> None:
+def _print_dry_run(plan: dict, *, dry_run: bool = True) -> None:
     print()
     print("==============================================================")
-    print("  m3-entities DRY RUN -- no writes will happen")
+    print("  m3-entities DRY RUN -- no writes will happen" if dry_run
+          else "  m3-entities RUN PLAN -- writes WILL happen")
     print("==============================================================")
     print()
     print(f"  Profile:             {plan['profile_name']}")
@@ -935,7 +970,8 @@ def _print_dry_run(plan: dict) -> None:
         print(f"     est wall:    ~{info['n_rows'] * 3 / 60:.1f} min @ concurrency=4 (local model)")
         print("     est cost:    $0 (local)")
         print()
-    print("To run for real, drop --dry-run.")
+    if dry_run:
+        print("To run for real, drop --dry-run.")
     print("==============================================================")
 
 
@@ -1036,7 +1072,7 @@ async def _main_async(args: argparse.Namespace) -> int:
         _print_dry_run(plan)
         return 0
 
-    _print_dry_run(plan)
+    _print_dry_run(plan, dry_run=False)
 
     if not args.yes:
         try:

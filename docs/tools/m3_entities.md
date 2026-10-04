@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_entities.py
-sha1: ab78e000aaca
-mtime_utc: 2026-09-21T23:46:12.820082+00:00
-generated_utc: 2026-09-21T23:46:20.928219+00:00
+sha1: 78af294b88c1
+mtime_utc: 2026-10-04T03:41:31.382945+00:00
+generated_utc: 2026-10-04T03:41:41.349611+00:00
 private: false
 ---
 
@@ -51,7 +51,7 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 ## Entry points
 
-- `def main()` (line 1161)
+- `def main()` (line 1197)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -94,11 +94,12 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 - `agent_protocol (strip_code_fences)`
 - `auth_utils (get_api_key)`
+- `llm_failover (LLMUnavailable, report_available, report_unavailable, require_usable_endpoint)`
 - `llm_failover (discover_model_async)`
 - `llm_failover (suppresses_thinking_via_effort)`
 - `m3_sdk (get_m3_root, scoped_db_env)`
 - `memory_core`
-- `slm_intent (Profile, load_profile, localize_endpoint)`
+- `slm_intent (Profile, _is_loopback, load_profile, localize_endpoint)`
 
 ---
 
@@ -106,8 +107,8 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 **http**
 
-- `httpx.AsyncClient()` (line 633)
-- `httpx.AsyncClient()` (line 811)
+- `httpx.AsyncClient()` (line 639)
+- `httpx.AsyncClient()` (line 817)
 
 
 ---
