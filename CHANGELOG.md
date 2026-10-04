@@ -37,6 +37,13 @@ the policy is forward-going only.
   `M3_PG_RESTORE`) for these tools · **Action:** none · **Data status:** backups
   taken by the old copy may be missing recent writes; treat them as incomplete.
 
+- **`m3_chatlog_backfill_title` writes the store it was pointed at.** Its chatlog
+  pass updated titles in the main store instead, and its UPDATE used a
+  SQLite-only placeholder that fails on PostgreSQL. **Affected:** installs that
+  ran the title backfill with a separate chatlog store · **Action:** none ·
+  **Data status:** main-store rows with an empty or role-label title may have
+  received a title derived from their own first line; no content was changed.
+
 - **Entity extraction no longer holds the database write lock while it waits
   on the embedder.** Each extracted memory resolved its entities (one embedding
   call per entity) inside one write transaction, so while the cognitive loop

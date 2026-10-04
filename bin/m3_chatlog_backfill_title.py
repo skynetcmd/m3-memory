@@ -23,7 +23,13 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from m3_core.paths import get_m3_backups_root, seam_backend, seam_dialect, snapshot_stores
+from m3_core.paths import (
+    get_m3_backups_root,
+    scoped_db_env,
+    seam_backend,
+    seam_dialect,
+    snapshot_stores,
+)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
@@ -114,7 +120,10 @@ def _backfill(
     counters = {"updated": 0, "skipped_empty_derived": 0, "wall_s": 0.0}
     started = time.monotonic()
 
-    with seam_backend().connection() as conn:
+    # Scoped to THIS target: unscoped, connection() follows the process-active
+    # store, so the chatlog pass rewrote the main store (and the pre-write
+    # snapshot, which is scoped per target, backed up a store nobody changed).
+    with scoped_db_env(db_path), seam_backend().connection() as conn:
         placeholders = seam_dialect().placeholder(len(useless_titles))
         sql = f"""
             SELECT id, content
@@ -138,7 +147,7 @@ def _backfill(
                 counters["skipped_empty_derived"] += 1
                 continue
             cur.execute(
-                "UPDATE memory_items SET title=? WHERE id=?",
+                f"UPDATE memory_items SET title={seam_dialect().param()} WHERE id={seam_dialect().param()}",
                 (new_title, mid),
             )
             counters["updated"] += cur.rowcount
