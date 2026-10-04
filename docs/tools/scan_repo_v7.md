@@ -1,8 +1,8 @@
 ---
 tool: scan_repo_v7.py
-sha1: 2766448c7099
-mtime_utc: 2026-09-14T04:11:58.194196+00:00
-generated_utc: 2026-09-14T04:12:09.205133+00:00
+sha1: 812146d99a18
+mtime_utc: 2026-10-04T08:59:26.351701+00:00
+generated_utc: 2026-10-04T09:01:02.878165+00:00
 private: false
 ---
 
@@ -43,7 +43,7 @@ with a setup hint covering both input shapes.
 
 ## Entry points
 
-- `def main()` (line 378)
+- `def main()` (line 386)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -79,11 +79,11 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `argv`` (line 252)
+- `subprocess.run()  → `argv`` (line 260)
 
 **http**
 
-- `requests.post()  → `url`` (line 293)
+- `requests.post()  → `url`` (line 301)
 
 
 ---

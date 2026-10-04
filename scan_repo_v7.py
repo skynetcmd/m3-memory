@@ -167,12 +167,20 @@ def _dd_token():
     return DD_TOKEN
 
 
-# Ensure all scanner paths are in the PATH.
-# Only on POSIX: this REPLACES PATH outright, so doing it on Windows would hide
-# every installed tool from shutil.which() and make the preflight report all 19
-# scanners missing on a host that has some of them.
-if os.name != 'nt':
-    os.environ['PATH'] = '/usr/local/bin:/usr/bin:/bin:/root/.local/bin'
+# Where the scanners are installed on the scan host. APPENDED to PATH when a scan
+# runs, never substituted for it: other install locations (Homebrew on macOS)
+# must stay visible, and importing this module must not change the caller's
+# environment. POSIX only -- these directories do not exist on Windows.
+_SCANNER_DIRS = ('/usr/local/bin', '/usr/bin', '/bin', '/root/.local/bin')
+
+
+def _ensure_scanner_path():
+    if os.name == 'nt':
+        return
+    parts = [p for p in os.environ.get('PATH', '').split(os.pathsep) if p]
+    missing = [d for d in _SCANNER_DIRS if d not in parts]
+    if missing:
+        os.environ['PATH'] = os.pathsep.join(parts + missing)
 
 # Minimal VALID empty-SARIF fallback. DefectDojo's SARIF importer 500s on a bare
 # `{}` (no version/runs[] keys), so SARIF-emitting scanners must fall back to a
@@ -387,6 +395,7 @@ def main():
                     help='Report which scanners are missing and exit. No scan, '
                          'no upload. Exits 0 when complete, 3 when deficient.')
     args = ap.parse_args()
+    _ensure_scanner_path()
     if args.check_only:
         missing = missing_scanners()
         if not missing:

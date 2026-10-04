@@ -138,3 +138,22 @@ def test_plain_run_on_a_deficient_host_refuses_end_to_end():
     assert r.returncode == 3, f"expected refusal (3), got {r.returncode}"
     assert "Refusing to upload a partial run" in r.stderr
     assert "== scanning" not in r.stdout, "it started scanning despite refusing"
+
+
+def test_import_leaves_path_unchanged():
+    """Importing the module must not change the caller's PATH: the suite imports
+    it in-process, and a replaced PATH hides every later test's tools."""
+    import os
+    before = os.environ.get("PATH")
+    _load()
+    assert os.environ.get("PATH") == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="scanner dirs are POSIX paths")
+def test_scanner_path_is_appended_not_substituted(monkeypatch):
+    import os
+    monkeypatch.setenv("PATH", "/opt/homebrew/bin:/usr/bin")
+    _load()._ensure_scanner_path()
+    parts = os.environ["PATH"].split(os.pathsep)
+    assert parts[:2] == ["/opt/homebrew/bin", "/usr/bin"], "existing entries kept, in order"
+    assert "/root/.local/bin" in parts and parts.count("/usr/bin") == 1
