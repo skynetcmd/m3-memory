@@ -2229,6 +2229,38 @@ def _verify_unix_cognitive_loop() -> bool:
     return False
 
 
+def _windows_task_registered(name: str) -> bool:
+    try:
+        return _run(["schtasks", "/Query", "/TN", name],
+                    capture_output=True, text=True).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return True  # unknown: let the full verify report it
+
+
+def _verify_or_explain_absence(task: dict) -> bool:
+    """Verify one Windows task, treating a deliberate absence as correct.
+
+    A task the governor took over runs as a cognitive-loop pass, and the Python
+    embed-server task is not registered while the Rust service owns :8082;
+    reporting either as "not registered" would be a false alarm.
+    """
+    name = task["name"]
+    if not _windows_task_registered(name):
+        try:
+            from governor_migration import GOVERNOR_ELIGIBLE
+            governed: "tuple[str, ...]" = tuple(GOVERNOR_ELIGIBLE)
+        except Exception:  # noqa: BLE001
+            governed = ()
+        if name in governed:
+            _safe_print(f"{OK} {name}: runs as a cognitive-loop pass (no task needed)")
+            return True
+        if name == _ROLE_TO_SERVICE["embed-server"]["win"] and _rust_embed_service_loaded() is True:
+            _safe_print(f"{OK} {name}: not needed — the Rust m3-embed-server "
+                        f"service keeps :8082 up")
+            return True
+    return _verify_windows_task(name, _task_arguments(task))
+
+
 def verify_schedules(selector: str | None, m3_memory_root: str) -> bool:
     """Verify the registered scheduled job(s) match what the installer intends.
     Cross-platform: Windows tasks, macOS launchd, Linux systemd. Returns True if
@@ -2241,7 +2273,7 @@ def verify_schedules(selector: str | None, m3_memory_root: str) -> bool:
             return False
         # Check EVERY task (don't short-circuit) so all failures are reported at
         # once, not just the first — a verify tool should surface the full picture.
-        results = [_verify_windows_task(t["name"], _task_arguments(t)) for t in tasks]
+        results = [_verify_or_explain_absence(t) for t in tasks]
         return all(results)
     # On Unix only the cognitive loop is a managed service; the rest are cron
     # lines. Verify the loop (the one with the self-heal semantics).

@@ -502,3 +502,23 @@ def test_every_real_spec_gets_a_working_directory():
         if not [e for e in root.iter() if e.tag.endswith("WorkingDirectory")]:
             missing.append(task["name"])
     assert not missing, f"specs with no WorkingDirectory: {missing}"
+
+
+def test_verify_accepts_a_governor_task_that_is_absent(monkeypatch):
+    """Tasks the governor took over run as loop passes; absence is correct."""
+    monkeypatch.setattr(isch, "_windows_task_registered", lambda n: False)
+    monkeypatch.setattr(isch, "_verify_windows_task",
+                        lambda *a, **k: pytest.fail("absent governor task must not be verified"))
+    assert isch._verify_or_explain_absence({"name": "AgentOS_Maintenance", "args": []}) is True
+
+
+def test_verify_accepts_an_absent_embed_task_when_rust_owns_the_port(monkeypatch):
+    monkeypatch.setattr(isch, "_windows_task_registered", lambda n: False)
+    monkeypatch.setattr(isch, "_rust_embed_service_loaded", lambda: True)
+    assert isch._verify_or_explain_absence({"name": "AgentOS_EmbedServer", "args": []}) is True
+
+
+def test_verify_still_fails_a_task_missing_for_no_reason(monkeypatch):
+    monkeypatch.setattr(isch, "_windows_task_registered", lambda n: False)
+    monkeypatch.setattr(isch, "_verify_windows_task", lambda *a, **k: False)
+    assert isch._verify_or_explain_absence({"name": "AgentOS_CognitiveLoop", "args": []}) is False
