@@ -32,6 +32,19 @@ the policy is forward-going only.
   **Data status:** repeated distillation leaves superseded duplicate procedure
   memories (source `distillation`) and procedures without `distills_from` links.
 
+- **A local model server with no model loaded no longer costs entity
+  extraction its retries.** Each eligible memory used to fail and be charged a
+  retry attempt; after three it was excluded from extraction permanently. Rows
+  are now deferred until a model is available. Distillation stops for the
+  cycle instead of failing every task, the outage is reported once (and again
+  hourly) instead of per call, and model errors now include the server's
+  message (e.g. `No models loaded`). The entity run banner no longer says
+  "DRY RUN" on real runs. **Affected:** installs using a local LM Studio /
+  Ollama server · **Action:** keep a model loaded in the local server ·
+  **Data status:** memories excluded by an earlier outage stay excluded; they
+  appear in `entity_extraction_queue` as `failed` with a "No models loaded"
+  error and need re-queueing.
+
 - **`M3_DB_BACKEND` is read on every call instead of once per process.** Two
   loaded copies of the backend selector could disagree about the active
   backend, so code could reach SQLite while PostgreSQL was selected. A change
