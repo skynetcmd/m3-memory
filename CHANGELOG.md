@@ -19,6 +19,8 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.10.4.0] — 2026-10-04 — verified backups, and tools that refuse the wrong store
+
 ### Fixed
 
 - **The cognitive loop log no longer contains duplicated or split lines.**
