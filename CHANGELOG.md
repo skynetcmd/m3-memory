@@ -48,6 +48,22 @@ the policy is forward-going only.
   **Affected:** all installs running setup or `m3 upgrade` · **Action:** none ·
   **Data status:** none.
 
+- **Upgrades no longer wait for the cognitive loop to finish its cycle.** The
+  loop now pauses for an upgrade or migration between passes and while idle,
+  instead of only at the start of its next cycle.
+  **Affected:** all installs · **Action:** none · **Data status:** none.
+
+- **`m3 schedules verify` and setup flag Windows tasks registered by an older
+  install.** Tasks kept their old script and log paths across a pip or pipx
+  upgrade.
+  **Affected:** Windows · **Action:** run `m3 schedules repair` from an
+  elevated shell when setup reports it · **Data status:** none.
+
+- **No empty SQLite database is created on PostgreSQL installs.**
+  **Affected:** PostgreSQL installs · **Action:** an empty
+  `<engine root>/agent_memory.db` left by earlier versions can be deleted ·
+  **Data status:** none.
+
 - **The cognitive loop is re-registered on upgrade.** A pip or pipx upgrade
   kept the previous unit, so loop logs stayed under the package directory and
   were deleted by each upgrade.
