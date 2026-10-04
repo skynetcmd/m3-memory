@@ -263,6 +263,8 @@ def test_installer_never_raises(monkeypatch, tmp_path):
     def _boom(*a, **k):
         raise OSError("no systemctl")
     monkeypatch.setattr(sched.subprocess, "run", _boom)
+    # The unit file is written BEFORE systemctl runs; keep it out of the real ~.
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path / "home"))
     sched.install_unix_embed_server(str(_ROOT), "/py")  # must not raise
 
 

@@ -65,6 +65,10 @@ def isolated_roots(tmp_path, monkeypatch):
     monkeypatch.setattr(installer, "_prompt_endpoint_choice", lambda *a, **k: None)
     monkeypatch.setattr(installer, "_prompt_capture_mode", lambda *a, **k: "none")
     monkeypatch.setattr(installer, "_prompt_and_install_cognitive_loop", lambda *a, **k: None)
+    # With the dashboard deps installed this spawns `install_schedules.py --add
+    # dashboard` as a real subprocess, which writes the developer's REAL
+    # launchd/systemd unit and loads it -- out of reach of any monkeypatch here.
+    monkeypatch.setattr(installer, "_prompt_and_install_dashboard", lambda *a, **k: None)
     monkeypatch.setattr(installer, "save_config", lambda *a, **k: None)
     # `_run_os_install` shells out to the REAL install_os.py against the
     # developer's actual machine. It is not what any test in this file asserts

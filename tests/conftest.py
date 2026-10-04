@@ -25,6 +25,7 @@ _os.environ.setdefault("_M3_UTF8_REEXEC", "1")
 # environment that deliberately set it wins. Must run at conftest IMPORT time,
 # before any test imports memory.config (which reads it once at import).
 _os.environ.setdefault("M3_CORE_RS_DISABLE", "1")
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -433,6 +434,56 @@ def _repo_root_stays_clean():
         "Tests must write under tmp_path; a path built from mocked subprocess argv "
         "is the usual cause (see this fixture's docstring)."
     )
+
+
+# The developer's REAL service directories, resolved at import -- before any test
+# can patch HOME or os.path.expanduser -- so the guard below always watches the
+# live ones, whatever a test redirects.
+_REAL_HOME = Path(_os.path.expanduser("~"))
+_SERVICE_DIRS = (_REAL_HOME / ".config" / "systemd" / "user", _REAL_HOME / "Library" / "LaunchAgents")
+_SERVICE_NAME = re.compile(r"^(m3[-_].*\.(service|timer)|com\.(m3memory|skynetcmd)\..*\.plist)$")
+
+
+def _service_files_state() -> dict:
+    """{path: (mtime_ns, size)} of m3's unit/plist files in the real service dirs."""
+    state = {}
+    for d in _SERVICE_DIRS:
+        try:
+            entries = list(d.iterdir())
+        except OSError:
+            continue
+        for p in entries:
+            if _SERVICE_NAME.match(p.name):
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue
+                state[str(p)] = (st.st_mtime_ns, st.st_size)
+    return state
+
+
+@pytest.fixture(autouse=True)
+def _real_service_units_untouched():
+    """Fail the test that creates, rewrites or deletes a REAL m3 service unit.
+
+    Hazard: installers write ~/.config/systemd/user/*.service and
+    ~/Library/LaunchAgents/*.plist through os.path.expanduser, so a test that
+    forces Linux or Darwin without redirecting it rewrites -- and may load -- the
+    developer's live units.
+
+    Per test, so the failure names the test that did it. A real m3 install on the
+    same machine rewriting its own units mid-run would also trip this; rerun.
+    """
+    before = _service_files_state()
+    yield
+    after = _service_files_state()
+    if after != before:
+        changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
+        pytest.fail(
+            "this test changed REAL service units: " + ", ".join(changed) + ". "
+            "Redirect os.path.expanduser (or HOME) to tmp_path before calling an installer.",
+            pytrace=False,
+        )
 
 
 @pytest.fixture(autouse=True)
