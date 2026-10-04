@@ -1437,10 +1437,10 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
                     pass
             _ok(f"  wiped {wiped} __pycache__ dirs")
         else:
-            _warn("  skipped __pycache__ wipe ("
-                  + ("non-interactive; pass --clean-cache to wipe"
-                     if args.non_interactive else "declined")
-                  + ") — stale bytecode may load")
+            # Python checks each cached file against its source and never
+            # imports one whose source is gone, so leaving them is safe.
+            _say(f"  left {len(pycache_dirs)} __pycache__ dirs in place "
+                 f"(Python rebuilds any that no longer match their source)")
     else:
         _ok("  no stale __pycache__ to wipe")
 
@@ -3094,16 +3094,19 @@ def _trace(msg: str) -> None:
 
     Best-effort and silent on failure: instrumentation must never be the thing
     that breaks the run it is instrumenting.
+
+    Off unless M3_TRACE_FILE is set (CI sets it): these lines are internal
+    breadcrumbs, not information for the person running setup.
     """
+    path = os.environ.get("M3_TRACE_FILE")
+    if not path:
+        return
+    line = f"[trace] {msg}"
     try:
-        line = f"[trace] {msg}"
         print(line, file=sys.stderr, flush=True)
     except Exception:  # noqa: BLE001
         pass
     try:
-        path = os.environ.get("M3_TRACE_FILE")
-        if not path:
-            return
         with open(path, "a", encoding="utf-8", errors="backslashreplace") as fh:
             fh.write(f"{line}\n")
             fh.flush()
