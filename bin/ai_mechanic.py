@@ -47,6 +47,8 @@ def check_bridges():
             print(f"⚠️  Missing Bridge: {bridge}")
 
 if __name__ == "__main__":
+    from m3_core.paths import require_sqlite_backend
+    require_sqlite_backend("ai_mechanic")  # opens SQLite files directly; refuse on PostgreSQL
     parser = argparse.ArgumentParser(
         description="Emergency schema repair (DESTRUCTIVE: drops project_decisions and system_focus)."
     )

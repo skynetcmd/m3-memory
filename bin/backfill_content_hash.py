@@ -324,6 +324,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from m3_core.paths import require_sqlite_backend
+    require_sqlite_backend("backfill_content_hash")  # opens SQLite files directly; refuse on PostgreSQL
     args = _parse_args(argv)
 
     try:

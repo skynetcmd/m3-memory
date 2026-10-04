@@ -869,6 +869,55 @@ def seam_backend():
         return _SqliteOnlyShim()
 
 
+# The backend names M3_DB_BACKEND may select. `memory.backends.selector` and
+# its registry use this tuple; it lives here so tools that must not import the
+# `memory` package (migration runners, repair scripts) share the one predicate.
+SELECTABLE_BACKENDS: tuple = ("sqlite", "postgres")
+
+
+def resolve_backend_name() -> str:
+    """The configured backend name, re-read from the environment on every call.
+
+    THE single owner of this predicate; ``memory.backends.selector`` re-exports
+    it. Precedence mirrors every other m3 flag: ``M3_DB_BACKEND``, then the
+    legacy ``DB_BACKEND``, then ``sqlite``. An unrecognised value raises — a
+    typo like ``postgre`` must not silently run SQLite.
+
+    Never memoised: a module-global memo lives per module instance, and two
+    instances with disagreeing memos once sent PostgreSQL-marked work to SQLite.
+    """
+    raw = (getenv_compat("M3_DB_BACKEND", "DB_BACKEND", "sqlite") or "sqlite").strip().lower()
+    if raw not in SELECTABLE_BACKENDS:
+        raise ValueError(
+            f"M3_DB_BACKEND={raw!r} is not recognized; expected one of {SELECTABLE_BACKENDS}. "
+            f"Unset it to use the default 'sqlite'."
+        )
+    return raw
+
+
+def require_sqlite_backend(tool: str) -> None:
+    """Fail loud if a SQLite-only tool is run against a non-SQLite deployment.
+
+    Such tools open ``sqlite3.connect`` on a file path. Under PostgreSQL that
+    file is not the live store, so the tool would silently read or WRITE a stale
+    or empty SQLite file. Call this first thing in ``main()``: an operator who
+    set ``M3_DB_BACKEND=postgres`` gets an actionable refusal instead. A no-op
+    on SQLite (the default).
+
+    Importable without the ``memory`` package, so lightweight bootstrap tools
+    can use it.
+    """
+    name = resolve_backend_name()
+    if name != "sqlite":
+        raise RuntimeError(
+            f"{tool} operates directly on SQLite, but M3_DB_BACKEND={name!r} is "
+            f"selected. Running it would touch a stale SQLite file, not the live "
+            f"{name} store. This tool is SQLite-only; run it against a SQLite "
+            f"deployment, or unset M3_DB_BACKEND. (Refusing rather than silently "
+            f"editing the wrong database.)"
+        )
+
+
 def snapshot_stores(db_paths, dest_dir, *, label: str) -> list:
     """Verified snapshot of every distinct store a tool is about to write.
 

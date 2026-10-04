@@ -189,6 +189,8 @@ def migrate(db_path: str, dry_run: bool = False) -> int:
 
 
 def main() -> int:
+    from m3_core.paths import require_sqlite_backend
+    require_sqlite_backend("migrate_entity_vocab")  # opens SQLite files directly; refuse on PostgreSQL
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--database",

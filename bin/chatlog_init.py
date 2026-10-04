@@ -238,9 +238,24 @@ def interactive_redaction() -> RedactionSpec:
     )
 
 
+def _chatlog_is_sqlite_file() -> bool:
+    """True when the chatlog lives in a SQLite file that migrate_memory manages.
+
+    On PostgreSQL the chatlog is tables in the primary database, created by the
+    server schema; migrate_memory (SQLite-only) refuses there by design.
+    """
+    from m3_core.paths import resolve_backend_name
+
+    return resolve_backend_name() == "sqlite"
+
+
 def run_migrations() -> bool:
     """Ask and run migrations if user agrees."""
     print_section("Database Migrations")
+    if not _chatlog_is_sqlite_file():
+        print("PostgreSQL: the chatlog tables are created by the server schema; "
+              "no SQLite migrations to run.")
+        return True
     if not prompt_yes_no("Run migrations now?", default=True):
         return False
 
@@ -715,16 +730,20 @@ def main() -> int:
             # with 'no such table: memory_items'. The prompt-skipping flag
             # shouldn't mean a broken install.
             migrate_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
-            try:
-                subprocess.run(
-                    [sys.executable, migrate_script, "up", "--target", "chatlog", "-y"],
-                    check=True,
-                )
-                print("Migrations applied.")
-            except subprocess.CalledProcessError as e:
-                print(f"Warning: migrations failed ({e}). Run manually with:")
-                print(f"  python {migrate_script} up --target chatlog -y")
-                # Don't fail the install — migrations can be retried.
+            if not _chatlog_is_sqlite_file():
+                print("PostgreSQL: chatlog tables come from the server schema; "
+                      "skipping SQLite migrations.")
+            else:
+                try:
+                    subprocess.run(
+                        [sys.executable, migrate_script, "up", "--target", "chatlog", "-y"],
+                        check=True,
+                    )
+                    print("Migrations applied.")
+                except subprocess.CalledProcessError as e:
+                    print(f"Warning: migrations failed ({e}). Run manually with:")
+                    print(f"  python {migrate_script} up --target chatlog -y")
+                    # Don't fail the install — migrations can be retried.
 
             # Optional: write the hook entries directly into the agent's
             # settings.json instead of just printing the snippet. Skip silently

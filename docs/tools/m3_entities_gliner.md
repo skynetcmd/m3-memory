@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_entities_gliner.py
-sha1: edba0e98fe53
-mtime_utc: 2026-09-08T21:34:25.098923+00:00
-generated_utc: 2026-09-08T21:39:23.649540+00:00
+sha1: 34077c0e50a3
+mtime_utc: 2026-10-04T08:36:30.195354+00:00
+generated_utc: 2026-10-04T08:38:00.549545+00:00
 private: false
 ---
 
@@ -100,6 +100,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 - `gliner (GLiNER)`
 - `m3_core.gpu (torch_device)`
+- `m3_core.paths (require_sqlite_backend)`
 - `memory.backends (dialect)`
 
 ---

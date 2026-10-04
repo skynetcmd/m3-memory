@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich_assign.py
-sha1: 5c1104299f79
-mtime_utc: 2026-05-30T18:38:21.558054+00:00
-generated_utc: 2026-05-31T18:42:52.785163+00:00
+sha1: 29aedc665cfc
+mtime_utc: 2026-10-04T08:36:30.193810+00:00
+generated_utc: 2026-10-04T08:38:00.481999+00:00
 private: false
 ---
 
@@ -81,14 +81,14 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `str(args.db)`` (line 72)
+- `sqlite3.connect()  → `str(args.db)`` (line 74)
 
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core.paths (require_sqlite_backend)`
 
 ---
 

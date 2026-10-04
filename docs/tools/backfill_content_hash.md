@@ -1,8 +1,8 @@
 ---
 tool: bin/backfill_content_hash.py
-sha1: 911c4c0ba2cf
-mtime_utc: 2026-09-07T21:42:44.789625+00:00
-generated_utc: 2026-09-07T21:45:35.638229+00:00
+sha1: bd508108f6ba
+mtime_utc: 2026-10-04T08:36:30.192810+00:00
+generated_utc: 2026-10-04T08:37:59.957740+00:00
 private: false
 ---
 
@@ -110,6 +110,7 @@ Usage:
 
 ## Notable external imports
 
+- `m3_core.paths (require_sqlite_backend)`
 - `memory.backends.sqlite_backend (SqliteDialect)`
 
 ---

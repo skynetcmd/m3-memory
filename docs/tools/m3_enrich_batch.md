@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich_batch.py
-sha1: 7f6719831bf1
-mtime_utc: 2026-09-16T15:21:24.465895+00:00
-generated_utc: 2026-09-16T15:29:43.595446+00:00
+sha1: 652ef1f82395
+mtime_utc: 2026-10-04T08:37:49.146212+00:00
+generated_utc: 2026-10-04T08:38:00.503151+00:00
 private: false
 ---
 
@@ -135,6 +135,7 @@ Status:  Phase E worker. Pairs with batch_runner.py (provider abstraction).
 ## Notable external imports
 
 - `httpx`
+- `m3_core.paths (require_sqlite_backend)`
 
 ---
 

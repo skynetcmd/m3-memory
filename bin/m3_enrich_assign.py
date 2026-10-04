@@ -41,6 +41,8 @@ from sqlite_pragmas import apply_pragmas, profile_for_db
 
 
 def main() -> int:
+    from m3_core.paths import require_sqlite_backend
+    require_sqlite_backend("m3_enrich_assign")  # opens SQLite files directly; refuse on PostgreSQL
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", required=True, type=Path,
                     help="Path to the database with enrichment_groups.")

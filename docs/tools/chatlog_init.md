@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_init.py
-sha1: 0c02cf6e9dba
-mtime_utc: 2026-09-22T00:24:11.976610+00:00
-generated_utc: 2026-09-22T00:25:39.661536+00:00
+sha1: 8a681ab26e6b
+mtime_utc: 2026-10-04T08:37:04.190856+00:00
+generated_utc: 2026-10-04T08:38:00.054775+00:00
 private: false
 ---
 
@@ -29,7 +29,7 @@ path equality.
 
 ## Entry points
 
-- `def main()` (line 595)
+- `def main()` (line 610)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -71,16 +71,16 @@ path equality.
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, install_script, '--add', 'chatlog-embed-sweep']`` (line 274)
-- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 249)
-- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 719)
+- `subprocess.run()  → `[sys.executable, install_script, '--add', 'chatlog-embed-sweep']`` (line 289)
+- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 264)
+- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 738)
 
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core.paths (resolve_backend_name)`
 
 ---
 

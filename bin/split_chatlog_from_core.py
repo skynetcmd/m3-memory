@@ -117,6 +117,8 @@ def _table_has_column(conn: sqlite3.Connection, table: str, column: str) -> bool
 
 
 def main() -> int:
+    from m3_core.paths import require_sqlite_backend
+    require_sqlite_backend("split_chatlog_from_core")  # opens SQLite files directly; refuse on PostgreSQL
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--source", help="CORE memory DB (default: $M3_DATABASE or engine agent_memory.db)")
     ap.add_argument("--target", help="CHATLOG DB (default: $CHATLOG_DB_PATH or engine agent_chatlog.db)")

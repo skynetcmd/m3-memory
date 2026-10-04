@@ -21,6 +21,21 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **SQLite-only tools refuse to run on PostgreSQL instead of editing a stale
+  SQLite file.** `backfill_content_hash`, `migrate_entity_vocab`,
+  `m3_enrich_assign`, `m3_enrich_batch`, `m3_entities_gliner`,
+  `split_chatlog_from_core`, `migrate_memory` and `ai_mechanic` open SQLite
+  files directly; with `M3_DB_BACKEND=postgres` they now exit with an error
+  before touching anything. `m3 doctor --fix` reports its SQLite-file repairs
+  as skipped on PostgreSQL rather than running them against a local file, and
+  `chatlog_init` no longer runs the SQLite migration runner there.
+  **Affected:** PostgreSQL installs · **Action:** none ·
+  **Data status:** earlier runs of `m3_enrich_batch` and `m3_entities_gliner` on PostgreSQL
+  wrote observations and entity links to PostgreSQL while reading candidates or
+  tracking batch state in a local SQLite file, so they may have added duplicate
+  observations, or links for memories selected from that file; the other tools
+  changed only a local SQLite file.
+
 - **Pre-write backups are now verified snapshots of the store being changed.**
   `m3_entities`, `m3_enrich`, `m3_chatlog_backfill_embed`,
   `m3_chatlog_backfill_title` and `reembed_space` backed up with a file copy,

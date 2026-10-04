@@ -994,6 +994,8 @@ def build_parser():
     return p
 
 def main():
+    from m3_core.paths import require_sqlite_backend
+    require_sqlite_backend("migrate_memory")  # opens SQLite files directly; refuse on PostgreSQL
     if not os.path.exists(MIGRATIONS_DIR):
         logger.error(f"Migrations directory not found: {MIGRATIONS_DIR}")
         sys.exit(1)

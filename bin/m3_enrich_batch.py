@@ -1236,6 +1236,8 @@ async def _run_async(args) -> int:
 
 
 def main() -> int:
+    from m3_core.paths import require_sqlite_backend
+    require_sqlite_backend("m3_enrich_batch")  # opens SQLite files directly; refuse on PostgreSQL
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--profile", required=True,

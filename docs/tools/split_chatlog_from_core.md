@@ -1,8 +1,8 @@
 ---
 tool: bin/split_chatlog_from_core.py
-sha1: f9b291c6f3ac
-mtime_utc: 2026-08-07T23:53:52.255872+00:00
-generated_utc: 2026-08-08T14:40:50.104591+00:00
+sha1: 8fde14b30123
+mtime_utc: 2026-10-04T08:36:30.195354+00:00
+generated_utc: 2026-10-04T08:38:00.916309+00:00
 private: false
 ---
 
@@ -106,13 +106,14 @@ Take a filesystem backup of both DBs before --commit; this script does not.
 **sqlite**
 
 - `sqlite3.connect()  → `p`` (line 101)
-- `sqlite3.connect()  → `source`` (line 149)
+- `sqlite3.connect()  → `source`` (line 151)
 
 
 ---
 
 ## Notable external imports
 
+- `m3_core.paths (require_sqlite_backend)`
 - `m3_core.paths (resolve_engine_file)`
 
 ---

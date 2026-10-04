@@ -455,6 +455,20 @@ async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
         actions.append({"action": action, "status": status, "detail": detail})
         logger.info("doctor --fix [%s] %s: %s", status, action, detail or "(ok)")
 
+    # Every repair below acts on a SQLite FILE: the migration runner, the FTS5
+    # rebuild, embed_backfill by path, the cohesion table via M3Context. On any
+    # other backend those files are not the live store, so running them would
+    # repair a stale file and report success. Say so per action instead.
+    from m3_core.paths import resolve_backend_name
+
+    backend = resolve_backend_name()
+    if backend != "sqlite":
+        reason = f"SQLite-file repair; not applicable on {backend}"
+        _record("run_migrations", "skipped", f"{reason} (schema is applied by ensure_schema())")
+        for name in ("rebuild_fts5", "embed_backfill", "rebuild_cohesion"):
+            _record(name, "skipped", reason)
+        return {"dry_run": dry_run, "actions": actions, "summary": "nothing_to_do"}
+
     db_path = resolve_db_path(None)
 
     # ── Action 1: Run pending migrations ──────────────────────────────────────

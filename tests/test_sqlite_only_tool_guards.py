@@ -98,6 +98,102 @@ def test_chatlog_status_main_count_na_on_postgres(monkeypatch):
     assert "PostgreSQL" in text or "n/a" in text
 
 
+# Tools that open SQLite files directly and have no PostgreSQL path. Each must
+# refuse at the top of main(), before it parses arguments or opens anything.
+_SQLITE_ONLY_MAINS = [
+    "backfill_content_hash",
+    "migrate_entity_vocab",
+    "m3_enrich_assign",
+    "m3_enrich_batch",
+    "m3_entities_gliner",
+    "split_chatlog_from_core",
+    "migrate_memory",
+]
+
+
+def _no_sqlite(monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(sqlite3, "connect", lambda *a, **k: pytest.fail(
+        "a refused tool must not open a SQLite file"))
+
+
+@pytest.mark.parametrize("tool", _SQLITE_ONLY_MAINS)
+def test_sqlite_only_tool_refuses_on_postgres(tool, monkeypatch):
+    import importlib
+    import sys
+
+    _force_pg(monkeypatch)
+    mod = importlib.import_module(tool)
+    _no_sqlite(monkeypatch)
+    monkeypatch.setattr(sys, "argv", [tool])
+    with pytest.raises(RuntimeError, match="SQLite-only"):
+        mod.main([]) if tool == "backfill_content_hash" else mod.main()
+
+
+@pytest.mark.parametrize("tool", _SQLITE_ONLY_MAINS)
+def test_sqlite_only_tool_passes_the_guard_on_sqlite(tool, monkeypatch):
+    """On the default backend the guard is invisible: --help reaches argparse."""
+    import importlib
+    import sys
+
+    monkeypatch.delenv("M3_DB_BACKEND", raising=False)
+    mod = importlib.import_module(tool)
+    monkeypatch.setattr(sys, "argv", [tool, "--help"])
+    with pytest.raises(SystemExit):
+        mod.main(["--help"]) if tool == "backfill_content_hash" else mod.main()
+
+
+def test_ai_mechanic_refuses_on_postgres(tmp_path):
+    """Its guard sits in the __main__ block, so run it as the operator would."""
+    import os
+    import subprocess
+    import sys
+
+    script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "bin", "ai_mechanic.py")
+    db = tmp_path / "x.db"
+    env = dict(os.environ, M3_DB_BACKEND="postgres")
+    r = subprocess.run([sys.executable, script, "--database", str(db), "--force"],
+                       env=env, capture_output=True, text=True, timeout=120)
+    assert r.returncode != 0
+    assert "SQLite-only" in r.stderr
+    assert not db.exists(), "no SQLite file may be created"
+
+
+def test_doctor_fix_skips_sqlite_file_repairs_on_postgres(monkeypatch):
+    """Each repair acts on a SQLite file; on PG it must be reported as skipped,
+    not run against a stale file and reported fixed."""
+    _force_pg(monkeypatch)
+    import importlib
+    doctor = importlib.import_module("memory.doctor")
+
+    async def _diag():
+        return {"db": {"status": "online"}}
+
+    monkeypatch.setattr(doctor, "memory_doctor_impl", _diag)
+    _no_sqlite(monkeypatch)
+    out = asyncio.run(doctor.memory_doctor_fix_impl())
+    assert {a["action"] for a in out["actions"]} == {
+        "run_migrations", "rebuild_fts5", "embed_backfill", "rebuild_cohesion"}
+    assert all(a["status"] == "skipped" and "postgres" in a["detail"] for a in out["actions"])
+
+
+def test_chatlog_init_skips_sqlite_migrations_on_postgres(monkeypatch):
+    _force_pg(monkeypatch)
+    import chatlog_init
+    monkeypatch.setattr(chatlog_init.subprocess, "run", lambda *a, **k: pytest.fail(
+        "migrate_memory must not be launched on PostgreSQL"))
+    monkeypatch.setattr(chatlog_init, "prompt_yes_no", lambda *a, **k: True)
+    assert chatlog_init.run_migrations() is True
+
+
+def test_selector_reexports_the_single_owner():
+    from m3_core import paths
+    from memory.backends import selector
+    assert selector.require_sqlite_backend is paths.require_sqlite_backend
+    assert selector._VALID == paths.SELECTABLE_BACKENDS
+
+
 def test_guards_are_noop_on_sqlite(monkeypatch):
     """The default (sqlite) backend must not trip any guard — proving these are
     pure fail-loud gates that never affect a normal SQLite deployment."""

@@ -140,8 +140,6 @@ _EXEMPT = {
         "under `_primary_is_sqlite`, the files count under `_pg_files`, and "
         "_recent_write_count now returns its -1 unknown sentinel on non-SQLite "
         "rather than walking candidate FILE paths that cannot exist on PG.",
-    "bin/memory/backends/selector.py":
-        "Defines require_sqlite_backend(), the fail-loud guard FOR this pattern.",
     "bin/enrich/prep.py":
         "Replays a SQLite-DIALECT migration file (executescript + sqlite_master). "
         "Returns early on any non-sqlite backend; PG gets these tables from its "

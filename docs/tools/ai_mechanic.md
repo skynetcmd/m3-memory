@@ -1,8 +1,8 @@
 ---
 tool: bin/ai_mechanic.py
-sha1: 6ea64e52cf4a
-mtime_utc: 2026-09-17T18:03:22.581445+00:00
-generated_utc: 2026-09-17T18:03:36.086792+00:00
+sha1: b7d8d5a179dc
+mtime_utc: 2026-10-04T08:36:30.196358+00:00
+generated_utc: 2026-10-04T08:37:59.923929+00:00
 private: false
 ---
 
@@ -52,7 +52,7 @@ _(none detected)_
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core.paths (require_sqlite_backend)`
 
 ---
 

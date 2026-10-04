@@ -10,14 +10,16 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from m3_sdk import getenv_compat
+from m3_core.paths import SELECTABLE_BACKENDS
+from m3_core.paths import require_sqlite_backend as require_sqlite_backend  # re-export
+from m3_core.paths import resolve_backend_name as _resolve_backend_name
 
 from .base import BackendName, StorageBackend
 
 if TYPE_CHECKING:
     from .dialect import Dialect
 
-_VALID: tuple[BackendName, ...] = ("sqlite", "postgres")
+_VALID: tuple[BackendName, ...] = SELECTABLE_BACKENDS
 
 # Cache the resolved backend per name so capability probes / pools aren't rebuilt
 # on every call. Guarded because MCP tool impls may resolve concurrently.
@@ -33,20 +35,12 @@ _lock = threading.Lock()
 
 
 def resolve_backend_name() -> BackendName:
-    """Resolve the configured backend name from the environment, on every call.
+    """The configured backend name, re-read on every call.
 
-    Precedence mirrors every other m3 flag: ``M3_DB_BACKEND`` env, then the
-    legacy ``DB_BACKEND`` alias (via ``getenv_compat``), then ``sqlite``.
-    An unrecognized value raises rather than defaulting — a typo like
-    ``postgre`` must not silently run SQLite.
+    Delegates to ``m3_core.paths.resolve_backend_name`` — the single owner, kept
+    in that light module so tools that must not import ``memory`` share it.
     """
-    raw = (getenv_compat("M3_DB_BACKEND", "DB_BACKEND", "sqlite") or "sqlite").strip().lower()
-    if raw not in _VALID:
-        raise ValueError(
-            f"M3_DB_BACKEND={raw!r} is not recognized; expected one of {_VALID}. "
-            f"Unset it to use the default 'sqlite'."
-        )
-    return raw  # type: ignore[return-value]
+    return _resolve_backend_name()  # type: ignore[return-value]
 
 
 def active_backend() -> StorageBackend:
@@ -87,31 +81,6 @@ def dialect() -> "Dialect":
     singleton).
     """
     return active_backend().dialect()
-
-
-def require_sqlite_backend(tool: str) -> None:
-    """Fail loud if a SQLite-only tool is run against a PostgreSQL deployment.
-
-    Many maintenance / migration / CLI tools open ``sqlite3.connect`` directly,
-    bypassing the backend seam. On a PostgreSQL-primary deployment that would
-    silently read or WRITE a stale, empty SQLite file instead of the live PG
-    store — a data-correctness hazard that gives no error. Such a tool calls this
-    at entry so an operator who set ``M3_DB_BACKEND=postgres`` gets a clear,
-    actionable refusal instead of silently editing the wrong database.
-
-    ``tool`` is a short human name for the message (e.g. ``"backfill_content_hash"``).
-    Raises ``RuntimeError`` when the active backend is not sqlite; a no-op on
-    sqlite (the default), so it never affects normal SQLite deployments.
-    """
-    name = resolve_backend_name()
-    if name != "sqlite":
-        raise RuntimeError(
-            f"{tool} operates directly on SQLite, but M3_DB_BACKEND={name!r} is "
-            f"selected. Running it would touch a stale SQLite file, not the live "
-            f"{name} store. This tool is SQLite-only; run it against a SQLite "
-            f"deployment, or unset M3_DB_BACKEND. (Refusing rather than silently "
-            f"editing the wrong database.)"
-        )
 
 
 def backend_for(uri: str) -> StorageBackend:

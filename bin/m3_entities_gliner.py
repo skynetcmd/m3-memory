@@ -487,6 +487,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    from m3_core.paths import require_sqlite_backend
+    require_sqlite_backend("m3_entities_gliner")  # opens SQLite files directly; refuse on PostgreSQL
     args = build_parser().parse_args()
     return asyncio.run(_run_async(args))
 

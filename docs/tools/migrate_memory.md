@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_memory.py
-sha1: 356180ee48b6
-mtime_utc: 2026-10-04T07:25:59.008657+00:00
-generated_utc: 2026-10-04T07:29:40.803656+00:00
+sha1: ad7a66c6cb3a
+mtime_utc: 2026-10-04T08:37:49.131190+00:00
+generated_utc: 2026-10-04T08:38:00.746804+00:00
 private: false
 ---
 
@@ -104,6 +104,7 @@ transaction already committed.
 ## Notable external imports
 
 - `m3_core.paths (get_m3_backups_root)`
+- `m3_core.paths (require_sqlite_backend)`
 - `m3_core.paths (resolve_config_file)`
 - `m3_core.paths (resolve_engine_file)`
 
