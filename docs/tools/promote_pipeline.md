@@ -1,8 +1,8 @@
 ---
 tool: bin/promote_pipeline.py
-sha1: 468ba54c9ad9
-mtime_utc: 2026-09-08T10:56:21.285243+00:00
-generated_utc: 2026-09-08T10:59:36.327798+00:00
+sha1: c05617ca9260
+mtime_utc: 2026-10-04T17:52:18.623951+00:00
+generated_utc: 2026-10-04T17:54:42.851167+00:00
 private: false
 ---
 
@@ -20,7 +20,7 @@ Stage 2 (--smoke N / --run): batched judge via LM Studio; distill PROMOTE
 
 ## Entry points
 
-- `def main()` (line 136)
+- `def main()` (line 137)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -61,6 +61,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 - `importlib.util`
 - `m3_core.paths (seam_backend)`
+- `memory.backends (chatlog_table, dialect)`
 
 ---
 

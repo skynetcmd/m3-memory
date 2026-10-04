@@ -144,9 +144,14 @@ def _is_short_user_command(role: str, content: str) -> bool:
     return len(s.split()) <= 4 or s in _SHORT_COMMAND_WORDS
 
 
-def _age_days(created_at: str | None, now_ts: float) -> float:
+def _age_days(created_at: "str | datetime | None", now_ts: float) -> float:
+    """Age in days of a stored timestamp: an ISO-8601 or SQLite text value, or
+    the datetime a TIMESTAMPTZ column returns."""
     if not created_at:
         return 0.0
+    if isinstance(created_at, datetime):
+        dt = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        return max(0.0, (now_ts - dt.timestamp()) / 86400.0)
     s = created_at.replace("Z", "+00:00")
     try:
         dt = datetime.fromisoformat(s)
@@ -193,8 +198,28 @@ def classify(role: str, content: str, importance: float, norm: str,
     return None, "keep:default"
 
 
+_TITLE_ROLES = ("user", "assistant", "system", "tool")
+
+
+def role_from_title_sql(d) -> tuple[str, tuple]:
+    """(CASE expression, params) deriving a chat turn's role from the
+    `<role>@<host_agent>: ...` title convention; '' when no prefix matches.
+
+    The prefixes are bound, not inlined: a literal '%' in a statement that also
+    carries parameters is read as a placeholder by psycopg.
+    """
+    whens, params = [], []
+    for role in _TITLE_ROLES:
+        frag, value = d.literal_prefix_match("title", d.param(), f"{role}@")
+        whens.append(f"WHEN {frag} THEN '{role}'")
+        params.append(value)
+    return "CASE " + " ".join(whens) + " ELSE '' END", tuple(params)
+
+
 def run(db_path: str, args) -> dict:
-    if not os.path.exists(db_path):
+    from memory.backends import active_backend
+    # Only a file-per-database backend has a file to find.
+    if active_backend().name == "sqlite" and not os.path.exists(db_path):
         return {"error": f"DB not found: {db_path}"}
     now_ts = time.time()
     S: dict[str, Any] = {
@@ -248,10 +273,7 @@ def _run_sweep(conn, db_path, args, now_ts, S, _d, _p, _tbl, _is_sqlite) -> dict
             if not _has_column(conn, _d, _tbl, col):
                 return {"error": f"{_tbl}.{col} missing"}
         has_valid_to = _has_column(conn, _d, _tbl, "valid_to")
-        role_sql = """CASE WHEN title LIKE 'user@%' THEN 'user'
-                           WHEN title LIKE 'assistant@%' THEN 'assistant'
-                           WHEN title LIKE 'system@%' THEN 'system'
-                           WHEN title LIKE 'tool@%' THEN 'tool' ELSE '' END"""
+        role_sql, role_params = role_from_title_sql(_d)
         # §4/§8: scope the scan to the ACTIONABLE window. Only rows aged past
         # fresh_days are ever decayed/pruned (fresher noise is kept, see below),
         # so there's no reason to pull the whole chat_log table into Python every
@@ -274,7 +296,7 @@ def _run_sweep(conn, db_path, args, now_ts, S, _d, _p, _tbl, _is_sqlite) -> dict
                                 FROM {_tbl}
                                 WHERE type='chat_log' AND is_deleted=0
                                   AND created_at < {_p}
-                                ORDER BY created_at ASC""", (fresh_cutoff,)).fetchall()
+                                ORDER BY created_at ASC""", role_params + (fresh_cutoff,)).fetchall()
         # PASS 1: build normalized-content cluster sizes (for repeat-status)
         cluster: dict[str, int] = {}
         norms: dict[str, str] = {}

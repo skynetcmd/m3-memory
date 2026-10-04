@@ -80,6 +80,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from chatlog_prune import _age_days, role_from_title_sql  # noqa: F401
 from m3_sdk import getenv_compat
 
 
@@ -167,22 +168,6 @@ def _is_short_user_command(role: str, content: str) -> bool:
 
 
 # ── Decay schedule ─────────────────────────────────────────────────────────
-def _age_days(created_at: str | None, now_ts: float) -> float:
-    if not created_at:
-        return 0.0
-    # Handle ISO 8601 with or without trailing Z and microseconds
-    s = created_at.replace("Z", "+00:00")
-    try:
-        dt = datetime.fromisoformat(s)
-    except ValueError:
-        # Fall back: SQLite "2026-05-07 10:23:45" form (no T, no tz)
-        try:
-            dt = datetime.strptime(s.split(".")[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-        except Exception:
-            return 0.0
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return max(0.0, (now_ts - dt.timestamp()) / 86400.0)
 
 
 def _decay_decision(role: str, content: str, age_days: float, now_ts: float):
@@ -222,7 +207,9 @@ def _has_column(conn, dialect, table: str, col: str) -> bool:
 
 def run_sweep(db_path: str, *, apply: bool, batch_size: int = 1000) -> dict:
     """Walk all chat_log rows, apply decay decisions, return a summary."""
-    if not os.path.exists(db_path):
+    from memory.backends import active_backend
+    # Only a file-per-database backend has a file to find.
+    if active_backend().name == "sqlite" and not os.path.exists(db_path):
         return {"error": f"DB not found: {db_path}"}
 
     now_ts = time.time()
@@ -276,21 +263,16 @@ def run_sweep(db_path: str, *, apply: bool, batch_size: int = 1000) -> dict:
                 # "unflagged_role" bucket and are reported separately. They get the
                 # general-ephemeral schedule (short-command decay does not fire on them)
                 # so misclassification is in the safe direction.
+                role_sql, role_params = role_from_title_sql(_d)
                 cur = conn.execute(f"""
                     SELECT id,
-                           CASE
-                               WHEN title LIKE 'user@%'      THEN 'user'
-                               WHEN title LIKE 'assistant@%' THEN 'assistant'
-                               WHEN title LIKE 'system@%'    THEN 'system'
-                               WHEN title LIKE 'tool@%'      THEN 'tool'
-                               ELSE ''
-                           END AS role,
+                           {role_sql} AS role,
                            content,
                            importance,
                            created_at
                     FROM {_tbl}
                     WHERE type='chat_log' AND is_deleted=0
-                """)
+                """, role_params)
 
                 write_buffer = []
                 for row in cur:

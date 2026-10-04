@@ -62,10 +62,11 @@ def select(db: str, min_age=14.0, lo=120, hi=4000):
 
 
 def _select(c, now, min_age, lo, hi):
-    rows = c.execute("""SELECT id, CASE WHEN title LIKE 'user@%' THEN 'user'
-        WHEN title LIKE 'assistant@%' THEN 'assistant' WHEN title LIKE 'system@%' THEN 'system'
-        WHEN title LIKE 'tool@%' THEN 'tool' ELSE '' END role, content, importance, created_at
-        FROM memory_items WHERE type='chat_log' AND is_deleted=0""").fetchall()
+    from memory.backends import chatlog_table, dialect
+    role_sql, role_params = cp.role_from_title_sql(dialect())
+    rows = c.execute(f"""SELECT id, {role_sql} role, content, importance, created_at
+        FROM {chatlog_table("items")} WHERE type='chat_log' AND is_deleted=0""",
+        role_params).fetchall()
     cluster, norms = defaultdict(int), {}
     for r in rows:
         n = cp._norm_key(r["content"] or ""); norms[r["id"]] = n
