@@ -474,6 +474,23 @@ def _no_existing_install_by_default(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_shell_rc(monkeypatch, tmp_path):
+    """The setup wizard reads and appends to the user's shell rc; point it at a
+    temp file so tests neither depend on nor edit the developer's real one."""
+    persist = sys.modules.get("m3_memory.wizard.persist")
+    if persist is not None and hasattr(persist, "_pick_unix_shell_rc"):
+        real_pick = persist._pick_unix_shell_rc
+
+        def _pick():
+            rc = real_pick()
+            # Only the real home is redirected; a test that set HOME keeps its own.
+            return tmp_path / rc.name if Path(rc).parent == _REAL_HOME else rc
+
+        monkeypatch.setattr(persist, "_pick_unix_shell_rc", _pick)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _real_service_units_untouched():
     """Fail the test that creates, rewrites or deletes a REAL m3 service unit.
 
