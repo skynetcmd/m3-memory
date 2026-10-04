@@ -19,6 +19,20 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Running the test suite no longer changes the machine's installed m3
+  services.** The embed server could be left failing to start, or the dashboard
+  running from the test checkout.
+  **Affected:** contributors on Linux or macOS who ran the suite on a machine
+  with m3 installed; the package runtime is unaffected · **Action:** if the
+  embed server or dashboard misbehaves after a test run, re-run `m3 setup` ·
+  **Data status:** none.
+
+- **The pre-push hook no longer blocks a push that only deletes branches.**
+  **Affected:** contributors with the repo's `.githooks` installed ·
+  **Action:** none · **Data status:** none.
+
 ## [2026.10.4.0] — 2026-10-04 — verified backups, and tools that refuse the wrong store
 
 ### Fixed
