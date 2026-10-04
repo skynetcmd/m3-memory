@@ -217,6 +217,7 @@ def clear_failover_caches() -> None:
     global _LLM_ENDPOINT_CACHE, _SMALL_LLM_ENDPOINT_CACHE, _EMBED_ENDPOINT_CACHE
     global _EMBED_NEG_CACHE_TS
     _SYNC_MODEL_CACHE.clear()
+    _USABILITY_CACHE.clear()
     _LLM_ENDPOINT_CACHE = None
     _SMALL_LLM_ENDPOINT_CACHE = None
     _EMBED_ENDPOINT_CACHE = None
@@ -401,6 +402,142 @@ async def discover_model_async(
         _SYNC_MODEL_CACHE[endpoint] = best
     logger.info(f"[llm_failover] async discovery {endpoint} -> {best}")
     return best
+
+
+class LLMUnavailable(httpx.HTTPError):
+    """No configured endpoint can answer a generation request: each one is
+    unreachable, or reachable but lists no generative model.
+
+    A SYSTEM state, not a per-request failure. Callers working through a batch
+    stop the batch instead of failing every item, and must not charge it to an
+    item's retry budget (§3: classify a failure by what it says about the
+    system). Subclasses httpx.HTTPError so existing handlers keep working."""
+
+
+# Endpoint usability, cached for BOTH outcomes so an outage costs one /models
+# probe per endpoint per TTL instead of one per call. Keyed by endpoint.
+_USABILITY_CACHE: dict = {}
+try:
+    USABILITY_TTL = float(os.environ.get("M3_LLM_USABILITY_TTL", "60"))
+except ValueError:
+    USABILITY_TTL = 60.0
+
+
+def cached_usability(endpoint: str) -> "Optional[tuple[bool, str]]":
+    """(usable, observed detail) from a probe younger than USABILITY_TTL, else
+    None. Never touches the network."""
+    hit = _USABILITY_CACHE.get(endpoint)
+    if hit is None or time.monotonic() - hit[0] > USABILITY_TTL:
+        return None
+    return hit[1], hit[2]
+
+
+def first_usable_endpoint_cached() -> Optional[str]:
+    """The first LLM_ENDPOINTS entry not KNOWN to be unusable, from the cache
+    alone (an unprobed endpoint counts as a candidate). None when every
+    endpoint is known unusable. For sync routing that must not block."""
+    for ep in LLM_ENDPOINTS:
+        known = cached_usability(ep)
+        if known is None or known[0]:
+            return ep
+    return None
+
+
+async def probe_usability(
+    client: httpx.AsyncClient, endpoint: str, token: Optional[str] = None,
+    *, fresh: bool = False,
+) -> "tuple[bool, str]":
+    """Ask ``endpoint`` whether it can answer: GET /models and require a
+    generative model (the same filter as discovery, via _pick_best_model).
+    Returns (usable, observed detail); cached per endpoint for USABILITY_TTL.
+    ``fresh=True`` skips the cache: after a failed call, to tell "the server
+    went away" from "this request failed"."""
+    known = None if fresh else cached_usability(endpoint)
+    if known is not None:
+        return known
+    tok = token if token is not None else _default_lm_token()
+    try:
+        r = await client.get(
+            f"{endpoint.rstrip('/')}/models",
+            headers=_auth_headers(tok),
+            timeout=httpx.Timeout(CONNECT_TIMEOUT, read=READ_TIMEOUT),
+        )
+        if r.status_code != 200:
+            result = (False, f"GET /models -> HTTP {r.status_code}: {r.text[:200]}")
+        else:
+            best = _pick_best_model(r.json())
+            result = ((True, f"serves {best}") if best
+                      else (False, "reachable, but lists no generative model (none loaded)"))
+    except Exception as e:  # noqa: BLE001 — unreachable is an answer, not a crash
+        result = (False, f"unreachable: {type(e).__name__}: {e}")
+    _USABILITY_CACHE[endpoint] = (time.monotonic(), result[0], result[1])
+    return result
+
+
+async def require_usable_endpoint(
+    client: httpx.AsyncClient, token: Optional[str] = None, *, fresh: bool = False,
+) -> str:
+    """The first LLM_ENDPOINTS entry that can answer, or raise LLMUnavailable
+    naming what each endpoint reported."""
+    observed = []
+    for ep in LLM_ENDPOINTS:
+        usable, detail = await probe_usability(client, ep, token, fresh=fresh)
+        if usable:
+            return ep
+        observed.append(f"{ep}: {detail}")
+    raise LLMUnavailable(
+        "observed: no local LLM endpoint can answer — "
+        + ("; ".join(observed) if observed else "LLM_ENDPOINTS is empty")
+        + ". inspect: load a model in the local server (LM Studio: `lms load "
+        "<model>`; Ollama: `ollama run <model>`), or set M3_LLM_ENDPOINTS_CSV."
+    )
+
+
+# Outage reporting, shared so each consumer (distillation, entity extraction,
+# ...) cannot grow its own spam. WARNING when an outage starts, again at most
+# every OUTAGE_REPEAT_S while it lasts, INFO on recovery; DEBUG in between.
+_OUTAGE_STATE: dict = {}  # component -> (first_seen, last_warned)
+try:
+    OUTAGE_REPEAT_S = float(os.environ.get("M3_LLM_OUTAGE_REPEAT_S", "3600"))
+except ValueError:
+    OUTAGE_REPEAT_S = 3600.0
+
+
+def report_unavailable(log: logging.Logger, component: str, err: BaseException) -> None:
+    now = time.monotonic()
+    state = _OUTAGE_STATE.get(component)
+    if state is None:
+        _OUTAGE_STATE[component] = (now, now)
+        log.warning(f"{component}: local LLM unavailable, pausing until it returns. {err}")
+    elif now - state[1] >= OUTAGE_REPEAT_S:
+        _OUTAGE_STATE[component] = (state[0], now)
+        log.warning(f"{component}: local LLM still unavailable "
+                    f"({(now - state[0]) / 60:.0f} min). {err}")
+    else:
+        log.debug(f"{component}: local LLM unavailable (reported). {err}")
+
+
+def report_available(log: logging.Logger, component: str) -> None:
+    state = _OUTAGE_STATE.pop(component, None)
+    if state is not None:
+        log.info(f"{component}: local LLM available again after "
+                 f"{(time.monotonic() - state[0]) / 60:.0f} min.")
+
+
+def raise_for_status_with_body(resp: httpx.Response) -> None:
+    """resp.raise_for_status(), but the exception text carries the server's
+    error body. httpx's own message omits it, which turned LM Studio's
+    "No models loaded" into a bare "400 Bad Request" in every log line."""
+    if resp.is_success:
+        return
+    try:
+        body = resp.text[:300].strip()
+    except Exception:  # noqa: BLE001 — a body we cannot read is still a failure
+        body = "<unreadable body>"
+    raise httpx.HTTPStatusError(
+        f"{resp.status_code} {resp.reason_phrase} from {resp.request.url}: {body}",
+        request=resp.request, response=resp,
+    )
 
 
 def parse_model_size(model_id: str) -> float:

@@ -1,8 +1,8 @@
 ---
 tool: bin/llm_failover.py
-sha1: 7cb128d2f12b
-mtime_utc: 2026-09-17T18:03:22.583444+00:00
-generated_utc: 2026-09-17T18:03:36.380384+00:00
+sha1: 46d733390b57
+mtime_utc: 2026-10-04T03:36:39.548050+00:00
+generated_utc: 2026-10-04T03:41:41.227082+00:00
 private: false
 ---
 
@@ -35,7 +35,9 @@ _(no argparse arguments detected)_
 - `LM_API_TOKEN`
 - `M3_EMBED_DISCOVERY_NEG_TTL`
 - `M3_LLM_CONNECT_TIMEOUT`
+- `M3_LLM_OUTAGE_REPEAT_S`
 - `M3_LLM_URL`
+- `M3_LLM_USABILITY_TTL`
 
 ---
 
@@ -50,7 +52,7 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.get()  → `f"{endpoint.rstrip('/')}/models"`` (line 320)
+- `httpx.get()  → `f"{endpoint.rstrip('/')}/models"`` (line 321)
 
 
 ---

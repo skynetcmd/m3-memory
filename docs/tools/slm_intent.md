@@ -1,8 +1,8 @@
 ---
 tool: bin/slm_intent.py
-sha1: 624633b295dc
-mtime_utc: 2026-08-08T12:37:41.474132+00:00
-generated_utc: 2026-08-08T14:40:50.102533+00:00
+sha1: 37239428b4c6
+mtime_utc: 2026-10-04T03:41:16.949512+00:00
+generated_utc: 2026-10-04T03:41:41.587228+00:00
 private: false
 ---
 
@@ -85,7 +85,10 @@ _(no argparse arguments detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
-- `llm_failover (LLM_ENDPOINTS, is_lmstudio_url)`
+- `llm_failover (LLMUnavailable, require_usable_endpoint)`
+- `llm_failover (LLM_ENDPOINTS, LLMUnavailable, first_usable_endpoint_cached)`
+- `llm_failover (LLM_ENDPOINTS, first_usable_endpoint_cached, is_lmstudio_url)`
+- `llm_failover (raise_for_status_with_body)`
 - `llm_failover (suppresses_thinking_via_effort)`
 
 ---
@@ -94,9 +97,9 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 517)
-- `httpx.AsyncClient()` (line 574)
-- `httpx.AsyncClient()` (line 624)
+- `httpx.AsyncClient()` (line 555)
+- `httpx.AsyncClient()` (line 612)
+- `httpx.AsyncClient()` (line 662)
 
 
 ---

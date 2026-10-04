@@ -315,8 +315,10 @@ def localize_endpoint(url: str, backend: str, *, prefer_native: bool = False) ->
     if not _is_loopback(url):
         return url, backend
     try:
-        from llm_failover import LLM_ENDPOINTS, is_lmstudio_url
-        base = (LLM_ENDPOINTS or [None])[0]
+        from llm_failover import LLM_ENDPOINTS, first_usable_endpoint_cached, is_lmstudio_url
+        # Skip an endpoint already KNOWN unable to answer (cache only — this is
+        # sync and must not block); fall back to configured order when all are.
+        base = first_usable_endpoint_cached() or (LLM_ENDPOINTS or [None])[0]
     except Exception:  # noqa: BLE001 — advisory; keep the profile's own url
         base = None
     if not base:
@@ -359,8 +361,19 @@ async def _call_model(
     Raises httpx.HTTPError / KeyError / json.JSONDecodeError / TimeoutError
     to the caller, which logs + returns None/[] per its contract.
     """
+    from llm_failover import raise_for_status_with_body
+
     token = _resolve_api_key(prof.api_key_service)
     headers = {"Content-Type": "application/json"}
+    local = _is_loopback(prof.url)
+    if local:
+        # Every local endpoint was found unable to answer within USABILITY_TTL:
+        # do not POST again (cache only — a healthy system pays nothing here).
+        from llm_failover import LLM_ENDPOINTS, LLMUnavailable, first_usable_endpoint_cached
+        if LLM_ENDPOINTS and first_usable_endpoint_cached() is None:
+            raise LLMUnavailable(
+                "observed: every local LLM endpoint was recently found unable to "
+                "answer (cached). inspect: load a model in the local server.")
     # A loopback profile follows the shared LLM seam so it hits the local server
     # that is actually running (not a pinned port that may be dead). prefer_native
     # keeps LM Studio's Anthropic wire format for its prompt caching, but routes
@@ -391,8 +404,12 @@ async def _call_model(
             "messages": [{"role": "user", "content": user_text}],
             "temperature": prof.temperature,
         }
-        resp = await client.post(url, headers=headers, json=payload, timeout=prof.timeout_s)
-        resp.raise_for_status()
+        try:
+            resp = await client.post(url, headers=headers, json=payload, timeout=prof.timeout_s)
+            raise_for_status_with_body(resp)
+        except (httpx.HTTPStatusError, httpx.TransportError) as e:
+            await _raise_if_unavailable(client, token, local, e)
+            raise
         data = resp.json()
         # Anthropic: content is a list of content blocks. Concat all text blocks.
         blocks = data.get("content", [])
@@ -422,10 +439,31 @@ async def _call_model(
             payload["reasoning_effort"] = "none"
     except Exception:  # noqa: BLE001
         pass
-    resp = await client.post(url, headers=headers, json=payload, timeout=prof.timeout_s)
-    resp.raise_for_status()
+    try:
+        resp = await client.post(url, headers=headers, json=payload, timeout=prof.timeout_s)
+        raise_for_status_with_body(resp)
+    except (httpx.HTTPStatusError, httpx.TransportError) as e:
+        await _raise_if_unavailable(client, token, local, e)
+        raise
     data = resp.json()
     return data["choices"][0]["message"]["content"]
+
+
+async def _raise_if_unavailable(
+    client: httpx.AsyncClient, token: Optional[str], local: bool, err: Exception,
+) -> None:
+    """After a failed local call, a FRESH usability probe tells "no local server
+    can answer" (raise LLMUnavailable, a system state, so batch callers stop
+    instead of failing every item) from "this request failed" (return; the
+    caller re-raises the original, which now carries the server's body). The
+    healthy path never reaches this."""
+    if not local:
+        return
+    from llm_failover import LLMUnavailable, require_usable_endpoint
+    try:
+        await require_usable_endpoint(client, token, fresh=True)
+    except LLMUnavailable as down:
+        raise down from err
 
 
 def _apply_post(raw: str, profile: Profile) -> str:
