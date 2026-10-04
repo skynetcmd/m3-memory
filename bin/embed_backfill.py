@@ -54,7 +54,7 @@ import os
 import sqlite3
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -77,29 +77,74 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from embed_sweep_lib import Counters as _LibCounters  # noqa: E402
 from embed_sweep_lib import run_embed_loop
 
-# SQL fragments come from the backend seam so this module cannot drift from the
-# dialect (DESIGN_PHILOSOPHIES §10a). This module still opens SQLite by path
-# (Finding L: the connection layer is a separate port), so the SQLite dialect is
-# the correct one to resolve here -- but the FRAGMENTS now have exactly one
-# definition, shared with every other caller.
-try:  # pragma: no cover - import shim for standalone execution
-    from memory.backends.sqlite_backend import SqliteDialect as _SqliteDialect
-    _SQL = _SqliteDialect(backend="sqlite", param_style="qmark")
-    _byte_length = _SQL.byte_length
-    _has_content = _SQL.has_content
-    _now_minus_days = _SQL.now_minus_days
-except Exception:  # pragma: no cover
-    def _byte_length(column: str) -> str:
+class _StandaloneSqliteDialect:
+    """The few SQLite fragments this module needs, for a standalone run without
+    the payload on sys.path. With the payload present every fragment comes from
+    the active backend's dialect (see _sql)."""
+
+    def param(self) -> str:
+        return "?"
+
+    def placeholder(self, n: int = 1) -> str:
+        return ", ".join(["?"] * n)
+
+    def byte_length(self, column: str) -> str:
         return f"LENGTH(CAST({column} AS BLOB))"
 
-    def _has_content(column: str) -> str:
+    def has_content(self, column: str) -> str:
         return f"LENGTH(TRIM(COALESCE({column}, ''))) > 0"
 
-    def _now_minus_days(days_placeholder: str) -> str:
+    def now_minus_days(self, days_placeholder: str) -> str:
         # strftime, not datetime(): the columns store "...T..Z" and a bare
         # datetime() bound matches every same-day row. Matches the seam.
         return (f"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', "
                 f"'-' || {days_placeholder} || ' days')")
+
+    def insert_or_ignore(self) -> str:
+        return "INSERT OR IGNORE INTO"
+
+    def on_conflict_ignore(self, **_kw) -> str:
+        return ""
+
+    def table_exists(self, table: str) -> tuple:
+        return ("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", (table,))
+
+    def columns_of(self, table: str) -> tuple:
+        return (f"SELECT name FROM pragma_table_info('{table}')", ())
+
+
+def _sql():
+    """The active backend's dialect; the SQLite subset when standalone."""
+    try:
+        from memory.backends import dialect  # type: ignore
+        return dialect()
+    except Exception:  # pragma: no cover - standalone fallback
+        return _StandaloneSqliteDialect()
+
+
+def _is_sqlite() -> bool:
+    """True when the active backend stores each database as a file."""
+    try:
+        from memory.backends import active_backend  # type: ignore
+        return active_backend().name == "sqlite"
+    except Exception:  # pragma: no cover - standalone fallback
+        return True
+
+
+def _tables(args: argparse.Namespace) -> tuple[str, str]:
+    """(items, embeddings) table names for the store being swept.
+
+    On SQLite the chatlog is a separate file with the core table names, so
+    `--db` alone picks the store. Other backends hold both stores in one
+    database under different table names, so `--store` picks them.
+    """
+    if getattr(args, "store", "core") == "chatlog":
+        try:
+            from memory.backends import chatlog_table  # type: ignore
+            return chatlog_table("items"), chatlog_table("embeddings")
+        except Exception:  # pragma: no cover - standalone fallback
+            pass
+    return "memory_items", "memory_embeddings"
 
 
 
@@ -117,7 +162,15 @@ def _bound_db(db_path):
     Falls back to a raw connection when the seam is unavailable (standalone
     execution without the payload on sys.path). Read-mostly queries only —
     writes still funnel through `mc._db()` in the write callback, as before.
+
+    On a backend that is not file-per-database there is one pooled store and
+    `db_path` does not select it; the backend's own connection is used.
     """
+    if not _is_sqlite():
+        from memory.db import _db  # type: ignore
+        with _db() as conn:
+            yield conn
+        return
     try:
         from m3_core.context import M3Context  # type: ignore
         from m3_sdk import active_database  # type: ignore
@@ -272,41 +325,31 @@ def _lockfile_guard(path: Path | None):
 
 
 # ── Schema sanity check ───────────────────────────────────────────────────
-def _verify_schema(db_path: Path) -> None:
-    """Confirm the target DB has memory_items + memory_embeddings tables
-    in the shape we expect. Raise with a clear actionable message if not."""
+def _verify_schema(db_path: Path, store: str = "core") -> None:
+    """Confirm the target store has its items + embeddings tables in the shape
+    we expect. Raise with a clear actionable message if not."""
     # No .exists() gate: on PostgreSQL there is no DB file, and raising
     # FileNotFoundError there would abort a backfill against a healthy store.
-    _cm = _bound_db(db_path)
-    conn = _cm.__enter__()
-    try:
-        for tbl in ("memory_items", "memory_embeddings"):
-            row = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (tbl,),
-            ).fetchone()
-            if not row:
+    d = _sql()
+    items, embeddings = _tables(argparse.Namespace(store=store))
+    required = {
+        items: ("id", "content", "type", "variant", "user_id"),
+        embeddings: ("memory_id", "embedding", "content_hash"),
+    }
+    with _bound_db(db_path) as conn:
+        for tbl, cols in required.items():
+            if conn.execute(*d.table_exists(tbl)).fetchone() is None:
                 raise RuntimeError(
                     f"Table {tbl!r} not found in {db_path}. "
                     f"Run `python bin/migrate_memory.py --db {db_path} up` first."
                 )
-        # Probe for required columns
-        mi_cols = {r[1] for r in conn.execute("PRAGMA table_info(memory_items)")}
-        for col in ("id", "content", "type", "variant", "user_id"):
-            if col not in mi_cols:
-                raise RuntimeError(
-                    f"memory_items.{col} missing from {db_path}. "
-                    f"DB schema is too old; run migrate_memory.py up."
-                )
-        me_cols = {r[1] for r in conn.execute("PRAGMA table_info(memory_embeddings)")}
-        for col in ("memory_id", "embedding", "content_hash"):
-            if col not in me_cols:
-                raise RuntimeError(
-                    f"memory_embeddings.{col} missing from {db_path}. "
-                    f"DB schema is too old; run migrate_memory.py up."
-                )
-    finally:
-        _cm.__exit__(None, None, None)
+            have = {r[0] for r in conn.execute(*d.columns_of(tbl)).fetchall()}
+            for col in cols:
+                if col not in have:
+                    raise RuntimeError(
+                        f"{tbl}.{col} missing from {db_path}. "
+                        f"DB schema is too old; run migrate_memory.py up."
+                    )
 
 
 # ── Build the candidate-row query ─────────────────────────────────────────
@@ -331,10 +374,13 @@ def _build_query(
     NULL-safe on every column. Uses the existing index on
     memory_items.id (PK) and the memory_embeddings.memory_id index.
     """
+    d = _sql()
+    p = d.param()
+    items, embeddings = _tables(args)
     where = [
         "COALESCE(mi.is_deleted, 0) = 0",
-        _has_content("mi.content"),
-        "NOT EXISTS (SELECT 1 FROM memory_embeddings me WHERE me.memory_id = mi.id)",
+        d.has_content("mi.content"),
+        f"NOT EXISTS (SELECT 1 FROM {embeddings} me WHERE me.memory_id = mi.id)",
     ]
     params: list = []
 
@@ -346,56 +392,50 @@ def _build_query(
     # 174MB of logs). Mirrors the per-row cap applied during the sweep, so the
     # gate and the sweep now agree on what "pending" means.
     #
-    # DIALECT: the byte-length fragment now comes from the seam
-    # (_byte_length -> Dialect.byte_length), so a PostgreSQL port gets
-    # octet_length() for free instead of needing this call site edited. The
-    # module still opens SQLite by path (Finding L), which is why the SQLite
-    # dialect is resolved above; the backend-agnostic protection against the
-    # same livelock is _MAX_DRAIN_TICKS in m3_cognitive_loop, which bounds the
-    # idle-drain burst no matter which store reports the un-drainable work.
+    # The backend-agnostic protection against the same livelock is
+    # _MAX_DRAIN_TICKS in m3_cognitive_loop, which bounds the idle-drain burst
+    # no matter which store reports the un-drainable work.
     # Only exclude them when the sweep would genuinely drop them. With
     # --subdivide-oversize (the default) they ARE drainable — embed_many splits
     # and mean-pools them — so they must stay in the candidate set and in
     # _count_pending, or the loop would never wake up to process them.
     max_row_bytes = getattr(args, "max_row_bytes", None)
     if max_row_bytes and not getattr(args, "subdivide_oversize", False):
-        where.append(f"{_byte_length('mi.content')} <= ?")
+        where.append(f"{d.byte_length('mi.content')} <= {p}")
         params.append(int(max_row_bytes))
 
     if after_id is not None:
-        where.append("mi.id > ?")
+        where.append(f"mi.id > {p}")
         params.append(after_id)
     if args.variant:
-        placeholders = ",".join("?" * len(args.variant))
-        where.append(f"mi.variant IN ({placeholders})")
+        where.append(f"mi.variant IN ({d.placeholder(len(args.variant))})")
         params.extend(args.variant)
     if args.type:
-        placeholders = ",".join("?" * len(args.type))
-        where.append(f"mi.type IN ({placeholders})")
+        where.append(f"mi.type IN ({d.placeholder(len(args.type))})")
         params.extend(args.type)
     if args.user_id:
-        where.append("COALESCE(mi.user_id, '') = ?")
+        where.append(f"COALESCE(mi.user_id, '') = {p}")
         params.append(args.user_id)
     if args.scope:
-        where.append("COALESCE(mi.scope, '') = ?")
+        where.append(f"COALESCE(mi.scope, '') = {p}")
         params.append(args.scope)
     if args.id_prefix:
-        where.append("mi.id LIKE ?")
+        where.append(f"mi.id LIKE {p}")
         params.append(f"{args.id_prefix.lower()}%")
     if args.max_age_days is not None:
         # Older than N days = created_at < (now - N days). The expression comes
         # from the seam: `datetime('now', ?)` binding a "-N days" MODIFIER
         # STRING is SQLite-only and raises on PostgreSQL. now_minus_days() binds
         # a plain INTEGER instead, which both dialects accept.
-        where.append(f"mi.created_at < {_now_minus_days('?')}")
+        where.append(f"mi.created_at < {d.now_minus_days(p)}")
         params.append(int(args.max_age_days))
 
     sql = f"""
         SELECT mi.id, mi.content, mi.title, mi.metadata_json
-        FROM memory_items mi
+        FROM {items} mi
         WHERE {' AND '.join(where)}
         ORDER BY mi.id
-        LIMIT ?
+        LIMIT {p}
     """
     return sql, params
 
@@ -427,13 +467,15 @@ def count_oversize_excluded(db_path: Path, args: argparse.Namespace) -> int:
     max_row_bytes = getattr(args, "max_row_bytes", None)
     if not max_row_bytes or getattr(args, "subdivide_oversize", False):
         return 0
+    d = _sql()
+    items, embeddings = _tables(args)
     sql = f"""
-        SELECT COUNT(*) FROM memory_items mi
+        SELECT COUNT(*) FROM {items} mi
         WHERE COALESCE(mi.is_deleted, 0) = 0
-          AND {_has_content("mi.content")}
+          AND {d.has_content("mi.content")}
           AND NOT EXISTS (
-              SELECT 1 FROM memory_embeddings me WHERE me.memory_id = mi.id)
-          AND {_byte_length("mi.content")} > ?
+              SELECT 1 FROM {embeddings} me WHERE me.memory_id = mi.id)
+          AND {d.byte_length("mi.content")} > {d.param()}
     """
     try:
         with _bound_db(db_path) as conn:
@@ -519,13 +561,19 @@ async def _run_sweep_inner(args: argparse.Namespace, counters: Counters) -> int:
     # memory_core's connection pool (keeps WAL / busy_timeout behavior
     # consistent with the rest of the codebase). Returns True iff a row
     # was newly written.
+    d = _sql()
+    _, embeddings = _tables(args)
+    insert_sql = (
+        f"{d.insert_or_ignore()} {embeddings} "
+        "(id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
+        f"VALUES ({d.placeholder(7)}) {d.on_conflict_ignore()}"
+    ).rstrip()
+
     def _write(mid: str, vec: list[float], model_str: str, content_hash: str) -> bool:
         now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with mc._db() as db:
             cur = db.execute(
-                "INSERT OR IGNORE INTO memory_embeddings "
-                "(id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                insert_sql,
                 (
                     _new_uuid(),
                     mid,
@@ -558,7 +606,8 @@ async def _run_sweep_inner(args: argparse.Namespace, counters: Counters) -> int:
     # leak is restored on exit, the binding has to be explicit here or writes
     # would target the MAIN db while reads came from the swept one. ContextVars
     # propagate across `await` within a task, so this covers the whole drive.
-    with _sweep_binding(args.db):
+    # Not needed on a backend with one pooled store: mc._db() reaches it anyway.
+    with (_sweep_binding(args.db) if _is_sqlite() else nullcontext()):
         await run_embed_loop(
             fetch_candidates=_fetch,
             write_embedding=_write,
@@ -646,6 +695,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sel = ap.add_argument_group("selection")
     sel.add_argument("--db", type=Path, default=Path(os.environ.get("M3_DATABASE", str(DEFAULT_DB))),
                      help=f"Target DB. Default: $M3_DATABASE or {DEFAULT_DB}")
+    sel.add_argument("--store", choices=("core", "chatlog"), default="core",
+                     help="Which store to sweep on a backend that keeps both in one "
+                          "database (PostgreSQL). On SQLite --db selects the store.")
     sel.add_argument("--variant", action="append", default=[],
                      help="Filter to one variant. Repeatable for OR.")
     sel.add_argument("--type", action="append", default=[],
@@ -727,7 +779,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Schema sanity
     try:
-        _verify_schema(args.db)
+        _verify_schema(args.db, args.store)
     except (FileNotFoundError, RuntimeError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2

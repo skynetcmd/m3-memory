@@ -904,6 +904,30 @@ def _embed_target_dbs(core_db: Optional[str]) -> list[str]:
     return out
 
 
+def _embed_targets(core_db: Optional[str]) -> list[tuple[Optional[str], str]]:
+    """(db, store) pairs the embed pass drains.
+
+    SQLite keeps each store in its own file, so the targets are the existing
+    files from _embed_target_dbs. Other backends keep the core and chatlog
+    stores in one database, so both stores are targets and `db` is unused.
+    """
+    from memory.backends import active_backend
+    if active_backend().name == "sqlite":
+        return [(p, "core") for p in _embed_target_dbs(core_db)]
+    return [(None, "core"), (None, "chatlog")]
+
+
+def _backfill_argv(db: Optional[str], store: str, limit: int) -> list[str]:
+    argv = ["--store", store, "--limit", str(limit)]
+    if db is not None:
+        argv = ["--db", str(db)] + argv
+    return argv
+
+
+def _target_label(db: Optional[str], store: str) -> str:
+    return os.path.basename(db) if db is not None else f"{store} store"
+
+
 def has_spill_work() -> bool:
     """Are there chatlog spill files waiting to be drained into a store?
 
@@ -947,14 +971,19 @@ def has_embed_work(core_db: Optional[str]) -> bool:
         return True
     try:
         import embed_backfill
-        for db_path in _embed_target_dbs(core_db):
-            args = embed_backfill._parse_args(["--db", str(db_path), "--limit", "1"])
+        for db_path, store in _embed_targets(core_db):
+            args = embed_backfill._parse_args(_backfill_argv(db_path, store, 1))
             if embed_backfill._count_pending(args.db, args) > 0:
                 return True
         return False
     except Exception as e:
-        logger.debug(f"Embed-backfill work check failed (non-fatal): {e}")
-        return False  # conservative: don't spin the embedder unless we're sure
+        # Fails closed, but visibly: a store that will not answer must not look
+        # like an idle loop.
+        logger.warning(
+            "observed: embed work-gate probe failed (%s: %s). possible: store "
+            "is locked, offline, or its tables are missing. inspect: `m3 doctor`. "
+            "Assuming NO embed work this cycle.", type(e).__name__, e)
+        return False
 
 
 def _checkpoint_wal(db_path: Optional[str]) -> None:
@@ -1113,17 +1142,17 @@ async def run_embed_pass(args):
     # is a separate file; sweeping args.database alone left it permanently
     # unembedded. Each store is swept independently so a failure on one (a
     # locked chatlog, say) still lets the other drain.
-    for db_path in _embed_target_dbs(args.database):
+    for db_path, store in _embed_targets(args.database):
         try:
             bf_args = embed_backfill._parse_args(
-                ["--db", str(db_path), "--limit", str(args.limit_per_pass)]
+                _backfill_argv(db_path, store, args.limit_per_pass)
             )
             counters = embed_backfill.Counters()
             await embed_backfill._run_sweep(bf_args, counters)
             if counters.embedded:
                 logger.info(
                     f"Embed-backfill: {counters.embedded} rows embedded in "
-                    f"{os.path.basename(db_path)}"
+                    f"{_target_label(db_path, store)}"
                 )
             elif counters.scanned:
                 # SILENT ZERO (§3). Logging only successes made a 30-hour
@@ -1135,7 +1164,7 @@ async def run_embed_pass(args):
                 # observed; never assert a cause the code has not confirmed.
                 logger.warning(
                     f"Embed-backfill: observed {counters.scanned} row(s) scanned "
-                    f"and 0 embedded in {os.path.basename(db_path)} "
+                    f"and 0 embedded in {_target_label(db_path, store)} "
                     f"(failed batches: {counters.failed_batches}, content "
                     f"failures: {counters.content_failures}) — possible: no "
                     f"embedder tier is returning vectors, or every row was "
@@ -1144,7 +1173,7 @@ async def run_embed_pass(args):
                 )
         except Exception as e:
             logger.error(
-                f"observed: embed-backfill pass failed on {os.path.basename(db_path)} "
+                f"observed: embed-backfill pass failed on {_target_label(db_path, store)} "
                 f"({type(e).__name__}: {e}). "
                 f"possible: embedder is down, "
                 f"store query failed, or an oversized row was skipped. inspect: "

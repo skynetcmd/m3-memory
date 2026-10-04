@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_backfill.py
-sha1: 864d570382a9
-mtime_utc: 2026-09-21T23:52:26.722969+00:00
-generated_utc: 2026-09-21T23:59:06.693867+00:00
+sha1: 08baddd6b067
+mtime_utc: 2026-10-04T17:42:36.261683+00:00
+generated_utc: 2026-10-04T17:54:42.422523+00:00
 private: false
 ---
 
@@ -60,7 +60,7 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 
 ## Entry points
 
-- `def main()` (line 725)
+- `def main()` (line 777)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -70,6 +70,7 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
 | `--db` | f'Target DB. Default: $M3_DATABASE or {DEFAULT_DB}' | `Path(os.environ.get('M3_DATABASE', str(DEFAULT_DB)))` |  | Path |  |
+| `--store` | Which store to sweep on a backend that keeps both in one database (PostgreSQL). On SQLite --db selects the store. | `core` |  | str |  |
 | `--variant` | Filter to one variant. Repeatable for OR. | `[]` |  | append |  |
 | `--type` | Filter to one memory type. Repeatable for OR. | `[]` |  | append |  |
 | `--user-id` | Filter to one user_id. | None |  | str |  |
@@ -113,7 +114,7 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 
 **sqlite**
 
-- `sqlite3.connect()  → `str(db_path)`` (line 125)
+- `sqlite3.connect()  → `str(db_path)`` (line 178)
 
 
 ---
@@ -122,7 +123,10 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 
 - `m3_core.context (M3Context)`
 - `m3_core.paths (_looks_like_dsn)`
-- `memory.backends.sqlite_backend (SqliteDialect)`
+- `memory.backends (active_backend)`
+- `memory.backends (chatlog_table)`
+- `memory.backends (dialect)`
+- `memory.db (_db)`
 
 ---
 
