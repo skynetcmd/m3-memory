@@ -389,8 +389,9 @@ def test_doctor_says_installed_when_bridge_matches_config(tmp_path, monkeypatch,
     # this, find_bridge would resolve the real dev-checkout bridge and doctor
     # would (correctly) report divergence instead of 'installed'.
     monkeypatch.setattr(installer, "bin_dir", lambda: bridge.parent)
+    from m3_memory import __version__
     monkeypatch.setattr(installer, "load_config", lambda: {
-        "version": "2026.6.27.0", "tag": "v2026.6.27.0", "installed_at": "now",
+        "version": __version__, "tag": f"v{__version__}", "installed_at": "now",
         "bridge_path": str(bridge), "repo_path": str(bridge.parent.parent),
     })
 

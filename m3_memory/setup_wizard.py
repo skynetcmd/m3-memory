@@ -1437,7 +1437,10 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
                     pass
             _ok(f"  wiped {wiped} __pycache__ dirs")
         else:
-            _warn("  skipped __pycache__ wipe — stale bytecode may load")
+            _warn("  skipped __pycache__ wipe ("
+                  + ("non-interactive; pass --clean-cache to wipe"
+                     if args.non_interactive else "declined")
+                  + ") — stale bytecode may load")
     else:
         _ok("  no stale __pycache__ to wipe")
 

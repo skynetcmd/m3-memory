@@ -390,21 +390,21 @@ def _roots_section() -> None:
     except Exception:  # noqa: BLE001 — informational only
         return
 
-    def _src(env_name: str) -> str:
+    def _src(env_name: str, default: str) -> str:
         if os.environ.get(env_name):
             return f"({env_name} env)"
         if os.environ.get("M3_MEMORY_ROOT"):
             return "(derived from M3_MEMORY_ROOT)"
-        return "(default ~/.m3)"
+        return f"(default {default})"
 
     print()
     print("decoupled roots:")
     mem = get_m3_root()
     cfg_root = get_m3_config_root()
     eng_root = get_m3_engine_root()
-    print(f"  memory root (repo/state): {mem}  {_src('M3_MEMORY_ROOT')}")
-    print(f"  config root:              {cfg_root}  {_src('M3_CONFIG_ROOT')}")
-    print(f"  engine root (DBs):        {eng_root}  {_src('M3_ENGINE_ROOT')}")
+    print(f"  memory root (repo/state): {mem}  {_src('M3_MEMORY_ROOT', '~/.m3-memory')}")
+    print(f"  config root:              {cfg_root}  {_src('M3_CONFIG_ROOT', '~/.m3/config')}")
+    print(f"  engine root (DBs):        {eng_root}  {_src('M3_ENGINE_ROOT', '~/.m3/engine')}")
 
     # Engine DBs presence — the thing users actually care about.
     eng = Path(eng_root)

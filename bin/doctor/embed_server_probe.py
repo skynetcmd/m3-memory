@@ -131,10 +131,14 @@ def run(brief: bool = False) -> int:
         )
         if probe.returncode != 0 and "USAGE" in (probe.stdout or "") + (probe.stderr or ""):
             sub = "status"
+            # Captured in both modes: an uncaptured child writes straight to the
+            # terminal, ahead of this process's buffered section header.
             r = subprocess.run(
-                [exe, "status"], capture_output=brief, text=True,
+                [exe, "status"], capture_output=True, text=True,
                 timeout=TIMEOUT_SECS, env=env,
             )
+            if not brief:
+                print(f"  status   : {(r.stdout or r.stderr or '').strip() or '(no output)'}")
         else:
             r = probe
             if not brief:
@@ -155,6 +159,9 @@ def run(brief: bool = False) -> int:
                 if "not installed" in (r.stdout or "").lower():
                     print("⚠️  embed-server: not installed — shared mode expects "
                           "a service on this port. fix: m3 embedder install")
+                elif sub == "status" and state[0].strip().lower() == "stopped":
+                    print("⚠️  embed-server: registered but stopped. "
+                          "fix: m3 embedder start")
                 else:
                     print(f"✅ embed-server: ok{detail}")
             else:

@@ -1911,9 +1911,21 @@ def status_summary() -> dict:
 
     # 3. Embedder tier.
     try:
+        from m3_memory.embedder_admin import _embed_config_path
         from m3_memory.rust_core_install import active_embedder_tier
-        out["embedder"] = "native (in-process)" if active_embedder_tier().get("native") \
-            else "pure-Python (HTTP)"
+        try:
+            with open(_embed_config_path(), encoding="utf-8") as f:
+                shared = bool((json.load(f) or {}).get("disable_inproc_embedder"))
+        except (OSError, ValueError):
+            shared = False
+        # Shared mode turns the in-process tier off, so a native wheel being
+        # installed does not mean embeds run in-process.
+        if shared:
+            out["embedder"] = "shared server (:8082)"
+        elif active_embedder_tier().get("native"):
+            out["embedder"] = "native (in-process)"
+        else:
+            out["embedder"] = "pure-Python (HTTP)"
     except Exception:  # noqa: BLE001
         pass
 
@@ -2847,7 +2859,9 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
         # When the live bridge matches the config, these ARE the installed
         # version. When it diverges (M3_BRIDGE_PATH / dev checkout), they're just
         # the record of the last fetch — label them so, and point at the live code.
-        if bridge_matches_config:
+        # A pip/pipx upgrade replaces the package without rewriting config.json,
+        # so a version that differs from the running package is a fetch record.
+        if bridge_matches_config and cfg.get("version") == __version__:
             print(f"  installed version:       {cfg.get('version', '?')}")
             print(f"  installed tag:           {cfg.get('tag', '?')}")
             print(f"  installed at:            {cfg.get('installed_at', '?')}")
@@ -2861,7 +2875,7 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
             print(f"      running code:        {resolved}")
             print(f"      live package version: {__version__}")
     else:
-        print("  (no config - system not installed via `mcp-memory install-m3`)")
+        print("  (none — expected for a pip/pipx install, which runs the packaged payload)")
 
     env = os.environ.get("M3_BRIDGE_PATH")
     if env:
