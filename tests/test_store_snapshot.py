@@ -169,13 +169,17 @@ def test_snapshot_stores_copies_each_distinct_store_once(tmp_path, monkeypatch):
 def test_snapshot_stores_raises_rather_than_returning_an_unverified_copy(tmp_path, monkeypatch):
     monkeypatch.delenv("M3_DB_BACKEND", raising=False)
     from memory.backends import selector
-    from memory.backends.base import SnapshotError
 
     selector._reset_for_tests()
     from m3_core.paths import snapshot_stores
 
-    with pytest.raises(SnapshotError):
+    # Matched by name and module, not identity: after another test purges the
+    # memory.* namespace, the raiser and this test can hold different
+    # instances of memory.backends.base.
+    with pytest.raises(Exception) as ei:
         snapshot_stores([str(tmp_path / "nope.db")], tmp_path / "bk", label="pre-test")
+    assert type(ei.value).__name__ == "SnapshotError"
+    assert type(ei.value).__module__ == "memory.backends.base"
 
 
 # ── migration callers ───────────────────────────────────────────────────────
