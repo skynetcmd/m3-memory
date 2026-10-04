@@ -28,7 +28,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 def _run(cmd: list[str], cwd: Path) -> str:
     """Run a validator and return combined stdout+stderr (exit code ignored)."""
-    p = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=60)
+    p = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=60)
     return (p.stdout or "") + (p.stderr or "")
 
 
