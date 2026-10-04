@@ -64,6 +64,38 @@ def _rotate_task_log(log_file: str) -> None:
         )
 
 
+def _stdout_is_file(path: str) -> bool:
+    """True when this process's stdout is already ``path`` (same device + inode).
+
+    False when it cannot be determined, so the caller keeps writing the file
+    itself: a duplicated line is recoverable, a missing one is not.
+    """
+    try:
+        out = os.fstat(sys.stdout.fileno())
+        target = os.stat(path)
+    except (AttributeError, OSError, ValueError):
+        return False
+    return bool(target.st_ino) and (out.st_dev, out.st_ino) == (target.st_dev, target.st_ino)
+
+
+def _attach_log_file(log_file: str, logger_: Optional[logging.Logger] = None) -> bool:
+    """Route log records to ``log_file`` exactly once. Returns True if a handler was added.
+
+    The root logger already streams to stdout. Under ``--background`` on Windows
+    (the re-exec redirects stdout into the log file) and under launchd (the plist
+    points StandardOutPath at it), stdout IS this file; a second FileHandler on
+    it writes every record twice through two independent handles, which
+    duplicates and splits lines. Elsewhere (systemd: stdout is the journal) the
+    FileHandler is still needed.
+    """
+    if _stdout_is_file(log_file):
+        return False
+    fh = logging.FileHandler(log_file, encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    (logger_ or logging.getLogger()).addHandler(fh)
+    return True
+
+
 import chatlog_config
 import m3_enrich
 import m3_entities
@@ -1969,10 +2001,7 @@ def main():
         # platforms; on Windows the parent has usually rotated already and this
         # is a cheap no-op (one stat).
         _rotate_task_log(args.log_file)
-        _fh = logging.FileHandler(args.log_file, encoding="utf-8")
-        _fh.setFormatter(logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-        logging.getLogger().addHandler(_fh)
+        _attach_log_file(args.log_file)
 
     # Cross-OS FD headroom (backstop behind the pool-reuse fix; covers Windows,
     # which the launchd/systemd rlimit knobs cannot).

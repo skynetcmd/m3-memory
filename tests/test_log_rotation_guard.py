@@ -201,10 +201,18 @@ def test_posix_launchers_reach_rotation_without_a_re_exec():
     body = "\n".join(lines[fn.lineno - 1: (fn.end_lineno or len(lines))])
 
     rotate = body.find("_rotate_task_log(args.log_file)")
-    handler = body.find("logging.FileHandler(args.log_file")
+    handler = body.find("_attach_log_file(args.log_file")
     assert rotate != -1, "main() must rotate — it is the only POSIX rotation point"
-    assert handler != -1, "main() no longer opens a FileHandler; update this guard"
+    assert handler != -1, "main() no longer attaches the log file; update this guard"
     assert rotate < handler, "must rotate BEFORE opening the handler"
+    # _attach_log_file opens the FileHandler (unless stdout already is the file).
+    attach = next(
+        n for n in ast.parse(src).body
+        if isinstance(n, ast.FunctionDef) and n.name == "_attach_log_file"
+    )
+    attach_src = "\n".join(lines[attach.lineno - 1: (attach.end_lineno or len(lines))])
+    assert "logging.FileHandler(log_file" in attach_src, (
+        "_attach_log_file no longer opens a FileHandler; update this guard")
 
 
 @pytest.mark.parametrize("unit", ["com.m3memory.cognitiveloop.plist",
