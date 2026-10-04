@@ -86,3 +86,23 @@ def test_a_stale_config_version_is_not_called_installed(monkeypatch, capsys, tmp
 
 def test_subprocess_is_the_module_used_by_the_probe():
     assert esp.subprocess is subprocess
+
+
+def test_tier_summary_names_the_shared_server_in_shared_mode(monkeypatch, tmp_path):
+    """Setup's summary and doctor's embedder section print this summary; a
+    native-core install must not read as in-process embedding in shared mode."""
+    import types
+
+    from m3_memory import rust_core_install
+
+    cfg = tmp_path / ".embed_config.json"
+    cfg.write_text(json.dumps({"disable_inproc_embedder": True}), encoding="utf-8")
+    monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path))
+    fake = types.ModuleType("m3_core_rs")
+    fake.EmbeddedEmbedder = object
+    fake.__version__ = "3.10.1"
+    monkeypatch.setitem(sys.modules, "m3_core_rs", fake)
+    tier = rust_core_install.active_embedder_tier()
+    assert tier["native"] is True
+    assert tier["summary"].startswith("shared server (:8082)")
+    assert "tier-1 in-process" not in tier["summary"]

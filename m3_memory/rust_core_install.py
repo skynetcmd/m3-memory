@@ -291,6 +291,18 @@ def active_embedder_tier() -> dict:
             break
     out["backend"] = str(backend) if backend else None
     inner = f"{out['backend']}, " if out["backend"] else ""
+    try:
+        from m3_memory.embedder_admin import shared_mode_enabled
+        shared = shared_mode_enabled()
+    except Exception:  # noqa: BLE001 — a display detail must not break the probe
+        shared = False
+    if shared:
+        # The core is installed, but shared mode routes embeds to :8082.
+        out["summary"] = (
+            f"shared server (:8082) — native core installed "
+            f"({inner}m3_core_rs {out['version']}), in-process tier off by design"
+        )
+        return out
     out["summary"] = (
         f"tier-1 in-process — Project Oxidation active "
         f"({inner}m3_core_rs {out['version']})"

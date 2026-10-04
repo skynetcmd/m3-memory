@@ -1912,16 +1912,11 @@ def status_summary() -> dict:
 
     # 3. Embedder tier.
     try:
-        from m3_memory.embedder_admin import _embed_config_path
+        from m3_memory.embedder_admin import shared_mode_enabled
         from m3_memory.rust_core_install import active_embedder_tier
-        try:
-            with open(_embed_config_path(), encoding="utf-8") as f:
-                shared = bool((json.load(f) or {}).get("disable_inproc_embedder"))
-        except (OSError, ValueError):
-            shared = False
         # Shared mode turns the in-process tier off, so a native wheel being
         # installed does not mean embeds run in-process.
-        if shared:
+        if shared_mode_enabled():
             out["embedder"] = "shared server (:8082)"
         elif active_embedder_tier().get("native"):
             out["embedder"] = "native (in-process)"

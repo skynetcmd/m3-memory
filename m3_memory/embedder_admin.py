@@ -19,6 +19,7 @@ m3-memory payload root (set by `install-m3`); no network fetch.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -1061,6 +1062,16 @@ def _embed_config_path() -> str:
         root = (os.path.join(os.path.abspath(os.path.expanduser(mem_root)), "config")
                 if mem_root else os.path.join(os.path.expanduser("~"), ".m3", "config"))
     return os.path.join(root, ".embed_config.json")
+
+
+def shared_mode_enabled() -> bool:
+    """True when .embed_config.json turns the in-process embedder off so every
+    process uses the shared :8082 server. An unreadable config reads as off."""
+    try:
+        with open(_embed_config_path(), encoding="utf-8") as f:
+            return bool((json.load(f) or {}).get("disable_inproc_embedder"))
+    except (OSError, ValueError):
+        return False
 
 
 def seed_shared_config(
