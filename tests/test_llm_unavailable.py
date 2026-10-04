@@ -244,3 +244,17 @@ def test_recovery_is_silent_when_there_was_no_outage(caplog):
     with caplog.at_level(logging.DEBUG, logger="test-healthy"):
         llm_failover.report_available(log, "distillation")
     assert caplog.records == [], "a healthy system must log nothing"
+
+
+def test_error_body_redacts_a_bearer_token_but_keeps_placeholders():
+    """The body goes into exception text and from there into logs."""
+    req = httpx.Request("POST", f"{EP}/chat/completions")
+    leaked = httpx.Response(401, text="bad auth for Bearer sk-lm-AbCdEf123456XyZ please retry", request=req)
+    with pytest.raises(httpx.HTTPStatusError) as ei:
+        llm_failover.raise_for_status_with_body(leaked)
+    assert "sk-lm-AbCdEf123456XyZ" not in str(ei.value)
+    assert "Bearer [REDACTED]" in str(ei.value)
+    doc = httpx.Response(401, text="use the 'Bearer' scheme (i.e., 'Authorization: Bearer $LM_API_TOKEN')", request=req)
+    with pytest.raises(httpx.HTTPStatusError) as ei2:
+        llm_failover.raise_for_status_with_body(doc)
+    assert "$LM_API_TOKEN" in str(ei2.value), "a literal placeholder must stay readable"

@@ -524,6 +524,9 @@ def report_available(log: logging.Logger, component: str) -> None:
                  f"{(time.monotonic() - state[0]) / 60:.0f} min.")
 
 
+_BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]{8,}")
+
+
 def raise_for_status_with_body(resp: httpx.Response) -> None:
     """resp.raise_for_status(), but the exception text carries the server's
     error body. httpx's own message omits it, which turned LM Studio's
@@ -534,6 +537,9 @@ def raise_for_status_with_body(resp: httpx.Response) -> None:
         body = resp.text[:300].strip()
     except Exception:  # noqa: BLE001 — a body we cannot read is still a failure
         body = "<unreadable body>"
+    # This text reaches logs. Blank anything bearer-shaped a server might echo
+    # back (a literal placeholder like "$LM_API_TOKEN" is left readable).
+    body = _BEARER_RE.sub("Bearer [REDACTED]", body)
     raise httpx.HTTPStatusError(
         f"{resp.status_code} {resp.reason_phrase} from {resp.request.url}: {body}",
         request=resp.request, response=resp,
