@@ -1504,6 +1504,33 @@ def stop_unix_services() -> list:
     return stopped
 
 
+def start_unix_services(names: list) -> list:
+    """Start the named services if they are not running; the inverse of
+    stop_unix_services. Returns the names it started."""
+    key = _platform_key()
+    started: list = []
+    for name in names:
+        if key == "linux":
+            state = _run(["systemctl", "--user", "is-active", name], capture_output=True, text=True)
+            if (state.stdout or "").strip() in ("active", "activating", "reloading"):
+                continue
+            r = _run(["systemctl", "--user", "start", name], capture_output=True, text=True)
+        elif key == "darwin":
+            if _service_exists(name):
+                continue
+            plist = os.path.expanduser(f"~/Library/LaunchAgents/{name}.plist")
+            if not os.path.exists(plist):
+                continue
+            r = _run(["launchctl", "load", plist], capture_output=True, text=True)
+        else:
+            continue
+        if r.returncode == 0:
+            started.append(name)
+        else:
+            _safe_print(f"{WARN} could not start {name}: {(r.stderr or '').strip()}")
+    return started
+
+
 def _resolve_service(entry: "str | tuple | None") -> "str | None":
     """The service name to restart for one platform's _ROLE_TO_SERVICE value:
     the name itself, or the first registered candidate of a tuple (the first

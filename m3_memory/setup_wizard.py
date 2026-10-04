@@ -821,6 +821,43 @@ def _quiesce_tick_done(args: argparse.Namespace) -> None:
         sys.stdout.flush()
 
 
+_STOPPED_SERVICES: list = []
+
+
+def _stop_supervised_services() -> None:
+    """Stop m3's launchd/systemd services for the install (best-effort)."""
+    try:
+        sys.path.insert(0, str(_bin_dir()))
+        import install_schedules
+        stopped = install_schedules.stop_unix_services()
+    except Exception as e:  # noqa: BLE001 — the HALT quiesce below still runs
+        _warn(f"  could not stop m3's services first ({type(e).__name__}: {e})")
+        return
+    _STOPPED_SERVICES.extend(stopped)
+    if stopped:
+        _say(f"  stopped {len(stopped)} m3 service(s) for the update; "
+             f"setup starts them again")
+
+
+def _restore_stopped_services() -> None:
+    """Start any service this run stopped that is still down at the end, so an
+    aborted or partial setup does not leave m3 stopped."""
+    if not _STOPPED_SERVICES:
+        return
+    try:
+        sys.path.insert(0, str(_bin_dir()))
+        import install_schedules
+        started = install_schedules.start_unix_services(list(_STOPPED_SERVICES))
+    except Exception as e:  # noqa: BLE001
+        _warn(f"  could not restart m3's services ({type(e).__name__}: {e}); "
+              f"run `m3 setup` again")
+        return
+    finally:
+        _STOPPED_SERVICES.clear()
+    for name in started:
+        _say(f"  restarted {name} (stopped for the update)")
+
+
 def _quiesce_db_writers(args: argparse.Namespace) -> bool:
     """Cooperatively quiesce autonomous m3 DB-writers before a DB-exclusive
     install/upgrade step, via the HALT_m3 protocol (docs/design/HALT_PROTOCOL.md).
@@ -834,6 +871,13 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
     halt = _import_m3_halt()
     if halt is None:
         return True  # can't coordinate; the mcp-memory.exe file-lock probe still guards Windows
+
+    # macOS/Linux: stop supervised services through the service manager first.
+    # The dashboard does not pause for HALT, and launchd/systemd restart a
+    # killed daemon mid-install; stopping them here avoids the timeout and the
+    # kill prompt. Setup's later steps start them again.
+    if sys.platform != "win32":
+        _stop_supervised_services()
 
     # Union of registered writers AND a cmdline scan — so an UPGRADE from an
     # older m3 (whose loop/embed/MCP predate the PID registry + HALT protocol and
@@ -3623,6 +3667,7 @@ def run_setup(args: argparse.Namespace) -> int:
     # finally so paused writers ALWAYS resume — success, failure, or exception.
     if not _step_preflight(plan, args):
         _err("setup aborted by preflight")
+        _restore_stopped_services()
         return 2  # preflight cleared its own HALT on any abort path
     try:
         if not _step_install_m3(plan):
@@ -3672,6 +3717,7 @@ def run_setup(args: argparse.Namespace) -> int:
     finally:
         # Idempotent backstop for every exit path, including exceptions.
         _lower_halt()
+        _restore_stopped_services()
 
 
 def _lower_halt() -> None:

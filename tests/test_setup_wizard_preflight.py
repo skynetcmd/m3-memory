@@ -1459,3 +1459,48 @@ def test_gui_is_not_offered_on_an_existing_install(monkeypatch):
     monkeypatch.setattr(setup_wizard, "_ask_yes_no",
                         lambda *a, **k: pytest.fail("no GUI offer on an existing install"))
     assert setup_wizard._should_use_gui(_setup_args()) is False
+
+
+def test_aborted_setup_restarts_the_services_it_stopped(monkeypatch):
+    """Preflight stops supervised services; an abort must not leave m3 down."""
+    import types
+
+    sched = types.ModuleType("install_schedules")
+    sched.stop_unix_services = lambda: ["m3-cognitive-loop.service"]
+    restarted = []
+    sched.start_unix_services = lambda names: restarted.extend(names) or list(names)
+    monkeypatch.setitem(sys.modules, "install_schedules", sched)
+    monkeypatch.setattr(setup_wizard, "_STOPPED_SERVICES", [])
+    setup_wizard._stop_supervised_services()
+    monkeypatch.setattr(setup_wizard, "_should_use_gui", lambda a: False)
+    monkeypatch.setattr(setup_wizard, "_detect_agents", lambda: setup_wizard.AgentTargets())
+    monkeypatch.setattr(setup_wizard, "_gather_plan", lambda d, a: setup_wizard.SetupPlan())
+    monkeypatch.setattr(setup_wizard, "_step_preflight", lambda p, a: False)
+    assert setup_wizard.run_setup(_setup_args(non_interactive=True)) == 2
+    assert restarted == ["m3-cognitive-loop.service"]
+
+
+def test_start_unix_services_starts_only_what_is_down(monkeypatch):
+    sys.path.insert(0, str(Path(setup_wizard.__file__).resolve().parent.parent / "bin"))
+    import install_schedules as sched
+
+    calls = []
+
+    class _R:
+        returncode = 0
+        stderr = ""
+
+        def __init__(self, out=""):
+            self.stdout = out
+
+    def fake(cmd, **k):
+        calls.append(cmd)
+        if cmd[2] == "is-active":
+            return _R("active" if cmd[3] == "m3-dashboard.service" else "inactive")
+        return _R()
+
+    monkeypatch.setattr(sched, "_platform_key", lambda: "linux")
+    monkeypatch.setattr(sched, "_run", fake)
+    started = sched.start_unix_services(["m3-dashboard.service", "m3-cognitive-loop.service"])
+    assert started == ["m3-cognitive-loop.service"]
+    assert ["systemctl", "--user", "start", "m3-dashboard.service"] not in calls
