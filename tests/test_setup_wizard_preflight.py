@@ -500,6 +500,26 @@ def test_step_install_m3_passes_force(monkeypatch):
     assert "--capture-mode" in cmd
 
 
+@pytest.mark.parametrize("platform, enabled, expect", [
+    ("linux", True, 1), ("darwin", True, 1), ("linux", False, 0), ("win32", True, 0),
+])
+def test_present_payload_still_reregisters_the_loop(monkeypatch, platform, enabled, expect):
+    """On a pipx upgrade the payload is present, so install-m3 (which registers
+    the loop) is skipped; the loop unit must still be rewritten from the new
+    payload or it keeps the old payload's paths."""
+    from m3_memory import installer
+
+    calls = []
+    monkeypatch.setattr(installer, "find_bridge", lambda: "/payload/bin/memory_bridge.py")
+    monkeypatch.setattr(installer, "_register_cognitive_loop_task",
+                        lambda: calls.append(1) or True)
+    monkeypatch.setattr(setup_wizard.sys, "platform", platform)
+    plan = setup_wizard.SetupPlan()
+    plan.cognitive_loop = enabled
+    assert setup_wizard._step_install_m3(plan) is True
+    assert len(calls) == expect
+
+
 # ────────────────────────────────────────────────────────────────────────
 # _persist_embed_gguf — Fix #7: M3_EMBED_GGUF persistence
 # ────────────────────────────────────────────────────────────────────────

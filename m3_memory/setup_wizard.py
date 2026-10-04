@@ -1705,6 +1705,17 @@ def _discover_bge_m3_gguf() -> str | None:
         return None
 
 
+def _reregister_cognitive_loop() -> None:
+    """Rewrite the cognitive-loop service from the current payload."""
+    from m3_memory.installer import _register_cognitive_loop_task
+
+    if _register_cognitive_loop_task():
+        _ok("  cognitive loop service re-registered from this payload")
+    else:
+        _warn("  cognitive loop service NOT re-registered; it may still run the "
+              "previous payload's paths. Fix: m3 schedules add cognitive-loop")
+
+
 def _step_install_m3(plan: SetupPlan) -> bool:
     """Run install-m3 with the wizard's chosen capture-mode.
 
@@ -1722,6 +1733,12 @@ def _step_install_m3(plan: SetupPlan) -> bool:
     if find_bridge() is not None:
         _say("  payload already present (packaged or via sibling); skipping fetch")
         _ok("payload available")
+        # install-m3 is what registers the loop, so skipping it would leave an
+        # upgraded host's unit pointing at the previous payload's paths. On
+        # Windows registering a boot task needs elevation; `m3 schedules repair`
+        # owns that there.
+        if plan.cognitive_loop and sys.platform != "win32":
+            _reregister_cognitive_loop()
         return True
 
     # Subprocess-time package-shadow guard. The wizard's own preflight checks
