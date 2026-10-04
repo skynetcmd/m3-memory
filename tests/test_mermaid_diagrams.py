@@ -97,17 +97,31 @@ def test_sequence_notes_avoid_parser_breaking_characters() -> None:
     assert not problems, "\n  ".join(["unparseable sequence notes:", *problems])
 
 
+# The mermaid-cli version this suite is validated against. Install exactly this
+# (`npm i -g @mermaid-js/mermaid-cli@<ver>`); the npx fallback fetches the same.
+MERMAID_CLI_VERSION = "11.17.0"
+_NPX_OPT_IN = "M3_ALLOW_NPX_MERMAID"
+
+
 def _mermaid_cli() -> list[str] | None:
     """Resolve the launcher to its ABSOLUTE path.
 
     On Windows these are ``.CMD`` shims, so passing the bare name to
     subprocess raises WinError 2 and the test skipped itself on the very
     machine that had mermaid-cli installed -- a false green.
+
+    An installed ``mmdc`` is used when present. The ``npx`` fallback DOWNLOADS
+    AND EXECUTES a package from the npm registry during a test run, so it is
+    opt-in (``M3_ALLOW_NPX_MERMAID=1``) and fetches the exact pinned version,
+    never a floating ``@11``.
     """
-    for name, args in (("mmdc", []), ("npx", ["-y", "-q", "@mermaid-js/mermaid-cli@11"])):
-        found = shutil.which(name)
-        if found:
-            return [found, *args]
+    found = shutil.which("mmdc")
+    if found:
+        return [found]
+    if os.environ.get(_NPX_OPT_IN) == "1":
+        npx = shutil.which("npx")
+        if npx:
+            return [npx, "-y", "-q", f"@mermaid-js/mermaid-cli@{MERMAID_CLI_VERSION}"]
     return None
 
 
@@ -135,7 +149,8 @@ def test_every_mermaid_block_renders() -> None:
     """Authoritative check: hand each block to the real Mermaid parser."""
     cli = _mermaid_cli()
     if cli is None:
-        pytest.skip("no mermaid-cli / npx available")
+        pytest.skip(f"no mmdc installed (npm i -g @mermaid-js/mermaid-cli@{MERMAID_CLI_VERSION}); "
+                    f"the npx download fallback is off unless {_NPX_OPT_IN}=1")
     if os.environ.get("M3_SKIP_MERMAID_RENDER") == "1":
         pytest.skip("M3_SKIP_MERMAID_RENDER=1")
 
@@ -182,3 +197,24 @@ def test_every_mermaid_block_renders() -> None:
             failures.append(f"{path} block {idx}: {detail or (err[-1][:160] if err else 'no output and no error')}")
 
     assert not failures, "mermaid blocks that do not parse:\n  " + "\n  ".join(failures)
+
+
+def test_npx_fallback_is_off_by_default(monkeypatch):
+    """Without the opt-in, a box with npx but no mmdc must NOT download code."""
+    monkeypatch.delenv(_NPX_OPT_IN, raising=False)
+    monkeypatch.setattr(shutil, "which", lambda n: "/usr/bin/npx" if n == "npx" else None)
+    assert _mermaid_cli() is None
+
+
+def test_npx_fallback_when_opted_in_fetches_the_exact_pin(monkeypatch):
+    monkeypatch.setenv(_NPX_OPT_IN, "1")
+    monkeypatch.setattr(shutil, "which", lambda n: "/usr/bin/npx" if n == "npx" else None)
+    cli = _mermaid_cli()
+    assert cli is not None and cli[-1] == f"@mermaid-js/mermaid-cli@{MERMAID_CLI_VERSION}"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", MERMAID_CLI_VERSION), "pin an exact version, not a range"
+
+
+def test_installed_mmdc_wins_over_npx(monkeypatch):
+    monkeypatch.setenv(_NPX_OPT_IN, "1")
+    monkeypatch.setattr(shutil, "which", lambda n: f"/usr/bin/{n}")
+    assert _mermaid_cli() == ["/usr/bin/mmdc"]
