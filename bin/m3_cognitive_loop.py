@@ -1801,6 +1801,7 @@ async def main_loop(args):
         order = _select_pass_order(passes, _cycle, active, work_map)
         _cycle += 1
 
+        halted = False
         for p in order:
             if p["skip"]:
                 continue
@@ -1814,8 +1815,15 @@ async def main_loop(args):
                 await p["run"](args)
             if _STOP_EVENT.is_set():
                 break
+            # An exclusive op raised the halt mid-cycle: stop before the next
+            # pass so the quiesce does not wait for the rest of the cycle.
+            if m3_halt.halt_is_active(role=_HALT_ROLE):
+                halted = True
+                break
 
         args.limit_per_pass = _full_limit  # restore for the next cycle's defaults
+        if halted:
+            continue  # the HALT block at the top checkpoints and pauses
 
         # §10 WAL discipline: the loop is the heavy writer; force a checkpoint at
         # the cycle boundary so the WAL can't grow to its 64 MiB ceiling and wedge
@@ -1872,12 +1880,27 @@ async def main_loop(args):
         if _STOP_EVENT.is_set():
             break
 
-        try:
-            await asyncio.wait_for(_STOP_EVENT.wait(), timeout=wait_time)
-        except asyncio.TimeoutError:
-            pass
+        await _sleep_or_halt(wait_time)
 
     logger.info("Cognitive Loop stopped.")
+
+
+async def _sleep_or_halt(wait_time: float, poll_s: float = 2.0) -> None:
+    """Sleep up to wait_time; return early on stop or when HALT_m3 is raised.
+
+    A sleeping loop opens no DB connection but is still registered, so an
+    exclusive op's quiesce would otherwise wait out a whole interval for it.
+    """
+    deadline = time.monotonic() + wait_time
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or m3_halt.halt_is_active(role=_HALT_ROLE):
+            return
+        try:
+            await asyncio.wait_for(_STOP_EVENT.wait(), timeout=min(poll_s, remaining))
+            return
+        except asyncio.TimeoutError:
+            pass
 
 def _raise_fd_limit(target: int = 4096) -> None:
     """Best-effort raise this process's open-file limit — a cross-OS backstop
