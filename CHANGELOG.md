@@ -42,6 +42,12 @@ the policy is forward-going only.
   keep-alive instead of as a failure.
   **Affected:** macOS and Linux · **Action:** none · **Data status:** none.
 
+- **`m3 setup` no longer reports a running cognitive loop as down.** Setup
+  verified services before releasing its own database pause, and on macOS
+  before launchd's restart delay had passed, then exited with status 3.
+  **Affected:** all installs running setup or `m3 upgrade` · **Action:** none ·
+  **Data status:** none.
+
 - **The cognitive loop is re-registered on upgrade.** A pip or pipx upgrade
   kept the previous unit, so loop logs stayed under the package directory and
   were deleted by each upgrade.
