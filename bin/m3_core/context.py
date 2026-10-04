@@ -21,6 +21,7 @@ from m3_core.paths import (
     get_m3_engine_root,
     get_m3_root,
     getenv_compat,
+    resolve_backend_name,
     resolve_cdw_pg_dsn,
     resolve_db_path,
 )
@@ -89,7 +90,11 @@ class M3Context:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._pool: Optional["queue.Queue[sqlite3.Connection]"] = None
         self._pool_lock = threading.Lock()
-        self._init_sqlite_pool()
+        # Eager only where SQLite is the store. Elsewhere get_sqlite_conn builds
+        # the pool on first use, so importing memory_core on PostgreSQL no
+        # longer creates an empty agent_memory.db in the engine root.
+        if resolve_backend_name() == "sqlite":
+            self._init_sqlite_pool()
 
     @classmethod
     def for_db(cls, db_path: Optional[str] = None) -> "M3Context":
