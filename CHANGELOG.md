@@ -26,8 +26,8 @@ the policy is forward-going only.
   task or launchd agent · **Action:** none · **Data status:** none (log file
   only).
 
-- **`scan_repo_v7.py` keeps the caller's PATH.** It replaced PATH when
-  imported, hiding scanners and tools installed elsewhere (e.g. Homebrew).
+- **`scan_repo_v7.py` keeps the caller's PATH.** Scanners and tools installed
+  elsewhere (e.g. Homebrew) are no longer hidden.
   **Affected:** contributors running the security scan on macOS or Linux; the
   package runtime is unaffected · **Action:** none · **Data status:** none.
 
@@ -47,10 +47,9 @@ the policy is forward-going only.
   `m3_entities`, `m3_enrich`, `m3_chatlog_backfill_embed`,
   `m3_chatlog_backfill_title` and `reembed_space` could take a backup missing
   recent writes, and on PostgreSQL backed up a local file rather than the
-  database (`reembed_space` refused instead). A run now stops before writing
-  unless its backup verifies; `migrate_memory` does the same, and `homecoming`
-  exits non-zero when a database fails to copy. Backups are written to
-  `<engine root>/backups/<tool>/`.
+  database. A run now stops before writing unless its backup verifies;
+  `migrate_memory` does the same, and `homecoming` exits non-zero when a
+  database fails to copy. Backups are written to `<engine root>/backups/<tool>/`.
   **Affected:** all installs · **Action:** on PostgreSQL, install
   `pg_dump`/`pg_restore` (or set `M3_PG_DUMP` / `M3_PG_RESTORE`) to run these
   tools · **Data status:** backups these tools made before this change may be
@@ -91,7 +90,7 @@ the policy is forward-going only.
 - **The selected backend is used consistently, and a change to
   `M3_DB_BACKEND` takes effect on the next call.** Code could reach SQLite
   while PostgreSQL was selected. **Affected:** PostgreSQL deployments ·
-  **Action:** none · **Data status:** observed only in the test suite; rows
+  **Action:** none · **Data status:** none known outside test runs; rows
   written to SQLite under a PostgreSQL selection are not migrated.
 
 - **Scheduled-task and service logs are written to `~/.m3/logs`.** They were
