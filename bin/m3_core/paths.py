@@ -884,7 +884,7 @@ def resolve_backend_name() -> str:
     typo like ``postgre`` must not silently run SQLite.
 
     Never memoised: a module-global memo lives per module instance, and two
-    instances with disagreeing memos once sent PostgreSQL-marked work to SQLite.
+    loaded instances can disagree about the backend.
     """
     raw = (getenv_compat("M3_DB_BACKEND", "DB_BACKEND", "sqlite") or "sqlite").strip().lower()
     if raw not in SELECTABLE_BACKENDS:

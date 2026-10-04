@@ -3,18 +3,17 @@
 WHY: In WAL mode, committed transactions live in ``<db>-wal`` until a checkpoint
 folds them into the main file. ``shutil.copy2(db_path, ...)`` copies only the
 main file, so a "backup" taken that way silently omits recent writes — and a
-copy taken mid-write can be torn (DESIGN_PHILOSOPHIES §10). Five tools did
-exactly that before their destructive step. This module is the single owner of
-the correct procedure, so no caller decides it for itself again (§10a).
+copy taken mid-write can be torn (DESIGN_PHILOSOPHIES §10). This module is the
+single owner of the correct procedure (§10a).
 
 HOW:
   1. Open the source read-only and BEGIN a read transaction. In WAL mode that
      pins one snapshot of the database.
   2. Count every table's rows inside that transaction.
   3. Run the online backup API on the SAME connection. It copies the pinned
-     snapshot — measured: rows committed by another writer after step 1 are
-     absent from the copy, so the counts from step 2 describe it exactly and a
-     concurrent writer cannot cause a false mismatch.
+     snapshot: rows committed by another writer after step 1 are absent from
+     the copy, so the counts from step 2 describe it exactly and a concurrent
+     writer cannot cause a false mismatch.
   4. Convert the copy to ``journal_mode=DELETE`` so it is one self-contained
      file with no ``-wal`` of its own.
   5. Verify the copy: ``PRAGMA quick_check`` must say ``ok`` and every table's

@@ -271,9 +271,7 @@ def test_file_backend_honours_the_db_path(tmp_path, monkeypatch):
 
 
 def test_a_failed_snapshot_aborts_before_any_delete(tmp_path, capsys, monkeypatch, backup_dir):
-    """No verified backup, no delete — on any backend. (A server-hosted store
-    used to be refused outright; it is now snapshotted with pg_dump, so the
-    rule that matters is what happens when the snapshot cannot be taken.)"""
+    """No verified backup, no delete — on any backend."""
     db = _store(tmp_path, MIXED)
 
     def no_snapshot(db_path):

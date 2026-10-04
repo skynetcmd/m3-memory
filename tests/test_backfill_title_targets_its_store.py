@@ -1,8 +1,8 @@
 """m3_chatlog_backfill_title must write the store it was pointed at.
 
-Its write used an unscoped seam connection, which follows the process-active
-store: the chatlog pass rewrote titles in the MAIN store, while the pre-write
-snapshot (scoped per target) backed up the chatlog store nobody changed.
+Hazard: an unscoped seam connection follows the process-active store, so a
+chatlog pass would rewrite the main store while its pre-write snapshot covers
+the chatlog store.
 """
 from __future__ import annotations
 

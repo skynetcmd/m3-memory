@@ -1119,8 +1119,8 @@ class PostgresBackend:
 
         A DEDICATED connection holds the REPEATABLE READ transaction, not a
         pooled one: it stays open for the whole dump, and parking a pool slot
-        for that long starves every other caller — the failure the entity
-        write-lock fix removed. Row counts are read in that transaction and
+        for that long starves every other caller. Row counts are read in that
+        transaction and
         pg_dump attaches to its snapshot (``--snapshot``), so both see one state
         no matter what commits meanwhile.
 

@@ -21,85 +21,78 @@ the policy is forward-going only.
 
 ### Fixed
 
-- **SQLite-only tools refuse to run on PostgreSQL instead of editing a stale
-  SQLite file.** `backfill_content_hash`, `migrate_entity_vocab`,
-  `m3_enrich_assign`, `m3_enrich_batch`, `m3_entities_gliner`,
-  `split_chatlog_from_core`, `migrate_memory` and `ai_mechanic` open SQLite
-  files directly; with `M3_DB_BACKEND=postgres` they now exit with an error
-  before touching anything. `m3 doctor --fix` reports its SQLite-file repairs
-  as skipped on PostgreSQL rather than running them against a local file, and
-  `chatlog_init` no longer runs the SQLite migration runner there.
+- **The cognitive loop log no longer contains duplicated or split lines.**
+  **Affected:** Windows and macOS installs running the loop as a scheduled
+  task or launchd agent · **Action:** none · **Data status:** none (log file
+  only).
+
+- **`scan_repo_v7.py` keeps the caller's PATH.** It replaced PATH when
+  imported, hiding scanners and tools installed elsewhere (e.g. Homebrew).
+  **Affected:** contributors running the security scan on macOS or Linux; the
+  package runtime is unaffected · **Action:** none · **Data status:** none.
+
+- **SQLite-only maintenance tools refuse to run on PostgreSQL.**
+  `backfill_content_hash`, `migrate_entity_vocab`, `m3_enrich_assign`,
+  `m3_enrich_batch`, `m3_entities_gliner`, `split_chatlog_from_core`,
+  `migrate_memory` and `ai_mechanic` exit with an error under
+  `M3_DB_BACKEND=postgres` instead of modifying a local SQLite file.
+  `m3 doctor --fix` reports its SQLite repairs as skipped on PostgreSQL, and
+  `chatlog_init` skips SQLite migrations there.
   **Affected:** PostgreSQL installs · **Action:** none ·
-  **Data status:** earlier runs of `m3_enrich_batch` and `m3_entities_gliner` on PostgreSQL
-  wrote observations and entity links to PostgreSQL while reading candidates or
-  tracking batch state in a local SQLite file, so they may have added duplicate
-  observations, or links for memories selected from that file; the other tools
-  changed only a local SQLite file.
+  **Data status:** earlier runs of `m3_enrich_batch` or `m3_entities_gliner`
+  on PostgreSQL may have written duplicate observations or extra entity links;
+  the other tools changed only a local SQLite file.
 
-- **Pre-write backups are now verified snapshots of the store being changed.**
+- **Backups taken by maintenance tools are complete and verified.**
   `m3_entities`, `m3_enrich`, `m3_chatlog_backfill_embed`,
-  `m3_chatlog_backfill_title` and `reembed_space` backed up with a file copy,
-  which omits writes still in the SQLite WAL; on PostgreSQL the first four
-  copied an unrelated local SQLite file, and `reembed_space` refused to run
-  without `--no-backup`. All five now use `StorageBackend.snapshot()`: the
-  SQLite online backup API, or `pg_dump` pinned to an exported snapshot. Each
-  copy's per-table row counts are checked against the snapshot it came from,
-  and the tool stops before writing if that fails. `migrate_memory` no longer
-  falls back to a file copy, and `homecoming` exits non-zero instead of
-  reporting success when a database fails to copy. Snapshots go to
-  `<engine root>/backups/<tool>/`. **Affected:** all installs; PostgreSQL
-  installs need `pg_dump`/`pg_restore` on PATH (or `M3_PG_DUMP` /
-  `M3_PG_RESTORE`) for these tools · **Action:** none · **Data status:** backups
-  taken by the old copy may be missing recent writes; treat them as incomplete.
+  `m3_chatlog_backfill_title` and `reembed_space` could take a backup missing
+  recent writes, and on PostgreSQL backed up a local file rather than the
+  database (`reembed_space` refused instead). A run now stops before writing
+  unless its backup verifies; `migrate_memory` does the same, and `homecoming`
+  exits non-zero when a database fails to copy. Backups are written to
+  `<engine root>/backups/<tool>/`.
+  **Affected:** all installs · **Action:** on PostgreSQL, install
+  `pg_dump`/`pg_restore` (or set `M3_PG_DUMP` / `M3_PG_RESTORE`) to run these
+  tools · **Data status:** backups these tools made before this change may be
+  missing recent writes.
 
-- **`m3_chatlog_backfill_title` writes the store it was pointed at.** Its chatlog
-  pass updated titles in the main store instead, and its UPDATE used a
-  SQLite-only placeholder that fails on PostgreSQL. **Affected:** installs that
-  ran the title backfill with a separate chatlog store · **Action:** none ·
+- **`m3_chatlog_backfill_title` writes only the store it targets, and runs on
+  PostgreSQL.** **Affected:** installs that ran the title backfill against a
+  separate chatlog store · **Action:** none ·
   **Data status:** main-store rows with an empty or role-label title may have
-  received a title derived from their own first line; no content was changed.
+  received a title from their own first line; no content was changed.
 
-- **Entity extraction no longer holds the database write lock while it waits
-  on the embedder.** Each extracted memory resolved its entities (one embedding
-  call per entity) inside one write transaction, so while the cognitive loop
-  worked through extraction backlog, other writes to the main store — memory
-  saves from the MCP server or CLI — failed with `database is locked`.
-  Resolution now runs before the write, which is one short transaction.
+- **Entity extraction no longer blocks other writes to the main store.** While
+  the cognitive loop worked through extraction backlog, memory saves from the
+  MCP server or CLI could fail with `database is locked`.
   **Affected:** SQLite installs running entity extraction · **Action:** none ·
-  **Data status:** none (writes that failed with `database is locked` were not
-  applied and can be retried).
+  **Data status:** none (writes that failed were not applied and can be
+  retried).
 
-- **Procedural distillation and belief consolidation no longer crash after
-  writing.** Linking a new memory to its sources on the caller's open connection
-  raised `TypeError: _db() takes 0 positional arguments`, after the memory itself
-  had been written. Distillation then repeated the same task every cycle, writing
-  a new copy of the procedure each time (superseding the previous copy), and no
-  provenance links were recorded. A task that already has a procedure is no
-  longer distilled again on every pass. **Affected:** installs where distillation or
-  consolidation reach a working model · **Action:** none ·
+- **Procedural distillation and belief consolidation complete, and a task is
+  distilled once.** The same task was re-distilled every cycle, each pass
+  adding a superseded copy of the procedure, and no provenance links were
+  recorded. **Affected:** installs where distillation or consolidation reach a
+  working model · **Action:** none ·
   **Data status:** repeated distillation leaves superseded duplicate procedure
   memories (source `distillation`) and procedures without `distills_from` links.
 
-- **A local model server with no model loaded no longer costs entity
-  extraction its retries.** Each eligible memory used to fail and be charged a
-  retry attempt; after three it was excluded from extraction permanently. Rows
-  are now deferred until a model is available. Distillation stops for the
-  cycle instead of failing every task, the outage is reported once (and again
-  hourly) instead of per call, and model errors now include the server's
-  message (e.g. `No models loaded`). The entity run banner no longer says
-  "DRY RUN" on real runs. **Affected:** installs using a local LM Studio /
-  Ollama server · **Action:** keep a model loaded in the local server ·
-  **Data status:** memories excluded by an earlier outage stay excluded; they
-  appear in `entity_extraction_queue` as `failed` with a "No models loaded"
-  error and need re-queueing.
+- **A local model server with no model loaded no longer makes entity
+  extraction give up on memories.** They are deferred until a model is
+  available instead of being excluded after three attempts. Distillation pauses
+  for the cycle, the outage is reported once (then hourly), and model errors
+  include the server's message (e.g. `No models loaded`). The entity run banner
+  no longer says "DRY RUN" on real runs. **Affected:** installs using a local
+  LM Studio / Ollama server · **Action:** keep a model loaded in the local
+  server · **Data status:** memories excluded by an earlier outage stay
+  excluded; they appear in `entity_extraction_queue` as `failed` with a "No
+  models loaded" error and need re-queueing.
 
-- **`M3_DB_BACKEND` is read on every call instead of once per process.** Two
-  loaded copies of the backend selector could disagree about the active
-  backend, so code could reach SQLite while PostgreSQL was selected. A change
-  to `M3_DB_BACKEND` inside a running process now takes effect on the next call.
-  **Affected:** PostgreSQL deployments · **Action:** none ·
-  **Data status:** observed only in the test suite; rows written to SQLite
-  under a PostgreSQL selection are not migrated.
+- **The selected backend is used consistently, and a change to
+  `M3_DB_BACKEND` takes effect on the next call.** Code could reach SQLite
+  while PostgreSQL was selected. **Affected:** PostgreSQL deployments ·
+  **Action:** none · **Data status:** observed only in the test suite; rows
+  written to SQLite under a PostgreSQL selection are not migrated.
 
 - **Scheduled-task and service logs are written to `~/.m3/logs`.** They were
   written inside the installed package, where a reinstall deletes them. New

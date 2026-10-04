@@ -1,10 +1,8 @@
 """The pre-write snapshot primitive: verified, WAL-safe, and the same on both backends.
 
-Five tools used to "back up" with ``shutil.copy2(db_path, ...)`` before deleting
-or rewriting rows. In WAL mode that omits every commit still in ``<db>-wal``;
-on PostgreSQL it copied an unrelated local SQLite file and called it a
-rollback. These tests pin the replacement's guarantees, each with a case that
-would have failed under the old copy.
+Hazard: a file copy omits commits still in ``<db>-wal``, and on PostgreSQL a
+copy of ``db_path`` is not the live store at all. Each test below includes a
+case a plain file copy would fail.
 """
 from __future__ import annotations
 

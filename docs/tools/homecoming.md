@@ -1,8 +1,8 @@
 ---
 tool: bin/homecoming.py
-sha1: 7417038e8ece
-mtime_utc: 2026-10-04T07:25:38.189681+00:00
-generated_utc: 2026-10-04T07:29:40.507860+00:00
+sha1: b1af10e99008
+mtime_utc: 2026-10-04T08:58:19.545848+00:00
+generated_utc: 2026-10-04T09:01:02.408723+00:00
 private: false
 ---
 
@@ -22,7 +22,7 @@ and MOVES configuration files. It does NOT modify system-wide tool settings
 
 ## Entry points
 
-- `def main()` (line 88)
+- `def main()` (line 87)
 - `if __name__ == "__main__"` guard
 
 ---

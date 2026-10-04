@@ -120,9 +120,8 @@ def _backfill(
     counters = {"updated": 0, "skipped_empty_derived": 0, "wall_s": 0.0}
     started = time.monotonic()
 
-    # Scoped to THIS target: unscoped, connection() follows the process-active
-    # store, so the chatlog pass rewrote the main store (and the pre-write
-    # snapshot, which is scoped per target, backed up a store nobody changed).
+    # Scoped to THIS target: an unscoped connection() follows the process-active
+    # store, not db_path. The pre-write snapshot is scoped the same way.
     with scoped_db_env(db_path), seam_backend().connection() as conn:
         placeholders = seam_dialect().placeholder(len(useless_titles))
         sql = f"""

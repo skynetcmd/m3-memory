@@ -77,9 +77,8 @@ def get_legacy_assets():
 def backup_db(src, dst):
     """WAL-safe, verified copy of a legacy SQLite DB to its new location.
 
-    Raises SqliteSnapshotError on failure. It used to log and return, so the run
-    reported success and went on to point the chatlog config at a database that
-    had never been copied.
+    Raises SqliteSnapshotError on failure. The caller must not continue as if
+    it succeeded: the chatlog config is repointed at the copied database.
     """
     logger.info(f"Copying {os.path.basename(src)} to {dst}...")
     counts = snapshot_sqlite(src, dst)
