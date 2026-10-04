@@ -3072,12 +3072,13 @@ _DOCTOR_TIMEOUT_S = 60.0
 # the child after its interpreter boots, so this covers Python startup +
 # imports on a loaded host — not a service's full readiness.
 #
-# Sized against the existing budgets above rather than guessed: an order of
-# magnitude below _DOCTOR_TIMEOUT_S (60s) and below --quiesce-timeout (30s),
-# because a process that has not even registered within 20s is not slow, it
-# failed to start. The wait polls, so a healthy start costs well under a second
-# and only a genuinely dead service pays the full timeout.
-_REGISTER_SETTLE_S = 20.0
+# Must exceed the service manager's respawn throttle: the launchd plists set
+# ThrottleInterval 60, so a daemon the install just stopped can take up to 60s
+# to be relaunched. A shorter bound reported a healthy loop as NOT running.
+# The wait polls, so a healthy start costs well under a second and only a
+# genuinely dead service pays the full timeout.
+_LAUNCHD_THROTTLE_S = 60.0
+_REGISTER_SETTLE_S = _LAUNCHD_THROTTLE_S + 15.0
 
 
 def _trace(msg: str) -> None:

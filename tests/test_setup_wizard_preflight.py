@@ -1359,3 +1359,19 @@ def test_setup_lowers_its_halt_before_verifying(monkeypatch):
 
     assert setup_wizard.run_setup(argparse.Namespace(non_interactive=True)) == 0
     assert events.index("clear") < events.index("doctor") < events.index("verify")
+
+
+def test_settle_wait_outlasts_the_launchd_respawn_throttle():
+    """A stopped daemon is relaunched only after ThrottleInterval; verifying
+    sooner reported a healthy loop as NOT running."""
+    import re
+
+    bin_dir = Path(setup_wizard.__file__).resolve().parent.parent / "bin"
+    throttles = []
+    for name in ("com.m3memory.cognitiveloop.plist", "com.m3memory.dashboard.plist",
+                 "com.m3memory.notificationwaiter.plist"):
+        # Templates carry `--` in comments, so they are not strict XML.
+        text = (bin_dir / name).read_text(encoding="utf-8")
+        m = re.search(r"<key>ThrottleInterval</key>\s*<integer>(\d+)</integer>", text)
+        throttles.append(int(m.group(1)) if m else 10)
+    assert setup_wizard._REGISTER_SETTLE_S > max(throttles)
