@@ -2060,26 +2060,31 @@ def _register_embed_server_task(*, non_interactive: bool = False) -> None:
     which we pass through."""
     try:
         from m3_memory import embedder_admin
-        if embedder_admin._server_binary() is not None:
-            print("    Keep-alive: the Rust m3-embed-server OS service (installed "
-                  "above) keeps :8082 up — no scheduled task needed.")
+        binary = embedder_admin._server_binary()
+        if binary is not None:
+            # Ask the service manager: the binary being present does not mean the
+            # step above registered it (it may have been skipped).
+            gguf = embedder_admin._find_bundled_gguf() or Path("")
+            if embedder_admin._service_reports_installed(binary, gguf):
+                print("    Keep-alive: the Rust m3-embed-server OS service keeps "
+                      ":8082 up — no scheduled task needed.")
+            else:
+                print("    [!] the Rust m3-embed-server is present but NOT registered "
+                      "as a service, so nothing keeps :8082 up. Register it with:")
+                print("        m3 embedder install")
             return
     except Exception:  # noqa: BLE001 — detection failure: fall through to the fallback
         pass
 
-    # Rust binary absent. The scheduled-task fallback (bin/install_schedules.py,
-    # schtasks) is WINDOWS-ONLY — there is no crontab/systemd/launchd unit for the
-    # Python embed_server_inproc.py. So on Unix the only cross-boot keep-alive is
-    # the Rust OS service; be honest and point there rather than shell out to a
-    # Windows-only path that would silently do nothing (§1 3-OS, §3 never-silent).
+    # Rust binary absent. On macOS/Linux the Python server's launchd/systemd unit
+    # is installed with the cognitive loop (install_schedules
+    # install_unix_embed_server); the schtasks fallback below is Windows-only.
     if sys.platform != "win32":
-        print("    Rust m3-embed-server not present, and the Python embed-server has")
-        print("    no launchd/systemd unit yet — so shared mode has no cross-boot")
-        print("    keep-alive on this OS. To get one, install the sovereign embedder:")
-        print("        m3 embedder install-gpu   # fetches the m3-embed-server binary")
-        print("        m3 embedder install       # registers it as a systemd/launchd service")
-        print("    Until then, shared mode works only while a server is started manually:")
-        print("        python bin/embed_server_inproc.py --port 8082")
+        print("    Rust m3-embed-server not present. The Python embed-server unit")
+        print("    is installed with the cognitive loop; to add it on its own:")
+        print("        m3 schedules add cognitive-loop")
+        print("    or install the sovereign embedder service instead:")
+        print("        m3 embedder install-gpu && m3 embedder install")
         return
 
     print("    Rust m3-embed-server not present — registering the Python embed-"

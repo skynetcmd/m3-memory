@@ -1316,3 +1316,21 @@ class TestCursorClineVisibility:
         for a in "cursor,cline".split(","):
             setattr(t, a.strip().lower(), True)
         assert t.cursor and t.cline
+
+
+@pytest.mark.parametrize("registered, expect", [
+    (True, "keeps :8082 up"),
+    (False, "NOT registered"),
+])
+def test_keep_alive_line_reflects_the_service_manager(monkeypatch, capsys, registered, expect):
+    """The Rust binary being present does not mean step 2 registered it."""
+    from m3_memory import embedder_admin
+
+    monkeypatch.setattr(embedder_admin, "_server_binary", lambda: Path("/bin/m3-embed-server"))
+    monkeypatch.setattr(embedder_admin, "_find_bundled_gguf", lambda: None)
+    monkeypatch.setattr(embedder_admin, "_service_reports_installed",
+                        lambda b, g: registered)
+    setup_wizard._register_embed_server_task(non_interactive=True)
+    out = capsys.readouterr().out
+    assert expect in out
+    assert "installed above" not in out
