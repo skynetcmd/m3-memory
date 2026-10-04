@@ -1238,12 +1238,13 @@ def has_distill_work(core_db: Optional[str], threshold: int, stale_days: int) ->
     call when there's real work (event-driven, backend-agnostic via dialect)."""
     try:
         from memory.backends import dialect
+        from memory_maintenance import undistilled_task_clause
         _d = dialect()
         _p = _d.param()
-        clause = ""
+        clause = " AND " + undistilled_task_clause(_d)
         params: tuple = (threshold,)
         if stale_days > 0:
-            clause = f" AND completed_at IS NOT NULL AND completed_at < {_d.now_minus_days(_p)}"
+            clause += f" AND completed_at IS NOT NULL AND completed_at < {_d.now_minus_days(_p)}"
             params = (int(stale_days), threshold)
         sql = (
             "SELECT 1 FROM tasks "

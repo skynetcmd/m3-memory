@@ -1907,6 +1907,23 @@ async def memory_consolidate_impl(
 VALID_PROCEDURE_KINDS = frozenset({"skill", "runbook", "how_to", "checklist"})
 
 
+def undistilled_task_clause(d) -> str:
+    """SQL predicate over ``tasks``: no non-deleted procedure was distilled from
+    this task yet. The single owner — both the distillation selection and the
+    loop's work gate (m3_cognitive_loop.has_distill_work) append it, so the gate
+    cannot keep reporting work the pass will not do. A superseded copy still
+    counts: it proves the task was distilled.
+
+    Without it every pass re-distilled every completed task and contradiction
+    detection superseded the previous copy (~5 procedure writes per minute on
+    2026-10-04)."""
+    jx = d.json_extract_text("p.metadata_json", "distilled_from_task")
+    return (
+        "NOT EXISTS (SELECT 1 FROM memory_items p "
+        f"WHERE p.type = 'procedure' AND p.is_deleted = 0 AND {jx} = tasks.id)"
+    )
+
+
 def _resolve_distill_model() -> str:
     """Return the M3_DISTILL_MODEL selector (local-first default).
 
@@ -2046,7 +2063,8 @@ async def memory_distill_procedures_impl(
 
     # 1. Select completed, non-deleted tasks with a result, aged past stale_days.
     #    Built through the dialect so the same SQL runs on SQLite / PG / MariaDB.
-    where = ["state = 'completed'", "deleted_at IS NULL", "result_memory_id IS NOT NULL"]
+    where = ["state = 'completed'", "deleted_at IS NULL", "result_memory_id IS NOT NULL",
+             undistilled_task_clause(_d)]
     params: list = []
     if stale_days > 0:
         where.append(f"completed_at IS NOT NULL AND completed_at < {_d.now_minus_days(p)}")

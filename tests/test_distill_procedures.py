@@ -228,3 +228,50 @@ async def test_job_defers_when_user_active(monkeypatch, tmp_path):
     with sqlite3.connect(str(db)) as conn:
         n = conn.execute("SELECT COUNT(*) FROM memory_items WHERE type='procedure'").fetchone()[0]
     assert n == 0, "a real write must defer when the host is busy"
+
+
+# ── a distilled task is never re-distilled (2026-10-04) ──────────────────────
+
+@pytest.mark.asyncio
+async def test_a_distilled_task_is_not_distilled_again(monkeypatch, tmp_path):
+    """Nothing excluded already-distilled tasks: every pass re-distilled every
+    completed task, and contradiction detection superseded the previous copy
+    (~5 procedure writes per minute on 2026-10-04)."""
+    monkeypatch.setenv("M3_DB_BACKEND", "sqlite")
+    db = tmp_path / "t.db"
+    _full_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        _seed_completed_task(conn)
+        conn.commit()
+    mm = _patch_db(monkeypatch, db)
+    _patch_model_and_embed(monkeypatch, mm)
+
+    first = await mm.memory_distill_procedures_impl(stale_days=0, threshold=1)
+    assert "Distilled task t1" in first, first
+    second = await mm.memory_distill_procedures_impl(stale_days=0, threshold=1)
+    assert "Distilled task" not in second, second
+    with sqlite3.connect(str(db)) as conn:
+        n = conn.execute("SELECT COUNT(*) FROM memory_items WHERE type='procedure'").fetchone()[0]
+    assert n == 1, f"exactly one procedure per task, found {n}"
+
+
+def test_loop_work_gate_agrees_after_distillation(monkeypatch, tmp_path):
+    """The loop's gate must stop reporting work once the task is distilled, or
+    it keeps spending a model call per cycle on nothing."""
+    monkeypatch.setenv("M3_DB_BACKEND", "sqlite")
+    import m3_cognitive_loop as loop
+
+    db = tmp_path / "t.db"
+    _full_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        _seed_completed_task(conn)
+        conn.commit()
+    assert loop.has_distill_work(str(db), 1, 0) is True, "precondition: one undistilled task"
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO memory_items (id, type, title, content, metadata_json, created_at, is_deleted) "
+            "VALUES ('proc-1', 'procedure', 'p', 'body', ?, '2026-01-01T00:00:00Z', 0)",
+            (json.dumps({"distilled_from_task": "t1"}),),
+        )
+        conn.commit()
+    assert loop.has_distill_work(str(db), 1, 0) is False
