@@ -76,18 +76,26 @@ def test_apply_deletes_only_the_minority_family(tmp_path):
     assert left == {"bge-m3-GGUF-Q4_K_M.gguf"}
 
 
-def test_apply_takes_a_restorable_backup(tmp_path):
+@pytest.fixture()
+def backup_dir(tmp_path, monkeypatch):
+    d = tmp_path / "backups"
+    monkeypatch.setattr(reembed_space, "_backup_dir", lambda: str(d))
+    monkeypatch.delenv("M3_DB_BACKEND", raising=False)
+    return d
+
+
+def test_apply_takes_a_restorable_backup(tmp_path, backup_dir):
     db = _store(tmp_path, MIXED)
     reembed_space.main(["--db", db, "--apply", "--no-backfill"])
-    baks = [p for p in os.listdir(tmp_path) if "-prereembed" in p]
+    baks = [p for p in os.listdir(backup_dir) if ".pre-reembed." in p]
     assert len(baks) == 1, "exactly one backup expected"
-    assert _count(str(tmp_path / baks[0])) == 107, "backup must hold the pre-delete state"
+    assert _count(str(backup_dir / baks[0])) == 107, "backup must hold the pre-delete state"
 
 
-def test_no_backup_flag_skips_the_copy(tmp_path):
+def test_no_backup_flag_skips_the_copy(tmp_path, backup_dir):
     db = _store(tmp_path, MIXED)
     reembed_space.main(["--db", db, "--apply", "--no-backup", "--no-backfill"])
-    assert not [p for p in os.listdir(tmp_path) if "-prereembed" in p]
+    assert not backup_dir.exists() or not os.listdir(backup_dir)
 
 
 # ── correctness of what gets chosen ──────────────────────────────────────────
@@ -262,14 +270,20 @@ def test_file_backend_honours_the_db_path(tmp_path, monkeypatch):
     assert _count(other) == 107, "a different store must be untouched"
 
 
-def test_pooled_backend_refuses_silent_backup(tmp_path, capsys, monkeypatch):
-    """A file copy cannot snapshot a server-hosted store — implying otherwise
-    would promise a rollback that does not exist."""
+def test_a_failed_snapshot_aborts_before_any_delete(tmp_path, capsys, monkeypatch, backup_dir):
+    """No verified backup, no delete — on any backend. (A server-hosted store
+    used to be refused outright; it is now snapshotted with pg_dump, so the
+    rule that matters is what happens when the snapshot cannot be taken.)"""
     db = _store(tmp_path, MIXED)
-    monkeypatch.setattr(reembed_space, "_is_file_backend", lambda: False)
-    rc = reembed_space.main(["--db", db, "--apply"])
+
+    def no_snapshot(db_path):
+        raise RuntimeError("simulated snapshot failure")
+
+    monkeypatch.setattr(reembed_space, "_backup", no_snapshot)
+    rc = reembed_space.main(["--db", db, "--apply", "--no-backfill"])
     assert rc == 1
-    assert "--no-backup is required" in capsys.readouterr().out
+    assert "aborting" in capsys.readouterr().out
+    assert _count(db) == 107, "nothing may be deleted without a backup"
 
 
 @pytest.mark.parametrize("rows,expected_kept", [

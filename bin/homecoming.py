@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import shutil
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -20,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from m3_sdk import get_m3_config_root, get_m3_engine_root
+    from sqlite_snapshot import SqliteSnapshotError, snapshot_sqlite
 except ImportError:
     print("Error: Could not import m3_sdk. Run from project root.")
     sys.exit(1)
@@ -75,19 +75,15 @@ def get_legacy_assets():
     return assets
 
 def backup_db(src, dst):
-    """Secure copy using SQLite Backup API."""
-    logger.info(f"Backing up {os.path.basename(src)} to {dst}...")
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    try:
-        src_conn = sqlite3.connect(src)
-        dst_conn = sqlite3.connect(dst)
-        with dst_conn:
-            src_conn.backup(dst_conn)
-        src_conn.close()
-        dst_conn.close()
-        logger.info(f"Successfully backed up {os.path.basename(src)}")
-    except Exception as e:
-        logger.error(f"Failed to backup {src}: {e}")
+    """WAL-safe, verified copy of a legacy SQLite DB to its new location.
+
+    Raises SqliteSnapshotError on failure. It used to log and return, so the run
+    reported success and went on to point the chatlog config at a database that
+    had never been copied.
+    """
+    logger.info(f"Copying {os.path.basename(src)} to {dst}...")
+    counts = snapshot_sqlite(src, dst)
+    logger.info(f"Copied {os.path.basename(src)} (verified: {len(counts)} tables match)")
 
 def main():
     config_root = get_m3_config_root()
@@ -100,6 +96,7 @@ def main():
         logger.info("No legacy assets found in repository or old ~/.m3-memory/. Current configuration is already standard.")
         return
 
+    failed = []
     total_size = sum(get_size_mb(src) for src, _ in assets.values())
     logger.info(f"Found {len(assets)} legacy assets ({total_size:.2f} MB)")
 
@@ -117,7 +114,11 @@ def main():
             continue
 
         if src.endswith(".db"):
-            backup_db(src, dst)
+            try:
+                backup_db(src, dst)
+            except SqliteSnapshotError as e:
+                logger.error(f"Failed to copy {dst_name}: {e}")
+                failed.append(key)
         else:
             logger.info(f"Copying {dst_name} to {target_dir}...")
             try:
@@ -128,6 +129,7 @@ def main():
                 logger.info(f"Successfully copied {dst_name}")
             except Exception as e:
                 logger.error(f"Failed to copy {dst_name}: {e}")
+                failed.append(key)
 
         # The chatlog config pins an absolute `db_path`; a verbatim copy leaves it
         # pointing at the OLD location, so the chatlog falls back there even after
@@ -135,13 +137,22 @@ def main():
         # M3_DATABASE > config db_path > default). Rewrite it to the new engine
         # root so the migrated chatlog DB is actually used.
         if key == "chatlog_config" and os.path.exists(dst):
-            _rewrite_chatlog_db_path(dst, engine_root)
+            if "chatlog_db" in failed:
+                logger.error("Not repointing the chatlog config: its database was not copied.")
+            else:
+                _rewrite_chatlog_db_path(dst, engine_root)
+
+    if failed:
+        logger.error(f"\nMigration INCOMPLETE — failed: {', '.join(failed)}. "
+                     "The legacy files are untouched; fix the cause and re-run.")
+        return 1
 
     logger.info("\nMigration (Data & Configuration) completed.")
     logger.info(f"New configuration root: {config_root}")
     logger.info(f"New engine root: {engine_root}")
 
     _print_post_migration_checklist(config_root, engine_root)
+    return 0
 
 
 def _rewrite_chatlog_db_path(config_path, engine_root):
@@ -203,4 +214,4 @@ def _print_post_migration_checklist(config_root, engine_root):
     logger.info(sep)
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

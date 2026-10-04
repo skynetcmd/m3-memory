@@ -68,6 +68,9 @@ _EXEMPT = {
         "Resolves and validates DB paths before any context exists.",
     "bin/sqlite_pragmas.py":
         "Defines the pragma stack itself; applying it needs a connection.",
+    "bin/sqlite_snapshot.py":
+        "The one owner of the WAL-safe SQLite file copy (backup API + verify); "
+        "SqliteBackend.snapshot, migrate_memory and homecoming route through it.",
     "bin/chatlog_config.py":
         "BUILDS the chatlog connection pool (same role as m3_core/context.py) -- "
         "the thing other code borrows from.",
@@ -88,8 +91,6 @@ _EXEMPT = {
     # --- Bootstrap: runs BEFORE a usable schema/seam exists. ---
     "bin/migrate_memory.py":
         "Creates and versions the schema the seam later assumes.",
-    "bin/homecoming.py":
-        "Relocates database FILES between roots; operates on paths, not rows.",
     "bin/split_chatlog_from_core.py":
         "One-time topology split: copies between two physical SQLite files.",
     "bin/backfill_content_hash.py":

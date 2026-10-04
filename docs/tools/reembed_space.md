@@ -1,8 +1,8 @@
 ---
 tool: bin/reembed_space.py
-sha1: 20cc84f875d6
-mtime_utc: 2026-08-30T00:09:08.520688+00:00
-generated_utc: 2026-08-30T01:24:29.409422+00:00
+sha1: 6aa0b7558944
+mtime_utc: 2026-10-04T07:24:55.966154+00:00
+generated_utc: 2026-10-04T07:29:40.859407+00:00
 private: false
 ---
 
@@ -32,7 +32,8 @@ keep correct. So the flow is:
 
 SAFETY: dry-run is the DEFAULT. The tool prints exactly what it would delete and
 exits without touching anything until ``--apply`` is passed. A timestamped backup
-of the target DB is taken before the first delete unless ``--no-backup`` is set.
+of the target store is taken and verified before the first delete unless
+``--no-backup`` is set (SQLite: online backup API; PostgreSQL: pg_dump).
 Deleting an embedding is non-destructive to the MEMORY — content, metadata and
 relationships are untouched; only the vector is dropped and regenerated.
 
@@ -40,7 +41,7 @@ relationships are untouched; only the vector is dropped and regenerated.
 
 ## Entry points
 
-- `def main()` (line 243)
+- `def main()` (line 251)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -52,7 +53,7 @@ relationships are untouched; only the vector is dropped and regenerated.
 | `--db` | Target DB (default: the resolved engine agent_memory.db). | None |  | str |  |
 | `--keep` | Model family to KEEP (e.g. 'bge-m3'). Default: the family holding the most vectors. | None |  | str |  |
 | `--apply` | Actually delete. Without this the tool only reports. | `False` |  | store_true |  |
-| `--no-backup` | Skip the pre-delete DB copy (not recommended). | `False` |  | store_true |  |
+| `--no-backup` | Skip the pre-delete snapshot (not recommended). | `False` |  | store_true |  |
 | `--no-backfill` | Do not chain embed_backfill.py after deleting. | `False` |  | store_true |  |
 | `--all-dbs` | Process BOTH engine stores (agent_memory.db and agent_chatlog.db). File backend only. Ignores --db. | `False` |  | store_true |  |
 
@@ -80,7 +81,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 191)
+- `sqlite3.connect()  → `db_path`` (line 190)
 
 
 ---
@@ -88,7 +89,9 @@ _(none detected)_
 ## Notable external imports
 
 - `doctor.embed_space_probe (_family)`
+- `m3_core.paths (get_m3_backups_root)`
 - `m3_core.paths (resolve_engine_file)`
+- `m3_core.paths (snapshot_stores)`
 - `memory.backends (active_backend)`
 
 ---

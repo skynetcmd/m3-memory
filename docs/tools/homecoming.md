@@ -1,8 +1,8 @@
 ---
 tool: bin/homecoming.py
-sha1: 4eac42bcc400
-mtime_utc: 2026-09-17T17:26:58.267983+00:00
-generated_utc: 2026-09-17T17:38:56.513827+00:00
+sha1: 7417038e8ece
+mtime_utc: 2026-10-04T07:25:38.189681+00:00
+generated_utc: 2026-10-04T07:29:40.507860+00:00
 private: false
 ---
 
@@ -22,7 +22,7 @@ and MOVES configuration files. It does NOT modify system-wide tool settings
 
 ## Entry points
 
-- `def main()` (line 92)
+- `def main()` (line 88)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -42,16 +42,13 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (get_m3_config_root, get_m3_engine_root)`
+- `sqlite_snapshot (SqliteSnapshotError, snapshot_sqlite)`
 
 ---
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `dst`` (line 83)
-- `sqlite3.connect()  → `src`` (line 82)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ---
 

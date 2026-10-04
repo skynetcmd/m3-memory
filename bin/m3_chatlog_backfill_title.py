@@ -18,20 +18,17 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import shutil
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from m3_core.paths import seam_backend, seam_dialect
+from m3_core.paths import get_m3_backups_root, seam_backend, seam_dialect, snapshot_stores
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-from m3_sdk import get_m3_root
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BACKUP_DIR = Path(get_m3_root()) / "backups"
+BACKUP_DIR = Path(get_m3_backups_root()) / "title-backfill"
 
 # Default set of titles we consider "useless" for FTS purposes.
 # These are role labels or generic placeholders — they tell you nothing
@@ -52,14 +49,6 @@ def _resolve_db(arg_path: Optional[str], env_var: str, default_name: str) -> Opt
         return p if p.exists() else None
     p = REPO_ROOT / "memory" / default_name
     return p if p.exists() else None
-
-
-def _backup_db(db_path: Path) -> Path:
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.utcnow().strftime("%Y%m%dT%H%M")
-    dst = BACKUP_DIR / f"{db_path.stem}.pre-title-backfill.{stamp}.db"
-    shutil.copy2(db_path, dst)
-    return dst
 
 
 def _derive_title(content: str, max_chars: int = 100) -> str:
@@ -285,9 +274,8 @@ def main() -> int:
             return 0
 
     if not args.skip_backup:
-        for label, db_path in db_targets:
-            backup = _backup_db(db_path)
-            print(f"[title-backfill] backup: {db_path.name} → {backup}", flush=True)
+        for snap in snapshot_stores([p for _, p in db_targets], BACKUP_DIR, label="pre-title-backfill"):
+            print(f"[title-backfill] backup: {snap.store} → {snap.path} ({snap.verified})", flush=True)
 
     grand = {"updated": 0, "skipped_empty_derived": 0}
     for label, db_path in db_targets:

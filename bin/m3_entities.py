@@ -46,7 +46,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import sys
 import time
 from collections import defaultdict
@@ -69,14 +68,15 @@ from llm_failover import (  # noqa: E402
     report_unavailable,
     require_usable_endpoint,
 )
-from m3_sdk import get_m3_root, scoped_db_env
+from m3_core.paths import get_m3_backups_root, snapshot_stores
+from m3_sdk import scoped_db_env
 from slm_intent import Profile, _is_loopback, load_profile, localize_endpoint  # noqa: E402
 
 logger = logging.getLogger("m3_entities")
 
 DEFAULT_PROFILE = "entities_local_qwen"
 DEFAULT_VOCAB_YAML = REPO_ROOT / "config" / "lists" / "entity_graph_m3.yaml"
-BACKUP_DIR = Path(get_m3_root()) / "backups" / "entities"
+BACKUP_DIR = Path(get_m3_backups_root()) / "entities"
 
 # By default, only DURABLE types where named-entity extraction is high-value.
 # Curated content (note/decision/knowledge/reference/fact/plan/document/
@@ -168,14 +168,6 @@ def _maybe_reclassify_module(etype: str, cname: str) -> str:
 
 def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d")
-
-
-def _backup_db(db_path: Path) -> Path:
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M")
-    dst = BACKUP_DIR / f"{db_path.stem}.pre-entities.{stamp}{db_path.suffix}"
-    shutil.copy2(str(db_path), str(dst))
-    return dst
 
 
 def _load_vocab(path: Optional[Path]) -> tuple[frozenset[str], frozenset[str]]:
@@ -1092,9 +1084,8 @@ async def _main_async(args: argparse.Namespace) -> int:
 
     if not args.skip_preflight:
         await _smoke_profile(profile, token, valid_types, valid_predicates)
-        for label, db_path in db_targets:
-            backup = _backup_db(db_path)
-            print(f"[m3-entities] backup: {db_path.name} -> {backup}", flush=True)
+        for snap in snapshot_stores([p for _, p in db_targets], BACKUP_DIR, label="pre-entities"):
+            print(f"[m3-entities] backup: {snap.store} -> {snap.path} ({snap.verified})", flush=True)
 
     counters_total: defaultdict[str, int] = defaultdict(int)
     for label, db_path in db_targets:

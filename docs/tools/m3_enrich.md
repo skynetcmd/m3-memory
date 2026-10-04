@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich.py
-sha1: 3cebac46b2f7
-mtime_utc: 2026-09-21T23:51:36.363764+00:00
-generated_utc: 2026-09-21T23:59:06.939725+00:00
+sha1: cb39fe2a7f2d
+mtime_utc: 2026-10-04T07:23:21.421768+00:00
+generated_utc: 2026-10-04T07:29:40.613859+00:00
 private: false
 ---
 
@@ -45,7 +45,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Entry points
 
-- `def main()` (line 1013)
+- `def main()` (line 1012)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -142,11 +142,11 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 - `enrich (ALWAYS_SKIP_TYPES)`
 - `enrich.eligibility (_load_conv_list, _query_eligible_groups)`
-- `enrich.prep (_backup_db, _ensure_migration_025, _load_profile_with_path, _resolve_db, _today)`
+- `enrich.prep (BACKUP_DIR, _ensure_migration_025, _load_profile_with_path, _resolve_db, _today)`
 - `enrich.rate_limit (_classify_observer_error, _estimate_cost_wall, _RateLimitCascade)`
 - `enrich.report (_print_dry_run, _print_run_summary)`
 - `m3_core.paths (get_m3_engine_root)`
-- `m3_core.paths (scoped_db_env)`
+- `m3_core.paths (scoped_db_env, snapshot_stores)`
 - `memory.backends (active_backend)`
 - `memory.backends.postgres_backend (_make_compat_cursor_factory)`
 

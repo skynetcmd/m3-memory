@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_entities.py
-sha1: 78af294b88c1
-mtime_utc: 2026-10-04T03:41:31.382945+00:00
-generated_utc: 2026-10-04T03:41:41.349611+00:00
+sha1: 801a0613a9ad
+mtime_utc: 2026-10-04T07:24:26.650917+00:00
+generated_utc: 2026-10-04T07:29:40.658323+00:00
 private: false
 ---
 
@@ -51,7 +51,7 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 ## Entry points
 
-- `def main()` (line 1197)
+- `def main()` (line 1188)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -97,7 +97,7 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 - `llm_failover (LLMUnavailable, report_available, report_unavailable, require_usable_endpoint)`
 - `llm_failover (discover_model_async)`
 - `llm_failover (suppresses_thinking_via_effort)`
-- `m3_sdk (get_m3_root, scoped_db_env)`
+- `m3_sdk (scoped_db_env)`
 - `memory_core`
 - `slm_intent (Profile, _is_loopback, load_profile, localize_endpoint)`
 
@@ -107,8 +107,8 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 **http**
 
-- `httpx.AsyncClient()` (line 639)
-- `httpx.AsyncClient()` (line 817)
+- `httpx.AsyncClient()` (line 631)
+- `httpx.AsyncClient()` (line 809)
 
 
 ---
@@ -116,6 +116,7 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 ## Notable external imports
 
 - `httpx`
+- `m3_core.paths (get_m3_backups_root, snapshot_stores)`
 - `memory.backends (active_backend)`
 - `memory.backends (dialect)`
 

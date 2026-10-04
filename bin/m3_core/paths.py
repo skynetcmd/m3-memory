@@ -322,6 +322,17 @@ def get_m3_root() -> str:
     return os.path.join(os.path.expanduser("~"), ".m3-memory")
 
 
+def get_m3_backups_root() -> str:
+    """Where database snapshots go: ``<engine root>/backups``.
+
+    Backups are database state, so they follow the engine root (and with it
+    ``M3_ENGINE_ROOT`` / ``M3_MEMORY_ROOT``) rather than the legacy
+    ``get_m3_root()`` (~/.m3-memory), which the decoupled-roots layout no
+    longer uses for databases. Tools add their own subdirectory.
+    """
+    return os.path.join(get_m3_engine_root(), "backups")
+
+
 def get_m3_config_root() -> str:
     """Returns the M3 configuration directory.
     Precedence: M3_CONFIG_ROOT > M3_MEMORY_ROOT/config > ~/.m3/config
@@ -856,6 +867,37 @@ def seam_backend():
                     c.close()
 
         return _SqliteOnlyShim()
+
+
+def snapshot_stores(db_paths, dest_dir, *, label: str) -> list:
+    """Verified snapshot of every distinct store a tool is about to write.
+
+    The ONE pre-write backup for the tools that sweep ``db_path`` targets (core,
+    then chatlog). Each target is resolved exactly the way those tools resolve
+    their WRITES — ``scoped_db_env(path)`` then the active backend — so the copy
+    is of the store that will change, never of a file that merely shares its
+    name. On SQLite that is each file; on PostgreSQL both targets are one
+    database, so ``store_identity`` collapses them to a single dump.
+
+    Returns ``Snapshot`` objects. Raises ``SnapshotError`` on any failure: the
+    caller must stop before its first write (DESIGN_PHILOSOPHIES §3, §10).
+
+    Deliberately NOT the bootstrap shim ``seam_backend`` falls back to: a
+    snapshot without the seam would be the unverified copy this replaces.
+    """
+    from memory.backends import active_backend  # type: ignore
+
+    seen: set = set()
+    out: list = []
+    for path in db_paths:
+        with scoped_db_env(path):
+            backend = active_backend()
+            key = backend.store_identity()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(backend.snapshot(str(dest_dir), label=label))
+    return out
 
 
 def seam_dialect():

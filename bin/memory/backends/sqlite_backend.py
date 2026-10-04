@@ -16,7 +16,15 @@ import uuid
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 
-from .base import BackendName, Capabilities, KeywordHit, VectorHit
+from .base import (
+    BackendName,
+    Capabilities,
+    KeywordHit,
+    Snapshot,
+    SnapshotError,
+    VectorHit,
+    snapshot_target,
+)
 from .dialect import Dialect, ParamStyle
 from .registry import register_backend
 
@@ -588,6 +596,43 @@ class SqliteBackend:
                 sqlite_pragmas.checkpoint_passive(conn)  # type: ignore[arg-type]
         except Exception:
             pass
+
+    def _store_path(self) -> str:
+        """This backend's file WITHOUT opening it.
+
+        Deliberately not `_ctx().db_path`: building an M3Context registers a
+        pool, and the lazy-init on first use would create a schema in a file
+        that a snapshot was only meant to read.
+        """
+        from m3_sdk import resolve_db_path
+
+        return self._db_path or resolve_db_path(None)
+
+    def store_identity(self) -> str:
+        """One file is one store: its normalised absolute path."""
+        import os
+
+        return "sqlite:" + os.path.normcase(os.path.realpath(self._store_path()))
+
+    def snapshot(self, dest_dir: str, *, label: str) -> Snapshot:
+        """WAL-safe verified copy via `bin/sqlite_snapshot.py` (the one owner)."""
+        import os
+
+        from sqlite_snapshot import SqliteSnapshotError, snapshot_sqlite
+
+        src = self._store_path()
+        stem, ext = os.path.splitext(os.path.basename(src))
+        dst = snapshot_target(dest_dir, stem, label, ext or ".db")
+        try:
+            counts = snapshot_sqlite(src, dst)
+        except SqliteSnapshotError as e:
+            raise SnapshotError(str(e)) from e
+        return Snapshot(
+            path=dst,
+            store=self.store_identity(),
+            row_counts=counts,
+            verified=f"quick_check ok; row counts match in {len(counts)} tables",
+        )
 
     def keyword_search(
         self,

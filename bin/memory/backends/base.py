@@ -34,6 +34,7 @@ upstream. This is what lets a search caller be identical on both backends.
 """
 from __future__ import annotations
 
+import re
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
@@ -111,6 +112,54 @@ class VectorHit:
 
     memory_id: str
     score: float
+
+
+class SnapshotError(RuntimeError):
+    """A store snapshot could not be taken AND verified.
+
+    Raised instead of returning a partial or unchecked result: a caller that
+    snapshots before a destructive operation must stop, not proceed on a
+    rollback that may not exist (DESIGN_PHILOSOPHIES §3, §10).
+    """
+
+
+_LABEL_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def snapshot_target(dest_dir: str, stem: str, label: str, ext: str) -> str:
+    """The final path for a new snapshot: ``<dest_dir>/<stem>.<label>.<UTC stamp><ext>``.
+
+    One owner for the naming so both backends' copies sort and read alike.
+    Refuses a ``label`` that could escape ``dest_dir`` and refuses to reuse an
+    existing name — a snapshot never overwrites an earlier one.
+    """
+    import os
+    from datetime import datetime, timezone
+
+    if not _LABEL_RE.fullmatch(label or ""):
+        raise SnapshotError(f"snapshot label must match [A-Za-z0-9._-]+; got {label!r}")
+    os.makedirs(dest_dir, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = os.path.join(dest_dir, f"{stem}.{label}.{stamp}{ext}")
+    if os.path.exists(path) or os.path.exists(path + ".partial"):
+        raise SnapshotError(f"snapshot target already exists: {path}")
+    return path
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """A verified point-in-time copy of one store. IDENTICAL shape on every backend.
+
+    ``row_counts`` were read inside the SAME snapshot that was copied, then
+    re-read from the copy and matched — so they describe the copy exactly, even
+    while other writers kept committing. ``verified`` says in one line what was
+    checked, for the operator to read next to ``path``.
+    """
+
+    path: str
+    store: str
+    row_counts: "dict[str, int]"
+    verified: str
 
 
 @runtime_checkable
@@ -462,5 +511,42 @@ class StorageBackend(Protocol):
 
         MUST be best-effort: a checkpoint failure is a housekeeping problem, not
         a data problem, and must never abort the batch that called it.
+        """
+        ...
+
+    def store_identity(self) -> str:
+        """A stable key naming the store this backend addresses.
+
+        Two targets that are the same store must yield the same key, so a tool
+        sweeping several ``db_path`` targets snapshots each STORE once. On
+        SQLite each file is its own store; on PostgreSQL the core and chatlog
+        targets are tables in one database, so both map to one key. Contains no
+        credentials.
+        """
+        ...
+
+    def snapshot(self, dest_dir: str, *, label: str) -> "Snapshot":
+        """Write a verified point-in-time copy of this store into ``dest_dir``.
+
+        The opposite of best-effort: it returns only a copy that was checked,
+        and raises :class:`SnapshotError` otherwise. A copy that was never
+        verified is not a backup, and a tool about to delete or rewrite rows
+        must stop rather than proceed on one.
+
+          SQLite   — the online backup API, not a file copy: committed pages
+                     still in ``<db>-wal`` are part of the live database (§10)
+                     and a byte copy silently omits them. Verified with
+                     ``PRAGMA quick_check`` plus per-table row counts.
+          Postgres — ``pg_dump --format=custom`` pinned to an exported
+                     snapshot, so the dump and the row counts see one state.
+                     Verified by streaming the archive back through
+                     ``pg_restore`` and counting each table's rows.
+
+        Both backends verify the same thing: every table's row count in the
+        copy equals its count in the snapshot it was taken from. A file that is
+        not yet verified never appears under its final name.
+
+        ``label`` becomes part of the file name and is restricted to
+        ``[A-Za-z0-9._-]``.
         """
         ...

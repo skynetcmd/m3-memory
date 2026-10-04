@@ -1,15 +1,13 @@
 """DB prep / profile loading — _today, _resolve_db, _load_profile_with_path,
-_ensure_migration_025, _backup_db."""
+_ensure_migration_025."""
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 
-from m3_core.paths import resolve_engine_file
-from m3_sdk import get_m3_root
+from m3_core.paths import get_m3_backups_root, resolve_engine_file
 from slm_intent import (
     Profile,
     _parse_profile,
@@ -21,7 +19,7 @@ from slm_intent import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_PROFILE = os.environ.get("M3_ENRICH_PROFILE", "enrich_local_qwen")
-BACKUP_DIR = Path(get_m3_root()) / "backups"
+BACKUP_DIR = Path(get_m3_backups_root()) / "enrich"
 
 
 def _today() -> str:
@@ -128,13 +126,3 @@ def _ensure_migration_025(db_path: Path) -> None:
     finally:
         conn.close()
 
-
-def _backup_db(db_path: Path) -> Path:
-    """Copy db_path into BACKUP_DIR with a timestamp suffix. Returns
-    the backup file path. Idempotent within the same minute (silently
-    overwrites if the same minute-stamp already exists)."""
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.utcnow().strftime("%Y%m%dT%H%M")
-    dst = BACKUP_DIR / f"{db_path.stem}.pre-enrich.{stamp}.db"
-    shutil.copy2(db_path, dst)
-    return dst

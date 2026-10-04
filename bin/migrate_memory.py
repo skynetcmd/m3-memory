@@ -52,8 +52,10 @@ _M3_ROOT = get_m3_root()
 
 # Path resolution (new-root-with-legacy-fallback) is the single source of truth
 # in m3_core.paths; these local names are thin aliases.
+from m3_core.paths import get_m3_backups_root
 from m3_core.paths import resolve_config_file as _resolve_config_file
 from m3_core.paths import resolve_engine_file as _resolve_engine_file
+from sqlite_snapshot import snapshot_sqlite
 
 CONFIG_PATH = _resolve_config_file(".migrate_config.json")
 DB_PATH = os.environ.get("M3_DATABASE") or _resolve_engine_file("agent_memory.db")
@@ -317,8 +319,7 @@ def prompt_backup_dir(assume_yes: bool) -> str:
     if saved and os.path.isdir(saved):
         return saved
 
-    # Precedence: get_m3_engine_root()/backups > get_m3_root()/backups
-    default = os.path.join(get_m3_engine_root(), "backups")
+    default = get_m3_backups_root()
 
     if assume_yes:
         # Non-interactive: fall back to out-of-repo default under the user's home
@@ -381,34 +382,12 @@ def take_backup(backup_dir: str, version_before: int, tag: str, target: Migratio
     db_basename = os.path.basename(target.db_path).replace(".db", "")
     basename = f"{db_basename}.v{version_before:03d}.{tag}.{ts}.db"
     dst = os.path.join(target_backup_dir, basename)
-    # Prefer SQLite's online backup API — it takes a consistent snapshot even
-    # while other connections are writing. Falls back to file-copy if the
-    # source can't be opened (rare on a locked DB on Windows).
-    try:
-        if src_conn is not None:
-            dst_conn = sqlite3.connect(dst)
-            try:
-                src_conn.backup(dst_conn)
-            finally:
-                dst_conn.close()
-        else:
-            src_conn_local = sqlite3.connect(target.db_path)
-            try:
-                dst_conn = sqlite3.connect(dst)
-                try:
-                    src_conn_local.backup(dst_conn)
-                finally:
-                    dst_conn.close()
-            finally:
-                src_conn_local.close()
-    except sqlite3.Error as e:
-        logger.warning(f"Online backup failed ({e}); falling back to file copy.")
-        shutil.copy2(target.db_path, dst)
-        for suffix in ("-wal", "-shm", "-journal"):
-            src = target.db_path + suffix
-            if os.path.exists(src):
-                shutil.copy2(src, dst + suffix)
-    logger.info(f"Backup written: {dst}")
+    # Verified online-backup snapshot (bin/sqlite_snapshot.py, the one owner).
+    # No file-copy fallback: copying a database other connections are writing
+    # can capture a torn file, and a migration must not proceed on that. A
+    # failure raises here, BEFORE any migration is applied.
+    counts = snapshot_sqlite(target.db_path, dst, src_conn=src_conn)
+    logger.info(f"Backup written: {dst} (verified: {len(counts)} tables match)")
     return dst
 
 def restore_backup(backup_path: str, target: MigrationTarget):

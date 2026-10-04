@@ -24,6 +24,7 @@ a silent fallback to SQLite.
 from __future__ import annotations
 
 import os
+import re
 import threading
 import uuid
 from contextlib import contextmanager
@@ -32,7 +33,15 @@ from typing import TYPE_CHECKING, Any, Iterator
 
 from m3_sdk import getenv_compat, resolve_primary_pg_dsn
 
-from .base import BackendName, Capabilities, KeywordHit, VectorHit
+from .base import (
+    BackendName,
+    Capabilities,
+    KeywordHit,
+    Snapshot,
+    SnapshotError,
+    VectorHit,
+    snapshot_target,
+)
 from .dialect import Dialect, ParamStyle
 from .registry import register_backend
 
@@ -382,6 +391,128 @@ def _reject_same_as_warehouse(primary_url: str) -> None:
             f"entirely). A different dbname on the same {p_id[0]}:{p_id[1]} is "
             f"sufficient."
         )
+
+
+# ── Snapshot support (pg_dump / pg_restore) ──────────────────────────────────
+
+_PG_TOOL_ENV = {"pg_dump": "M3_PG_DUMP", "pg_restore": "M3_PG_RESTORE"}
+
+# A data block in `pg_restore --data-only` output: `COPY schema.table (cols) FROM stdin;`
+# then one line per row (COPY text format escapes embedded newlines as \n, so a
+# row is always exactly one line), ended by `\.`. Either name may be quoted.
+_IDENT = rb'(?:"((?:[^"]|"")+)"|([^\s."]+))'
+_COPY_RE = re.compile(rb"^COPY " + _IDENT + rb"\." + _IDENT + rb" \(.*\) FROM stdin;\r?$")
+
+
+def _pg_tool(name: str) -> str:
+    """Absolute path to a PostgreSQL client tool, or SnapshotError saying how to get one.
+
+    ``M3_PG_DUMP`` / ``M3_PG_RESTORE`` override PATH. pg_restore is looked for
+    next to an overridden pg_dump first, so the pair comes from one install.
+    """
+    import shutil
+
+    explicit = os.environ.get(_PG_TOOL_ENV[name])
+    if explicit:
+        if os.path.isfile(explicit):
+            return os.path.abspath(explicit)
+        raise SnapshotError(f"{_PG_TOOL_ENV[name]}={explicit!r} is not a file.")
+    if name == "pg_restore" and os.environ.get("M3_PG_DUMP"):
+        sibling = shutil.which("pg_restore", path=os.path.dirname(os.environ["M3_PG_DUMP"]))
+        if sibling:
+            return sibling
+    found = shutil.which(name)
+    if found:
+        return found
+    raise SnapshotError(
+        f"observed: {name} is not on PATH. cause: a PostgreSQL store is snapshotted "
+        f"with pg_dump and verified with pg_restore; no client tools are installed "
+        f"here. inspect: install the PostgreSQL client tools (same major version as "
+        f"the server or newer), or point {_PG_TOOL_ENV[name]} at the executable. "
+        f"Refusing to continue without a backup."
+    )
+
+
+def _libpq_quote(value: object) -> str:
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _conninfo_and_env(dsn: str) -> "tuple[str, dict[str, str]]":
+    """A libpq conninfo WITHOUT the password, plus an env carrying it.
+
+    Command lines are readable by every local user (``ps``, Task Manager), so
+    the password goes to the child through ``PGPASSWORD`` and never through
+    argv. Everything else in the DSN — sslmode, options, a socket host — is
+    preserved, because those change what the tool connects to.
+    """
+    try:
+        from psycopg2.extensions import parse_dsn
+
+        params = dict(parse_dsn(dsn))
+    except Exception as e:  # noqa: BLE001 — never echo the DSN: it carries a password
+        raise SnapshotError(f"cannot parse the PostgreSQL DSN ({type(e).__name__}).") from e
+    password = params.pop("password", None)
+    env = dict(os.environ)
+    if password:
+        env["PGPASSWORD"] = str(password)
+    return " ".join(f"{k}={_libpq_quote(v)}" for k, v in params.items()), env
+
+
+def _tail(text: "str | bytes", n: int = 400) -> str:
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", "replace")
+    return text.strip()[-n:]
+
+
+def _remove_file(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
+def _archive_row_counts(pg_restore: str, archive: str, schema: str) -> "dict[str, int]":
+    """Row count per table of ``schema`` as stored IN the archive.
+
+    Streams ``pg_restore --data-only`` to stdout and counts each COPY block's
+    lines, so every data block is decompressed and read back — a truncated or
+    corrupt archive fails here rather than at restore time.
+    """
+    import subprocess
+
+    counts: dict[str, int] = {}
+    current: "str | None" = None
+    # stderr goes to a temp file, not a second pipe: an undrained stderr pipe
+    # that fills while we read stdout deadlocks both processes.
+    import tempfile
+
+    with tempfile.TemporaryFile() as errf, subprocess.Popen(  # nosec B603 — absolute tool path, no shell, argv list
+        # `--file=-` explicitly: pg_restore 18 refuses to default to stdout.
+        [pg_restore, "--data-only", "--file=-", archive],
+        stdout=subprocess.PIPE, stderr=errf,
+    ) as proc:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            if current is None:
+                m = _COPY_RE.match(line)
+                if m:
+                    sch = (m.group(1) or b"").replace(b'""', b'"') or m.group(2)
+                    tbl = (m.group(3) or b"").replace(b'""', b'"') or m.group(4)
+                    current = tbl.decode("utf-8") if sch.decode("utf-8") == schema else ""
+                    if current:
+                        counts.setdefault(current, 0)
+            elif line.rstrip(b"\r\n") == b"\\.":
+                current = None
+            elif current:
+                counts[current] += 1
+        rc = proc.wait()
+        errf.seek(0)
+        stderr = errf.read()
+    if rc != 0:
+        raise SnapshotError(f"pg_restore could not read the archive back: {_tail(stderr)}")
+    if current is not None:
+        raise SnapshotError("pg_restore output ended inside a data block; the archive is truncated.")
+    return counts
 
 
 # ── PostgreSQL SQL dialect (co-located with the backend it belongs to) ───────
@@ -962,6 +1093,97 @@ class PostgresBackend:
         knowing the backend (§1 storage seam).
         """
         return None
+
+    def store_identity(self) -> str:
+        """``postgres:host:port/dbname`` — core and chatlog share it (one database)."""
+        ident = _dsn_identity(self._dsn or "")
+        if ident is None:
+            import hashlib
+
+            # Unparseable: still stable and credential-free.
+            return "postgres:" + hashlib.sha256((self._dsn or "").encode()).hexdigest()[:16]
+        host, port, db = ident
+        return f"postgres:{host}:{port}/{db}"
+
+    def _run_pg_dump(self, argv: "list[str]", env: "dict[str, str]") -> None:
+        """Run pg_dump. A separate method so a test can act between the
+        snapshot export and the dump (the window a concurrent writer uses)."""
+        import subprocess
+
+        proc = subprocess.run(argv, env=env, capture_output=True)  # nosec B603 — absolute tool path, no shell
+        if proc.returncode != 0:
+            raise SnapshotError(f"pg_dump failed (rc {proc.returncode}): {_tail(proc.stderr)}")
+
+    def snapshot(self, dest_dir: str, *, label: str) -> Snapshot:
+        """``pg_dump -Fc`` pinned to an exported snapshot, verified by reading it back.
+
+        A DEDICATED connection holds the REPEATABLE READ transaction, not a
+        pooled one: it stays open for the whole dump, and parking a pool slot
+        for that long starves every other caller — the failure the entity
+        write-lock fix removed. Row counts are read in that transaction and
+        pg_dump attaches to its snapshot (``--snapshot``), so both see one state
+        no matter what commits meanwhile.
+
+        Scope is ``current_schema()`` — the same tables ``list_tables`` reports
+        — so what is counted is exactly what is dumped and verified.
+        """
+        import psycopg2
+        from psycopg2 import sql
+
+        pg_dump = _pg_tool("pg_dump")
+        pg_restore = _pg_tool("pg_restore")
+        conninfo, env = _conninfo_and_env(self._dsn or "")
+        ident = _dsn_identity(self._dsn or "")
+        dst = snapshot_target(dest_dir, (ident[2] if ident else "") or "postgres", label, ".dump")
+        partial = dst + ".partial"
+
+        try:
+            conn = psycopg2.connect(self._dsn)
+        except Exception as e:  # noqa: BLE001 — psycopg2 errors may quote the DSN
+            raise SnapshotError(f"cannot connect for the snapshot ({type(e).__name__}).") from e
+        try:
+            conn.set_session(isolation_level="REPEATABLE READ", readonly=True)
+            cur = conn.cursor()
+            cur.execute("SELECT pg_export_snapshot(), current_schema()")
+            snap_id, schema = cur.fetchone()
+            expected: dict[str, int] = {}
+            for t in sorted(self.list_tables(conn)):
+                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}.{}").format(
+                    sql.Identifier(schema), sql.Identifier(t)))
+                expected[t] = int(cur.fetchone()[0])
+            self._run_pg_dump([
+                pg_dump, "--format=custom", f"--snapshot={snap_id}",
+                "--schema=" + '"' + schema.replace('"', '""') + '"',
+                "--no-password", f"--file={partial}", f"--dbname={conninfo}",
+            ], env)
+        except SnapshotError:
+            _remove_file(partial)
+            raise
+        except Exception as e:  # noqa: BLE001
+            _remove_file(partial)
+            raise SnapshotError(f"snapshot failed: {type(e).__name__}: {_tail(str(e))}") from e
+        finally:
+            try:
+                conn.rollback()
+            finally:
+                conn.close()
+
+        try:
+            got = _archive_row_counts(pg_restore, partial, schema)
+        except SnapshotError:
+            _remove_file(partial)
+            raise
+        diffs = sorted(t for t in set(expected) | set(got) if expected.get(t, 0) != got.get(t, 0))
+        if diffs:
+            _remove_file(partial)
+            raise SnapshotError(f"archive did not verify: row-count mismatch in {diffs[:10]}")
+        os.replace(partial, dst)
+        return Snapshot(
+            path=dst,
+            store=self.store_identity(),
+            row_counts=expected,
+            verified=f"archive read back; row counts match in {len(expected)} tables",
+        )
 
     def schema_version(self) -> "int | None":
         """MAX(version) from schema_versions, or None if the table is absent."""

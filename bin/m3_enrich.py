@@ -58,7 +58,7 @@ from enrich.eligibility import _load_conv_list, _query_eligible_groups  # noqa: 
 
 # Import moved functions from enrich subpackage
 from enrich.prep import (
-    _backup_db,
+    BACKUP_DIR,
     _ensure_migration_025,
     _load_profile_with_path,
     _resolve_db,
@@ -73,7 +73,7 @@ from enrich.report import (
     _print_dry_run,
     _print_run_summary,
 )  # noqa: E402
-from m3_core.paths import scoped_db_env  # noqa: E402
+from m3_core.paths import scoped_db_env, snapshot_stores  # noqa: E402
 from slm_intent import (  # noqa: E402
     Profile,
 )
@@ -865,9 +865,8 @@ async def _main_async(args) -> int:
     # Pre-flight: smoke profile, backup each DB.
     if not args.skip_preflight:
         await _smoke_profile(profile)
-        for label, db_path in db_targets:
-            backup = _backup_db(db_path)
-            print(f"[m3-enrich] backup: {db_path.name} -> {backup}", flush=True)
+        for snap in snapshot_stores([p for _, p in db_targets], BACKUP_DIR, label="pre-enrich"):
+            print(f"[m3-enrich] backup: {snap.store} -> {snap.path} ({snap.verified})", flush=True)
 
     # Observer pass per DB.
     counters_total = {"processed": 0, "written": 0, "failed": 0, "empty_groups": 0}

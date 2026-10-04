@@ -21,6 +21,22 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **Pre-write backups are now verified snapshots of the store being changed.**
+  `m3_entities`, `m3_enrich`, `m3_chatlog_backfill_embed`,
+  `m3_chatlog_backfill_title` and `reembed_space` backed up with a file copy,
+  which omits writes still in the SQLite WAL; on PostgreSQL the first four
+  copied an unrelated local SQLite file, and `reembed_space` refused to run
+  without `--no-backup`. All five now use `StorageBackend.snapshot()`: the
+  SQLite online backup API, or `pg_dump` pinned to an exported snapshot. Each
+  copy's per-table row counts are checked against the snapshot it came from,
+  and the tool stops before writing if that fails. `migrate_memory` no longer
+  falls back to a file copy, and `homecoming` exits non-zero instead of
+  reporting success when a database fails to copy. Snapshots go to
+  `<engine root>/backups/<tool>/`. **Affected:** all installs; PostgreSQL
+  installs need `pg_dump`/`pg_restore` on PATH (or `M3_PG_DUMP` /
+  `M3_PG_RESTORE`) for these tools · **Action:** none · **Data status:** backups
+  taken by the old copy may be missing recent writes; treat them as incomplete.
+
 - **Entity extraction no longer holds the database write lock while it waits
   on the embedder.** Each extracted memory resolved its entities (one embedding
   call per entity) inside one write transaction, so while the cognitive loop

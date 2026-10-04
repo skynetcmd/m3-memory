@@ -21,7 +21,8 @@ keep correct. So the flow is:
 
 SAFETY: dry-run is the DEFAULT. The tool prints exactly what it would delete and
 exits without touching anything until ``--apply`` is passed. A timestamped backup
-of the target DB is taken before the first delete unless ``--no-backup`` is set.
+of the target store is taken and verified before the first delete unless
+``--no-backup`` is set (SQLite: online backup API; PostgreSQL: pg_dump).
 Deleting an embedding is non-destructive to the MEMORY — content, metadata and
 relationships are untouched; only the vector is dropped and regenerated.
 """
@@ -29,9 +30,7 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import sys
-import time
 from typing import Any
 
 _BIN = os.path.dirname(os.path.abspath(__file__))
@@ -233,11 +232,20 @@ def _delete_doomed(db_path: str, doomed) -> int:
     return deleted
 
 
+def _backup_dir() -> str:
+    """Resolved at call time so a relocated engine root is honoured."""
+    from m3_core.paths import get_m3_backups_root
+
+    return os.path.join(get_m3_backups_root(), "reembed")
+
+
 def _backup(db_path: str) -> str:
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    dest = f"{db_path}.bak-{stamp}-prereembed"
-    shutil.copy2(db_path, dest)
-    return dest
+    """Verified snapshot of the store ``db_path`` names (§10: never a file copy)."""
+    from m3_core.paths import snapshot_stores
+
+    snap = snapshot_stores([db_path], _backup_dir(), label="pre-reembed")[0]
+    print(f"verified: {snap.verified}")
+    return snap.path
 
 
 def main(argv=None) -> int:
@@ -254,7 +262,7 @@ def main(argv=None) -> int:
     ap.add_argument("--apply", action="store_true",
                     help="Actually delete. Without this the tool only reports.")
     ap.add_argument("--no-backup", action="store_true",
-                    help="Skip the pre-delete DB copy (not recommended).")
+                    help="Skip the pre-delete snapshot (not recommended).")
     ap.add_argument("--no-backfill", action="store_true",
                     help="Do not chain embed_backfill.py after deleting.")
     ap.add_argument("--all-dbs", action="store_true",
@@ -352,14 +360,6 @@ def _process_one_db(db_path: str, args) -> int:
 
     backup_path = ""
     if not args.no_backup:
-        if not _is_file_backend():
-            # A file copy is meaningless for a server-hosted store; taking one
-            # silently would imply a rollback that does not exist. Say so and
-            # make the operator opt in explicitly.
-            print("error: --no-backup is required on a non-file backend. This tool "
-                  "cannot snapshot a server-hosted store — take a dump first "
-                  "(e.g. pg_dump) and re-run with --no-backup.")
-            return 1
         try:
             backup_path = _backup(db_path)
             print(f"backup  : {backup_path}")
