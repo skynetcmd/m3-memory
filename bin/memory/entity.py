@@ -675,21 +675,37 @@ async def _run_entity_extractor(
             ).fetchone()
         source_valid_from: str | None = src_row["valid_from"] if src_row else None
 
-        # Resolve/create entities and record IDs by canonical_name for relationship linking.
+        # Phase 1 — resolve with NO write transaction. Resolution awaits one
+        # embedding call per entity (30-60 per memory), and the old single
+        # transaction held SQLite's write lock across all of them, starving
+        # every other writer (measured 2026-10-04: CLI memory writes failed
+        # "database is locked" throughout back-to-back entity passes). Only
+        # SELECTs run here; new candidate vectors are buffered, not written.
+        resolved: list[tuple[dict, str, str, "str | None"]] = []
+        with deferred_entity_vector_writes() as vec_buf:
+            with _db() as rdb:
+                for ent in entities_raw:
+                    cname = (ent.get("canonical_name") or "").strip()
+                    etype = (ent.get("entity_type") or "").strip()
+                    # Centralized vocabulary validation — reject unknown entity types.
+                    if not cname or etype not in active_types:
+                        if not cname or etype:
+                            logger.debug(
+                                f"Entity extractor: rejected entity_type='{etype}' "
+                                f"(not in active vocabulary) for memory {memory_id}"
+                            )
+                        continue
+                    resolved.append((ent, cname, etype, await _resolve_entity_async(cname, etype, rdb)))
+
+        # Phase 2 — one short write transaction, no awaits inside.
         canonical_to_id: dict[str, str] = {}
         with _db() as db:
-            for ent in entities_raw:
-                cname = (ent.get("canonical_name") or "").strip()
-                etype = (ent.get("entity_type") or "").strip()
-                # Centralized vocabulary validation — reject unknown entity types.
-                if not cname or etype not in active_types:
-                    if not cname or etype:
-                        logger.debug(
-                            f"Entity extractor: rejected entity_type='{etype}' "
-                            f"(not in active vocabulary) for memory {memory_id}"
-                        )
-                    continue
-                entity_id = await _resolve_entity_async(cname, etype, db)
+            flush_entity_vectors(db, vec_buf)
+            for ent, cname, etype, entity_id in resolved:
+                if entity_id is None:
+                    # Another writer may have created it since phase 1: re-check
+                    # with the DB-only tiers (exact + fuzzy) before creating.
+                    entity_id = _resolve_entity(cname, etype, db)
                 if entity_id is None:
                     try:
                         entity_id = _create_entity(cname, etype, {}, db)

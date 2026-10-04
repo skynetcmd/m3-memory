@@ -21,6 +21,16 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **Entity extraction no longer holds the database write lock while it waits
+  on the embedder.** Each extracted memory resolved its entities (one embedding
+  call per entity) inside one write transaction, so while the cognitive loop
+  worked through extraction backlog, other writes to the main store — memory
+  saves from the MCP server or CLI — failed with `database is locked`.
+  Resolution now runs before the write, which is one short transaction.
+  **Affected:** SQLite installs running entity extraction · **Action:** none ·
+  **Data status:** none (writes that failed with `database is locked` were not
+  applied and can be retried).
+
 - **Procedural distillation and belief consolidation no longer crash after
   writing.** Linking a new memory to its sources on the caller's open connection
   raised `TypeError: _db() takes 0 positional arguments`, after the memory itself
