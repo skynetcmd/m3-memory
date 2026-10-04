@@ -70,23 +70,26 @@ OK = "[OK]"
 FAIL = "[FAIL]"
 WARN = "[WARN]"
 
+def _refresh_managed_crontab(m3_memory_root) -> None:
+    """Rewrite m3's managed cron block from this payload, only if one exists."""
+    try:
+        r = _run(["crontab", "-l"], capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return
+    if r.returncode == 0 and "# >>> m3-managed" in (r.stdout or ""):
+        install_unix_crontab(m3_memory_root)
+
+
 def install_unix_crontab(m3_memory_root):
     template_path = os.path.join(m3_memory_root, "bin", "crontab.template")
     if not os.path.exists(template_path):
         print(f"Error: Could not find {template_path}")
         sys.exit(1)
 
-    with open(template_path, "r", encoding="utf-8") as f:
-        template_content = f.read()
-
-    # Create logs directory if it doesn't exist
     log_dir = _logs_dir()
     os.makedirs(log_dir, exist_ok=True)
-
-    # Replace placeholder with absolute path
-    cron_content = (template_content
-                    .replace("[M3_LOGS_ROOT]", log_dir)
-                    .replace("[M3_MEMORY_ROOT]", m3_memory_root))
+    cron_content = _render_template(template_path, m3_memory_root,
+                                    _venv_python(m3_memory_root))
 
     # Get current crontab
     current_cron = ""
@@ -2318,6 +2321,9 @@ def main():
                     # The cognitive loop is a service, not a cron entry —
                     # support installing it on its own.
                     install_unix_cognitive_loop(m3_memory_root)
+                    # Setup re-registers the loop on upgrade; an installed cron
+                    # block carries the same payload paths and is refreshed too.
+                    _refresh_managed_crontab(m3_memory_root)
                 elif _sel in ("dashboard", "agentosdashboard"):
                     # The dashboard is a launchd/systemd user service (like the
                     # cognitive loop), not a cron entry — install it on its own.
