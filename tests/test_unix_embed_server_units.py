@@ -97,6 +97,16 @@ def test_neither_unit_hardcodes_a_gguf_path():
 
 
 # ── installer behaviour ───────────────────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def _isolated_home(monkeypatch, tmp_path):
+    """The guard reads ~/Library/LaunchAgents and ~/.config; never the real ones."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+
 @pytest.fixture
 def fake_run(monkeypatch):
     calls: list[list[str]] = []
@@ -318,3 +328,16 @@ def test_watchdog_unit_names_match_the_installed_units():
     plist_label = plistlib.loads(
         sched._render_template(str(PLIST), "/o", "/p").encode("utf-8"))["Label"]
     assert ew._LAUNCHD_LABEL == plist_label
+
+
+def test_darwin_counts_an_unloaded_rust_plist_as_registered(monkeypatch, tmp_path):
+    """`m3 stop` unloads the Rust agent without removing its plist; installing
+    the Python agent then would put two supervisors on :8082."""
+    agents = tmp_path / "Library" / "LaunchAgents"
+    agents.mkdir(parents=True)
+    (agents / "com.skynetcmd.m3-embed-server.plist").write_text("<plist/>", encoding="utf-8")
+    monkeypatch.setattr(sched, "_os_name", lambda: "Darwin")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(tmp_path), 1))
+    monkeypatch.setattr(sched.subprocess, "run",
+                        lambda *a, **k: pytest.fail("launchctl must not be needed"))
+    assert sched._rust_embed_service_loaded() is True

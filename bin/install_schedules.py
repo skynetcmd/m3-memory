@@ -359,6 +359,10 @@ def _rust_embed_service_loaded() -> "bool | None":
     osn = _os_name()
     if osn == "Darwin":
         label = _RUST_EMBED_LABEL
+        # The plist on disk is the registration; `m3 stop` unloads it without
+        # removing it, so a loaded-label check alone misses a stopped server.
+        if os.path.exists(os.path.expanduser(f"~/Library/LaunchAgents/{label}.plist")):
+            return True
         try:
             r = _run(["launchctl", "list"],
                                capture_output=True, text=True, timeout=20)
@@ -1447,6 +1451,46 @@ _ROLE_TO_SERVICE = {
         "linux": "m3-notification-waiter.service",
     },
 }
+
+
+def stop_unix_services() -> list:
+    """Stop m3's macOS/Linux services through the service manager.
+
+    Killing a supervised process is not a stop: systemd `Restart=always` and
+    launchd `KeepAlive` start it again within seconds. The loop watchdog is
+    stopped too, or it restarts the loop it finds missing. Returns the names
+    stopped; `m3 setup` starts them again.
+    """
+    key = _platform_key()
+    names: list = []
+    for entry in _ROLE_TO_SERVICE.values():
+        val = entry.get(key) if key in ("linux", "darwin") else None
+        for name in (val if isinstance(val, tuple) else (val,)):
+            if name and name not in names:
+                names.append(name)
+    stopped: list = []
+    if key == "linux":
+        names.append("m3-loop-watchdog.timer")
+        for name in names:
+            if not _service_exists(name):
+                continue
+            r = _run(["systemctl", "--user", "stop", name], capture_output=True, text=True)
+            if r.returncode == 0:
+                stopped.append(name)
+            else:
+                _safe_print(f"{WARN} could not stop {name}: {(r.stderr or '').strip()}")
+    elif key == "darwin":
+        agents = os.path.expanduser("~/Library/LaunchAgents")
+        for label in names:
+            plist = os.path.join(agents, f"{label}.plist")
+            if not os.path.exists(plist) or not _service_exists(label):
+                continue
+            r = _run(["launchctl", "unload", plist], capture_output=True, text=True)
+            if r.returncode == 0:
+                stopped.append(label)
+            else:
+                _safe_print(f"{WARN} could not stop {label}: {(r.stderr or '').strip()}")
+    return stopped
 
 
 def _resolve_service(entry: "str | tuple | None") -> "str | None":

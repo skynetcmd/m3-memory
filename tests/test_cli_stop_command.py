@@ -41,6 +41,12 @@ def fake_halt(monkeypatch):
     mod.kill_stale_daemons = kill_stale_daemons
     mod.results = []
     monkeypatch.setitem(sys.modules, "m3_halt", mod)
+    # Never stop the developer's real systemd/launchd services.
+    sched = types.ModuleType("install_schedules")
+    sched.stopped = []
+    sched.stop_unix_services = lambda: list(sched.stopped)
+    monkeypatch.setitem(sys.modules, "install_schedules", sched)
+    mod.sched = sched
     monkeypatch.setattr(cli, "_resolve_bin_script",
                         lambda name: Path(_ROOT / "bin" / "m3_halt.py"))
     return mod
@@ -94,3 +100,35 @@ def test_missing_payload_reports_and_fails(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_resolve_bin_script", lambda name: None)
     assert cli._cmd_stop(argparse.Namespace(timeout=8.0)) == 1
     assert "m3_halt.py not found" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="service managers are macOS/Linux")
+def test_supervised_services_are_stopped_through_the_manager(fake_halt, capsys):
+    fake_halt.sched.stopped = ["m3-cognitive-loop.service"]
+    fake_halt.results = []
+    assert _run() == 0
+    out = capsys.readouterr().out
+    assert "stopped service m3-cognitive-loop.service" in out
+    assert "m3 setup" in out
+
+
+def test_stop_unix_services_stops_units_and_the_watchdog_timer(monkeypatch):
+    """systemd restarts a killed Restart=always unit; only `stop` holds it."""
+    sys.path.insert(0, str(_ROOT / "bin"))
+    import install_schedules as sched
+
+    calls = []
+
+    class _R:
+        returncode = 0
+        stderr = ""
+
+    monkeypatch.setattr(sched, "_platform_key", lambda: "linux")
+    monkeypatch.setattr(sched, "_service_exists",
+                        lambda n: n != "m3-notification-waiter.service")
+    monkeypatch.setattr(sched, "_run", lambda cmd, **k: calls.append(cmd) or _R())
+    stopped = sched.stop_unix_services()
+    assert ["systemctl", "--user", "stop", "m3-cognitive-loop.service"] in calls
+    assert ["systemctl", "--user", "stop", "m3-loop-watchdog.timer"] in calls
+    assert "m3-notification-waiter.service" not in stopped
+    assert all(c[:3] == ["systemctl", "--user", "stop"] for c in calls)

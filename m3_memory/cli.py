@@ -417,9 +417,25 @@ def _cmd_stop(args: argparse.Namespace) -> int:
         sys.path.insert(0, bin_dir)
     import m3_halt as halt  # type: ignore
 
+    # Supervised daemons are stopped through their service manager first;
+    # killing them alone lets systemd/launchd start them again.
+    services: list = []
+    if sys.platform != "win32":
+        try:
+            import install_schedules  # type: ignore
+            services = install_schedules.stop_unix_services()
+        except Exception as e:  # noqa: BLE001 — the PID reap below still runs
+            print(f"  [!] could not stop m3's services ({type(e).__name__}: {e}); "
+                  f"supervised daemons may restart.", file=sys.stderr)
+        for name in services:
+            print(f"  stopped service {name}")
+        if services:
+            print("[m3] services stay stopped until `m3 setup` starts them.")
+
     results = halt.kill_stale_daemons(timeout=getattr(args, "timeout", 8.0))
     if not results:
-        print("[m3] nothing to stop — no m3 DB-writers running.")
+        print("[m3] no other m3 DB-writers running." if services else
+              "[m3] nothing to stop — no m3 DB-writers running.")
         return 0
 
     killed = [r for r in results if r.get("killed")]
