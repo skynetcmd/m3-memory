@@ -21,6 +21,57 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **On PostgreSQL, memories and chat turns saved without an embedding now get
+  one.** The cognitive loop never filled them in, so they were missing from
+  semantic search.
+  **Affected:** PostgreSQL installs · **Action:** none — the loop embeds the
+  backlog on its next passes · **Data status:** rows written while the embedder
+  was unavailable had no vector until now; none were lost.
+
+- **Chatlog decay and prune run on PostgreSQL.** Both stopped with "DB not
+  found" before reaching the PostgreSQL chatlog.
+  **Affected:** PostgreSQL installs · **Action:** none ·
+  **Data status:** chat turns on PostgreSQL were never decayed or pruned; the
+  first run acts on the whole backlog (prune writes only with
+  `M3_CHATLOG_PRUNE_AUTO` set).
+
+- **Upgrades on macOS and Linux restart the services they stop.** The embed
+  server and notification waiter could stay down after `m3 setup`, failing its
+  verification. On Linux, setup no longer replaces the Rust embed server's
+  systemd unit with the Python one, and reports the Rust service as the
+  keep-alive instead of as a failure.
+  **Affected:** macOS and Linux · **Action:** none · **Data status:** none.
+
+- **The cognitive loop is re-registered on upgrade.** A pip or pipx upgrade
+  kept the previous unit, so loop logs stayed under the package directory and
+  were deleted by each upgrade.
+  **Affected:** macOS and Linux pip/pipx installs · **Action:** run `m3 setup`
+  once after upgrading · **Data status:** none (log files only).
+
+- **m3's cron jobs run.** They named an interpreter that pip and pipx installs
+  do not have, so scheduled maintenance never ran; re-registering the loop now
+  rewrites them.
+  **Affected:** macOS and Linux installs with m3's crontab block ·
+  **Action:** run `m3 setup` · **Data status:** none.
+
+- **`m3 stop` stops m3 on macOS and Linux.** systemd and launchd restarted the
+  daemons it killed; services now stay stopped until `m3 setup`.
+  **Affected:** macOS and Linux · **Action:** none · **Data status:** none.
+
+- **The NVIDIA GPU core is installed only where it can load.** A host with the
+  CUDA toolkit but no driver got a CUDA core that failed to import; such hosts
+  now get the next backend, and any core that does not import is removed.
+  **Affected:** Linux and Windows hosts with the CUDA toolkit and no NVIDIA
+  driver · **Action:** run `m3 embedder install-gpu --force` if `m3 doctor`
+  reports the native core missing · **Data status:** none.
+
+- **Setup and doctor report what is running.** Setup reports the embed-server
+  keep-alive from the service manager. Doctor names shared mode in its
+  headline, reports a stopped embed server as a warning, labels the decoupled
+  roots' defaults correctly, and no longer calls a stale config.json version
+  installed.
+  **Affected:** all installs · **Action:** none · **Data status:** none.
+
 - **Running the test suite no longer changes the machine's installed m3
   services.** The embed server could be left failing to start, or the dashboard
   running from the test checkout.
@@ -32,6 +83,13 @@ the policy is forward-going only.
 - **The pre-push hook no longer blocks a push that only deletes branches.**
   **Affected:** contributors with the repo's `.githooks` installed ·
   **Action:** none · **Data status:** none.
+
+### Changed
+
+- **`m3 upgrade` shows where pipx will upgrade from.** It warns when that is a
+  local path, URL or pinned version rather than the PyPI release.
+  **Affected:** pipx installs · **Action:** follow the printed command to track
+  PyPI · **Data status:** none.
 
 ## [2026.10.4.0] — 2026-10-04 — verified backups, and tools that refuse the wrong store
 
