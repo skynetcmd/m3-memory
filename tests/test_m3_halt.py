@@ -647,3 +647,20 @@ def test_lock_timeout_param_accepted_and_acquires(tmp_path):
     res = m3_halt.acquire_single_instance("svc", engine_root=root, timeout=1.0)
     assert res.status is m3_halt.LockStatus.ACQUIRED
     res.lock.release()
+
+
+def test_kill_stale_daemons_spares_daemons_started_after_the_cutoff(monkeypatch):
+    """The installer reaps only daemons running code older than its payload;
+    one started since (by the same setup run) is already current."""
+    import m3_halt as h
+
+    from pathlib import Path
+
+    old = h.ProcInfo(pid=1001, role="cognitive-loop", started_at="", engine_root="", path=Path("a"))
+    new = h.ProcInfo(pid=1002, role="embed-server", started_at="", engine_root="", path=Path("b"))
+    monkeypatch.setattr(h, "list_all_db_writers", lambda engine_root=None: [old, new])
+    monkeypatch.setattr(h, "_ancestor_pids", lambda pid, **k: set())
+    monkeypatch.setattr(h, "_proc_create_time", lambda pid: {1001: 100.0, 1002: 300.0}[pid])
+    monkeypatch.setattr(h, "_pid_is_alive", lambda pid: False)
+    out = h.kill_stale_daemons(started_before=200.0)
+    assert [r["pid"] for r in out] == [1001]

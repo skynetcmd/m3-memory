@@ -619,6 +619,7 @@ def kill_stale_daemons(
     engine_root: Optional[str] = None,
     *,
     timeout: float = 8.0,
+    started_before: Optional[float] = None,
 ) -> "list[dict]":
     """Terminate every running m3 DB-writer for this engine root. Call this at the
     START of an install/upgrade so no OLD-version daemon survives across the swap:
@@ -668,6 +669,12 @@ def kill_stale_daemons(
     for w in list_all_db_writers(engine_root):
         if w.pid in protected:
             continue
+        # started_before (epoch seconds): a daemon started after the payload was
+        # installed already runs the current code and is not stale.
+        if started_before is not None:
+            born = _proc_create_time(w.pid)
+            if born is not None and born >= started_before:
+                continue
         entry: dict = {"pid": w.pid, "role": w.role, "killed": False, "error": None}
         try:
             if not _pid_is_alive(w.pid):

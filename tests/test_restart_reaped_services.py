@@ -116,7 +116,7 @@ def test_unix_install_restarts_what_the_reap_stopped(monkeypatch):
         calls.append(list(cmd))
         return _Res()
 
-    monkeypatch.setattr(m3_sdk, "kill_stale_daemons", lambda: [
+    monkeypatch.setattr(m3_sdk, "kill_stale_daemons", lambda **k: [
         {"role": "embed-server", "pid": 1, "killed": True}])
     monkeypatch.setattr(isch, "_reaped_roles", set())
     monkeypatch.setattr(isch, "_os_name", lambda: "Linux")
