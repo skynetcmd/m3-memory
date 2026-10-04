@@ -165,6 +165,22 @@ def _fix_lines() -> list[str]:
     ]
 
 
+def _chat_model_reachable() -> "bool | None":
+    """Whether any main-path LLM endpoint answers with a model; None if unknown.
+
+    Uses the file-extraction probe's endpoint list and reachability check so
+    both doctor lines agree on what "an LLM is available" means.
+    """
+    try:
+        from doctor.files_extraction_probe import _main_path_endpoints, _reach
+        endpoints = _main_path_endpoints()
+    except Exception:  # noqa: BLE001 — unknown, not absent
+        return None
+    if not endpoints:
+        return False
+    return any(_reach(ep)[0] == "ok" for ep in endpoints)
+
+
 def run(brief: bool = False) -> int:
     """Report cognitive-loop dormancy. Always returns 0 (report-only)."""
     try:
@@ -193,8 +209,13 @@ def run(brief: bool = False) -> int:
         elif definitely_down:
             print("⚠️  cognitive loop: installed but not running; `m3 setup`")
         elif memories and entities == 0:
-            print("⚠️  cognitive loop: 0 entities extracted from "
-                  f"{memories} memories (loop hasn't distilled yet)")
+            if _chat_model_reachable() is False:
+                print("⚠️  cognitive loop: 0 entities — entity extraction needs a "
+                      "chat model and none is reachable. fix: load a model in LM "
+                      "Studio or Ollama, or set M3_LLM_URL")
+            else:
+                print("⚠️  cognitive loop: 0 entities extracted from "
+                      f"{memories} memories (loop hasn't distilled yet)")
         else:
             suffix = f" · {entities} entities" if entities else ""
             print(f"✅ cognitive loop: OK ({backend}{suffix})")

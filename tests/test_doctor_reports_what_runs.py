@@ -106,3 +106,18 @@ def test_tier_summary_names_the_shared_server_in_shared_mode(monkeypatch, tmp_pa
     assert tier["native"] is True
     assert tier["summary"].startswith("shared server (:8082)")
     assert "tier-1 in-process" not in tier["summary"]
+
+
+def test_zero_entities_names_the_missing_chat_model(monkeypatch, capsys):
+    from doctor import cognitive_loop_probe as clp
+
+    monkeypatch.setattr(clp, "_installed_active", lambda: (True, True, "systemd"))
+    monkeypatch.setattr(clp, "_process_running", lambda: True)
+    monkeypatch.setattr(clp, "_entity_stats", lambda: (12, 0))
+    monkeypatch.setattr(clp, "_chat_model_reachable", lambda: False)
+    clp.run(brief=True)
+    assert "needs a chat model" in capsys.readouterr().out
+
+    monkeypatch.setattr(clp, "_chat_model_reachable", lambda: True)
+    clp.run(brief=True)
+    assert "hasn't distilled yet" in capsys.readouterr().out
