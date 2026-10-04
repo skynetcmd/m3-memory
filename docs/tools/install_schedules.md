@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: 8d41f90a8749
-mtime_utc: 2026-10-03T19:01:30.613961+00:00
-generated_utc: 2026-10-03T19:02:39.228754+00:00
+sha1: 5639fca2619f
+mtime_utc: 2026-10-04T18:02:26.031449+00:00
+generated_utc: 2026-10-04T18:02:36.937797+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 2157)
+- `def main()` (line 2192)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -42,6 +42,7 @@ Uses project virtual environment paths and ensures log directories exist.
 - `USER`
 - `USERDOMAIN`
 - `USERNAME`
+- `XDG_CONFIG_HOME`
 
 ---
 

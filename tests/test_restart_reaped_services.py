@@ -81,16 +81,54 @@ def test_every_reapable_role_is_mapped_on_every_platform(role):
 def test_embed_server_is_not_derivable():
     """The specific case that proves the map is necessary rather than tidy.
 
-    Verified against a live macOS host (`launchctl list`, 2026-09-12) and
-    against this installer's own systemd unit names.
+    Verified against a live macOS host and against this installer's own
+    systemd unit names (`systemctl --user list-units`, Debian 13, 2026-10-04).
     """
     e = isch._ROLE_TO_SERVICE["embed-server"]
-    assert e["darwin"] == "com.skynetcmd.m3-embed-server", (
+    assert e["darwin"][0] == "com.skynetcmd.m3-embed-server", (
         "macOS uses a different product prefix AND keeps the hyphens"
     )
-    assert e["linux"] is None, (
-        "the Rust m3-embed-server manages its own service; there is no unit"
-    )
+    assert e["linux"] == "m3-embed-server.service"
+
+
+def test_resolve_service_picks_the_registered_candidate(monkeypatch):
+    monkeypatch.setattr(isch, "_service_exists", lambda n: n == "b")
+    assert isch._resolve_service(("a", "b")) == "b"
+    assert isch._resolve_service("a") == "a"
+    assert isch._resolve_service(None) is None
+    monkeypatch.setattr(isch, "_service_exists", lambda n: False)
+    assert isch._resolve_service(("a", "b")) == "a"
+
+
+def test_unix_install_restarts_what_the_reap_stopped(monkeypatch):
+    """`--add dashboard` on Linux reaps the embed server; it must be started
+    again (systemd does not restart a Restart=on-failure unit after SIGTERM)."""
+    import m3_sdk
+
+    calls = []
+
+    class _Res:
+        returncode = 0
+        stdout = "loaded"
+        stderr = ""
+
+    def fake_run(cmd, **_kw):
+        calls.append(list(cmd))
+        return _Res()
+
+    monkeypatch.setattr(m3_sdk, "kill_stale_daemons", lambda: [
+        {"role": "embed-server", "pid": 1, "killed": True}])
+    monkeypatch.setattr(isch, "_reaped_roles", set())
+    monkeypatch.setattr(isch, "_os_name", lambda: "Linux")
+    monkeypatch.setattr(isch, "_platform_key", lambda: "linux")
+    monkeypatch.setattr(isch, "install_unix_dashboard", lambda *a, **k: None)
+    monkeypatch.setattr(isch, "_run", fake_run)
+    monkeypatch.setattr(isch, "_confirm_service_live", lambda *a, **k: True)
+    monkeypatch.setattr(sys, "argv", ["install_schedules.py", "--add", "dashboard"])
+
+    isch.main()
+
+    assert ["systemctl", "--user", "start", "m3-embed-server.service"] in calls
 
 
 def test_restart_command_is_platform_specific():

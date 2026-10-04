@@ -102,12 +102,21 @@ def test_windows_task_name_never_reaches_a_unix_launcher(spy, monkeypatch):
 
 
 def test_a_platform_without_the_service_is_skipped_not_started(spy, monkeypatch):
-    """embed-server self-manages on Linux (_ROLE_TO_SERVICE linux=None). It must
-    be skipped -- starting `None` or falling back to the task name would run a
-    command against a unit that does not exist."""
+    """A role whose platform entry is None must be skipped -- starting `None` or
+    falling back to the task name would run a command against a unit that does
+    not exist."""
+    monkeypatch.setattr(isch, "_platform_key", lambda: "linux")
+    monkeypatch.setitem(isch._ROLE_TO_SERVICE["embed-server"], "linux", None)
+    isch._start_longlived_tasks([{"name": "AgentOS_EmbedServer"}])
+    assert spy == [], f"expected no command for an unmanaged service, got {spy}"
+
+
+def test_linux_embed_server_is_started_by_its_unit(spy, monkeypatch):
+    """Both the Rust server and install_unix_embed_server install
+    m3-embed-server.service on Linux."""
     monkeypatch.setattr(isch, "_platform_key", lambda: "linux")
     isch._start_longlived_tasks([{"name": "AgentOS_EmbedServer"}])
-    assert spy == [], f"expected no command for a self-managed service, got {spy}"
+    assert ["systemctl", "--user", "start", "m3-embed-server.service"] in spy
 
 
 def test_an_unmappable_task_is_reported_not_silently_skipped(monkeypatch):

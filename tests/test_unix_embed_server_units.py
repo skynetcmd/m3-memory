@@ -189,20 +189,38 @@ def test_loaded_false_when_label_absent(monkeypatch):
     assert sched._rust_embed_service_loaded() is False
 
 
-def test_linux_is_false_because_the_map_says_no_unit_exists(monkeypatch):
-    """Measured, not guessed: _ROLE_TO_SERVICE maps embed-server to None on
-    linux — the Rust binary manages its own service and ships no systemd unit,
-    so no registration can exist to collide with."""
-    assert sched._ROLE_TO_SERVICE["embed-server"]["linux"] is None
+def _linux_unit(monkeypatch, tmp_path, body):
     monkeypatch.setattr(sched, "_os_name", lambda: "Linux")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    if body is not None:
+        d = tmp_path / "systemd" / "user"
+        d.mkdir(parents=True)
+        (d / "m3-embed-server.service").write_text(body, encoding="utf-8")
+
+
+def test_linux_is_false_without_a_unit(monkeypatch, tmp_path):
+    _linux_unit(monkeypatch, tmp_path, None)
     assert sched._rust_embed_service_loaded() is False
 
 
+def test_linux_is_false_for_our_own_unit(monkeypatch, tmp_path):
+    _linux_unit(monkeypatch, tmp_path,
+                "ExecStart=/py /opt/m3/bin/embed_server_inproc.py --port 8082\n")
+    assert sched._rust_embed_service_loaded() is False
+
+
+def test_linux_detects_the_rust_servers_unit(monkeypatch, tmp_path):
+    """`m3 embedder install` writes the same unit file name on Linux
+    (m3-core-rs unit_render.rs); seen on a Debian 13 host, 2026-10-04."""
+    _linux_unit(monkeypatch, tmp_path,
+                "ExecStart=/venv/site-packages/m3_core_rs/m3-embed-server\n")
+    assert sched._rust_embed_service_loaded() is True
+
+
 def test_guard_uses_the_one_owner_label(monkeypatch):
-    """§10a: the label comes from _ROLE_TO_SERVICE, not a second hardcoded copy.
-    Repoint the map and the guard must follow."""
-    monkeypatch.setitem(sched._ROLE_TO_SERVICE["embed-server"],
-                        "darwin", "com.example.relabeled")
+    """§10a: the label comes from _RUST_EMBED_LABEL, not a second hardcoded
+    copy. Repoint it and the guard must follow."""
+    monkeypatch.setattr(sched, "_RUST_EMBED_LABEL", "com.example.relabeled")
 
     class R:
         returncode = 0

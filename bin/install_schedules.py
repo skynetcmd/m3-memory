@@ -348,7 +348,7 @@ def _rust_embed_service_loaded() -> "bool | None":
     """
     osn = _os_name()
     if osn == "Darwin":
-        label = _ROLE_TO_SERVICE["embed-server"]["darwin"]
+        label = _RUST_EMBED_LABEL
         try:
             r = _run(["launchctl", "list"],
                                capture_output=True, text=True, timeout=20)
@@ -363,15 +363,20 @@ def _rust_embed_service_loaded() -> "bool | None":
         return label in (r.stdout or "")
 
     if osn == "Linux":
-        # Measured, not assumed: _ROLE_TO_SERVICE maps embed-server to None on
-        # linux because the Rust binary manages its own service there and ships
-        # no systemd unit. There is therefore no unit name to query -- and
-        # inventing one is exactly the 3-of-5 mangling that map's comment
-        # documents. No registration can exist, so there is nothing to collide
-        # with the unit we install.
-        if _ROLE_TO_SERVICE["embed-server"]["linux"] is None:
+        # Both servers install ~/.config/systemd/user/m3-embed-server.service.
+        # Ours runs embed_server_inproc.py; any other ExecStart is the Rust
+        # server's unit, and overwriting it would replace that server.
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+        unit = os.path.join(base, "systemd", "user", _LINUX_EMBED_UNIT)
+        if not os.path.exists(unit):
             return False
-        return None
+        try:
+            with open(unit, encoding="utf-8") as f:
+                text = f.read()
+        except OSError as e:
+            _safe_print(f"{WARN} could not read {unit}: {type(e).__name__}: {e}")
+            return None
+        return _PYTHON_EMBED_ENTRY not in text
 
     if osn == "Windows":
         # SCM owns the port here, exactly as launchd does on Darwin. `m3
@@ -436,14 +441,12 @@ def _assert_no_rust_embed_service() -> None:
             "Could not determine whether the Rust m3-embed-server is registered "
             "on this host, and both it and the Python unit bind :8082. Refusing "
             "to install a possible second supervisor.\n"
-            "  Check: launchctl list | grep m3-embed-server\n"
+            "  Check: launchctl list | grep m3-embed-server (macOS), or the "
+            "ExecStart of ~/.config/systemd/user/m3-embed-server.service (Linux)\n"
             "  If it is absent, re-run; if present, `m3 embedder install` owns "
             "the keep-alive and no Python unit is needed."
         )
-    # Darwin is the only platform that can reach here: _rust_embed_service_loaded
-    # returns True only on the launchctl path (linux is a measured False,
-    # everything else None).
-    label = _ROLE_TO_SERVICE["embed-server"]["darwin"]
+    label = _RUST_EMBED_LABEL if _os_name() == "Darwin" else _LINUX_EMBED_UNIT
     raise EmbedServerConflict(
         f"The Rust m3-embed-server is already registered as `{label}` and owns "
         f":8082. Installing the Python unit would give this host two supervisors "
@@ -1295,9 +1298,16 @@ def _render_task_xml(task: dict, python_exe: str, user_id: str, m3_memory_root: 
 # CHECKED; one that does not (the cognitive loop) cannot, and we must not invent
 # a check that always passes -- that is how a green tick over a dead service
 # happens in the first place.
+_DASHBOARD_HEALTH = "http://127.0.0.1:{port}/"
+_EMBED_HEALTH = "http://127.0.0.1:8082/health"
 _SERVICE_HEALTH_URLS = {
-    "AgentOS_Dashboard": "http://127.0.0.1:{port}/",
-    "AgentOS_EmbedServer": "http://127.0.0.1:8082/health",
+    "AgentOS_Dashboard": _DASHBOARD_HEALTH,
+    "com.m3memory.dashboard": _DASHBOARD_HEALTH,
+    "m3-dashboard.service": _DASHBOARD_HEALTH,
+    "AgentOS_EmbedServer": _EMBED_HEALTH,
+    "com.skynetcmd.m3-embed-server": _EMBED_HEALTH,
+    "com.m3memory.embedserver": _EMBED_HEALTH,
+    "m3-embed-server.service": _EMBED_HEALTH,
 }
 
 
@@ -1354,8 +1364,7 @@ _ROLE_TO_TASK = {
 # every naming rule you could express in str.replace:
 #
 #   * embed-server is `com.skynetcmd.m3-embed-server` on macOS -- a DIFFERENT
-#     product prefix, and it KEEPS its hyphens -- while on Linux it has no
-#     systemd unit at all (the Rust binary manages its own service).
+#     product prefix, and it KEEPS its hyphens.
 #   * a derivation scored 3 of 5 against the real launchd labels, and the two
 #     it got wrong included embed-server, which is the service most likely to
 #     be reaped during an install because it holds :8082.
@@ -1367,9 +1376,8 @@ _ROLE_TO_TASK = {
 # SOURCES, all measured rather than assumed:
 #   win    -- _ROLE_TO_TASK above (the task names this installer registers)
 #   darwin -- `launchctl list` on a live macOS host, 2026-09-12
-#   linux  -- the .service names this installer itself writes; m3-dashboard
-#             .service confirmed installed under systemd --user on WSL Ubuntu
-#             24.04, 2026-09-12
+#   linux  -- the .service names this installer itself writes; all five
+#             confirmed under systemd --user on Debian 13, 2026-10-04
 #
 # A role with no entry for the current platform is NOT an error to paper over:
 # it means that platform genuinely has no such service, and we must say so
@@ -1381,6 +1389,12 @@ _ROLE_TO_TASK = {
 # COMPETING implementation that binds the same :8082. Kept adjacent so the
 # Windows conflict check and embedder_admin cannot drift apart silently.
 _WINDOWS_RUST_EMBED_SERVICE = "m3-embed-server"
+# The Rust server's launchd label, as written by `m3 embedder install`.
+_RUST_EMBED_LABEL = "com.skynetcmd.m3-embed-server"
+# On Linux the Rust server and install_unix_embed_server write the SAME unit
+# file name; which one is installed is told apart by its ExecStart.
+_LINUX_EMBED_UNIT = "m3-embed-server.service"
+_PYTHON_EMBED_ENTRY = "embed_server_inproc.py"
 
 
 _ROLE_TO_SERVICE = {
@@ -1404,25 +1418,37 @@ _ROLE_TO_SERVICE = {
         "darwin": "com.m3memory.loopwatchdog",
         "linux": "m3-loop-watchdog.service",
     },
+    # A tuple lists candidates; the first one registered on this host is used
+    # (see _resolve_service). macOS runs either the Rust server's own agent or
+    # install_unix_embed_server's CPU fallback; both bind :8082.
     "embed-server": {
         "win": "AgentOS_EmbedServer",
-        "darwin": "com.skynetcmd.m3-embed-server",
-        # No systemd unit: the Rust m3-embed-server manages its own service.
-        "linux": None,
+        "darwin": (_RUST_EMBED_LABEL, "com.m3memory.embedserver"),
+        "linux": _LINUX_EMBED_UNIT,
     },
     "embed_server": {
         "win": "AgentOS_EmbedServer",
-        "darwin": "com.skynetcmd.m3-embed-server",
-        "linux": None,
+        "darwin": (_RUST_EMBED_LABEL, "com.m3memory.embedserver"),
+        "linux": _LINUX_EMBED_UNIT,
     },
     "waiter": {
         "win": "AgentOS_NotificationWaiter",
-        # Not yet registered on these platforms; the waiter currently ships as
-        # a Windows scheduled task only. Explicit None, not a guessed name.
-        "darwin": None,
-        "linux": None,
+        "darwin": "com.m3memory.notificationwaiter",
+        "linux": "m3-notification-waiter.service",
     },
 }
+
+
+def _resolve_service(entry: "str | tuple | None") -> "str | None":
+    """The service name to restart for one platform's _ROLE_TO_SERVICE value:
+    the name itself, or the first registered candidate of a tuple (the first
+    candidate when none is registered, so the caller reports a real name)."""
+    if entry is None or isinstance(entry, str):
+        return entry
+    for name in entry:
+        if _service_exists(name):
+            return name
+    return entry[0]
 
 
 def _platform_key() -> str:
@@ -1450,11 +1476,20 @@ def _service_exists(name: str) -> bool:
     two boxes disagree. LoadState is the version-independent discriminator --
     `loaded` vs `not-found`.
 
-    FAILS OPEN on every other platform and on any probe error: schtasks and
-    launchctl do report a bad name through their exit code, so their callers
-    already have a working signal and must not be gated on this.
+    On macOS it asks launchd, so _resolve_service can pick between candidate
+    labels. FAILS OPEN on Windows and on any probe error: schtasks reports a
+    bad name through its exit code, so its callers already have a working
+    signal and must not be gated on this.
     """
-    if _platform_key() != "linux":
+    key = _platform_key()
+    if key == "darwin":
+        # launchctl list <label> exits non-zero when the label is not loaded.
+        try:
+            return _run(["launchctl", "list", name],
+                        capture_output=True, text=True).returncode == 0
+        except Exception:  # noqa: BLE001 — probe failure must not block a start
+            return True
+    if key != "linux":
         return True
     try:
         probe = _run(
@@ -1492,11 +1527,10 @@ def restart_reaped_services(covered: set) -> None:
             )
             continue
 
-        name = entry.get(_platform_key())
+        name = _resolve_service(entry.get(_platform_key()))
         if name is None:
-            # The platform genuinely has no such service (e.g. embed-server on
-            # Linux manages itself). Not an error, but say so rather than
-            # silently skipping a service we stopped.
+            # The platform genuinely has no such service. Not an error, but
+            # say so rather than silently skipping a service we stopped.
             _safe_print(
                 f"{WARN} Stopped {role}, which has no managed service on "
                 f"{sys.platform} — restart it by hand if it was running."
@@ -1509,8 +1543,9 @@ def restart_reaped_services(covered: set) -> None:
         # _service_exists, the single owner of that discrimination.
         if not _service_exists(name):
             _safe_print(
-                f"{FAIL} Stopped {role} but unit {name!r} does not exist — it "
-                f"will stay DOWN. _ROLE_TO_SERVICE has the wrong Linux name."
+                f"{FAIL} Stopped {role} but service {name!r} is not installed — "
+                f"it will stay DOWN. If it should be, _ROLE_TO_SERVICE may name "
+                f"it wrongly; start it by hand."
             )
             continue
 
@@ -2289,6 +2324,9 @@ def main():
                 # The cognitive loop runs as a launchd/systemd service, not a
                 # cron entry — install it alongside the crontab.
                 install_unix_cognitive_loop(m3_memory_root)
+            # Same contract as Windows: whatever the reap stopped, start. A
+            # `start` on a unit the installer just started is a no-op.
+            restart_reaped_services(set())
         else:
             _safe_print(f"Unsupported OS: {os_name}")
         return
