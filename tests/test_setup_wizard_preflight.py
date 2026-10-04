@@ -1334,3 +1334,28 @@ def test_keep_alive_line_reflects_the_service_manager(monkeypatch, capsys, regis
     out = capsys.readouterr().out
     assert expect in out
     assert "installed above" not in out
+
+
+def test_setup_lowers_its_halt_before_verifying(monkeypatch):
+    """A writer paused by HALT_m3 leaves the PID registry, so verifying under
+    the halt reported a healthy cognitive loop as NOT running and exited 3."""
+    events = []
+
+    class _Halt:
+        def clear_halt(self):
+            events.append("clear")
+
+    for name in dir(setup_wizard):
+        if name.startswith("_step_"):
+            monkeypatch.setattr(setup_wizard, name, lambda *a, **k: True)
+    monkeypatch.setattr(setup_wizard, "_step_doctor", lambda *a, **k: events.append("doctor") or True)
+    monkeypatch.setattr(setup_wizard, "_step_verify_daemons",
+                        lambda *a, **k: events.append("verify") or True)
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: _Halt())
+    monkeypatch.setattr(setup_wizard, "_should_use_gui", lambda a: False)
+    monkeypatch.setattr(setup_wizard, "_detect_agents", lambda: {})
+    monkeypatch.setattr(setup_wizard, "_gather_plan", lambda d, a: setup_wizard.SetupPlan())
+    monkeypatch.setattr(setup_wizard, "_summary", lambda *a, **k: None)
+
+    assert setup_wizard.run_setup(argparse.Namespace(non_interactive=True)) == 0
+    assert events.index("clear") < events.index("doctor") < events.index("verify")

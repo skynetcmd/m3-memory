@@ -3587,6 +3587,10 @@ def run_setup(args: argparse.Namespace) -> int:
         governor_result = _step_governor_migration(
             plan, non_interactive=args.non_interactive, gui=getattr(args, "gui_child", False))
         _trace("after governor_migration")
+        # The exclusive steps are done. Lower the halt BEFORE verifying: a
+        # writer paused by it drops out of the PID registry, so verification
+        # under the halt reports a healthy daemon as NOT running.
+        _lower_halt()
         verified = _step_doctor(plan)
         _trace(f"after step_doctor -> verified={verified}")
         # An install/upgrade STOPS the daemons (preflight must quiesce them so
@@ -3607,15 +3611,19 @@ def run_setup(args: argparse.Namespace) -> int:
         # a broken m3.
         return 0 if verified else 3
     finally:
-        # Lower HALT_m3 (idempotent — a no-op if preflight never raised it) so
-        # the cognitive loop / embed / MCP resume. Best-effort; never mask the
-        # real return/exception with a cleanup error.
-        try:
-            _halt = _import_m3_halt()
-            if _halt is not None:
-                _halt.clear_halt()
-        except Exception:  # noqa: BLE001
-            pass
+        # Idempotent backstop for every exit path, including exceptions.
+        _lower_halt()
+
+
+def _lower_halt() -> None:
+    """Lower HALT_m3 (a no-op if preflight never raised it) so the cognitive
+    loop / embed / MCP resume. Best-effort; never masks the real outcome."""
+    try:
+        _halt = _import_m3_halt()
+        if _halt is not None:
+            _halt.clear_halt()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
