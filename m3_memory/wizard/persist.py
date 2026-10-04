@@ -89,6 +89,18 @@ def _persist_embed_gguf_shell(gguf_path: str, *, non_interactive: bool) -> None:
         _warn(f"    failed to write {rc_path} ({e})")
 
 
+def shell_rc_has(name: str, value: str) -> bool:
+    """Whether the user's shell rc already exports name=value (POSIX only)."""
+    if os.name == "nt":
+        return False
+    try:
+        rc = _pick_unix_shell_rc()
+        text = rc.read_text(encoding="utf-8") if rc.exists() else ""
+    except OSError:
+        return False
+    return f"export {name}={value}" in text or f'export {name}="{value}"' in text
+
+
 def _pick_unix_shell_rc() -> Path:
     """Pick the shell rc file most likely to be read on this Unix system.
 
@@ -177,6 +189,9 @@ def _persist_env_var_shell(name: str, value: str, *, non_interactive: bool) -> N
         return
 
     rc_path = _pick_unix_shell_rc()
+    if shell_rc_has(name, value):
+        _ok(f"    {name}={value} already present in {rc_path}")
+        return
     if not non_interactive and not sw._ask_yes_no(
         f"  Persist {name} to {rc_path}?", default=True
     ):

@@ -1423,3 +1423,39 @@ def test_first_install_skips_the_keep_question(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a: "")
     setup_wizard._gather_plan(setup_wizard.AgentTargets(), _setup_args())
     assert not any("Keep the current settings" in q for q in asked)
+
+
+def test_gguf_question_is_skipped_when_already_configured(monkeypatch, tmp_path):
+    import json as _json
+
+    gguf = tmp_path / "bge-m3-Q4_K_M.gguf"
+    gguf.write_bytes(b"x")
+    (tmp_path / ".embed_config.json").write_text(
+        _json.dumps({"gguf_path": str(gguf).replace("\\", "/")}), encoding="utf-8")
+    monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path))
+    assert setup_wizard._shared_gguf_is(str(gguf)) is True
+    assert setup_wizard._shared_gguf_is(str(tmp_path / "other.gguf")) is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="shell rc files are POSIX")
+def test_persist_skips_the_question_when_the_rc_already_has_it(monkeypatch, tmp_path):
+    from m3_memory.wizard import persist
+
+    rc = tmp_path / ".zshrc"
+    rc.write_text('export M3_ENABLE_OLLAMA_FAILOVER="1"\n', encoding="utf-8")
+    monkeypatch.setattr(persist, "_pick_unix_shell_rc", lambda: rc)
+    monkeypatch.setattr(setup_wizard, "_ask_yes_no",
+                        lambda *a, **k: pytest.fail("must not ask when already persisted"))
+    persist._persist_env_var_shell("M3_ENABLE_OLLAMA_FAILOVER", "1", non_interactive=False)
+    assert persist.shell_rc_has("M3_ENABLE_OLLAMA_FAILOVER", "1")
+
+
+def test_gui_is_not_offered_on_an_existing_install(monkeypatch):
+    from m3_memory import setup_gui
+
+    monkeypatch.setattr(setup_gui, "gui_available", lambda: (True, ""))
+    monkeypatch.setattr(setup_wizard.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(setup_wizard, "_existing_install", lambda: "/e/agent_memory.db")
+    monkeypatch.setattr(setup_wizard, "_ask_yes_no",
+                        lambda *a, **k: pytest.fail("no GUI offer on an existing install"))
+    assert setup_wizard._should_use_gui(_setup_args()) is False

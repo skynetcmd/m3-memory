@@ -710,6 +710,17 @@ def _detect_governor_eligible_tasks() -> list[str]:
         return []
 
 
+def _shared_gguf_is(path: str) -> bool:
+    """Whether the shared embedder config already names this GGUF."""
+    try:
+        from m3_memory.embedder_admin import _embed_config_path
+        with open(_embed_config_path(), encoding="utf-8") as f:
+            current = (json.load(f) or {}).get("gguf_path") or ""
+    except (OSError, ValueError):
+        return False
+    return os.path.normcase(os.path.abspath(current)) == os.path.normcase(os.path.abspath(path))
+
+
 def _cognitive_loop_installed() -> "bool | None":
     """Whether the loop is registered here; None when it cannot be told."""
     try:
@@ -1490,7 +1501,7 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
         _say(f"  discovered BGE-M3 GGUF: {discovered}")
         _say("  wiring it into the SHARED embedder config so the single :8082 "
              "server loads it (one CUDA context, ~10-85x faster than HTTP tiers)")
-        if args.non_interactive or _ask_yes_no(
+        if args.non_interactive or _shared_gguf_is(discovered) or _ask_yes_no(
             "  Use this GGUF for the shared embedder?", default=True
         ):
             # Seed the shared config (NOT an env var). An env var would force
@@ -1580,6 +1591,10 @@ def _probe_llm_endpoints(plan: "SetupPlan", args: argparse.Namespace) -> None:
         # non-default ones, and an explicit disable for LM Studio if it's absent.
         already = os.environ.get(var, "").strip()
         if already in ("1", "true", "yes"):
+            continue
+        from m3_memory.wizard.persist import shell_rc_has
+        if shell_rc_has(var, val):
+            os.environ[var] = val  # set for this run; new shells read the rc
             continue
         if var == "M3_ENABLE_LMSTUDIO_FAILOVER":
             continue  # default already on; nothing to persist
@@ -3520,6 +3535,8 @@ def _should_use_gui(args: argparse.Namespace) -> bool:
         return False  # no display: silently use terminal (don't nag)
     if not sys.stdin.isatty():
         return False
+    if _existing_install():
+        return False  # an existing install gets the one keep-settings question
     return _ask_yes_no("  Configure with the graphical setup window?", default=False)
 
 
