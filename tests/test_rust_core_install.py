@@ -30,6 +30,16 @@ def _not_current(request, monkeypatch):
     monkeypatch.setattr(rci, "is_rust_core_current", lambda: False)
 
 
+@pytest.fixture(autouse=True)
+def _host_neutral(monkeypatch):
+    """Install-flow tests fake the install, so the post-install import check
+    must not import whatever core THIS host has; and detection must not depend
+    on whether this host has an NVIDIA driver. Tests that exercise either one
+    set it themselves."""
+    monkeypatch.setattr(rci, "_core_imports", lambda: (True, ""))
+    monkeypatch.setattr(rci, "_nvidia_driver_present", lambda: True)
+
+
 # ── name mapping (must mirror build_wheel.py) ──────────────────────────────────
 
 @pytest.mark.parametrize("os_tok,backend,expected", [
@@ -1074,3 +1084,42 @@ def test_explicit_backend_override_never_falls_back(monkeypatch):
     rc = rci.install_rust_core(os_tok="windows", backend="cuda",
                                allow_source_fallback=False)
     assert rc != 0, "an unsatisfiable override must not silently substitute"
+
+
+# ── a CUDA toolchain without a driver; a wheel that installs but won't import ──
+
+def test_detect_skips_cuda_without_a_driver(monkeypatch):
+    """nvcc present, libcuda absent (a GPU-less container): the CUDA wheel
+    would install and then fail to import."""
+    monkeypatch.setattr(rci, "_nvidia_driver_present", lambda: False)
+    monkeypatch.setattr(rci.shutil, "which", lambda x: "/usr/bin/nvcc" if x == "nvcc" else None)
+    monkeypatch.delenv("CUDA_PATH", raising=False)
+    monkeypatch.delenv("VULKAN_SDK", raising=False)
+    assert rci.detect_backend("linux").backend == "cpu"
+
+
+def test_unimportable_wheel_is_removed_and_the_chain_continues(monkeypatch, capsys):
+    _wire_chain(monkeypatch, {"cuda", "vulkan", "cpu"})
+    landed = []
+    monkeypatch.setattr(rci, "install_from_github_release",
+                        lambda c, **k: landed.append(c.backend) or 0)
+    monkeypatch.setattr(rci, "_core_imports",
+                        lambda: (landed[-1] != "cuda", "OSError: libcuda.so.1"))
+    removed = []
+    monkeypatch.setattr(rci, "_pip", lambda *a, **k: removed.append(a))
+
+    rc = rci.install_rust_core(os_tok="linux", allow_source_fallback=False)
+
+    assert rc == 0
+    assert landed == ["cuda", "vulkan"]
+    assert removed == [("uninstall", "-y", "m3-core-rs-linux-cuda")]
+    assert "does not import" in capsys.readouterr().err
+
+
+def test_no_source_build_when_the_detected_backend_will_not_import(monkeypatch):
+    _wire_chain(monkeypatch, {"cuda"})
+    monkeypatch.setattr(rci, "_core_imports", lambda: (False, "ImportError"))
+    monkeypatch.setattr(rci, "_pip", lambda *a, **k: None)
+    monkeypatch.setattr(rci, "install_from_source",
+                        lambda *a, **k: pytest.fail("source build attempted"))
+    assert rci.install_rust_core(os_tok="windows") == 1

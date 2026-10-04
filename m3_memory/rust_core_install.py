@@ -400,10 +400,52 @@ def _vulkan_has_device() -> bool:
     return False
 
 
+def _nvidia_driver_present() -> bool:
+    """True when the NVIDIA driver library loads (libcuda.so.1 / nvcuda.dll)."""
+    import ctypes
+
+    lib = "nvcuda.dll" if sys.platform == "win32" else "libcuda.so.1"
+    try:
+        ctypes.CDLL(lib)
+    except OSError:
+        return False
+    return True
+
+
+def _core_imports() -> "tuple[bool, str]":
+    """Does the installed m3_core_rs import, with the embedded embedder?
+
+    Checked in a fresh interpreter: this process may already hold the
+    previously installed module. Returns (ok, reason-if-not).
+    """
+    try:
+        r = subprocess.run(
+            [sys.executable, "-c",
+             "import m3_core_rs; m3_core_rs.EmbeddedEmbedder"],
+            capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, f"{type(e).__name__}: {e}"
+    if r.returncode == 0:
+        return True, ""
+    lines = (r.stderr or r.stdout or "").strip().splitlines()
+    return False, lines[-1] if lines else f"exit {r.returncode}"
+
+
+def _reject_unimportable(attempt: "BackendChoice", why: str) -> None:
+    """Remove a wheel that installed but cannot import, so the next backend in
+    the chain does not sit beside a broken module of the same name."""
+    print(f"[rust-core] {attempt.package} installed but does not import: {why}",
+          file=sys.stderr)
+    install_log(f"install REJECTED: package={attempt.package} import failed: {why}")
+    _pip("uninstall", "-y", attempt.package)
+
+
 def detect_backend(os_tok: Optional[str] = None) -> BackendChoice:
     """Pick the best backend for this host.
 
-    Order: macOS -> Metal (always). Else NVIDIA toolchain (nvcc) -> CUDA;
+    Order: macOS -> Metal (always). Else NVIDIA toolchain (nvcc) with a
+    loadable driver -> CUDA;
     else a Vulkan runtime/SDK -> Vulkan; else CPU. This intentionally matches
     the legacy detection in embedder_admin.cmd_install_gpu so behavior is
     unchanged for callers that relied on it — only the *install action*
@@ -414,8 +456,11 @@ def detect_backend(os_tok: Optional[str] = None) -> BackendChoice:
     if os_tok == "macos":
         return BackendChoice(os_tok, "metal", "macOS — Metal is the only backend")
 
-    if shutil.which("nvcc") or os.environ.get("CUDA_PATH"):
-        return BackendChoice(os_tok, "cuda", "NVIDIA CUDA toolchain detected")
+    # The CUDA wheel links the driver library, so a toolchain without a loadable
+    # driver (a container or VM with nvcc but no GPU) installs a wheel that
+    # cannot import.
+    if (shutil.which("nvcc") or os.environ.get("CUDA_PATH")) and _nvidia_driver_present():
+        return BackendChoice(os_tok, "cuda", "NVIDIA CUDA toolchain and driver detected")
 
     # Vulkan: SDK env var (explicit build-time config) OR vulkaninfo reports
     # at least one real device. vulkaninfo presence alone is not enough —
@@ -1344,6 +1389,7 @@ def install_rust_core(os_tok: Optional[str] = None, *,
     # unpublished discards a working hot path for no reason.
     rc_gh = rc = 1
     installed = choice  # the backend that actually landed; may differ from choice
+    rejected: list[str] = []  # backends whose wheel installed but did not import
     for attempt in chain:
         installed = attempt
         if attempt is not choice:
@@ -1351,18 +1397,29 @@ def install_rust_core(os_tok: Optional[str] = None, *,
                   f"({attempt.reason})", file=sys.stderr)
         rc_gh = install_from_github_release(attempt)
         if rc_gh == 0:
-            print(f"[rust-core] installed {attempt.package} {M3_CORE_RS_VERSION} "
-                  f"(GitHub Release)")
-            install_log(f"install OK: {_before or '(none)'} -> "
-                        f"{M3_CORE_RS_VERSION} package={attempt.package} "
-                        f"channel=github-release requested={choice.package}")
-            return 0
+            ok, why = _core_imports()
+            if ok:
+                print(f"[rust-core] installed {attempt.package} {M3_CORE_RS_VERSION} "
+                      f"(GitHub Release)")
+                install_log(f"install OK: {_before or '(none)'} -> "
+                            f"{M3_CORE_RS_VERSION} package={attempt.package} "
+                            f"channel=github-release requested={choice.package}")
+                return 0
+            _reject_unimportable(attempt, why)
+            rejected.append(attempt.backend)
+            rc_gh = 1
+            continue
 
         print(f"[rust-core] GitHub Release unavailable for {attempt.package} "
               f"(exit {rc_gh}); trying pip prebuilt.", file=sys.stderr)
         rc = install_prebuilt(attempt)
         if rc == 0:
-            break
+            ok, why = _core_imports()
+            if ok:
+                break
+            _reject_unimportable(attempt, why)
+            rejected.append(attempt.backend)
+            rc = 1
     if rc == 0:
         # Deliberately does NOT claim "PyPI". pip exits 0 just as happily from
         # its local cache without contacting PyPI at all, and install_prebuilt
@@ -1377,6 +1434,16 @@ def install_rust_core(os_tok: Optional[str] = None, *,
                     f"package={installed.package} channel=pip-prebuilt "
                     f"requested={choice.package}")
         return 0
+
+    if choice.backend in rejected:
+        # The detected backend's wheel installed and failed to import; a source
+        # build of the same backend would fail the same way.
+        print(f"[rust-core] no backend imports on this host "
+              f"(tried: {', '.join(rejected)}). m3 keeps running on the HTTP "
+              f"embed path.", file=sys.stderr)
+        install_log(f"install FAILED: every backend rejected at import "
+                    f"({','.join(rejected)}) still_at={_before or '(none)'}")
+        return 1
 
     if not allow_source_fallback:
         _print_manual_build_recommendation(choice, pypi_rc=rc, release_rc=rc_gh)
