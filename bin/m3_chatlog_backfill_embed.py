@@ -369,7 +369,28 @@ Examples:
     args = ap.parse_args()
     if args.core_only and args.chatlog_only:
         sys.exit("ERROR: --core and --chatlog are mutually exclusive.")
+    from m3_core.paths import resolve_backend_name
+    if resolve_backend_name() != "sqlite":
+        return _backfill_one_database(args)
     return asyncio.run(_main_async(args))
+
+
+def _backfill_one_database(args: argparse.Namespace) -> int:
+    """Backends that hold both stores in one database: embed_backfill owns
+    that path (--store core|chatlog). This tool's file paths do not apply."""
+    import embed_backfill
+
+    stores = ["chatlog"] if args.chatlog_only else ["core"] if args.core_only else ["core", "chatlog"]
+    rc = 0
+    for store in stores:
+        argv = ["--store", store]
+        if args.dry_run:
+            argv.append("--dry-run")
+        if args.limit:
+            argv += ["--limit", str(args.limit)]
+        print(f"== {store} store")
+        rc = max(rc, embed_backfill.main(argv))
+    return rc
 
 
 if __name__ == "__main__":

@@ -786,7 +786,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Plan
     pending = _count_pending(args.db, args)
-    print(f"DB:       {args.db}")
+    print(f"DB:       {args.db}" if _is_sqlite() else f"Store:    {args.store} (one database)")
     print(f"Pending:  {pending}")
     print("Filters:")
     if args.variant:    print(f"  variant: {args.variant}")

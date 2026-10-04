@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_chatlog_enrich_backfill.py
-sha1: 84bff8abf616
-mtime_utc: 2026-09-08T23:41:01.526000+00:00
-generated_utc: 2026-09-08T23:41:23.777862+00:00
+sha1: 5c16f405fba3
+mtime_utc: 2026-10-04T20:11:50.964342+00:00
+generated_utc: 2026-10-04T20:12:03.828353+00:00
 private: false
 ---
 
@@ -68,6 +68,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
+- `m3_core.paths (require_sqlite_backend)`
 - `m3_core.paths (seam_backend, seam_dialect)`
 - `memory.backends.dialect (Dialect)`
 

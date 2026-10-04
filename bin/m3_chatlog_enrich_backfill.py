@@ -114,6 +114,8 @@ def _already_enriched(
 
 
 def main() -> int:
+    from m3_core.paths import require_sqlite_backend
+    require_sqlite_backend("m3_chatlog_enrich_backfill")  # reads SQLite files by path
     parser = argparse.ArgumentParser(
         description="Enqueue chatlog conversations into observation_queue, "
                     "newest first.",

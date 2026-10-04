@@ -108,7 +108,26 @@ _SQLITE_ONLY_MAINS = [
     "m3_entities_gliner",
     "split_chatlog_from_core",
     "migrate_memory",
+    "m3_chatlog_enrich_backfill",
 ]
+
+
+def test_chatlog_backfill_embed_delegates_on_postgres(monkeypatch):
+    """Its file paths do not apply on PostgreSQL; embed_backfill's --store path
+    covers both stores in the one database."""
+    import importlib
+    import sys
+
+    import embed_backfill
+
+    _force_pg(monkeypatch)
+    calls = []
+    monkeypatch.setattr(embed_backfill, "main", lambda argv: calls.append(argv) or 0)
+    mod = importlib.import_module("m3_chatlog_backfill_embed")
+    _no_sqlite(monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["m3_chatlog_backfill_embed", "--dry-run", "--yes"])
+    assert mod.main() == 0
+    assert calls == [["--store", "core", "--dry-run"], ["--store", "chatlog", "--dry-run"]]
 
 
 def _no_sqlite(monkeypatch):

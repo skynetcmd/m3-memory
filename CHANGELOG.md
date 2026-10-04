@@ -28,6 +28,12 @@ the policy is forward-going only.
   backlog on its next passes · **Data status:** rows written while the embedder
   was unavailable had no vector until now; none were lost.
 
+- **The dashboard's "backfill embeddings" action works on PostgreSQL.** It
+  read local SQLite files; it now embeds the PostgreSQL core and chatlog
+  stores. `m3_chatlog_enrich_backfill`, which has no PostgreSQL path, refuses to
+  run there.
+  **Affected:** PostgreSQL installs · **Action:** none · **Data status:** none.
+
 - **Chatlog decay and prune run on PostgreSQL.** Both stopped with "DB not
   found" before reaching the PostgreSQL chatlog.
   **Affected:** PostgreSQL installs · **Action:** none ·
