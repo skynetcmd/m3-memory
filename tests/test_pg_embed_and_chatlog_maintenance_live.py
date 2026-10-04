@@ -1,8 +1,8 @@
 """Embed backfill, chatlog decay and chatlog prune reach the PostgreSQL stores.
 
-Hazard: each of these opened or required a local SQLite file, so on a
-PostgreSQL install deferred embeddings were never filled and decay/prune
-returned "DB not found" without touching the chatlog.
+Hazard: code that opens or requires a local SQLite file does nothing on
+PostgreSQL: deferred embeddings stay unfilled and decay/prune never reach the
+chatlog.
 
 Live-PG: skips without a reachable cluster. Rows are inserted with fresh ids and
 only those rows are asserted on, because the test database is shared.

@@ -1,8 +1,8 @@
 """The managed cron block runs m3's real interpreter, and an upgrade refreshes it.
 
-Hazard: the template named `<install root>/.venv/bin/python3`, which a pipx or
-pip install never has, so every Python cron job pointed at a missing file; and
-nothing an upgrade runs rewrote the block.
+Hazard: a cron line naming `<install root>/.venv/bin/python3` points at a file
+pip and pipx installs do not have, and a block nothing rewrites keeps an old
+payload's paths after an upgrade.
 """
 from __future__ import annotations
 

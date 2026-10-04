@@ -1338,7 +1338,7 @@ def test_keep_alive_line_reflects_the_service_manager(monkeypatch, capsys, regis
 
 def test_setup_lowers_its_halt_before_verifying(monkeypatch):
     """A writer paused by HALT_m3 leaves the PID registry, so verifying under
-    the halt reported a healthy cognitive loop as NOT running and exited 3."""
+    the halt reports a healthy cognitive loop as NOT running."""
     events = []
 
     class _Halt:
@@ -1363,7 +1363,7 @@ def test_setup_lowers_its_halt_before_verifying(monkeypatch):
 
 def test_settle_wait_outlasts_the_launchd_respawn_throttle():
     """A stopped daemon is relaunched only after ThrottleInterval; verifying
-    sooner reported a healthy loop as NOT running."""
+    sooner reports a healthy loop as NOT running."""
     import re
 
     bin_dir = Path(setup_wizard.__file__).resolve().parent.parent / "bin"

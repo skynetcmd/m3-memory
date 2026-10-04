@@ -91,8 +91,8 @@ class M3Context:
         self._pool: Optional["queue.Queue[sqlite3.Connection]"] = None
         self._pool_lock = threading.Lock()
         # Eager only where SQLite is the store. Elsewhere get_sqlite_conn builds
-        # the pool on first use, so importing memory_core on PostgreSQL no
-        # longer creates an empty agent_memory.db in the engine root.
+        # the pool on first use, so importing memory_core on PostgreSQL does not
+        # create an empty agent_memory.db in the engine root.
         if resolve_backend_name() == "sqlite":
             self._init_sqlite_pool()
 

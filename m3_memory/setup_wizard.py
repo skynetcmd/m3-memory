@@ -3074,7 +3074,7 @@ _DOCTOR_TIMEOUT_S = 60.0
 #
 # Must exceed the service manager's respawn throttle: the launchd plists set
 # ThrottleInterval 60, so a daemon the install just stopped can take up to 60s
-# to be relaunched. A shorter bound reported a healthy loop as NOT running.
+# to be relaunched; a shorter bound reports a healthy daemon as NOT running.
 # The wait polls, so a healthy start costs well under a second and only a
 # genuinely dead service pays the full timeout.
 _LAUNCHD_THROTTLE_S = 60.0

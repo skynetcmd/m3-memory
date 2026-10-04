@@ -1,9 +1,9 @@
 """Doctor lines must describe the running configuration.
 
-Hazard: each of these printed a confident statement that contradicted another
-line of the same run — a native embedder headline in shared mode, a green
-`embed-server: ok (stopped)`, a stray `running` above the headline, a stale
-config.json version labelled installed.
+Hazard: a line that contradicts another line of the same run — a native
+embedder headline in shared mode, a green tick for a stopped embed server,
+child output outside its section, an outdated config.json version labelled
+installed — trains readers to ignore doctor.
 """
 from __future__ import annotations
 

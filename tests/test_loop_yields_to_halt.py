@@ -1,8 +1,7 @@
 """The cognitive loop yields to HALT_m3 while sleeping, not only between cycles.
 
-Hazard: the loop slept a whole --interval (300s on Unix) waiting only for the
-stop event, while still registered as a DB writer, so setup's quiesce waited
-its full timeout and then force-killed it.
+Hazard: a loop that sleeps a whole --interval (300s on Unix) on the stop event
+alone stays registered as a DB writer, so a quiesce times out and kills it.
 """
 from __future__ import annotations
 

@@ -1,8 +1,8 @@
 """Building an M3Context off SQLite must not create a SQLite store.
 
-Hazard: memory_core binds a default context at import, and the context opened
-its SQLite pool eagerly, so importing m3 on PostgreSQL created an empty
-agent_memory.db in the engine root.
+Hazard: memory_core binds a default context at import; an eager SQLite pool
+would create an empty agent_memory.db in the engine root of a PostgreSQL
+install.
 """
 from __future__ import annotations
 
