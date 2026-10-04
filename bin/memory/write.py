@@ -189,7 +189,13 @@ def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related
     # (from_id, to_id, relationship_type) triple, not the id, so a re-link still
     # DO-NOTHINGs regardless of the new id.
     import uuid as _uuid
-    with (_db(db) if db is not None else _db()) as db_conn:
+    from contextlib import nullcontext
+    # A caller-supplied connection is used AS IS: the caller's own context owns
+    # commit/rollback. Routing it through `_db(db)` only worked under test fakes
+    # that accept an `existing` argument; the canonical `_db()` takes none, so
+    # every production `db=` caller (distillation, consolidation) raised
+    # TypeError after its memory write had already landed.
+    with (nullcontext(db) if db is not None else _db()) as db_conn:
         db_conn.execute(
             f"{_ins} memory_relationships (id, from_id, to_id, relationship_type) "
             f"VALUES ({_d.placeholder(4)}) {_suffix}".rstrip(),

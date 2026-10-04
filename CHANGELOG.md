@@ -21,6 +21,16 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **Procedural distillation and belief consolidation no longer crash after
+  writing.** Linking a new memory to its sources on the caller's open connection
+  raised `TypeError: _db() takes 0 positional arguments`, after the memory itself
+  had been written. Distillation then repeated the same task every cycle, writing
+  a new copy of the procedure each time (superseding the previous copy), and no
+  provenance links were recorded. **Affected:** installs where distillation or
+  consolidation reach a working model · **Action:** none ·
+  **Data status:** repeated distillation leaves superseded duplicate procedure
+  memories (source `distillation`) and procedures without `distills_from` links.
+
 - **`M3_DB_BACKEND` is read on every call instead of once per process.** Two
   loaded copies of the backend selector could disagree about the active
   backend, so code could reach SQLite while PostgreSQL was selected. A change
