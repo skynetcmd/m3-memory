@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import shutil
 import subprocess  # nosec B404 - orchestrates known package managers, never a shell
@@ -242,6 +243,16 @@ def source_is_pypi(spec: str) -> bool:
     return spec.strip().lower() in ("m3-memory", "m3_memory")
 
 
+def source_is_missing_path(spec: str) -> bool:
+    """True when the spec names a local file or directory that is gone."""
+    s = spec.strip()
+    if "://" in s or s.startswith("git+"):
+        return False
+    looks_local = (os.path.isabs(s) or s.startswith((".", "~"))
+                   or os.sep in s or "/" in s or s.endswith(".whl"))
+    return looks_local and not os.path.exists(os.path.expanduser(s))
+
+
 def upgrade_command(method: str, python: str = sys.executable) -> list[str] | None:
     """The package-level upgrade command for a method, or None when we must not
     run one (plugin-managed or undetermined installs)."""
@@ -292,6 +303,15 @@ def main(argv: list[str] | None = None) -> int:
         spec = pipx_source(pkg)
         print(f"         source        : {spec or 'unknown (no pipx metadata)'}")
         if spec and not source_is_pypi(spec):
+            if source_is_missing_path(spec):
+                # pipx upgrade would fail after the services were already
+                # stopped; stop here instead, with the way back to PyPI.
+                print(f"\nThe source pipx installed m3 from no longer exists:\n"
+                      f"    {spec}\n"
+                      f"so `pipx upgrade` cannot run. Reinstall from PyPI instead:\n"
+                      f"    pipx uninstall m3-memory && pipx install m3-memory && m3 setup\n"
+                      f"Your memories and settings under ~/.m3 are kept.")
+                return 2
             # `pipx upgrade` rebuilds from the recorded spec, not from PyPI.
             print("  [!] pipx will upgrade from this source, NOT the PyPI release.\n"
                   "      To track PyPI instead: pipx uninstall m3-memory && "

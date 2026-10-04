@@ -266,3 +266,29 @@ def test_pipx_source_is_read_and_classified(tmp_path, spec, pypi):
     pkg = _mk(venv, "Lib/site-packages/m3_memory")
     assert m3u.pipx_source(pkg) == spec
     assert m3u.source_is_pypi(spec) is pypi
+
+
+@pytest.mark.parametrize("spec, missing", [
+    ("m3-memory", False),
+    ("git+https://github.com/skynetcmd/m3-memory", False),
+    ("/tmp/definitely-gone/m3_memory-1-py3-none-any.whl", True),
+    ("m3_memory-2026.10.4.2rc3-py3-none-any.whl", True),
+])
+def test_missing_local_source_is_detected(spec, missing):
+    assert m3u.source_is_missing_path(spec) is missing
+
+
+def test_upgrade_stops_before_touching_services_when_the_source_is_gone(tmp_path, monkeypatch, capsys):
+    """pipx upgrade cannot run from a deleted wheel; stopping m3 first would
+    leave it down."""
+    import json
+
+    venv = _mk(tmp_path, "pipx/venvs/m3-memory")
+    (venv / "pipx_metadata.json").write_text(json.dumps(
+        {"main_package": {"package_or_url": str(tmp_path / "gone.whl")}}), encoding="utf-8")
+    pkg = _mk(venv, "Lib/site-packages/m3_memory")
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: "/bin/" + n)
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
+    assert m3u.main(["--yes"]) == 2
+    assert "no longer exists" in capsys.readouterr().out
