@@ -19,6 +19,8 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.10.4.2] — 2026-10-04 — upgrades that finish healthy, and PostgreSQL maintenance that runs
+
 ### Fixed
 
 - **On PostgreSQL, memories and chat turns saved without an embedding now get
