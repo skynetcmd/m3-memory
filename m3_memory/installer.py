@@ -824,8 +824,9 @@ def _prompt_and_install_dashboard(interactive: bool) -> None:
 
     print("  Installing web dashboard deps (fastapi + uvicorn)...")
     try:
+        from m3_memory._pip import pip_command
         proc = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "m3-memory[dashboard]"],
+            pip_command() + ["install", "m3-memory[dashboard]"],
             check=False, capture_output=True, text=True, **_hidden_window_kwargs())
         if proc.returncode == 0:
             print("    [OK] web dashboard installed.")

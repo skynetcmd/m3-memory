@@ -2925,8 +2925,9 @@ def _step_install_dashboard(plan: "SetupPlan") -> bool:
     # deps land where `m3 dashboard` will import them. Match the payload's own
     # distribution name so the extra resolves regardless of how m3 was installed.
     try:
+        from m3_memory._pip import pip_command
         proc = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "m3-memory[dashboard]"],
+            pip_command() + ["install", "m3-memory[dashboard]"],
             check=False, capture_output=True, text=True, **_hidden_window_kwargs())
         if proc.returncode == 0:
             print("    [OK] web dashboard installed.")

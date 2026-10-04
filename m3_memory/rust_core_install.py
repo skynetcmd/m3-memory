@@ -539,8 +539,14 @@ def detect_backend_chain(os_tok: Optional[str] = None) -> list[BackendChoice]:
 
 
 def _pip(*args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
+    from m3_memory._pip import PipUnavailable, pip_command
+
+    try:
+        argv = pip_command() + list(args)
+    except PipUnavailable as e:
+        return subprocess.CompletedProcess(args, 1, "", str(e))
     return subprocess.run(
-        [sys.executable, "-m", "pip", *args],
+        argv,
         env=env if env is not None else os.environ.copy(),
         capture_output=True,
         text=True,
@@ -1302,6 +1308,16 @@ def install_rust_core(os_tok: Optional[str] = None, *,
     Returns 0 on success, non-zero otherwise. Used by the wizard and the
     `m3 embedder install-gpu` CLI command.
     """
+    # Every channel below installs with pip; a missing pip must be reported as
+    # that, not as "no prebuilt wheel for this Python".
+    from m3_memory._pip import PipUnavailable, pip_command
+    try:
+        pip_command()
+    except PipUnavailable as e:
+        print(f"[rust-core] {e}", file=sys.stderr)
+        install_log(f"install FAILED: {e}")
+        return 1
+
     # Skip-if-current: if the embedded native wheel is already installed at the
     # target version, there's nothing to do — avoid re-downloading a large wheel
     # on every `m3 setup` / `m3 update`. Backend cannot be told apart from the
