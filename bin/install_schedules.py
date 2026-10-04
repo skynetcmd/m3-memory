@@ -149,7 +149,8 @@ def install_unix_crontab(m3_memory_root):
     # Append the new content
     new_cron = filtered_cron.strip() + "\n\n" + cron_content.strip() + "\n"
 
-    with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
+    # The template carries non-ASCII text; the locale default may be ASCII.
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as tmp:
         tmp.write(new_cron)
         tmp_path = tmp.name
 
