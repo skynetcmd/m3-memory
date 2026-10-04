@@ -19,6 +19,59 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.10.4.3] — 2026-10-04 — fresh pipx installs that work, and quieter upgrades
+
+### Fixed
+
+- **Fresh pipx installs get the native core and the shared embed server.**
+  Installs made with recent pipx versions ran without either.
+  **Affected:** installs created with pipx 1.17 or later, all platforms ·
+  **Action:** if `m3 doctor` reports oxidation not installed, run
+  `m3 embedder install-gpu` and then `m3 embedder install` ·
+  **Data status:** none.
+
+- **`m3 upgrade` stops before changing anything when the source pipx installed
+  m3 from no longer exists,** and prints the commands to reinstall from PyPI.
+  **Affected:** pipx installs made from a local wheel or path ·
+  **Action:** follow the printed commands · **Data status:** none.
+
+- **Setup on macOS and Linux no longer waits 30 seconds for m3's services to
+  pause or asks whether to kill one.**
+  **Affected:** macOS and Linux · **Action:** none · **Data status:** none.
+
+- **Installing or re-registering one service no longer restarts the others**
+  when they already run the installed version.
+  **Affected:** all installs · **Action:** none · **Data status:** none.
+
+- **`m3 schedules verify` no longer reports tasks that are absent by design as
+  failures.**
+  **Affected:** Windows · **Action:** none · **Data status:** none.
+
+- **Background enrichment uses the chat model you configured.** Ollama, a
+  custom server URL and an endpoint list were read only from your shell, which
+  background services do not see, so entity extraction found no chat model.
+  **Affected:** users of Ollama, `M3_LLM_URL` or `LLM_ENDPOINTS_CSV` whose
+  services run under launchd, systemd or Task Scheduler · **Action:** run `m3 setup` once (keep the current settings) ·
+  **Data status:** memories waiting for extraction were deferred, not dropped;
+  they are processed once a chat model is reachable.
+
+- **Setup, stop and doctor output is shorter and accurate.** `m3 stop` lists
+  only the services it stopped, setup no longer prints internal trace lines or
+  a bytecode warning, its summary names the shared embed server, and doctor
+  says when zero extracted entities is because no chat model is reachable.
+  Keeping the current settings no longer reports "no agents wired", pipx
+  installs skip the bytecode question, doctor no longer prints library log
+  lines, and it skips the Claude Code check when the `claude` CLI is not on PATH.
+  Setup waits for the embed server to answer before verifying, and no longer
+  calls an install "live" when verification fails.
+  **Affected:** all installs · **Action:** none · **Data status:** none.
+
+### Changed
+
+- **Running `m3 setup` on an existing install asks one question:** keep the
+  current settings, or answer them again.
+  **Affected:** all installs · **Action:** none · **Data status:** none.
+
 ## [2026.10.4.2] — 2026-10-04 — upgrades that finish healthy, and PostgreSQL maintenance that runs
 
 ### Fixed
