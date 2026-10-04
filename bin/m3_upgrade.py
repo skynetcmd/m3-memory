@@ -41,6 +41,7 @@ against a pip install exits 0 having upgraded NOTHING, which reads as success.
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import shutil
 import subprocess  # nosec B404 - orchestrates known package managers, never a shell
@@ -220,6 +221,27 @@ def detect_install_method(pkg_dir: pathlib.Path | None) -> tuple[str, str]:
     return PIP, f"package is in a standard site-packages: {pkg_dir}"
 
 
+def pipx_source(pkg_dir: pathlib.Path | None) -> str | None:
+    """What `pipx upgrade` reinstalls from: pipx_metadata.json's package spec."""
+    if pkg_dir is None:
+        return None
+    for parent in list(pkg_dir.parents)[:5]:
+        meta = parent / "pipx_metadata.json"
+        if meta.exists():
+            try:
+                with open(meta, encoding="utf-8") as f:
+                    spec = (json.load(f).get("main_package") or {}).get("package_or_url")
+            except (OSError, ValueError):
+                return None
+            return str(spec) if spec else None
+    return None
+
+
+def source_is_pypi(spec: str) -> bool:
+    """True for an unpinned PyPI name; False for a path, URL, VCS or pin."""
+    return spec.strip().lower() in ("m3-memory", "m3_memory")
+
+
 def upgrade_command(method: str, python: str = sys.executable) -> list[str] | None:
     """The package-level upgrade command for a method, or None when we must not
     run one (plugin-managed or undetermined installs)."""
@@ -266,6 +288,14 @@ def main(argv: list[str] | None = None) -> int:
     method, evidence = detect_install_method(pkg)
     print(f"[detect] install method: {method}")
     print(f"         evidence      : {evidence}")
+    if method == PIPX:
+        spec = pipx_source(pkg)
+        print(f"         source        : {spec or 'unknown (no pipx metadata)'}")
+        if spec and not source_is_pypi(spec):
+            # `pipx upgrade` rebuilds from the recorded spec, not from PyPI.
+            print("  [!] pipx will upgrade from this source, NOT the PyPI release.\n"
+                  "      To track PyPI instead: pipx uninstall m3-memory && "
+                  "pipx install m3-memory, then m3 setup")
 
     if method == PLUGIN:
         print(

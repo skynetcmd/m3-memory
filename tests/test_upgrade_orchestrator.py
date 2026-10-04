@@ -248,3 +248,21 @@ def test_package_dir_is_resolved_before_comparison():
     src = (_BIN / "m3_upgrade.py").read_text(encoding="utf-8")
     assert "pkg_dir = pkg_dir.resolve()" in src
     assert "pathlib.Path(user_site).resolve()" in src
+
+
+@pytest.mark.parametrize("spec, pypi", [
+    ("m3-memory", True),
+    ("/home/alice/src/m3-memory", False),
+    ("m3-memory==2026.10.1.1", False),
+    ("git+https://github.com/skynetcmd/m3-memory", False),
+])
+def test_pipx_source_is_read_and_classified(tmp_path, spec, pypi):
+    """`pipx upgrade` rebuilds from the recorded spec, which may not be PyPI."""
+    import json
+
+    venv = _mk(tmp_path, "pipx/venvs/m3-memory")
+    (venv / "pipx_metadata.json").write_text(
+        json.dumps({"main_package": {"package_or_url": spec}}), encoding="utf-8")
+    pkg = _mk(venv, "Lib/site-packages/m3_memory")
+    assert m3u.pipx_source(pkg) == spec
+    assert m3u.source_is_pypi(spec) is pypi
