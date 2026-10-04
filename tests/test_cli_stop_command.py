@@ -123,12 +123,25 @@ def test_stop_unix_services_stops_units_and_the_watchdog_timer(monkeypatch):
         returncode = 0
         stderr = ""
 
+        def __init__(self, out=""):
+            self.stdout = out
+
+    inactive = {"m3-dashboard.service"}
+
+    def fake_run(cmd, **k):
+        calls.append(cmd)
+        if cmd[2] == "is-active":
+            return _R("inactive" if cmd[3] in inactive else "active")
+        return _R()
+
     monkeypatch.setattr(sched, "_platform_key", lambda: "linux")
     monkeypatch.setattr(sched, "_service_exists",
                         lambda n: n != "m3-notification-waiter.service")
-    monkeypatch.setattr(sched, "_run", lambda cmd, **k: calls.append(cmd) or _R())
+    monkeypatch.setattr(sched, "_run", fake_run)
     stopped = sched.stop_unix_services()
     assert ["systemctl", "--user", "stop", "m3-cognitive-loop.service"] in calls
     assert ["systemctl", "--user", "stop", "m3-loop-watchdog.timer"] in calls
     assert "m3-notification-waiter.service" not in stopped
-    assert all(c[:3] == ["systemctl", "--user", "stop"] for c in calls)
+    # An already-stopped unit is neither stopped again nor reported.
+    assert "m3-dashboard.service" not in stopped
+    assert ["systemctl", "--user", "stop", "m3-dashboard.service"] not in calls

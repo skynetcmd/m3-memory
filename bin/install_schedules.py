@@ -1480,6 +1480,11 @@ def stop_unix_services() -> list:
         for name in names:
             if not _service_exists(name):
                 continue
+            # Report only what this call stops: an inactive unit is not news.
+            state = _run(["systemctl", "--user", "is-active", name],
+                         capture_output=True, text=True)
+            if (state.stdout or "").strip() not in ("active", "activating", "reloading"):
+                continue
             r = _run(["systemctl", "--user", "stop", name], capture_output=True, text=True)
             if r.returncode == 0:
                 stopped.append(name)
