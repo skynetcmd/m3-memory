@@ -47,6 +47,7 @@ import logging
 import os
 import re
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
@@ -451,71 +452,75 @@ def _resolve_entity(canonical_name: str, entity_type: str, db) -> str | None:
     return None  # Tiers 1+2 only in sync path
 
 
-async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> str | None:
-    """Full 3-tier resolution including embedding cosine. Use from async context."""
+@dataclass(frozen=True)
+class _ResolveInputs:
+    """Everything tier-3 resolution needs from the database, read up front.
+
+    Splitting the reads from the embedding work is what lets a caller release
+    its connection before awaiting: `_resolve_from_inputs` takes no database
+    handle, so it cannot hold a connection (SQLite write lock, PostgreSQL
+    idle-in-transaction) across an embedding round trip."""
+    sync_id: "str | None"
+    candidates: "tuple[tuple[str, str], ...]"   # (entity_id, canonical_name)
+    stored: dict
+    use_store: bool
+
+
+def _resolution_inputs(canonical_name: str, entity_type: str, db) -> _ResolveInputs:
+    """All database reads for one resolution, with no await in between.
+
+    Tiers 1+2 (exact, fuzzy) via `_resolve_entity`; for tier 3 the 100 most
+    recent candidates of the same type and their stored vectors (store-once,
+    migration 032; absent table = embed each candidate, as before)."""
     from memory.backends import dialect
 
-    _d = dialect()
-    p = _d.param()
     sync_id = _resolve_entity(canonical_name, entity_type, db)
     if sync_id is not None:
-        return sync_id
-
-    # Tier 3: embedding cosine within same entity_type.
-    # Cap candidates to 100 most-recently created to bound the comparison.
-    #
-    # Store-once (migration 032): candidate name vectors are loaded from the
-    # entity_embeddings table rather than re-embedded each cold resolve. A
-    # candidate with no stored vector is embedded once and persisted, so the
-    # next resolve reads the blob. At scale this turns an ~101-embed cold
-    # resolve into a 1-embed one (only the new query name). When the table is
-    # absent (DBs predating migration 032) we fall back to embedding each
-    # candidate via the in-process cache — identical behavior to before
-    # store-once.
-    candidates = db.execute(
+        return _ResolveInputs(sync_id, (), {}, False)
+    p = dialect().param()
+    rows = db.execute(
         f"SELECT id, canonical_name FROM entities WHERE entity_type = {p} ORDER BY created_at DESC LIMIT 100",
         (entity_type,),
     ).fetchall()
+    candidates = tuple((r["id"], r["canonical_name"]) for r in rows)
     if not candidates:
-        return None
+        return _ResolveInputs(None, (), {}, False)
+    use_store = _entity_embeddings_available(db)
+    stored = _load_entity_vectors(db, [c[0] for c in candidates]) if use_store else {}
+    return _ResolveInputs(None, candidates, stored, use_store)
 
+
+async def _resolve_from_inputs(
+    canonical_name: str, inputs: _ResolveInputs,
+) -> "tuple[str | None, list[tuple[str, list[float], str | None]]]":
+    """Tier-3 embedding cosine over pre-read inputs. Touches NO database.
+
+    Returns (entity_id or None, new candidate vectors to persist). The caller
+    writes the vectors in its own short transaction (`flush_entity_vectors`
+    or `_store_entity_vector`)."""
+    if inputs.sync_id is not None:
+        return inputs.sync_id, []
+    if not inputs.candidates:
+        return None, []
     qvec = await _embed_canonical_cached(canonical_name)
     if qvec is None:
-        return None
+        return None, []
 
-    use_store = _entity_embeddings_available(db)
-    stored = _load_entity_vectors(db, [c["id"] for c in candidates]) if use_store else {}
-
-    async def _candidate_vec(c) -> list[float] | None:
-        """Vector for a candidate: stored blob if present, else embed once and
-        (when the store exists) persist for next time."""
-        v = stored.get(c["id"])
+    model = _config.EMBED_MODEL if hasattr(_config, "EMBED_MODEL") else None
+    new_vectors: list[tuple[str, list[float], str | None]] = []
+    valid_ids: list[str] = []
+    cvecs: list[list[float]] = []
+    for cid, cname in inputs.candidates:
+        v = inputs.stored.get(cid)
+        if v is None:
+            v = await _embed_canonical_cached(cname)
+            if v is not None and inputs.use_store:
+                new_vectors.append((cid, v, model))
         if v is not None:
-            return v
-        v = await _embed_canonical_cached(c["canonical_name"])
-        if v is not None and use_store:
-            _store_entity_vector(db, c["id"], v, _config.EMBED_MODEL if hasattr(_config, "EMBED_MODEL") else None)
-        return v
-
-    valid_candidates = []
-    cvecs = []
-    for c in candidates:
-        cvec = await _candidate_vec(c)
-        if cvec is not None:
-            cvecs.append(cvec)
-            valid_candidates.append(c)
+            valid_ids.append(cid)
+            cvecs.append(v)
     if not cvecs:
-        return None
-
-    if use_store and _DEFERRED_ENTITY_VECTORS.get() is None:
-        # Write-through path: persist newly-embedded candidate vectors in one
-        # commit so the work isn't lost if the surrounding transaction rolls back.
-        # When deferral is active the vectors are in the caller's buffer instead —
-        # skip the commit so concurrent resolves don't contend for the write lock.
-        try:
-            db.commit()
-        except Exception:
-            pass
+        return None, new_vectors
 
     best_score, best_id = 0.0, None
     if _config.m3_core_rs is not None:
@@ -523,18 +528,34 @@ async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> st
         scores = _config.m3_core_rs.cosine_batch(qvec, cvecs)
         for i, s in enumerate(scores):
             if s > best_score:
-                best_score, best_id = s, valid_candidates[i]["id"]
+                best_score, best_id = s, valid_ids[i]
     else:
         from .util import _cosine
         for i, cvec in enumerate(cvecs):
             s = _cosine(qvec, cvec)
             if s > best_score:
-                best_score, best_id = s, valid_candidates[i]["id"]
+                best_score, best_id = s, valid_ids[i]
 
     if best_score >= ENTITY_RESOLVE_COSINE_MIN and best_id is not None:
-        return best_id
-    return None
+        return best_id, new_vectors
+    return None, new_vectors
 
+
+async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> str | None:
+    """Full 3-tier resolution including embedding cosine. Use from async context.
+
+    Composition of `_resolution_inputs` + `_resolve_from_inputs`, kept for
+    callers that hold a connection already. New candidate vectors go through
+    `_store_entity_vector` (honours a `deferred_entity_vector_writes` buffer)
+    and are committed by the CALLER's transaction — no commit here, so a
+    caller's partial work is never committed behind its back. A caller that
+    must not hold a connection across the awaits should use the two parts
+    directly, as `_run_entity_extractor` does."""
+    inputs = _resolution_inputs(canonical_name, entity_type, db)
+    entity_id, new_vectors = await _resolve_from_inputs(canonical_name, inputs)
+    for cid, vec, model in new_vectors:
+        _store_entity_vector(db, cid, vec, model)
+    return entity_id
 
 
 def _create_entity(canonical_name: str, entity_type: str, attributes: dict, db) -> str:
@@ -675,32 +696,37 @@ async def _run_entity_extractor(
             ).fetchone()
         source_valid_from: str | None = src_row["valid_from"] if src_row else None
 
-        # Phase 1 — resolve with NO write transaction. Resolution awaits one
-        # embedding call per entity (30-60 per memory), and the old single
-        # transaction held SQLite's write lock across all of them, starving
-        # every other writer (measured 2026-10-04: CLI memory writes failed
-        # "database is locked" throughout back-to-back entity passes). Only
-        # SELECTs run here; new candidate vectors are buffered, not written.
+        # Phase 1 — resolve holding NO connection across an await. Resolution
+        # awaits one embedding call per entity (30-60 per memory). Holding a
+        # connection across them held SQLite's write lock for the whole round
+        # trip once the first entity was created (measured 2026-10-04: CLI
+        # memory writes failed "database is locked" throughout back-to-back
+        # entity passes) and, on PostgreSQL, a pooled connection idle in
+        # transaction. Each entity's reads take one short connection, released
+        # before any await; new candidate vectors are collected, not written.
         resolved: list[tuple[dict, str, str, "str | None"]] = []
-        with deferred_entity_vector_writes() as vec_buf:
+        new_vectors: list[tuple[str, list[float], "str | None"]] = []
+        for ent in entities_raw:
+            cname = (ent.get("canonical_name") or "").strip()
+            etype = (ent.get("entity_type") or "").strip()
+            # Centralized vocabulary validation — reject unknown entity types.
+            if not cname or etype not in active_types:
+                if not cname or etype:
+                    logger.debug(
+                        f"Entity extractor: rejected entity_type='{etype}' "
+                        f"(not in active vocabulary) for memory {memory_id}"
+                    )
+                continue
             with _db() as rdb:
-                for ent in entities_raw:
-                    cname = (ent.get("canonical_name") or "").strip()
-                    etype = (ent.get("entity_type") or "").strip()
-                    # Centralized vocabulary validation — reject unknown entity types.
-                    if not cname or etype not in active_types:
-                        if not cname or etype:
-                            logger.debug(
-                                f"Entity extractor: rejected entity_type='{etype}' "
-                                f"(not in active vocabulary) for memory {memory_id}"
-                            )
-                        continue
-                    resolved.append((ent, cname, etype, await _resolve_entity_async(cname, etype, rdb)))
+                inputs = _resolution_inputs(cname, etype, rdb)
+            entity_id, vecs = await _resolve_from_inputs(cname, inputs)
+            new_vectors.extend(vecs)
+            resolved.append((ent, cname, etype, entity_id))
 
         # Phase 2 — one short write transaction, no awaits inside.
         canonical_to_id: dict[str, str] = {}
         with _db() as db:
-            flush_entity_vectors(db, vec_buf)
+            flush_entity_vectors(db, new_vectors)
             for ent, cname, etype, entity_id in resolved:
                 if entity_id is None:
                     # Another writer may have created it since phase 1: re-check

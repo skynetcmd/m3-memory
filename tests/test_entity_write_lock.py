@@ -116,3 +116,43 @@ def test_a_name_repeated_in_one_extraction_creates_one_entity(store, monkeypatch
     with sqlite3.connect(str(store)) as c:
         n = c.execute("SELECT COUNT(*) FROM entities WHERE canonical_name='Alpha Industries'").fetchone()[0]
     assert n == 1
+
+
+def test_no_connection_is_open_while_resolution_awaits(store, monkeypatch):
+    """Backend-agnostic: no `_db()` connection may be open across an embedding
+    await. On SQLite an open transaction can hold the write lock; on
+    PostgreSQL even a read leaves a pooled connection idle in transaction
+    (psycopg2 is not autocommit), pinning a snapshot and holding back VACUUM."""
+    import contextlib
+
+    ent = importlib.import_module("memory.entity")
+    real_db = ent._db
+    open_now = [0]
+    seen: list[int] = []
+
+    @contextlib.contextmanager
+    def counting_db(*a, **k):
+        open_now[0] += 1
+        try:
+            with real_db(*a, **k) as conn:
+                yield conn
+        finally:
+            open_now[0] -= 1
+
+    async def embed(name):
+        seen.append(open_now[0])
+        await asyncio.sleep(0)
+        return _vec(name)
+
+    monkeypatch.setattr(ent, "_db", counting_db)
+    monkeypatch.setattr(ent, "_embed_canonical_cached", embed)
+
+    async def extractor(_text):
+        return {"entities": [
+            {"canonical_name": "Alpha Industries", "entity_type": "organization"},
+            {"canonical_name": "Beta Logistics", "entity_type": "organization"},
+        ], "relationships": []}
+
+    asyncio.run(ent._run_entity_extractor("m1", "x", extractor))
+    assert seen, "precondition: resolution never reached the embedding tier"
+    assert all(n == 0 for n in seen), f"connections open during embedding awaits: {seen}"

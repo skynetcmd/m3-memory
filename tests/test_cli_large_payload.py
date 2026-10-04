@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -75,25 +74,21 @@ def test_the_ceiling_is_the_shell_not_the_platform():
     if sys.platform != "win32":
         pytest.skip("cmd.exe ceiling is Windows-specific")
 
-    # Resolve the console script instead of invoking a bare name. With
-    # shell=False there is no PATH search, so a bare "m3" raises
-    # FileNotFoundError [WinError 2] wherever the entry point is not installed
-    # -- which is every CI lane running the hermetic suite from a source
-    # checkout. That error is NOT the ceiling this test measures, but it failed
-    # the lane as though it were. (Same trap as the npm .CMD shim in
-    # setup_wizard._wire_openclaw: on Windows, resolve, never assume PATH.)
-    exe = shutil.which("m3")
-    if not exe:
-        pytest.skip("`m3` console script not installed; nothing to measure")
-
+    # Run THIS checkout's CLI via the test interpreter, never `m3` from PATH:
+    # on a dev box that is the installed payload (a different version than the
+    # code under test), and on a source-only CI lane it is absent, which made
+    # this test skip. The ceiling measured is the OS command-line limit, so the
+    # executable only has to be a real CreateProcess target with this argv.
+    repo_root = _ROOT
     payload = json.dumps({
         "agent_id": "pytest-large@s1", "kind": "probe",
         "payload": {"blob": "x" * 20000},
     })
-    argv = [exe, "admin", "notify", "--yes", "--dry-run", "--json", payload]
+    argv = [sys.executable, "-m", "m3_memory.cli",
+            "admin", "notify", "--yes", "--dry-run", "--json", payload]
 
-    direct = subprocess.run(argv, capture_output=True, text=True, shell=False)
-    viashell = subprocess.run(argv, capture_output=True, text=True, shell=True)
+    direct = subprocess.run(argv, capture_output=True, text=True, shell=False, cwd=repo_root)
+    viashell = subprocess.run(argv, capture_output=True, text=True, shell=True, cwd=repo_root)
 
     assert direct.returncode == 0, (
         f"CreateProcess refused {len(payload)} chars -- the ~32KB platform "
