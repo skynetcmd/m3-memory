@@ -275,3 +275,101 @@ def test_loop_work_gate_agrees_after_distillation(monkeypatch, tmp_path):
         )
         conn.commit()
     assert loop.has_distill_work(str(db), 1, 0) is False
+
+
+# ── a local LLM that cannot answer stops the pass (2026-10-03) ───────────────
+
+def _seed_second_task(conn):
+    conn.execute(
+        "INSERT INTO memory_items (id, type, title, content, user_id, agent_id, "
+        "conversation_id, created_at, is_deleted) VALUES (?,?,?,?,?,?,?,?,0)",
+        ("m-result-2", "note", "second result", "it worked", "u1", "claude",
+         "conv-2", "2026-01-02T00:00:00Z"),
+    )
+    conn.execute(
+        "INSERT INTO tasks (id, title, description, state, owner_agent, created_by, "
+        "result_memory_id, created_at, updated_at, completed_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("t2", "Second task", "steps", "completed", "claude", "claude", "m-result-2",
+         "2026-01-02T00:00:00Z", "2026-01-02T00:00:00Z", "2026-01-02T00:00:00Z"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_unavailable_llm_stops_the_pass_after_one_call(monkeypatch, tmp_path):
+    """Measured 2026-10-03: with no model loaded, the pass asked the model once
+    per task, every cycle (one task skipped 546 times in a day). A SYSTEM-down
+    error must stop the pass after the first call, not fail each task."""
+    import llm_failover
+
+    db = tmp_path / "t.db"
+    _full_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        _seed_completed_task(conn)
+        _seed_second_task(conn)
+        conn.commit()
+    mm = _patch_db(monkeypatch, db)
+    monkeypatch.setattr(llm_failover, "_OUTAGE_STATE", {})
+    calls = []
+
+    async def _down(prompt):
+        calls.append(prompt)
+        raise llm_failover.LLMUnavailable("observed: no generative model listed")
+
+    monkeypatch.setattr(mm, "_distill_call_model", _down)
+    out = await mm.memory_distill_procedures_impl(stale_days=0, threshold=1)
+    assert len(calls) == 1, f"pass must stop after the first system-down call, made {len(calls)}"
+    assert "Stopped: local LLM unavailable" in out and "2 task(s) left" in out
+    assert "Skipped task" not in out
+
+
+@pytest.mark.asyncio
+async def test_distill_call_classifies_connect_error_as_unavailable(monkeypatch):
+    import httpx
+    import llm_failover
+    import memory_maintenance as mm
+    import slm_intent
+
+    async def _refused(prof, prompt, client):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(slm_intent, "_call_model", _refused)
+    monkeypatch.delenv("M3_DISTILL_MODEL", raising=False)
+    with pytest.raises(llm_failover.LLMUnavailable):
+        await mm._distill_call_model("p")
+
+
+@pytest.mark.asyncio
+async def test_distill_call_keeps_a_request_error_per_task(monkeypatch, caplog):
+    """A 4xx on a server that CAN answer is this task's problem: warn with the
+    body and return None, so the pass moves on to the next task."""
+    import httpx
+    import memory_maintenance as mm
+    import slm_intent
+
+    async def _bad(prof, prompt, client):
+        raise httpx.HTTPStatusError("400 Bad Request from x: prompt too long",
+                                    request=httpx.Request("POST", "http://x"),
+                                    response=httpx.Response(400))
+
+    monkeypatch.setattr(slm_intent, "_call_model", _bad)
+    monkeypatch.delenv("M3_DISTILL_MODEL", raising=False)
+    with caplog.at_level("WARNING"):
+        assert await mm._distill_call_model("p") is None
+    assert any("prompt too long" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_llm_selector_with_no_model_is_loud(monkeypatch):
+    """The 'llm' selector returned None with NO log when no endpoint had a model."""
+    import llm_failover
+    import memory_maintenance as mm
+
+    async def _none(client, token):
+        return None
+
+    monkeypatch.setattr(mm, "get_best_llm", _none)
+    monkeypatch.setenv("M3_DISTILL_MODEL", "llm")
+    monkeypatch.setattr(mm.ctx, "get_secret", lambda *a, **k: "tok")
+    with pytest.raises(llm_failover.LLMUnavailable):
+        await mm._distill_call_model("p")

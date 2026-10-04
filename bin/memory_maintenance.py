@@ -9,7 +9,12 @@ from datetime import datetime, timedelta, timezone
 DEFAULT_PROTECTED_TYPES = ("preference", "user_fact", "task", "plan")
 
 import memory_core
-from llm_failover import apply_thinking_suppression
+from llm_failover import (
+    LLMUnavailable,
+    apply_thinking_suppression,
+    report_available,
+    report_unavailable,
+)
 from memory_core import (
     DEDUP_LIMIT,
     DEDUP_THRESHOLD,
@@ -1937,8 +1942,12 @@ def _resolve_distill_model() -> str:
 
 async def _distill_call_model(prompt: str) -> "str | None":
     """Run the distillation prompt through the resolved model. Returns the raw
-    reply text, or None if no model is available / the call fails. Local-first,
-    cloud-capable — the resolution is config, never a forced cloud dependency."""
+    reply text, or None if this call failed. Local-first, cloud-capable — the
+    resolution is config, never a forced cloud dependency.
+
+    Raises llm_failover.LLMUnavailable when no model can answer at all (no
+    endpoint lists a model, or the server is unreachable). That is a SYSTEM
+    state: the pass stops instead of failing every task the same way."""
     selector = _resolve_distill_model()
 
     if selector == "llm":
@@ -1947,7 +1956,9 @@ async def _distill_call_model(prompt: str) -> "str | None":
         client = _get_embed_client()
         result = await get_best_llm(client, token)
         if not result:
-            return None
+            raise LLMUnavailable(
+                "observed: get_best_llm found no endpoint listing a usable model. "
+                "inspect: load a model in the local server, or M3_LLM_ENDPOINTS_CSV.")
         base_url, model = result
         try:
             chat_url = f"{base_url}/chat/completions"
@@ -1982,6 +1993,11 @@ async def _distill_call_model(prompt: str) -> "str | None":
     try:
         async with httpx.AsyncClient(timeout=prof.timeout_s) as client:
             return await _call_model(prof, prompt, client)
+    except LLMUnavailable:
+        raise
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        # The server itself is unreachable: a system state, not this task's fault.
+        raise LLMUnavailable(f"observed: {type(e).__name__} reaching {prof.url}: {e}") from e
     except Exception as e:  # noqa: BLE001
         logger.warning(f"distill slm call failed (profile={prof_name!r}): {type(e).__name__}: {e}")
         return None
@@ -2135,7 +2151,15 @@ async def memory_distill_procedures_impl(
             f"DESCRIPTION: {t['description'] or ''}\n\n"
             "STEPS AND RESULT:\n" + "\n".join(step_texts)
         )
-        reply = await _distill_call_model(prompt)
+        try:
+            reply = await _distill_call_model(prompt)
+        except LLMUnavailable as e:
+            report_unavailable(logger, "distillation", e)
+            remaining = len(tasks) - tasks.index(t)
+            results.append(f"Stopped: local LLM unavailable; {remaining} task(s) left "
+                           f"for the next pass. {e}")
+            break
+        report_available(logger, "distillation")
         if not reply:
             results.append(f"Skipped task {t['id']}: no distillation model output.")
             continue
