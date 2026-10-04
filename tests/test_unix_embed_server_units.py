@@ -237,11 +237,24 @@ def test_conflict_does_not_abort_the_whole_installer(monkeypatch, capsys):
     The conflict is fatal to the embed-server unit only — loudly."""
     def _conflict(*a, **k):
         raise sched.EmbedServerConflict("two supervisors, one port")
+    monkeypatch.setattr(sched, "_os_name", lambda: "Linux")
+    monkeypatch.setattr(sched, "_rust_embed_service_loaded", lambda: None)
     monkeypatch.setattr(sched, "install_unix_embed_server", _conflict)
     sched._install_embed_server_or_report("/root", "/py")  # must not raise
     out = capsys.readouterr().out
     assert "two supervisors, one port" in out
     assert sched.FAIL in out, "a refusal must not read as a routine skip"
+
+
+def test_a_registered_rust_server_is_reported_as_the_keep_alive(monkeypatch, capsys):
+    """Not a failure: the Rust service is the keep-alive on that host."""
+    monkeypatch.setattr(sched, "_os_name", lambda: "Linux")
+    monkeypatch.setattr(sched, "_rust_embed_service_loaded", lambda: True)
+    monkeypatch.setattr(sched, "install_unix_embed_server",
+                        lambda *a, **k: pytest.fail("would overwrite the Rust unit"))
+    sched._install_embed_server_or_report("/root", "/py")
+    out = capsys.readouterr().out
+    assert sched.OK in out and sched.FAIL not in out
 
 
 def test_linux_installs_and_enables(monkeypatch, fake_run, tmp_path):

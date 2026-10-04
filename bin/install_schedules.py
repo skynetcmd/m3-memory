@@ -302,6 +302,13 @@ def _install_embed_server_or_report(m3_memory_root: str, python_exe: str) -> Non
     Still LOUD: FAIL, the full remediation text, and a trailing reminder, so it
     cannot be mistaken for the routine skip it replaced.
     """
+    # A registered Rust server IS the keep-alive; reporting its presence as a
+    # failure would be a false alarm on every correctly configured host.
+    if _os_name() in ("Darwin", "Linux") and _rust_embed_service_loaded() is True:
+        label = _RUST_EMBED_LABEL if _os_name() == "Darwin" else _LINUX_EMBED_UNIT
+        _safe_print(f"{OK} embed-server keep-alive: the Rust m3-embed-server "
+                    f"service ({label})")
+        return
     try:
         install_unix_embed_server(m3_memory_root, python_exe)
     except EmbedServerConflict as e:
