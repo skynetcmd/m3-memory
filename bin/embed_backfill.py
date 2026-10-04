@@ -77,6 +77,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from embed_sweep_lib import Counters as _LibCounters  # noqa: E402
 from embed_sweep_lib import run_embed_loop
 
+
 class _StandaloneSqliteDialect:
     """The few SQLite fragments this module needs, for a standalone run without
     the payload on sys.path. With the payload present every fragment comes from

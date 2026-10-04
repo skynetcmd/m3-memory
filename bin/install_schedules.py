@@ -6,9 +6,9 @@ Uses project virtual environment paths and ensures log directories exist.
 """
 
 import argparse
+import html
 import os
 import pathlib
-import html
 import re
 import subprocess
 
@@ -1416,7 +1416,7 @@ _LINUX_EMBED_UNIT = "m3-embed-server.service"
 _PYTHON_EMBED_ENTRY = "embed_server_inproc.py"
 
 
-_ROLE_TO_SERVICE = {
+_ROLE_TO_SERVICE: "dict[str, dict[str, str | tuple[str, ...] | None]]" = {
     "dashboard": {
         "win": "AgentOS_Dashboard",
         "darwin": "com.m3memory.dashboard",
@@ -1692,8 +1692,8 @@ def _service_name_for_task(task_name: str) -> "tuple[str | None, bool]":
     Returns ``(service_name, known)``. ``known`` distinguishes the two reasons
     a name can be ``None``, which must never be rendered the same way:
 
-      * ``(None, True)``  -- the platform genuinely has no such service (e.g.
-        embed-server self-manages on Linux). Skip it, and say so.
+      * ``(None, True)``  -- the platform genuinely has no such service.
+        Skip it, and say so.
       * ``(None, False)`` -- we do not know how to name it here. LOUD: we were
         asked to start something and cannot.
 
@@ -1708,7 +1708,7 @@ def _service_name_for_task(task_name: str) -> "tuple[str | None, bool]":
     key = _platform_key()
     for role, mapping in _ROLE_TO_SERVICE.items():
         if mapping.get("win") == task_name:
-            return mapping.get(key), True
+            return _resolve_service(mapping.get(key)), True
     return None, False
 
 

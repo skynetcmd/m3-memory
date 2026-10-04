@@ -150,3 +150,11 @@ def test_service_exists_has_one_owner():
         "the LoadState probe appears more than once -- it belongs only in "
         "_service_exists"
     )
+
+
+def test_darwin_embed_server_starts_one_resolved_label(spy, monkeypatch):
+    """The map holds candidate labels on macOS; the start must name one."""
+    monkeypatch.setattr(isch, "_platform_key", lambda: "darwin")
+    monkeypatch.setattr(isch, "_service_exists", lambda n: n == "com.m3memory.embedserver")
+    isch._start_longlived_tasks([{"name": "AgentOS_EmbedServer"}])
+    assert ["launchctl", "start", "com.m3memory.embedserver"] in spy
