@@ -24,7 +24,11 @@ import logging
 import os
 import sys
 
-logging.basicConfig(level=logging.INFO, format='%(name)s: [%(levelname)s] %(message)s')
+logging.basicConfig(level=logging.WARNING, format='%(name)s: [%(levelname)s] %(message)s')
+# The doctor's own INFO lines (repair results) stay visible; library INFO
+# chatter (connection pools, HTTP requests) would bury the readable report.
+logging.getLogger("memory_doctor").setLevel(logging.INFO)
+logging.getLogger("memory.doctor").setLevel(logging.INFO)
 logger = logging.getLogger("memory_doctor")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

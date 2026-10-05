@@ -214,3 +214,14 @@ def test_doctor_exposes_skip_claude_mcp_flag():
         text = f.read()
     assert "--skip-claude-mcp" in text
     assert "claude_mcp_probe" in text
+
+
+def test_brief_report_without_claude_installed(monkeypatch, capsys):
+    from doctor import claude_mcp_probe as p
+    monkeypatch.setattr(p, "_direct_servers", lambda: {})
+    monkeypatch.setattr(p, "_plugin_state", lambda: _plugin())
+    monkeypatch.setattr(p.shutil, "which", lambda name: None)
+    p.run(brief=True)
+    out = capsys.readouterr().out
+    assert "Claude Code not installed" in out
+    assert "m3 setup" not in out

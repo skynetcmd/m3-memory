@@ -212,7 +212,7 @@ def run(brief: bool = False) -> int:
             if _chat_model_reachable() is False:
                 print("⚠️  cognitive loop: 0 entities — entity extraction needs a "
                       "chat model and none is reachable. fix: load a model in LM "
-                      "Studio or Ollama, or set M3_LLM_URL")
+                      "Studio or Ollama, then run `m3 setup`")
             else:
                 print("⚠️  cognitive loop: 0 entities extracted from "
                       f"{memories} memories (loop hasn't distilled yet)")
