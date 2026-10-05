@@ -21,7 +21,22 @@ import os
 import sys
 import tempfile
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
+
+from doctor import claude_mcp_probe as _probe  # noqa: E402
+
+# The real local-scope reader, captured before the autouse fixture replaces it.
+_REAL_LOCAL_SERVERS = _probe._local_servers
+
+
+@pytest.fixture(autouse=True)
+def _no_real_local_scope(monkeypatch):
+    """The local-scope reader opens the developer's real ~/.claude.json; keep
+    every test off it unless the test supplies its own home."""
+    from doctor import claude_mcp_probe as p
+    monkeypatch.setattr(p, "_local_servers", lambda: [])
 
 
 def _load(path):
@@ -240,6 +255,7 @@ def test_a_local_scope_m3_server_is_reported_and_removed(monkeypatch, tmp_path, 
     }), encoding="utf-8")
     monkeypatch.setattr(p.os.path, "expanduser", lambda s: s.replace("~", str(home), 1))
     monkeypatch.setattr(p, "_plugin_state", lambda: _plugin())
+    monkeypatch.setattr(p, "_local_servers", _REAL_LOCAL_SERVERS)
     removed = []
     monkeypatch.setattr(p, "_claude_mcp_remove",
                         lambda name, scope="user", cwd=None: removed.append((name, scope, cwd)) or (True, ""))

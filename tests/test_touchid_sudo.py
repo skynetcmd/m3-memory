@@ -69,7 +69,7 @@ def test_setup_offers_only_at_the_mac_and_remembers_a_no(mac, monkeypatch):
     asked = []
     monkeypatch.setattr(setup_wizard, "_ask_yes_no", lambda q, default=True: asked.append(q) or False)
 
-    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.2 5000 10.0.0.1 22")
+    monkeypatch.setenv("SSH_CONNECTION", "192.0.2.2 5000 192.0.2.1 22")
     setup_wizard._offer_touchid_sudo()
     assert asked == [], "no fingerprint reaches an SSH session"
 
