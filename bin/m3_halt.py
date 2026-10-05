@@ -131,8 +131,8 @@ def _pid_is_alive(pid: int) -> bool:
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if not handle:
             # Access denied means the process EXISTS but runs elevated or as
-            # another user (an SCM service). Reading it as "gone" reported such a
-            # process stopped without any kill being attempted.
+            # another user (an SCM service). Read as "gone", such a process is
+            # reported stopped without any kill being attempted.
             return ctypes.get_last_error() == ERROR_ACCESS_DENIED
         try:
             exit_code = ctypes.c_ulong()
