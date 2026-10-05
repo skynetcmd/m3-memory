@@ -59,7 +59,7 @@ import sys
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
-from m3_sdk import resolve_cdw_pg_dsn, resolve_venv_python
+from m3_sdk import resolve_venv_python
 
 
 def ensure_venv():
@@ -127,10 +127,8 @@ def _get_pg_url() -> str:
     Warehouse role: M3_CDW_PG_URL > PG_URL(deprecated) > vault(PG_URL). Does NOT
     read M3_PG_URL (the primary-store var) — pg_sync fans in to the CDW mirror.
     """
-    url = (resolve_cdw_pg_dsn("") or "").strip()
-    if url:
-        return url
-    url = ctx.get_secret("PG_URL")
+    from m3_sdk import resolve_warehouse_dsn
+    url = resolve_warehouse_dsn()
     if url:
         return url
     logger.error(

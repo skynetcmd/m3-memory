@@ -67,7 +67,38 @@ def _resolve_python() -> str:
 
 
 PY = _resolve_python()
-TARGET_IP = getenv_compat("M3_POSTGRES_SERVER", "POSTGRES_SERVER", getenv_compat("M3_SYNC_TARGET_IP", "SYNC_TARGET_IP", ""))
+def _warehouse_host_from_env() -> str:
+    """The host env vars, read when asked: a value captured at import is the
+    importing process's environment, not the one sync runs in."""
+    return (getenv_compat("M3_POSTGRES_SERVER", "POSTGRES_SERVER",
+                          getenv_compat("M3_SYNC_TARGET_IP", "SYNC_TARGET_IP", "")) or "").strip()
+
+
+def warehouse_target() -> "tuple[str, int, str] | None":
+    """(host, port, source) of the warehouse to sync with, or None if none is
+    configured. The host env vars win; otherwise the host comes from the
+    warehouse DSN, which a scheduled job can read from the stored secret even
+    when it never sees the shell's environment."""
+    host = _warehouse_host_from_env()
+    if host:
+        return host, 5432, "M3_POSTGRES_SERVER"
+    try:
+        from urllib.parse import urlsplit
+
+        from m3_sdk import resolve_warehouse_dsn
+        dsn = resolve_warehouse_dsn()
+    except Exception as e:  # noqa: BLE001 — reported, then treated as unconfigured
+        log.warning(f"could not read the warehouse DSN ({type(e).__name__}: {e}); "
+                    f"sync is skipped. inspect: m3 doctor")
+        return None
+    if not dsn:
+        return None
+    parts = urlsplit(dsn)
+    if not parts.hostname:
+        log.warning("the warehouse DSN has no host; sync is skipped. "
+                    "inspect: M3_CDW_PG_URL or the stored PG_URL")
+        return None
+    return parts.hostname, parts.port or 5432, "warehouse DSN"
 
 # Logging is configured in main() via setup_task_runtime so scheduled-task
 # runs self-log without a shell `>>` redirect. This minimal fallback keeps
@@ -223,9 +254,8 @@ def _try_pg_fdw_fastpath(dry_run: bool) -> "bool | None":
         return None
     try:
         import pg_fdw_sync
-        from m3_sdk import M3Context
-        ctx = M3Context.for_db(None)
-        warehouse_dsn = ctx.get_secret("PG_URL") or os.environ.get("M3_CDW_PG_URL")
+        from m3_sdk import resolve_warehouse_dsn
+        warehouse_dsn = resolve_warehouse_dsn()
         if not warehouse_dsn:
             # Deliberate skip, not a failure: sync is opt-in, and main() already
             # exits cleanly when SYNC_TARGET_IP is unset (:390). Returning True
@@ -431,15 +461,20 @@ def main():
     _os = {"darwin": "Darwin", "win32": "Windows"}.get(sys.platform, "Linux")
     log.info(f"=== sync_all starting [{_os}] ===")
 
-    if not TARGET_IP:
-        log.info("SYNC_TARGET_IP not set — skipping sync.")
+    target = warehouse_target()
+    if target is None:
+        log.info("No warehouse configured (M3_POSTGRES_SERVER, M3_CDW_PG_URL or a "
+                 "stored PG_URL) — skipping sync.")
+        sys.exit(0)
+    host, port, source = target
+
+    if not is_reachable(host, port):
+        log.warning(f"PostgreSQL data warehouse ({host}:{port}, from {source}) "
+                    f"unreachable — skipping sync until the next scheduled run.")
         sys.exit(0)
 
-    if not is_reachable(TARGET_IP):
-        log.warning(f"PostgreSQL data warehouse ({TARGET_IP}) unreachable — skipping sync (will retry next hour).")
-        sys.exit(0)
-
-    log.info(f"PostgreSQL data warehouse ({TARGET_IP}) reachable — running full sync.")
+    log.info(f"PostgreSQL data warehouse ({host}:{port}, from {source}) reachable "
+             f"— running full sync.")
 
     pg_ok = run_pg_sync(args.dry_run)
 

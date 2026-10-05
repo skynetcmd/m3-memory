@@ -1,8 +1,8 @@
 ---
 tool: bin/pg_sync.py
-sha1: 48d4f100be9b
-mtime_utc: 2026-10-05T11:28:35.529219+00:00
-generated_utc: 2026-10-05T11:29:43.906335+00:00
+sha1: 2bd5e59b2ad8
+mtime_utc: 2026-10-05T11:31:46.471159+00:00
+generated_utc: 2026-10-05T11:34:22.518950+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 1660)
+- `def main()` (line 1658)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -42,7 +42,8 @@ _(none detected)_
 - `chatlog_config (chatlog_db_path)`
 - `m3_halt (pid_is_alive)`
 - `m3_sdk (M3Context, resolve_db_path)`
-- `m3_sdk (resolve_cdw_pg_dsn, resolve_venv_python)`
+- `m3_sdk (resolve_venv_python)`
+- `m3_sdk (resolve_warehouse_dsn)`
 - `migrate_memory`
 
 ---

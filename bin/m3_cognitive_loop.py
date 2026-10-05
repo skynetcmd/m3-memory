@@ -1544,12 +1544,14 @@ async def run_sync_pass(args):
         import sync_all
         # Cheap pre-flight: if the warehouse isn't reachable, skip fast (don't
         # stamp — so we retry next cycle rather than waiting a full interval).
-        if not sync_all.TARGET_IP:
+        target = sync_all.warehouse_target()
+        if target is None:
             logger.debug("Sync pass: no warehouse target configured. Skipping.")
             return
-        if not sync_all.is_reachable(sync_all.TARGET_IP):
-            logger.info("Sync pass: warehouse %s unreachable — skipping (retry next cycle).",
-                        sync_all.TARGET_IP)
+        host, port, _source = target
+        if not sync_all.is_reachable(host, port):
+            logger.info("Sync pass: warehouse %s:%s unreachable — skipping (retry next cycle).",
+                        host, port)
             return
         logger.info("Starting warehouse-sync pass...")
         ok = await asyncio.to_thread(sync_all.run_pg_sync, False)

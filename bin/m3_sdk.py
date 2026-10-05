@@ -154,6 +154,19 @@ def get_secret(service: str) -> "str | None":
     return get_api_key(service)
 
 
+def resolve_warehouse_dsn() -> "str | None":
+    """The data-warehouse (CDW) DSN, or None when sync is not configured.
+
+    Precedence: M3_CDW_PG_URL > PG_URL (deprecated) > stored secret PG_URL. The
+    secret path is what a launchd/systemd/Task Scheduler job can read; the env
+    vars are not. Never exits: callers decide whether "not configured" is fatal.
+    """
+    url = (resolve_cdw_pg_dsn("") or "").strip()
+    if url:
+        return url
+    return (get_secret("PG_URL") or "").strip() or None
+
+
 # name -> submodules whose namespace must observe a rebind of that name. The
 # first entry is the canonical read source used by the facade's own __getattr__.
 _ROUTED = {

@@ -491,6 +491,22 @@ def _no_existing_install_by_default(monkeypatch):
     yield
 
 
+_WAREHOUSE_SECRETS = frozenset({"PG_URL", "M3_CDW_PG_URL", "M3_CDW_URL"})
+
+
+@pytest.fixture(autouse=True)
+def _no_warehouse_secret(monkeypatch):
+    """The env scrub cannot hide a warehouse DSN stored in the OS keyring or
+    macOS Keychain, and resolve_warehouse_dsn() falls back to exactly that. A
+    test that resolved it would reach the production warehouse."""
+    import m3_sdk
+
+    real = m3_sdk.get_secret
+    monkeypatch.setattr(m3_sdk, "get_secret",
+                        lambda service: None if service in _WAREHOUSE_SECRETS else real(service))
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _embed_port_serving_by_default(monkeypatch):
     """`m3 embedder install` waits for :8082 to answer before reporting success.
