@@ -158,8 +158,7 @@ def _is_missing_confidence_column(exc) -> bool:
 
 def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related", db=None) -> str:
     """Creates a directional link between two memory items. Valid types:
-    related, supports, contradicts, extends, supersedes, references,
-    consolidates, message, handoff.
+    memory_core.VALID_RELATIONSHIP_TYPES.
 
     When `db` is provided, the link is written on that existing connection so a
     caller already inside an open transaction (e.g. the consolidation pass) shares

@@ -67,6 +67,14 @@ VALID_MEMORY_TYPES = frozenset({
 # so callers see a single import surface.
 VALID_ENTITY_TYPES = memory_core.VALID_ENTITY_TYPES
 VALID_ENTITY_PREDICATES = memory_core.VALID_ENTITY_PREDICATES
+# memory_link's edge types. Owned here (not in memory_core) because the tool
+# schemas render their description and enum from it at catalog load, before
+# memory_core is imported; memory_core imports it, so an agent is offered
+# exactly what memory_link_impl accepts.
+VALID_RELATIONSHIP_TYPES = frozenset({
+    "related", "supports", "contradicts", "extends", "supersedes", "references",
+    "message", "consolidates", "handoff", "precedes", "follows",
+})
 
 # Canonical UUID shape (8-4-4-4-12 hex). Mutating tools (supersede/delete)
 # require a full UUID, not the 8-char prefix that memory_get accepts for reads

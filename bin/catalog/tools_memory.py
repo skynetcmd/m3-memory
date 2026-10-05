@@ -10,7 +10,7 @@ import asyncio
 
 from .dispatch import _memory_verify_impl
 from .lazy import LazyModuleProxy
-from .spec import VALID_MEMORY_TYPES, ToolSpec
+from .spec import VALID_MEMORY_TYPES, VALID_RELATIONSHIP_TYPES, ToolSpec
 from .validators import (
     _memory_delete_validator,
     _memory_search_gated_validator,
@@ -714,13 +714,14 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="memory_link",
-        description="Creates a directional link between two memory items. Valid types: related, supports, contradicts, extends, supersedes, references, consolidates, message, handoff.",
+        description="Creates a directional link between two memory items. Valid types: "
+                    + ", ".join(sorted(VALID_RELATIONSHIP_TYPES)) + ".",
         parameters={
             "type": "object",
             "properties": {
                 "from_id":            {"type": "string", "description": "Source memory UUID."},
                 "to_id":              {"type": "string", "description": "Target memory UUID."},
-                "relationship_type":  {"type": "string", "enum": ["related", "supports", "contradicts", "extends", "supersedes", "references", "consolidates", "message", "handoff"], "description": "Link type.", "default": "related"},
+                "relationship_type":  {"type": "string", "enum": sorted(VALID_RELATIONSHIP_TYPES), "description": "Link type.", "default": "related"},
             },
             "required": ["from_id", "to_id"],
         },
@@ -749,7 +750,7 @@ TOOLS: list[ToolSpec] = [
                         "properties": {
                             "from_id":           {"type": "string"},
                             "to_id":             {"type": "string"},
-                            "relationship_type": {"type": "string", "enum": ["related", "supports", "contradicts", "extends", "supersedes", "references", "consolidates", "message", "handoff"]},
+                            "relationship_type": {"type": "string", "enum": sorted(VALID_RELATIONSHIP_TYPES)},
                         },
                         "required": ["from_id", "to_id"],
                     },
@@ -757,7 +758,7 @@ TOOLS: list[ToolSpec] = [
                 },
                 "relationship_type": {
                     "type": "string",
-                    "enum": ["related", "supports", "contradicts", "extends", "supersedes", "references", "consolidates", "message", "handoff"],
+                    "enum": sorted(VALID_RELATIONSHIP_TYPES),
                     "description": "Default link type for entries that omit it.",
                     "default": "related",
                 },

@@ -1252,7 +1252,7 @@ def memory_update_bulk_impl(updates):
     }
 
 
-VALID_RELATIONSHIP_TYPES = {"related", "supports", "contradicts", "extends", "supersedes", "references", "message", "consolidates", "handoff", "precedes", "follows"}
+from catalog.spec import VALID_RELATIONSHIP_TYPES  # noqa: E402 — the single owner
 
 _MEMORY_LINK_BULK_CHUNK = 500
 

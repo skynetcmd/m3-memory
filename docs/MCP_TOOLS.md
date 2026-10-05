@@ -45,7 +45,7 @@ This document provides a comprehensive inventory of all 118 MCP tools available 
 | `extract_pending` | Knowledge Graph | Extract pending entities from the queue. Default dry_run=true reports count + ETA; pass dry_run=false to execute. |
 | `memory_graph` | Knowledge Graph | Returns the local graph neighborhood of a memory item (connected memories up to N hops, max 3). |
 | `memory_history` | Knowledge Graph | Returns the change history (audit trail) for a memory item. Tracks create, update, delete, and supersede events. |
-| `memory_link` | Knowledge Graph | Creates a directional link between two memory items. Valid types: related, supports, contradicts, extends, supersedes, references, consolidates, message, handoff. |
+| `memory_link` | Knowledge Graph | Creates a directional link between two memory items. Valid types: consolidates, contradicts, extends, follows, handoff, message, precedes, references, related, supersedes, supports. |
 | `conversation_append` | Conversations | Appends a message to a conversation. |
 | `conversation_search` | Conversations | Search messages across conversations using hybrid semantic/keyword search. |
 | `conversation_start` | Conversations | Starts a new conversation thread. |
@@ -816,7 +816,7 @@ Returns the change history (audit trail) for a memory item. Tracks create, updat
 
 ### `memory_link`
 
-Creates a directional link between two memory items. Valid types: related, supports, contradicts, extends, supersedes, references, consolidates, message, handoff.
+Creates a directional link between two memory items. Valid types: consolidates, contradicts, extends, follows, handoff, message, precedes, references, related, supersedes, supports.
 
 **Source:** mcp_tool_catalog.py
 

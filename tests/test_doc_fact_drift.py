@@ -370,3 +370,99 @@ def test_inproc_opt_in_default_is_off() -> None:
         "topology claims in EMBED_DEPLOYMENT.md, the QUICKSTART pages, "
         "install_windows.md and README.md before updating this test"
     )
+
+
+_PUBLIC_DOCS = sorted(
+    [REPO / "README.md"]
+    + [p for p in (REPO / "docs").rglob("*.md")
+       if not {"tools", "plans", "decisions"} & set(p.relative_to(REPO / "docs").parts[:-1])]
+)
+
+
+def test_every_relationship_type_count_in_the_docs_matches_code() -> None:
+    """Any public doc quoting "N relationship types" agrees with the code.
+
+    The narrower check above read two files; COMPARISON.md said 9 in twelve
+    places and AGENT_INSTRUCTIONS.md said "the 9 supported relationship types"
+    while the code had 11.
+    """
+    from catalog.spec import VALID_RELATIONSHIP_TYPES
+
+    n = len(VALID_RELATIONSHIP_TYPES)
+    bad = []
+    for p in _PUBLIC_DOCS:
+        text = p.read_text(encoding="utf-8")
+        for m in re.finditer(r"\b(\d+) (?:supported )?relationship types|Relationship Types \((\d+)\)", text):
+            c = int(m.group(1) or m.group(2))
+            if c != n:
+                bad.append(f"{p.relative_to(REPO)}: says {c}")
+    assert not bad, f"code has {n} relationship types; " + "; ".join(bad)
+
+
+def test_memory_link_schemas_offer_exactly_the_valid_types() -> None:
+    """The MCP schema enum is what an agent may send. A hand-copied enum missing
+    `precedes`/`follows` made those links impossible through MCP."""
+    from catalog.spec import VALID_RELATIONSHIP_TYPES
+    from catalog.tools_memory import TOOLS
+
+    by_name = {t.name: t for t in TOOLS}
+    link = by_name["memory_link"].parameters["properties"]["relationship_type"]["enum"]
+    bulk = by_name["memory_link_bulk"].parameters["properties"]
+    assert set(link) == set(VALID_RELATIONSHIP_TYPES)
+    assert set(bulk["relationship_type"]["enum"]) == set(VALID_RELATIONSHIP_TYPES)
+    assert set(bulk["links"]["items"]["properties"]["relationship_type"]["enum"]) == set(
+        VALID_RELATIONSHIP_TYPES)
+
+
+def test_entity_vocabulary_counts_in_the_docs_match_the_profiles() -> None:
+    """"(N types, M predicates)" next to a shipped profile, and the default's
+    "N entity types and M predicates", must equal what load_entity_vocab loads.
+    Docs had said 7 and 33 for a default of 42."""
+    from memory.entity import load_entity_vocab
+
+    def counts(name: str) -> tuple[int, int]:
+        t, p = load_entity_vocab(REPO / "config" / "lists" / f"{name}.yaml")
+        return len(t), len(p)
+
+    bad = []
+    for p in _PUBLIC_DOCS:
+        text = p.read_text(encoding="utf-8")
+        for m in re.finditer(r"(entity_graph_\w+)\.yaml`?\s*\((\d+) types, (\d+) predicates\)", text):
+            if (int(m.group(2)), int(m.group(3))) != counts(m.group(1)):
+                bad.append(f"{p.relative_to(REPO)}: {m.group(0)} vs {counts(m.group(1))}")
+        for m in re.finditer(r"default vocabulary[^.]{0,80}?(\d+)\s+entity types and (\d+) predicates", text, re.S):
+            if (int(m.group(1)), int(m.group(2))) != counts("entity_graph_default"):
+                bad.append(f"{p.relative_to(REPO)}: default says {m.group(1)}/{m.group(2)}")
+    assert not bad, "; ".join(bad)
+
+
+def test_technical_details_lists_every_memory_type() -> None:
+    """TECHNICAL_DETAILS.md's "Valid Memory Types (N + `auto`)" list fell three
+    types behind the catalog (belief, procedure, synthesis) unseen, because the
+    check above reads only AGENT_INSTRUCTIONS.md."""
+    from catalog.spec import VALID_MEMORY_TYPES
+
+    text = _read("docs/TECHNICAL_DETAILS.md")
+    m = re.search(r"### Valid Memory Types \((\d+) \+ `auto`\)(.*?)(?=\n###|\Z)", text, re.S)
+    assert m, "TECHNICAL_DETAILS.md no longer has the memory type list"
+    assert int(m.group(1)) == len(VALID_MEMORY_TYPES - {"auto"})
+    for t in VALID_MEMORY_TYPES:
+        assert f"`{t}`" in m.group(2), f"memory type {t!r} missing from TECHNICAL_DETAILS.md"
+
+
+def test_default_vocabulary_counts_in_prose_match() -> None:
+    """Prose phrasings of the default profile's size ("the default has 42 types
+    and 34 predicates") agree with entity_graph_default.yaml."""
+    from memory.entity import load_entity_vocab
+
+    t, p = load_entity_vocab(REPO / "config" / "lists" / "entity_graph_default.yaml")
+    bad = []
+    for path in _PUBLIC_DOCS:
+        text = path.read_text(encoding="utf-8")
+        for m in re.finditer(r"default(?: profile)?(?: has|,)? (\d+) (?:entity )?types and (\d+) predicates", text):
+            if (int(m.group(1)), int(m.group(2))) != (len(t), len(p)):
+                bad.append(f"{path.relative_to(REPO)}: {m.group(0)}")
+        for m in re.finditer(r"entity_graph_default\.yaml`?,? (\d+) types and (\d+) predicates", text):
+            if (int(m.group(1)), int(m.group(2))) != (len(t), len(p)):
+                bad.append(f"{path.relative_to(REPO)}: {m.group(0)}")
+    assert not bad, f"default profile has {len(t)} types / {len(p)} predicates; " + "; ".join(bad)
