@@ -19,6 +19,127 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.10.5.0] — 2026-10-05 — upgrades that cannot remove m3, and scheduled sync that runs
+
+### Fixed
+
+- **`m3 upgrade` on Windows no longer removes m3 when one of its programs is in
+  use.** It now stops before changing anything, names what is holding the file,
+  and prints the command that works; after any failed upgrade it reports what is
+  actually installed.
+  **Affected:** Windows pipx installs, in particular with Developer Mode on, or
+  with an agent's m3 server running · **Action:** if the upgrade stops, run the
+  command it prints · **Data status:** none.
+
+- **The hourly warehouse sync runs on macOS and Linux.** macOS now gets launchd
+  jobs for the hourly sync, the chat-embedding sweep and secret rotation, and
+  the Linux cron jobs use the installed interpreter; on pipx installs the Linux
+  hourly sync failed on every run. Scheduled jobs find the warehouse from its
+  stored credentials, and `m3 schedules verify` checks each job's interval and
+  command.
+  **Affected:** macOS and Linux installs that sync to a warehouse ·
+  **Action:** run `m3 setup` (or `m3 schedules repair`); on macOS a previous
+  `com.m3memory.sync_all.plist` is saved as a `.bak-` copy and replaced ·
+  **Data status:** local data is unaffected; rows written while the job was not
+  running are sent by the next sync.
+
+- **The scheduled sync includes the chat log.** A job that set `M3_DATABASE`
+  synced only the main store.
+  **Affected:** installs whose scheduled sync sets `M3_DATABASE`, such as a
+  hand-made launchd plist · **Action:** run `m3 setup` once ·
+  **Data status:** chat-log rows not yet in the warehouse are sent by the next sync.
+
+- **`m3 stop` and setup no longer report a running embed server as stopped,**
+  and `m3 doctor` names an embed server still running the previous native core,
+  with the restart command.
+  **Affected:** stop and setup reporting — Windows installs whose embed server
+  runs as an elevated service; the doctor check — all platforms ·
+  **Action:** none, or the restart doctor prints · **Data status:** none.
+
+- **`memory_link` accepts the `precedes` and `follows` relationship types through
+  MCP.** The tool's schema offered 9 of the 11 types the store supports.
+  **Affected:** agents creating links through the MCP tools · **Action:** none ·
+  **Data status:** none.
+
+- **Setup no longer asks for an administrator shell to re-register a boot task
+  that is already registered correctly.**
+  **Affected:** Windows · **Action:** none · **Data status:** none.
+
+- **`m3 doctor` reports an m3 server registered for a single directory** (Claude
+  Code's local scope), which sessions started there load beside the main one;
+  `m3 doctor --fix --fix-hooks` removes it.
+  **Affected:** Claude Code users with an older `memory` registration ·
+  **Action:** run `m3 doctor --fix --fix-hooks` if doctor reports it ·
+  **Data status:** none.
+
+- **`m3_call` honours `M3_MCP_PROXY_ALLOW_DESTRUCTIVE`,** as the MCP proxy
+  already did; only the legacy name enabled destructive tools through it.
+  **Affected:** operators who enable destructive tools for MCP proxies ·
+  **Action:** none · **Data status:** none.
+
+- **`M3_SYNC_DBS` accepts Windows drive-letter paths.** Separate entries with
+  commas or the OS path separator (`;` on Windows, `:` elsewhere).
+  **Affected:** Windows installs that set `M3_SYNC_DBS` ·
+  **Action:** none · **Data status:** none.
+
+- **Transcript backfill progress survives a reinstall.** The ingest cursor now
+  lives under the engine root; existing progress carries over.
+  **Affected:** installs that backfill transcripts with `chatlog_ingest` ·
+  **Action:** none · **Data status:** none.
+
+- **Setup and doctor messages name current settings.** The "payload not
+  installed" error points to `m3 install-m3` and `M3_PATH_BIN`, not the removed
+  `M3_BRIDGE_PATH`; `m3 doctor` says in-process embedding needs
+  `M3_EMBED_INPROC=1`.
+  **Affected:** all platforms · **Action:** none · **Data status:** none.
+
+### Changed
+
+- **Windows setup asks for administrator rights once,** for every step that
+  needs them, and reports each step.
+  **Affected:** Windows · **Action:** approve the single prompt ·
+  **Data status:** none.
+
+- **macOS setup offers Touch ID for `sudo`,** once, when run at the Mac.
+  **Affected:** macOS 14 or later with Touch ID · **Action:** optional ·
+  **Data status:** none.
+
+### Documentation
+
+- **Sync and scheduling guides match how jobs now run:** launchd on macOS, cron
+  rendered by setup on Linux, the stored warehouse credentials, and
+  `m3 schedules verify` / repair.
+  **Affected:** readers of SYNC.md and the homelab guides · **Action:** none ·
+  **Data status:** none.
+
+- **Entity, relationship and memory-type counts agree across the docs,** and the
+  docs state that entity types are configured without code changes.
+  **Affected:** readers of the architecture and feature docs · **Action:** none ·
+  **Data status:** none.
+
+- **Windows upgrade, single administrator prompt and Touch ID are documented,**
+  with troubleshooting for scheduled jobs.
+  **Affected:** readers of the install, upgrade and troubleshooting guides ·
+  **Action:** none · **Data status:** none.
+
+- **The comparison guide marks agentmemory's LongMemEval figure as not
+  comparable,** with the evidence linked.
+  **Affected:** readers of COMPARISON.md · **Action:** none ·
+  **Data status:** none.
+
+- **Install, agent and operator guides corrected against the code:** Claude Code
+  registers as `m3_memory`; use the plugin or `m3 setup`, not both; `m3 setup`
+  keeps SQLite; in-process embedding is opt-in; agents use `memory_supersede`
+  when a fact changes and `memory_delete` to forget one memory.
+  **Affected:** readers of the install, agent-instruction and operator guides ·
+  **Action:** none · **Data status:** none.
+
+- **Retrieval is reported at k=8, m3's default search depth** (99.2%, the same as
+  at k=10), and the QA figure states what the benchmark harness supplies.
+  **Affected:** readers of the README and comparison guide · **Action:** none ·
+  **Data status:** none.
+
+
 ## [2026.10.4.3] — 2026-10-04 — fresh pipx installs that work, and quieter upgrades
 
 ### Fixed
