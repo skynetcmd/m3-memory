@@ -85,8 +85,11 @@ def test_health_routes_render():
     partial = client.get("/api/health")
     assert partial.status_code == 200
     pbody = partial.text
+    # Every label dashboard.health._verdict can return: the verdict reflects the
+    # host's real inference backend, so any of them is a valid render.
     assert any(v in pbody for v in
-               ("HEALTHY", "THROTTLED", "REDUCED PERFORMANCE", "NEEDS SETUP", "UNKNOWN"))
+               ("HEALTHY", "THROTTLED", "REDUCED PERFORMANCE", "NEEDS SETUP", "UNKNOWN",
+                "LLM FAILOVER ACTIVE", "INFERENCE BACKEND DOWN"))
     assert "report time:" in pbody
     assert "Database backend" in pbody
 

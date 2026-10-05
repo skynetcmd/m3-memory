@@ -25,6 +25,18 @@ _os.environ.setdefault("_M3_UTF8_REEXEC", "1")
 # environment that deliberately set it wins. Must run at conftest IMPORT time,
 # before any test imports memory.config (which reads it once at import).
 _os.environ.setdefault("M3_CORE_RS_DISABLE", "1")
+
+# Point the config root at an empty directory for COLLECTION. The autouse
+# sandbox pins it per test, but modules imported during collection read config
+# before any fixture runs: llm_failover builds LLM_ENDPOINTS from
+# <config_root>/.llm_config.json, so a developer's real file would reach tests.
+# Unconditional (not setdefault): an outer value would be that same leak.
+import atexit as _atexit  # noqa: E402
+import shutil as _shutil  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+
+_os.environ["M3_CONFIG_ROOT"] = _tempfile.mkdtemp(prefix="m3-test-config-")
+_atexit.register(_shutil.rmtree, _os.environ["M3_CONFIG_ROOT"], True)
 import re
 import shutil
 import sqlite3
@@ -470,6 +482,18 @@ def _no_existing_install_by_default(monkeypatch):
     wiz = sys.modules.get("m3_memory.setup_wizard")
     if wiz is not None and hasattr(wiz, "_existing_install"):
         monkeypatch.setattr(wiz, "_existing_install", lambda: None)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _embed_port_serving_by_default(monkeypatch):
+    """`m3 embedder install` waits for :8082 to answer before reporting success.
+    Tests that stub the service as running would otherwise poll the developer's
+    real port (or wait out the timeout where none runs). Tests of the wait call
+    `embedder_admin._wait_serving_impl`."""
+    ea = sys.modules.get("m3_memory.embedder_admin")
+    if ea is not None and hasattr(ea, "_wait_serving"):
+        monkeypatch.setattr(ea, "_wait_serving", lambda *a, **k: True)
     yield
 
 

@@ -67,8 +67,8 @@ def _recorded(config_root):
 
 
 def test_setup_records_ollama_even_when_the_shell_already_has_it(config_root, monkeypatch):
-    # The repair path for an existing install: the shell export was there, so
-    # setup used to stop before writing anything a daemon could see.
+    # The repair path for an existing install: the shell already exports the
+    # switch, and setup must still write the copy a daemon can see.
     monkeypatch.setenv("M3_ENABLE_OLLAMA_FAILOVER", "1")
     _probe(monkeypatch, "11434")
     assert _recorded(config_root) == {
