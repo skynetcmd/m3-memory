@@ -471,6 +471,11 @@ def _cmd_upgrade(args: argparse.Namespace) -> int:
     So this is a LAUNCHER, not an implementation. Doing the upgrade inline here
     would reintroduce exactly the hazard the standalone script exists to avoid.
 
+    Residual hazard: this process WAITS for the script, and its image is the
+    venv's ``Scripts\\m3.exe`` whenever ``~/.local/bin/m3.exe`` is a symlink
+    (pipx symlinks when Windows allows it). The script's lock gate detects that,
+    stops before changing anything, and prints the Python command that avoids it.
+
     Why the command exists at all: the script shipped in the payload but nothing
     told anyone it was there. `m3 --help`, the README and HOW-TO-UPGRADE all
     pointed at bare `pipx upgrade m3-memory` -- which, against a pip install,

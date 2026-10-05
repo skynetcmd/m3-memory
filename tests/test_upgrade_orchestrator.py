@@ -292,3 +292,88 @@ def test_upgrade_stops_before_touching_services_when_the_source_is_gone(tmp_path
     monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
     assert m3u.main(["--yes"]) == 2
     assert "no longer exists" in capsys.readouterr().out
+
+
+def _pip_install(tmp_path, version="2026.10.4.2"):
+    """A pip-layout venv: Scripts/python.exe + m3 launchers + dist-info."""
+    venv = _mk(tmp_path, "venv")
+    scripts = _mk(venv, "Scripts")
+    for name in ("python.exe", "m3.exe", "mcp-memory.exe"):
+        (scripts / name).write_bytes(b"MZ")
+    site = _mk(venv, "Lib/site-packages")
+    pkg = _mk(site, "m3_memory")
+    dist = _mk(site, f"m3_memory-{version}.dist-info")
+    (dist / "entry_points.txt").write_text(
+        "[console_scripts]\nm3 = m3_memory.cli:main\nmcp-memory = m3_memory.cli:main\n",
+        encoding="utf-8")
+    return scripts, pkg
+
+
+def test_entry_points_and_version_come_from_the_dist_info(tmp_path):
+    _scripts, pkg = _pip_install(tmp_path)
+    assert m3u._entry_point_names(pkg) == ["m3", "mcp-memory"]
+    assert m3u.installed_version(pkg) == "2026.10.4.2"
+
+
+def test_a_held_launcher_stops_the_upgrade_before_anything_runs(tmp_path, monkeypatch, capsys):
+    """pip removes the package and then fails on a held .exe, leaving m3
+    uninstalled; nothing may be stopped or replaced while one is held."""
+    scripts, pkg = _pip_install(tmp_path)
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [scripts / "m3.exe"])
+    monkeypatch.setattr(m3u, "describe_holders",
+                        lambda locked: ["    pid 1  m3.exe  (this command's own launcher)"])
+    monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    assert m3u.main(["--yes"]) == 2
+    out = capsys.readouterr().out
+    assert "Nothing was changed" in out
+    assert "m3_upgrade.py" in out and "python.exe" in out    # the remedy for a self-hold
+
+
+def test_other_holders_get_the_close_them_remedy(tmp_path, monkeypatch, capsys):
+    scripts, _pkg = _pip_install(tmp_path)
+    monkeypatch.setattr(m3u, "describe_holders",
+                        lambda locked: ["    pid 7  mcp-memory.exe  (started by claude.exe)"])
+    m3u.explain_locked([scripts / "mcp-memory.exe"], str(scripts / "python.exe"))
+    out = capsys.readouterr().out
+    assert "close the agent sessions" in out
+    assert "run the upgrade through Python" not in out
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows file-locking semantics")
+def test_an_open_launcher_is_reported_locked_and_left_intact(tmp_path):
+    scripts, _pkg = _pip_install(tmp_path)
+    with open(scripts / "m3.exe", "rb"):
+        assert m3u.locked_launchers(scripts, ["m3", "mcp-memory"]) == [scripts / "m3.exe"]
+    assert m3u.locked_launchers(scripts, ["m3", "mcp-memory"]) == []
+    assert sorted(p.name for p in scripts.iterdir()) == ["m3.exe", "mcp-memory.exe", "python.exe"]
+
+
+@pytest.mark.parametrize("importable, expect", [
+    (True, "m3 2026.10.4.2 is still installed"),
+    (False, "m3 is NOT installed now"),
+])
+def test_a_failed_upgrade_reports_what_is_actually_installed(tmp_path, monkeypatch, capsys,
+                                                             importable, expect):
+    scripts, pkg = _pip_install(tmp_path)
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    calls = []
+
+    def _run(cmd, **k):
+        calls.append(cmd)
+        return 1 if "install" in cmd else 0
+
+    monkeypatch.setattr(m3u, "run", _run)
+    monkeypatch.setattr(m3u.subprocess, "run",
+                        lambda *a, **k: type("R", (), {"returncode": 0 if importable else 1})())
+    assert m3u.main(["--yes"]) == 1
+    out = capsys.readouterr().out
+    assert expect in out
+    assert "still on its previous version" not in out
+    if not importable:
+        assert "--force-reinstall --no-deps m3-memory==2026.10.4.2" in out

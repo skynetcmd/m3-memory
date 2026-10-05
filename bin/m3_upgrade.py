@@ -34,9 +34,15 @@ The steps mirror what the CLI's own help already tells you to do:
                       point at the payload step 2 just REPLACED and nothing else
                       in the upgrade rewires them.
 
-There is no ``m3 upgrade`` subcommand. Guessing one (or guessing ``pipx`` for a
-pip install) is the failure this script exists to prevent: ``pipx upgrade``
-against a pip install exits 0 having upgraded NOTHING, which reads as success.
+``m3 upgrade`` launches this script. Guessing ``pipx`` for a pip install is the
+failure it exists to prevent: ``pipx upgrade`` against a pip install exits 0
+having upgraded NOTHING, which reads as success.
+
+On Windows, any process running from one of the venv's launcher .exe files
+(``m3 upgrade``'s own launcher when ``~/.local/bin/m3.exe`` is a symlink, an
+agent's m3 MCP server, a hook) blocks pip from replacing it, and pip then leaves
+the package uninstalled. ``locked_launchers`` checks for that before anything
+is stopped or replaced.
 """
 from __future__ import annotations
 
@@ -267,6 +273,105 @@ def upgrade_command(method: str, python: str = sys.executable) -> list[str] | No
     return None
 
 
+def _entry_point_names(pkg: pathlib.Path | None) -> list[str]:
+    """Console/GUI script names m3-memory installs, read from its dist-info."""
+    names: list[str] = []
+    if pkg is not None:
+        for ep in sorted(pkg.parent.glob("m3_memory-*.dist-info/entry_points.txt")):
+            section = ""
+            for line in ep.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if line.startswith("["):
+                    section = line
+                elif "=" in line and section in ("[console_scripts]", "[gui_scripts]"):
+                    names.append(line.split("=", 1)[0].strip())
+    return names or ["m3", "m3-team", "mcp-memory"]
+
+
+def installed_version(pkg: pathlib.Path | None) -> str | None:
+    """The installed m3-memory version, from its dist-info directory name."""
+    if pkg is None:
+        return None
+    for d in sorted(pkg.parent.glob("m3_memory-*.dist-info")):
+        return d.name[len("m3_memory-"):-len(".dist-info")]
+    return None
+
+
+def locked_launchers(scripts_dir: pathlib.Path, names: list[str]) -> list[pathlib.Path]:
+    """Windows only: the m3 launchers that cannot be replaced right now.
+
+    A process running FROM one of these .exe files (an agent's m3 MCP server, a
+    hook, or `m3 upgrade`'s own launcher when ~/.local/bin/m3.exe is a symlink
+    into the venv) holds it against rename. pip removes the package first and
+    then fails on the held file, leaving m3 uninstalled. Probing with the same
+    rename pip performs measures exactly that condition.
+    """
+    if os.name != "nt":
+        return []
+    locked = []
+    for name in names:
+        exe = scripts_dir / f"{name}.exe"
+        if not exe.is_file():
+            continue
+        probe = exe.with_name(exe.name + ".m3-upgrade-probe")
+        try:
+            os.rename(exe, probe)
+        except OSError:
+            locked.append(exe)
+            continue
+        try:
+            os.rename(probe, exe)
+        except OSError as e:
+            raise SystemExit(f"could not restore {exe} after a lock probe ({e}); "
+                             f"rename {probe.name} back to {exe.name} by hand")
+    return locked
+
+
+def describe_holders(locked: list[pathlib.Path]) -> list[str]:
+    """One line per process holding a locked launcher (best effort: psutil)."""
+    try:
+        import psutil
+    except ImportError:
+        return []
+    want = {os.path.normcase(str(p)) for p in locked}
+    try:
+        ancestors = {p.pid for p in psutil.Process().parents()}
+    except psutil.Error:
+        ancestors = set()
+    lines = []
+    for proc in psutil.process_iter(["pid", "exe"]):
+        exe = proc.info.get("exe") or ""
+        if os.path.normcase(exe) not in want:
+            continue
+        if proc.info["pid"] in ancestors:
+            who = "this command's own launcher"
+        else:
+            try:
+                who = f"started by {proc.parent().name()}"
+            except (psutil.Error, AttributeError):
+                who = "parent unknown"
+        lines.append(f"    pid {proc.info['pid']:>6}  {pathlib.Path(exe).name}  ({who})")
+    return lines
+
+
+def explain_locked(locked: list[pathlib.Path], owner_python: str) -> None:
+    print("\nCannot upgrade now: Windows keeps these m3 programs locked while they")
+    print("run, and replacing them would remove m3 and then fail:")
+    for p in locked:
+        print(f"    {p}")
+    holders = describe_holders(locked)
+    if holders:
+        print("held by:")
+        print("\n".join(holders))
+    print("\nNothing was changed. To upgrade:")
+    if any("own launcher" in h for h in holders) or not holders:
+        print("  - run the upgrade through Python, which holds none of them:")
+        print(f'      "{owner_python}" "{pathlib.Path(__file__).resolve()}"')
+    if any("own launcher" not in h for h in holders) or not holders:
+        print("  - close the agent sessions using m3 (or end the processes above),")
+        print("    then re-run; agents reconnect afterwards (Claude Code: /mcp).")
+
+
 def run(cmd: list[str], *, dry: bool, timeout: int = 900) -> int:
     printable = " ".join(cmd)
     if dry:
@@ -353,6 +458,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nNo upgrade command is defined for method {method!r}.")
         return 2
 
+    scripts_dir = pathlib.Path(owner_python).parent
+    launchers = _entry_point_names(pkg)
+    old_version = installed_version(pkg)
+    locked = locked_launchers(scripts_dir, launchers)
+    if locked:
+        explain_locked(locked, owner_python)
+        return 2
+
     if not args.yes and not args.dry_run:
         print("\nPlan:")
         print("  1. m3 stop            (release DB-writer file locks)")
@@ -387,12 +500,31 @@ def main(argv: list[str] | None = None) -> int:
         run([m3, "stop"], dry=dry, timeout=180)
 
     print("\n[2/5] upgrading the package ...")
+    # Re-probe: a hook or agent may have started an m3 launcher since the check
+    # above, and step 1 stops DB writers, not those.
+    locked = [] if dry else locked_launchers(scripts_dir, launchers)
+    if locked:
+        explain_locked(locked, owner_python)
+        if not args.skip_stop:
+            print("Step 1 stopped m3's services; `m3 setup` starts them again.")
+        return 2
     rc = run(up, dry=dry)
     if rc != 0:
-        print(
-            f"\nUpgrade command failed (exit {rc}). Nothing further was run; m3 is\n"
-            "still on its previous version."
-        )
+        importable = subprocess.run(  # nosec B603 - argv list, no shell
+            # In the OWNING interpreter, never this process (see module docstring).
+            [owner_python, "-c", "import importlib; importlib.import_module('m3_memory.cli')"],
+            capture_output=True
+        ).returncode == 0
+        if importable:
+            print(f"\nUpgrade command failed (exit {rc}). Nothing further was run; "
+                  f"m3 {old_version or ''} is still installed.")
+        else:
+            print(f"\nUpgrade command failed (exit {rc}) after removing the old "
+                  "package: m3 is NOT installed now.\nRestore it once nothing "
+                  "runs from the m3 launchers:")
+            pin = f"m3-memory=={old_version}" if old_version else "m3-memory"
+            print(f'    "{owner_python}" -m pip install --force-reinstall --no-deps {pin}')
+            print("then: m3 setup")
         return rc
 
     # Re-resolve: step 2 may have replaced the executable we started with.

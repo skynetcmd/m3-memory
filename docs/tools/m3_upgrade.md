@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_upgrade.py
-sha1: 0fc8076e5f24
-mtime_utc: 2026-10-04T22:46:36.238589+00:00
-generated_utc: 2026-10-04T22:46:49.961757+00:00
+sha1: e22f56038190
+mtime_utc: 2026-10-05T10:40:55.834768+00:00
+generated_utc: 2026-10-05T10:41:02.710869+00:00
 private: false
 ---
 
@@ -45,16 +45,22 @@ The steps mirror what the CLI's own help already tells you to do:
                       point at the payload step 2 just REPLACED and nothing else
                       in the upgrade rewires them.
 
-There is no ``m3 upgrade`` subcommand. Guessing one (or guessing ``pipx`` for a
-pip install) is the failure this script exists to prevent: ``pipx upgrade``
-against a pip install exits 0 having upgraded NOTHING, which reads as success.
+``m3 upgrade`` launches this script. Guessing ``pipx`` for a pip install is the
+failure it exists to prevent: ``pipx upgrade`` against a pip install exits 0
+having upgraded NOTHING, which reads as success.
+
+On Windows, any process running from one of the venv's launcher .exe files
+(``m3 upgrade``'s own launcher when ``~/.local/bin/m3.exe`` is a symlink, an
+agent's m3 MCP server, a hook) blocks pip from replacing it, and pip then leaves
+the package uninstalled. ``locked_launchers`` checks for that before anything
+is stopped or replaced.
 
 ---
 
 ## Entry points
 
-- `def run()` (line 270)
-- `def main()` (line 286)
+- `def run()` (line 375)
+- `def main()` (line 391)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -85,22 +91,25 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[exe, '--version']`` (line 78)
-- `subprocess.run()  → `[sys.executable, '-c', code]`` (line 159)
-- `subprocess.run()  → `cmd`` (line 277)
-- `subprocess.run()` (line 103)
+- `subprocess.run()  → `[exe, '--version']`` (line 84)
+- `subprocess.run()  → `[sys.executable, '-c', code]`` (line 165)
+- `subprocess.run()  → `cmd`` (line 382)
+- `subprocess.run()` (line 109)
+- `subprocess.run()` (line 513)
 
 
 ---
 
 ## Notable external imports
 
+- `psutil`
 - `site`
 
 ---
 
 ## File dependencies (repo paths referenced)
 
+- `m3_memory-*.dist-info/entry_points.txt`
 - `pipx_metadata.json`
 
 ---
