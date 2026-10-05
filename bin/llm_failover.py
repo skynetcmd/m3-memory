@@ -148,21 +148,26 @@ def is_lmstudio_url(url: str) -> bool:
         return False
 
 
-def _flag(name: str, default: bool) -> bool:
+def _setting(name: str) -> str:
     # Environment first, then <config_root>/.llm_config.json, which is what a
     # launchd/systemd daemon can see (it never reads the shell rc).
     try:
         from m3_core.llm_config import llm_setting
-        v = (llm_setting(name) or "").lower()
+        return llm_setting(name) or ""
     except Exception:  # noqa: BLE001 — a bare payload still honours the env
-        v = os.environ.get(name, "").strip().lower()
+        return os.environ.get(name, "").strip()
+
+
+def _flag(name: str, default: bool) -> bool:
+    v = _setting(name).lower()
     if not v:
         return default
     return v in ("1", "true", "yes")
 
 
-_endpoints_csv = getenv_compat("M3_LLM_ENDPOINTS_CSV", "LLM_ENDPOINTS_CSV", "").strip()
-_custom_url = os.environ.get("M3_LLM_URL", "").strip()
+_endpoints_csv = (getenv_compat("M3_LLM_ENDPOINTS_CSV", "LLM_ENDPOINTS_CSV", "").strip()
+                  or _setting("M3_LLM_ENDPOINTS_CSV"))
+_custom_url = _setting("M3_LLM_URL")
 if _endpoints_csv:
     # Explicit ordered list — full control, overrides everything below.
     LLM_ENDPOINTS = [ep.strip() for ep in _endpoints_csv.split(",") if ep.strip()]

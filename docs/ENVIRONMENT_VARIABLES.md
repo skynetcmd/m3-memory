@@ -440,8 +440,9 @@ Examples by runtime:
 - **Multiple endpoints in a specific order** — `LLM_ENDPOINTS_CSV="url1,url2,…"`.
 
 Background services started by launchd, systemd or Task Scheduler do not read
-your shell rc. For them, `M3_ENABLE_LMSTUDIO_FAILOVER` and
-`M3_ENABLE_OLLAMA_FAILOVER` are also read from `<M3_CONFIG_ROOT>/.llm_config.json`
+your shell rc. For them, `M3_ENABLE_LMSTUDIO_FAILOVER`,
+`M3_ENABLE_OLLAMA_FAILOVER`, `M3_LLM_URL` and `M3_LLM_ENDPOINTS_CSV` are also
+read from `<M3_CONFIG_ROOT>/.llm_config.json`
 (e.g. `{"M3_ENABLE_OLLAMA_FAILOVER": "1"}`) when the environment does not set
 them. `m3 setup` writes this file to match the runtimes it detects; the
 environment still wins when set.

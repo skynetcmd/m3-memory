@@ -82,6 +82,19 @@ def test_setup_records_a_fresh_ollama_enable(config_root, monkeypatch):
     assert _recorded(config_root)["M3_ENABLE_OLLAMA_FAILOVER"] == "1"
 
 
+def test_setup_records_a_custom_server_url(config_root, monkeypatch):
+    monkeypatch.delenv("LLM_ENDPOINTS_CSV", raising=False)
+    monkeypatch.delenv("M3_LLM_ENDPOINTS_CSV", raising=False)
+    monkeypatch.setenv("M3_LLM_URL", "http://localhost:8080/v1")
+    monkeypatch.setattr(setup_wizard, "_endpoint_reachable", lambda url, **k: True)
+    setup_wizard._probe_llm_endpoints(object(), argparse.Namespace(non_interactive=True))
+    assert _recorded(config_root) == {"M3_LLM_URL": "http://localhost:8080/v1"}
+
+    monkeypatch.delenv("M3_LLM_URL")
+    import llm_failover
+    assert llm_failover._setting("M3_LLM_URL") == "http://localhost:8080/v1"
+
+
 def test_setup_writes_nothing_when_only_the_default_is_reachable(config_root, monkeypatch):
     _probe(monkeypatch, "1234")
     assert not (config_root / llm_config.LLM_CONFIG_NAME).exists()
