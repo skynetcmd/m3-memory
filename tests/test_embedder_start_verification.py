@@ -324,3 +324,49 @@ def test_port_busy_notice_does_not_promise_it_is_fine(capsys, monkeypatch):
     out = capsys.readouterr().out
     assert "will not be able to bind" in out
     assert "m3 embedder status" in out
+
+
+# ── RUNNING is not SERVING: the model loads after the process starts ─────────
+
+def test_running_but_not_answering_is_not_reported_ok(pair, monkeypatch, capsys):
+    """A service that is up but has not loaded its model yet must not get the
+    success line; setup's doctor would read tier-2 offline right after it."""
+    binary, gguf = pair
+    monkeypatch.setattr(ea, "_service_reports_running", lambda *a, **k: True)
+    monkeypatch.setattr(ea, "_wait_serving", lambda *a, **k: False)
+
+    rc = ea._verify_started_or_explain(binary, gguf, start_rc=0)
+
+    cap = capsys.readouterr()
+    assert rc == 0                      # the service exists; doctor judges health
+    assert "[OK]" not in cap.out
+    assert "has not answered" in cap.err
+
+
+def test_wait_serving_polls_until_health_answers(monkeypatch):
+    calls = []
+
+    class _Resp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def _urlopen(url, timeout):
+        calls.append(url)
+        if len(calls) < 3:
+            raise ConnectionRefusedError
+        return _Resp()
+
+    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
+    assert ea._wait_serving_impl(8082, timeout=30) is True
+    assert calls[-1] == "http://127.0.0.1:8082/health"
+    assert len(calls) == 3
+
+
+def test_wait_serving_gives_up_at_the_deadline(monkeypatch):
+    def _refuse(*a, **k):
+        raise ConnectionRefusedError
+    clock = iter(range(0, 1000, 10))
+    monkeypatch.setattr(ea.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr("urllib.request.urlopen", _refuse)
+    assert ea._wait_serving_impl(8082, timeout=30) is False

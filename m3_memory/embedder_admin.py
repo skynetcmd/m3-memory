@@ -619,6 +619,28 @@ def _confirm_started(binary: Path, gguf: Path, *,
     return False
 
 
+_SERVE_WAIT_S = 60.0
+
+
+def _wait_serving_impl(port: int, timeout: float = _SERVE_WAIT_S) -> bool:
+    """True once GET /health on the embed port returns 200, within ``timeout``."""
+    import urllib.request
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as r:
+                if r.status == 200:
+                    return True
+        except OSError:
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
+
+
+_wait_serving = _wait_serving_impl  # tests stub this name (conftest)
+
+
 def _verify_started_or_explain(binary: Path, gguf: Path, *, start_rc: int = 0) -> int:
     """Confirm the embedder is really up; explain loudly if it is not (§3).
 
@@ -633,7 +655,14 @@ def _verify_started_or_explain(binary: Path, gguf: Path, *, start_rc: int = 0) -
     """
     port = _embed_server_port()
     if _confirm_started(binary, gguf):
-        print(f"[OK] sovereign CPU embedder running on port {port}")
+        # RUNNING means the process exists; it answers only once the model has
+        # loaded. A check fired in between (setup's doctor) reads tier-2 offline.
+        if _wait_serving(port):
+            print(f"[OK] sovereign CPU embedder running on port {port}")
+        else:
+            print(f"[!] m3-embed-server is running but port {port} has not answered "
+                  f"after {_SERVE_WAIT_S:.0f}s (model still loading, or stuck).\n"
+                  "  inspect: m3 embedder status", file=sys.stderr)
         return 0
     # The underlying `start` rc is reported in the message below; the RETURN code
     # is the specific one so callers can tell this apart from "never installed".
