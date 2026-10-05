@@ -1,8 +1,8 @@
 ---
 tool: bin/consolidate_beliefs.py
-sha1: d2766a97b265
-mtime_utc: 2026-08-07T23:53:51.836375+00:00
-generated_utc: 2026-08-08T14:40:49.774038+00:00
+sha1: 8dc44e058da5
+mtime_utc: 2026-10-05T11:41:24.759510+00:00
+generated_utc: 2026-10-05T11:41:32.620594+00:00
 private: false
 ---
 
@@ -22,7 +22,7 @@ Gated by M3_CONSOLIDATION_AUTO (default off): when the flag is unset, this runs 
 DRY-RUN regardless of --apply, so a scheduled invocation is a safe no-op until the
 operator opts in. Pass --apply AND set M3_CONSOLIDATION_AUTO=1 to actually write.
 
-Scheduled weekly (see crontab.template / install_schedules.py). Protected types
+Scheduled weekly (see install_schedules.py). Protected types
 (preference/user_fact/task/plan) are never consolidated — inherited from
 memory_consolidate_impl's defaults.
 

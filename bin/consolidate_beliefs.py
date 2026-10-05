@@ -11,7 +11,7 @@ Gated by M3_CONSOLIDATION_AUTO (default off): when the flag is unset, this runs 
 DRY-RUN regardless of --apply, so a scheduled invocation is a safe no-op until the
 operator opts in. Pass --apply AND set M3_CONSOLIDATION_AUTO=1 to actually write.
 
-Scheduled weekly (see crontab.template / install_schedules.py). Protected types
+Scheduled weekly (see install_schedules.py). Protected types
 (preference/user_fact/task/plan) are never consolidated — inherited from
 memory_consolidate_impl's defaults.
 

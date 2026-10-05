@@ -183,7 +183,7 @@ python3 run_tests.py
 python3 bin/install_schedules.py
 ```
 
-This installs crontab entries from `bin/crontab.template`.
+This installs m3's periodic jobs as a managed crontab block, rendered from the schedule specs in `bin/install_schedules.py`.
 
 **Option B — Manual (single sync task):**
 

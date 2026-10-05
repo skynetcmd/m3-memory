@@ -268,8 +268,8 @@ def detect_windows_legacy_action_tasks() -> set[str]:
 def _unix_installed_from_cron(cron: str) -> set[str]:
     """Unix detection body — split out so the Windows path can return early."""
     names: set[str] = set()
-    for name, marker in _UNIX_CRON_MARKERS.items():
-        if marker and marker in cron:
+    for name in _UNIX_CRON_MARKERS:
+        if _cron_line_is(name, cron):
             names.add(name)
     # The cognitive loop is a launchd/systemd service, not a cron line — detect
     # it by service-file presence.
@@ -283,19 +283,27 @@ def _unix_installed_from_cron(cron: str) -> set[str]:
 # detection works on macOS/Linux where cron carries the invoked command, not the
 # AgentOS_* task name. NOTE the HourlySync line invokes the `pg_sync.sh` wrapper
 # (which delegates to sync_all.py) — matching `sync_all.py` would MISS it, since
-# only the .sh path appears in the crontab. See bin/crontab.template.
+# only the .sh path appears in the crontab. The block is now rendered
+# from get_schedule_specs (install_schedules.render_cron_block).
 #
 # AgentOS_CognitiveLoop is intentionally absent: on Unix it is NOT a cron entry —
 # it is a launchd agent / systemd --user unit (see _UNIX_SERVICE_PATHS). It is
 # detected by service-file presence instead.
-_UNIX_CRON_MARKERS = {
-    "AgentOS_HourlySync": "pg_sync.sh",
-    "AgentOS_ChatlogEmbedSweep": "chatlog_embed_sweeper.py",
-    "AgentOS_ObservationDrain": "m3_enrich.py",
-    "AgentOS_Maintenance": "memory_maintenance.py",
-    "AgentOS_WeeklyAuditor": "weekly_auditor.py",
-    "AgentOS_SecretRotator": "secret_rotator.py",
+_UNIX_CRON_MARKERS: "dict[str, tuple[str, ...]]" = {
+    # sync_all.py: the line rendered from the schedule spec; pg_sync.sh: the
+    # line older payloads wrote, still present in existing crontabs.
+    "AgentOS_HourlySync": ("sync_all.py", "pg_sync.sh"),
+    "AgentOS_ChatlogEmbedSweep": ("chatlog_embed_sweeper.py",),
+    "AgentOS_ObservationDrain": ("m3_enrich.py",),
+    "AgentOS_Maintenance": ("memory_maintenance.py",),
+    "AgentOS_WeeklyAuditor": ("weekly_auditor.py",),
+    "AgentOS_SecretRotator": ("secret_rotator.py",),
 }
+
+
+def _cron_line_is(name: str, line: str) -> bool:
+    """Whether a crontab line runs the job ``name`` (any of its markers)."""
+    return any(m in line for m in _UNIX_CRON_MARKERS.get(name, ()))
 
 # Map AgentOS_* names to the token that appears in the WINDOWS task ACTION
 # ("Task To Run"), so we can recognise a legacy/hand-named scheduled task by what
@@ -380,10 +388,9 @@ def try_remove_scheduled_tasks(names: list[str]) -> tuple[list[str], list[str]]:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return [], list(names)
 
-    markers = {n: _UNIX_CRON_MARKERS.get(n, "") for n in names}
     kept, dropped = [], set()
     for line in lines:
-        hit = next((n for n, m in markers.items() if m and m in line), None)
+        hit = next((n for n in names if _cron_line_is(n, line)), None)
         if hit:
             dropped.add(hit)
         else:
@@ -443,8 +450,8 @@ def privileged_removal_commands(names: list[str]) -> list[str]:
         cmds.append("crontab -e")
         cmds.append("# ...or remove each non-interactively by its command marker:")
         for name in cron_names:
-            marker = _UNIX_CRON_MARKERS[name]
-            cmds.append(f"crontab -l | grep -v '{marker}' | crontab -   # {name}")
+            for marker in _UNIX_CRON_MARKERS[name]:
+                cmds.append(f"crontab -l | grep -v '{marker}' | crontab -   # {name}")
         cmds.append("# If it was installed as another user's / a system crontab, use sudo:")
         cmds.append("#   sudo crontab -u <user> -l | grep -v 'm3-memory' | sudo crontab -u <user> -")
 

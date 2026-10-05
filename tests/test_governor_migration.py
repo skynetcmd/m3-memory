@@ -72,10 +72,14 @@ def test_sync_runs_via_both_governor_and_scheduled_task_all_oses():
     assert 'run_sync_pass' in loop_src
     assert re.search(r'--skip-sync["\'],\s*action=["\']store_true', loop_src)
 
-    # Scheduled floor — Unix: crontab.template runs sync hourly via pg_sync.sh.
-    cron = (repo / "bin" / "crontab.template").read_text(encoding="utf-8")
-    assert "pg_sync.sh" in cron
-    assert re.search(r'^\s*0\s+\*\s+\*\s+\*\s+\*.*pg_sync\.sh', cron, re.MULTILINE)
+    # Scheduled floor — Unix: the rendered cron block runs sync hourly, and
+    # macOS gets a launchd agent with the same hourly interval.
+    import install_schedules
+    cron = install_schedules.render_cron_block(str(repo))
+    assert re.search(r'^0 \* \* \* \* .*sync_all\.py', cron, re.MULTILINE)
+    hourly = next(s for s in install_schedules.unix_periodic_specs(str(repo))
+                  if s["name"] == "AgentOS_HourlySync")
+    assert install_schedules.launchd_trigger(hourly) == {"StartInterval": 3600}
 
     # Scheduled floor — Windows: install_schedules emits an AgentOS_HourlySync
     # task running sync_all.py, and it is the KEEP_SCHEDULED_FLOOR entry.
@@ -180,11 +184,10 @@ def test_privileged_commands_linux_uses_crontab(monkeypatch):
     cmds = gm.privileged_removal_commands(["AgentOS_HourlySync"])
     joined = "\n".join(cmds)
     assert "crontab -e" in joined
-    # CRITICAL cross-OS correctness: the HourlySync cron line invokes the
-    # `pg_sync.sh` wrapper (NOT sync_all.py, which only appears in the Windows
-    # task action). Matching sync_all.py would miss the Unix cron entry.
+    # The HourlySync cron line is sync_all.py when rendered from the spec and
+    # pg_sync.sh in crontabs older payloads wrote; removal must cover both.
     assert "pg_sync.sh" in joined
-    assert "sync_all.py" not in joined
+    assert "sync_all.py" in joined
     assert "sudo" in joined  # system-crontab hint present
 
 
@@ -196,10 +199,13 @@ def test_privileged_commands_macos_uses_crontab(monkeypatch):
     assert "memory_maintenance.py" in joined
 
 
-def test_hourlysync_marker_is_pg_sync_sh():
-    # Guard against regression: the Unix detection marker must match the actual
-    # crontab.template line, which uses pg_sync.sh.
-    assert gm._UNIX_CRON_MARKERS["AgentOS_HourlySync"] == "pg_sync.sh"
+def test_hourlysync_is_detected_in_both_crontab_forms():
+    # The rendered line runs sync_all.py; crontabs written by older payloads
+    # run pg_sync.sh. Detection must see both or an existing floor goes missing.
+    assert gm._cron_line_is("AgentOS_HourlySync",
+                            "0 * * * * /v/bin/python /p/bin/sync_all.py --log-file /l/s.log")
+    assert gm._cron_line_is("AgentOS_HourlySync", "0 * * * * /p/bin/pg_sync.sh >> /l/s.log 2>&1")
+    assert not gm._cron_line_is("AgentOS_HourlySync", "*/30 * * * * /p/bin/chatlog_embed_sweeper.py")
     # Cognitive loop is NOT a cron marker (it's a service).
     assert "AgentOS_CognitiveLoop" not in gm._UNIX_CRON_MARKERS
 
@@ -495,7 +501,7 @@ def test_windows_action_marker_is_sync_all_not_pg_sync_sh():
     # Unix wrapper pg_sync.sh never appears in a Windows action. The two marker
     # maps MUST stay independent or HourlySync legacy tasks go undetected.
     assert gm._WINDOWS_ACTION_MARKERS["AgentOS_HourlySync"] == "sync_all.py"
-    assert gm._UNIX_CRON_MARKERS["AgentOS_HourlySync"] == "pg_sync.sh"
+    assert "pg_sync.sh" in gm._UNIX_CRON_MARKERS["AgentOS_HourlySync"]
 
 
 def test_windows_legacy_detection_never_raises_without_schtasks(monkeypatch):

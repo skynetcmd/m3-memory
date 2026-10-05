@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: 06de0726cab3
-mtime_utc: 2026-10-05T11:03:27.300191+00:00
-generated_utc: 2026-10-05T11:03:27.841627+00:00
+sha1: 4720202c1f29
+mtime_utc: 2026-10-05T11:42:49.729744+00:00
+generated_utc: 2026-10-05T11:43:11.630347+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 2379)
+- `def main()` (line 2593)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -49,6 +49,8 @@ Uses project virtual environment paths and ensures log directories exist.
 ## Calls INTO this repo (intra-repo imports)
 
 - `governor_migration (GOVERNOR_ELIGIBLE)`
+- `governor_migration (KEEP_SCHEDULED_FLOOR, NOT_MIGRATABLE)`
+- `governor_migration (_cron_line_is)`
 - `governor_migration (cognitive_loop_installed)`
 - `m3_halt (base_role)`
 - `m3_halt (holds_store)`
@@ -75,12 +77,14 @@ Uses project virtual environment paths and ensures log directories exist.
 - `memory.backends (dialect)`
 - `memory.orchestration (_db)`
 - `memory.orchestration (agent_list_impl)`
+- `plistlib`
+- `shlex`
 
 ---
 
 ## File dependencies (repo paths referenced)
 
-- `crontab.template`
+_(none detected)_
 
 ---
 

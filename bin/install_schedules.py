@@ -71,26 +71,70 @@ OK = "[OK]"
 FAIL = "[FAIL]"
 WARN = "[WARN]"
 
-def _refresh_managed_crontab(m3_memory_root) -> None:
-    """Rewrite m3's managed cron block from this payload, only if one exists."""
+def _has_managed_crontab() -> bool:
     try:
         r = _run(["crontab", "-l"], capture_output=True, text=True)
     except (OSError, subprocess.SubprocessError):
-        return
-    if r.returncode == 0 and "# >>> m3-managed" in (r.stdout or ""):
+        return False
+    return r.returncode == 0 and "# >>> m3-managed" in (r.stdout or "")
+
+
+def _refresh_managed_crontab(m3_memory_root) -> None:
+    """Rewrite m3's managed cron block from this payload, only if one exists."""
+    if _has_managed_crontab():
         install_unix_crontab(m3_memory_root)
 
 
-def install_unix_crontab(m3_memory_root):
-    template_path = os.path.join(m3_memory_root, "bin", "crontab.template")
-    if not os.path.exists(template_path):
-        print(f"Error: Could not find {template_path}")
-        sys.exit(1)
+def install_unix_periodic(m3_memory_root) -> None:
+    """Install the periodic floors: launchd agents on macOS (and drop an older
+    m3 cron block there, which would run them twice), the managed cron block on
+    Linux. Idempotent; called on every setup."""
+    if _os_name() == "Darwin":
+        install_macos_periodic(m3_memory_root)
+        if _has_managed_crontab():
+            install_unix_crontab(m3_memory_root, block=False)
+    else:
+        install_unix_crontab(m3_memory_root)
 
+
+_WEEKDAYS = {"SUN": 0, "MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5, "SAT": 6}
+
+
+def cron_schedule(spec: dict) -> str:
+    """The five cron fields that reproduce a spec's schedule."""
+    sched, mod = spec["schedule"], spec.get("modifier") or "1"
+    hour, minute = (int(x) for x in (spec.get("time") or "00:00").split(":"))
+    if sched == "MINUTE":
+        return f"*/{int(mod)} * * * *"
+    if sched == "HOURLY":
+        return "0 * * * *" if int(mod) == 1 else f"0 */{int(mod)} * * *"
+    if sched == "DAILY":
+        return f"{minute} {hour} * * *"
+    if sched == "WEEKLY":
+        return f"{minute} {hour} * * {_WEEKDAYS.get(mod.upper(), 0)}"
+    if sched == "MONTHLY":
+        return f"{minute} {hour} {int(mod)} * *"
+    raise ValueError(f"{spec['name']}: no cron mapping for schedule {sched!r}")
+
+
+def render_cron_block(m3_memory_root) -> str:
+    """m3's managed cron block, rendered from the same specs every OS uses."""
+    import shlex
+    python_exe = _venv_python(m3_memory_root)
+    lines = ["# >>> m3-managed (do not edit this block) >>>"]
+    for spec in unix_periodic_specs(m3_memory_root):
+        lines.append(f"# {spec['name']}: {spec['description']}")
+        lines.append(f"{cron_schedule(spec)} {shlex.join([python_exe, *spec['args']])}")
+    lines.append("# <<< m3-managed <<<")
+    return "\n".join(lines) + "\n"
+
+
+def install_unix_crontab(m3_memory_root, *, block: bool = True):
+    """Write m3's managed cron block (or, with block=False, remove it), leaving
+    every line outside the sentinels as it was."""
     log_dir = _logs_dir()
     os.makedirs(log_dir, exist_ok=True)
-    cron_content = _render_template(template_path, m3_memory_root,
-                                    _venv_python(m3_memory_root))
+    cron_content = render_cron_block(m3_memory_root) if block else ""
 
     # Get current crontab
     current_cron = ""
@@ -109,7 +153,7 @@ def install_unix_crontab(m3_memory_root):
         sys.exit(1)
 
     # Remove ONLY our previously-installed managed block, delimited by the
-    # >>> m3-managed >>> / <<< m3-managed <<< sentinels (see crontab.template).
+    # >>> m3-managed >>> / <<< m3-managed <<< sentinels (see render_cron_block).
     # The old filter dropped every line merely CONTAINING m3_memory_root, which
     # could silently delete unrelated user cron entries that happened to mention
     # the path (§6: a destructive filter must be precise, never a substring
@@ -147,7 +191,8 @@ def install_unix_crontab(m3_memory_root):
         _safe_print(f"{WARN} Could not back up crontab before rewrite: {_be}")
 
     # Append the new content
-    new_cron = filtered_cron.strip() + "\n\n" + cron_content.strip() + "\n"
+    new_cron = (filtered_cron.strip()
+                + ("\n\n" + cron_content.strip() if cron_content else "") + "\n")
 
     # The template carries non-ASCII text; the locale default may be ASCII.
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as tmp:
@@ -156,7 +201,11 @@ def install_unix_crontab(m3_memory_root):
 
     try:
         _run(["crontab", tmp_path], check=True)
-        _safe_print(f"{OK} Successfully installed crontab schedules for macOS/Linux.")
+        if block:
+            _safe_print(f"{OK} Installed m3's cron schedules "
+                        f"({', '.join(x['name'] for x in unix_periodic_specs(m3_memory_root))}).")
+        else:
+            _safe_print(f"{OK} Removed m3's cron block; launchd runs these jobs on macOS.")
         _safe_print(f"   Logs available in: {log_dir}")
     except subprocess.CalledProcessError as e:
         _safe_print(f"{FAIL} Failed to install crontab: {e}")
@@ -232,6 +281,167 @@ def install_unix_dashboard(m3_memory_root, port: int = 8088):
             _safe_print(f"{FAIL} systemctl enable --now failed: {r.stderr.strip()}")
     else:
         _safe_print(f"{WARN} install_unix_dashboard: unsupported OS {os_name}")
+
+
+def unix_periodic_specs(m3_memory_root) -> list:
+    """The periodic jobs that must stay scheduled on macOS/Linux even when the
+    cognitive loop runs the same work: the governor can pause the loop under
+    load, and these may not wait indefinitely. Membership comes from
+    governor_migration (the owner of that decision), timing from
+    get_schedule_specs. Services (the loop, its watchdog) are not periodic."""
+    from governor_migration import KEEP_SCHEDULED_FLOOR, NOT_MIGRATABLE
+    wanted = {n for n, _ in KEEP_SCHEDULED_FLOOR} | {n for n, _ in NOT_MIGRATABLE}
+    return [s for s in get_schedule_specs(m3_memory_root)
+            if s["name"] in wanted and s["schedule"] != "ONSTART"
+            and s["name"] not in _UNIX_TIMER_UNITS]
+
+
+# Periodic on Windows, but on macOS/Linux a launchd/systemd timer installed
+# alongside the loop (_install_macos_loop_watchdog / _install_linux_loop_watchdog);
+# a cron or extra launchd entry would run it twice.
+_UNIX_TIMER_UNITS = frozenset({"AgentOS_LoopWatchdog"})
+
+
+# HourlySync keeps the label already in use for it on existing Macs, so a
+# repair replaces that plist instead of adding a second hourly job beside it.
+_LAUNCHD_LABELS = {"AgentOS_HourlySync": "com.m3memory.sync_all"}
+
+
+def launchd_label(name: str) -> str:
+    return _LAUNCHD_LABELS.get(name) or "com.m3memory." + name.split("_", 1)[-1].lower()
+
+
+def launchd_trigger(spec: dict) -> dict:
+    """The launchd keys that reproduce a spec's schedule (one owner of the
+    mapping; verify compares against the same function)."""
+    sched, mod = spec["schedule"], spec.get("modifier") or "1"
+    hour, minute = (int(x) for x in (spec.get("time") or "00:00").split(":"))
+    if sched == "MINUTE":
+        return {"StartInterval": int(mod) * 60}
+    if sched == "HOURLY":
+        return {"StartInterval": int(mod) * 3600}
+    if sched == "DAILY":
+        return {"StartCalendarInterval": {"Hour": hour, "Minute": minute}}
+    if sched == "WEEKLY":
+        return {"StartCalendarInterval": {"Weekday": _WEEKDAYS.get(mod.upper(), 0),
+                                          "Hour": hour, "Minute": minute}}
+    if sched == "MONTHLY":
+        return {"StartCalendarInterval": {"Day": int(mod), "Hour": hour, "Minute": minute}}
+    raise ValueError(f"{spec['name']}: no launchd mapping for schedule {sched!r}")
+
+
+def _launchd_plist(spec: dict, python_exe: str) -> dict:
+    return {"Label": launchd_label(spec["name"]),
+            "ProgramArguments": [python_exe, *spec["args"]],
+            "WorkingDirectory": os.path.expanduser("~"),
+            "RunAtLoad": False,
+            **launchd_trigger(spec)}
+
+
+def install_macos_periodic(m3_memory_root) -> bool:
+    """Install the periodic floors as LaunchAgents. launchd, not cron: a cron
+    job runs outside the login session, where the Keychain that unlocks the
+    stored warehouse credentials is not available. Returns True if all loaded."""
+    import plistlib
+    import shutil
+    import time as _time
+    python_exe = _venv_python(m3_memory_root)
+    dest_dir = os.path.expanduser("~/Library/LaunchAgents")
+    os.makedirs(dest_dir, exist_ok=True)
+    ok = True
+    for spec in unix_periodic_specs(m3_memory_root):
+        want = _launchd_plist(spec, python_exe)
+        dest = os.path.join(dest_dir, f"{want['Label']}.plist")
+        if os.path.exists(dest):
+            try:
+                with open(dest, "rb") as fh:
+                    if plistlib.load(fh) == want:
+                        continue  # already current; leave it loaded as is
+            except Exception:  # noqa: BLE001 — unreadable: replace it below
+                pass
+            backup = f"{dest}.bak-{_time.strftime('%Y%m%d-%H%M%S')}"
+            shutil.copy2(dest, backup)
+            _safe_print(f"  saved the previous {os.path.basename(dest)} as {backup}")
+        with open(dest, "wb") as fh:
+            plistlib.dump(want, fh)
+        _run(["launchctl", "unload", dest], capture_output=True)
+        r = _run(["launchctl", "load", dest], capture_output=True, text=True)
+        if r.returncode == 0:
+            _safe_print(f"{OK} {spec['name']}: installed launchd agent {want['Label']}")
+        else:
+            ok = False
+            _safe_print(f"{FAIL} {spec['name']}: launchctl load failed: {r.stderr.strip()}")
+    return ok
+
+
+def verify_macos_periodic(m3_memory_root) -> bool:
+    """Each periodic floor exists, is loaded, and matches its spec (trigger and
+    program). Read-only."""
+    import plistlib
+    python_exe = _venv_python(m3_memory_root)
+    try:
+        loaded = _run(["launchctl", "list"], capture_output=True, text=True).stdout or ""
+    except (OSError, subprocess.SubprocessError):
+        loaded = ""
+    ok = True
+    for spec in unix_periodic_specs(m3_memory_root):
+        want = _launchd_plist(spec, python_exe)
+        dest = os.path.expanduser(f"~/Library/LaunchAgents/{want['Label']}.plist")
+        name = spec["name"]
+        try:
+            with open(dest, "rb") as fh:
+                have = plistlib.load(fh)
+        except FileNotFoundError:
+            _safe_print(f"{FAIL} {name}: no launchd agent ({dest}). fix: m3 schedules repair")
+            ok = False
+            continue
+        except Exception as e:  # noqa: BLE001
+            _safe_print(f"{FAIL} {name}: unreadable {dest} ({e}). fix: m3 schedules repair")
+            ok = False
+            continue
+        drift = [k for k in ("StartInterval", "StartCalendarInterval", "ProgramArguments")
+                 if have.get(k) != want.get(k)]
+        if drift:
+            _safe_print(f"{FAIL} {name}: {', '.join(drift)} differ from the spec "
+                        f"(have {[have.get(k) for k in drift]}, want "
+                        f"{[want.get(k) for k in drift]}). fix: m3 schedules repair")
+            ok = False
+        elif want["Label"] not in loaded:
+            _safe_print(f"{FAIL} {name}: {dest} is present but not loaded. "
+                        f"fix: launchctl load {dest}")
+            ok = False
+        else:
+            _safe_print(f"{OK} {name}: present, loaded, matches spec")
+    return ok
+
+
+def verify_linux_periodic(m3_memory_root) -> bool:
+    """Each periodic floor has a cron line identical to its rendered spec."""
+    import shlex
+
+    from governor_migration import _cron_line_is
+    try:
+        r = _run(["crontab", "-l"], capture_output=True, text=True)
+        cron = r.stdout if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        cron = ""
+    lines = [ln.strip() for ln in cron.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    python_exe = _venv_python(m3_memory_root)
+    ok = True
+    for spec in unix_periodic_specs(m3_memory_root):
+        want = f"{cron_schedule(spec)} {shlex.join([python_exe, *spec['args']])}"
+        name = spec["name"]
+        have = [ln for ln in lines if _cron_line_is(name, ln)]
+        if want in have:
+            _safe_print(f"{OK} {name}: cron line present and matches spec")
+        elif have:
+            _safe_print(f"{FAIL} {name}: cron line differs from the spec "
+                        f"(have {have[0]!r}, want {want!r}). fix: m3 schedules repair")
+            ok = False
+        else:
+            _safe_print(f"{FAIL} {name}: no cron line. fix: m3 schedules repair")
+            ok = False
+    return ok
 
 
 def install_unix_cognitive_loop(m3_memory_root):
@@ -2246,7 +2456,7 @@ def _verify_unix_cognitive_loop() -> bool:
             _safe_print(f"{FAIL} launchctl list timed out; cannot verify load state")
             return False
         if "com.m3memory.cognitiveloop" in (loaded.stdout or ""):
-            _safe_print(f"{OK} launchd agent installed and loaded: {dest}")
+            _safe_print(f"{OK} cognitive loop: launchd agent present and loaded: {dest}")
             # KeepAlive is the self-heal knob. Checking only that the KEY exists
             # is what let the 2026-08-09 outage pass this check silently: a
             # KeepAlive={Crashed:true} plist contains the string and still will
@@ -2290,7 +2500,7 @@ def _verify_unix_cognitive_loop() -> bool:
             return False
         state = (active.stdout or "").strip()
         if state == "active":
-            _safe_print(f"{OK} systemd --user unit installed and active: {unit}")
+            _safe_print(f"{OK} cognitive loop: systemd --user unit present and active: {unit}")
             return True
         _safe_print(f"{WARN} systemd --user unit installed but {state or 'inactive'}")
         return False
@@ -2355,14 +2565,18 @@ def verify_schedules(selector: str | None, m3_memory_root: str) -> bool:
         # once, not just the first — a verify tool should surface the full picture.
         results = [_verify_or_explain_absence(t) for t in tasks]
         return all(results)
-    # On Unix only the cognitive loop is a managed service; the rest are cron
-    # lines. Verify the loop (the one with the self-heal semantics).
-    if selector is None or selector.lower().replace("-", "").replace("_", "") in (
-        "cognitiveloop", "agentoscognitiveloop"
-    ):
+    sel = (selector or "").lower().replace("-", "").replace("_", "")
+    if sel in ("cognitiveloop", "agentoscognitiveloop"):
         return _verify_unix_cognitive_loop()
-    _safe_print(f"{WARN} verify on {osn} currently covers only the cognitive loop.")
-    return True
+    if selector is not None:
+        _safe_print(f"{WARN} verify on {osn} checks the cognitive loop and the "
+                    f"periodic jobs together; run it without a name.")
+        return True
+    # Check both (no short-circuit) so every problem is reported at once.
+    loop_ok = _verify_unix_cognitive_loop()
+    periodic_ok = (verify_macos_periodic(m3_memory_root) if osn == "Darwin"
+                   else verify_linux_periodic(m3_memory_root))
+    return loop_ok and periodic_ok
 
 
 def list_schedules(m3_memory_root):
@@ -2506,9 +2720,9 @@ def main():
                     # The cognitive loop is a service, not a cron entry —
                     # support installing it on its own.
                     install_unix_cognitive_loop(m3_memory_root)
-                    # Setup re-registers the loop on upgrade; an installed cron
-                    # block carries the same payload paths and is refreshed too.
-                    _refresh_managed_crontab(m3_memory_root)
+                    # The loop also runs these jobs, but the governor can pause
+                    # it under load; the scheduled floors may not wait on that.
+                    install_unix_periodic(m3_memory_root)
                 elif _sel in ("dashboard", "agentosdashboard"):
                     # The dashboard is a launchd/systemd user service (like the
                     # cognitive loop), not a cron entry — install it on its own.
@@ -2518,9 +2732,9 @@ def main():
                                 "Single-task add on Unix is not supported yet — use --add all or edit "
                                 "crontab directly. (cognitive-loop and dashboard can be added on their own.)")
             else:
-                install_unix_crontab(m3_memory_root)
+                install_unix_periodic(m3_memory_root)
                 # The cognitive loop runs as a launchd/systemd service, not a
-                # cron entry — install it alongside the crontab.
+                # cron entry — install it alongside the periodic jobs.
                 install_unix_cognitive_loop(m3_memory_root)
             # Same contract as Windows: whatever the reap stopped, start. A
             # `start` on a unit the installer just started is a no-op.

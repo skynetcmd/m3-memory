@@ -2213,8 +2213,8 @@ async def memory_distill_procedures_impl(
 if __name__ == "__main__":
     # Scheduled-task entrypoint. Previously invoked via
     #   python -c "import memory_maintenance; memory_maintenance.memory_maintenance_impl()"
-    # which never reached this block. install_schedules.py / crontab.template
-    # now invoke this file as a script so logging + single-instance locking
+    # which never reached this block. install_schedules.py
+    # now invokes this file as a script so logging + single-instance locking
     # apply. The helper call lives here (not in memory_maintenance_impl) so
     # MCP-server imports of this module are unaffected.
     import argparse
