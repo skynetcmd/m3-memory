@@ -44,6 +44,6 @@ def pip_command(python: str = sys.executable) -> list:
                 f"ensurepip could not install it ({detail[0]}). "
                 f"Fix: {python} -m ensurepip --default-pip"
             )
-        print(f"[m3] pip was missing from this environment; installed it with ensurepip.")
+        print("[m3] pip was missing from this environment; installed it with ensurepip.")
     _READY[python] = True
     return [python, "-m", "pip"]
