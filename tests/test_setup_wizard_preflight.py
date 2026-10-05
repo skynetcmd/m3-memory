@@ -1422,7 +1422,7 @@ def test_failed_verification_never_claims_live(capsys, kept, wired):
     setup_wizard._summary(plan, verified=False)
     out = capsys.readouterr().out
     assert "live" not in out
-    assert "NOT verified healthy" in out
+    assert "failed verification" in out
 
 
 def test_unwired_install_still_says_no_agents(capsys):
