@@ -2693,7 +2693,7 @@ def main():
                 if not holds_store(r["role"]):
                     _safe_print(f"  Left {r['role']} (pid {r['pid']}) running: "
                                 f"{' '.join(str(r['error']).split())}; it holds "
-                                f"no database.")
+                                f"no database and keeps its current binary until restarted.")
                     continue
                 _safe_print(f"{WARN} Could not stop {r['role']} (pid {r['pid']}): "
                             f"{r['error']} — re-run elevated or stop it manually, "

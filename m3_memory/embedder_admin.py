@@ -619,6 +619,50 @@ def _confirm_started(binary: Path, gguf: Path, *,
     return False
 
 
+def stale_embed_servers() -> "list[dict]":
+    """Running m3-embed-server processes that started BEFORE the installed
+    native core was (re)installed, so they still run the previous binary.
+
+    pip can replace the binary under a running service (Windows allows the
+    rename), so a core upgrade leaves the old one serving until something
+    restarts it, and an elevated service is not restarted by an unelevated
+    setup. Install time = the core's dist-info RECORD (pip writes it at install),
+    else the binary's mtime. Returns [{pid, started, installed}]; [] when
+    nothing is stale or nothing can be read.
+    """
+    try:
+        import glob
+
+        import psutil
+        binary = _server_binary()
+        if not binary:
+            return []
+        records = glob.glob(os.path.join(os.path.dirname(os.path.dirname(str(binary))),
+                                         "m3_core_rs*.dist-info", "RECORD"))
+        installed = max((os.path.getmtime(r) for r in records),
+                        default=os.path.getmtime(str(binary)))
+    except Exception:  # noqa: BLE001 — a diagnostic must never raise
+        return []
+    stale = []
+    for proc in psutil.process_iter(["pid", "name"]):
+        if not (proc.info.get("name") or "").lower().startswith("m3-embed-server"):
+            continue
+        try:
+            started = proc.create_time()
+        except psutil.Error:
+            continue
+        if started < installed - 1:
+            stale.append({"pid": proc.info["pid"], "started": started, "installed": installed})
+    return stale
+
+
+def restart_embed_service_hint() -> str:
+    """The command that restarts the embed service on this OS."""
+    if sys.platform == "win32":
+        return "m3 embedder stop; m3 embedder start   (from an admin shell)"
+    return "m3 embedder stop && m3 embedder start"
+
+
 _SERVE_WAIT_S = 60.0
 
 

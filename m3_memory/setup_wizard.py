@@ -1248,6 +1248,28 @@ def _flush_elevation(*, gui: bool = False) -> None:
                 print(f"      {line}")
 
 
+def _restart_stale_embed_server() -> None:
+    """After a core upgrade, an embed service started earlier still runs the old
+    binary. Unix setup restarts its user service itself; a Windows service runs
+    elevated, so its restart joins the administrator prompt (or is named)."""
+    try:
+        from m3_memory.embedder_admin import restart_embed_service_hint, stale_embed_servers
+        stale = stale_embed_servers()
+    except Exception:  # noqa: BLE001 — diagnostic only
+        return
+    if not stale:
+        return
+    pids = ", ".join(str(s["pid"]) for s in stale)
+    if sys.platform == "win32":
+        cli = [sys.executable, "-m", "m3_memory.cli", "embedder"]
+        if (_queue_elevated(f"stop the embed service still running the previous core (pid {pids})",
+                            [*cli, "stop"])
+                and _queue_elevated("start the embed service on the new core", [*cli, "start"])):
+            return
+    _warn(f"  the embed server (pid {pids}) still runs the previous native core. "
+          f"restart it: {restart_embed_service_hint()}")
+
+
 def _report_unrun_elevation() -> None:
     """Setup ended before the queued privileged steps ran; name them."""
     global _ELEVATION
@@ -3829,6 +3851,7 @@ def run_setup(args: argparse.Namespace) -> int:
         # forward to the pinned version.
         _step_rust_core(plan)
         _step_cpu_sovereign_embedder()
+        _restart_stale_embed_server()
         if plan.install_gpu_embedder:
             _step_gpu_embedder(plan)
         if plan.use_shared_embedder:

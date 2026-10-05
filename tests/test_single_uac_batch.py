@@ -113,3 +113,38 @@ def test_without_a_human_nothing_is_queued(monkeypatch):
     setup_wizard._begin_elevation_batch()
     assert setup_wizard._ELEVATION is None
     assert sys.platform  # keep the import used
+
+
+def test_a_stale_windows_embed_service_restart_joins_the_one_prompt(batching, monkeypatch):
+    from m3_memory import embedder_admin
+    monkeypatch.setattr(embedder_admin, "stale_embed_servers",
+                        lambda: [{"pid": 4242, "started": 1.0, "installed": 2.0}])
+    setup_wizard._restart_stale_embed_server()
+    labels = [label for label, _ in setup_wizard._ELEVATION.actions]
+    argvs = [argv[-1] for _, argv in setup_wizard._ELEVATION.actions]
+    assert "4242" in labels[0] and argvs == ["stop", "start"]
+
+
+def test_stale_detection_compares_process_start_with_core_install(monkeypatch, tmp_path):
+    """Started before the core was installed = still the previous binary."""
+    from m3_memory import embedder_admin
+    pkg = tmp_path / "site" / "m3_core_rs"
+    pkg.mkdir(parents=True)
+    exe = pkg / "m3-embed-server.exe"
+    exe.write_bytes(b"MZ")
+    rec = tmp_path / "site" / "m3_core_rs_windows_cuda-3.10.1.dist-info"
+    rec.mkdir()
+    (rec / "RECORD").write_text("x", encoding="utf-8")
+    os.utime(rec / "RECORD", (1000.0, 1000.0))
+    monkeypatch.setattr(embedder_admin, "_server_binary", lambda: exe)
+
+    class _P:
+        def __init__(self, pid, t):
+            self.info = {"pid": pid, "name": "m3-embed-server.exe"}
+            self._t = t
+        def create_time(self):
+            return self._t
+
+    import psutil
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [_P(1, 500.0), _P(2, 2000.0)])
+    assert [s["pid"] for s in embedder_admin.stale_embed_servers()] == [1]

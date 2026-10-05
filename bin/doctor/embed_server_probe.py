@@ -104,6 +104,19 @@ def run(brief: bool = False) -> int:
             else:
                 logger.debug(f"{BINARY_NAME} not located; skipping Rust-side doctor")
         return 0
+    try:
+        import datetime
+
+        from m3_memory.embedder_admin import restart_embed_service_hint, stale_embed_servers
+        for s in stale_embed_servers():
+            fmt = "%Y-%m-%d %H:%M"
+            print(f"⚠️  embed-server: pid {s['pid']} started "
+                  f"{datetime.datetime.fromtimestamp(s['started']).strftime(fmt)}, before the "
+                  f"native core was installed "
+                  f"({datetime.datetime.fromtimestamp(s['installed']).strftime(fmt)}); it still "
+                  f"runs the previous binary. fix: {restart_embed_service_hint()}")
+    except Exception:  # noqa: BLE001 — a diagnostic must never break the probe
+        pass
     if not brief:
         print()
         print("=== Rust-side service health (m3-embed-server doctor) ===")
