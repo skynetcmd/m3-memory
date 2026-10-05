@@ -161,27 +161,19 @@ python3 run_tests.py
 
 ## Step 9 — Set up scheduled tasks for hourly sync *(optional)*
 
-**Option A — Automated:**
+`m3 setup` installs m3's periodic jobs (hourly warehouse sync, chat-embedding
+sweep, monthly secret rotation) as launchd agents in
+`~/Library/LaunchAgents/com.m3memory.*.plist`, rendered from the schedule specs
+in `bin/install_schedules.py`. launchd, not cron: jobs run in your login session,
+where the Keychain that unlocks m3's vault is available.
 
 ```bash
-python3 bin/install_schedules.py
+m3 schedules verify    # each agent present, loaded, with the spec's interval and command
+m3 schedules repair    # re-install them (a hand-made plist with the same label is saved as .bak-)
 ```
 
-This installs m3's periodic jobs as launchd agents (`~/Library/LaunchAgents/com.m3memory.*.plist`), rendered from the schedule specs in `bin/install_schedules.py`.
-
-**Option B — Manual (single sync task):**
-
-```bash
-crontab -e
-# Add this line:
-0 * * * * /path/to/m3-memory/bin/pg_sync.sh >> /path/to/m3-memory/logs/cron.log 2>&1
-```
-
-To verify the crontab was installed:
-
-```bash
-crontab -l
-```
+Store the warehouse DSN in m3's vault (see [SYNC.md](SYNC.md#setup)); launchd jobs
+do not see the environment of your login shell.
 
 ---
 

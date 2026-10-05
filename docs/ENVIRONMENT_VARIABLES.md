@@ -168,8 +168,8 @@ engine root; the sweeper knobs bound background embedding cost.
 | Variable | Purpose | Example Keychain Command (macOS) |
 |---|---|---|
 | `M3_MEMORY_ROOT` | Optional master state-root override (see [Roots & precedence](#roots--precedence-the-single-source-of-truth)). Defaults to `~/.m3-memory`. | `export M3_MEMORY_ROOT="/path/to/state"` (Set directly) |
-| `M3_SYNC_TARGET_IP` | IP address of the central PostgreSQL server (fallback sync target). *(legacy alias: `SYNC_TARGET_IP`, still honored via `getenv_compat`.)* | `_keychain_set agentos_sync_target_ip "YOUR_SERVER_IP"` |
-| `PG_URL`| **Optional — deprecated.** Legacy warehouse DSN. Use `M3_CDW_PG_URL` for the data-warehouse role or `M3_PRIMARY_PG_URL` for a PostgreSQL primary store (see "Primary database backend" above). The default install is SQLite and needs no PostgreSQL at all. | `_keychain_set agentos_cdw_pg_url "postgresql://USERNAME:REPLACE_WITH_YOUR_PASSWORD@host/db"` |
+| `M3_SYNC_TARGET_IP` | **Optional.** Overrides the host the sync job probes before running; by default it comes from the warehouse DSN. *(legacy alias: `SYNC_TARGET_IP`.)* | `export M3_SYNC_TARGET_IP="192.0.2.10"` |
+| `PG_URL`| **Deprecated as an env var.** Use `M3_CDW_PG_URL` for the data-warehouse role or `M3_PRIMARY_PG_URL` for a PostgreSQL primary store (see "Primary database backend" above). `PG_URL` remains the NAME of the warehouse DSN in m3's encrypted vault, which is where scheduled jobs read it. The default install is SQLite and needs no PostgreSQL at all. | `python <payload>/bin/setup_secret.py` (service name `PG_URL`) |
 
 ### Postgres & sync
 
@@ -183,7 +183,7 @@ the LAN sync workflow; the default SQLite install ignores all of these.
 | `M3_PG_POOL_MIN` | — | Minimum size of the PostgreSQL connection pool. |
 | `M3_PG_POOL_MAX` | — | Maximum size of the PostgreSQL connection pool. |
 | `M3_PG_SYNC_TIMEOUT` | — | Timeout (seconds) for a PostgreSQL sync operation. |
-| `M3_POSTGRES_SERVER` | — | Target PostgreSQL host for the sync job. *(legacy alias: `POSTGRES_SERVER`, still honored via `getenv_compat`.)* Falls back to [`M3_SYNC_TARGET_IP`](#infrastructure--connectivity). |
+| `M3_POSTGRES_SERVER` | — | **Optional.** Host the sync job probes before running; when unset it comes from the warehouse DSN (`M3_CDW_PG_URL`, else the vault's `PG_URL`). *(legacy alias: `POSTGRES_SERVER`.)* Falls back to [`M3_SYNC_TARGET_IP`](#infrastructure--connectivity). |
 | `M3_SYNC_DBS` | — | Which databases the sync job should replicate (selector/list). |
 
 ### API Keys & Authentication

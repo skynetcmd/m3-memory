@@ -38,11 +38,11 @@ Default endpoint: `http://localhost:1234/v1`. Override with `LLM_ENDPOINTS_CSV` 
 
 ### PostgreSQL Sync Details
 
-- Configurable via `PG_URL` env var or encrypted vault — no hardcoded credentials
+- Configurable via `M3_CDW_PG_URL` env var or the encrypted vault (`PG_URL`) — no hardcoded credentials
 - Bi-directional delta sync via `bin/pg_sync.py` using watermark-based UPSERT
 - Syncs: memory items (including `user_id`, `scope`, `valid_from`, `valid_to`, `content_hash`), relationships, embeddings, encrypted secrets
 - Auto-creates `agent_retention_policies` and `gdpr_requests` tables if missing
-- Hourly automated sync via `bin/pg_sync.sh` cron job
+- Hourly automated sync, installed by `m3 setup`: a launchd agent on macOS, the managed crontab block on Linux, a Task Scheduler task on Windows (`m3 schedules verify` checks it)
 - Sync lock prevents concurrent runs (stale after 1 hour)
 
 ### Database Schema
@@ -369,13 +369,13 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 
 Always-on: when `metadata.temporal_anchors` is supplied, resolved ISO dates are prefixed to the embed text as `[YYYY-MM-DD] …` so absolute-date queries hit rows even when the source text says "yesterday". No flag; no-op when anchors are absent.
 
-### Valid Memory Types (32 + `auto`)
+### Valid Memory Types (35 + `auto`)
 
-`note`, `fact`, `fact_enriched`, `decision`, `preference`, `conversation`, `message`, `chat_log`, `task`, `to_do`, `code`, `config`, `observation`, `plan`, `summary`, `snippet`, `reference`, `log`, `migration-log`, `home`, `home_automation`, `user_fact`, `scratchpad`, `knowledge`, `event_extraction`, `security`, `local_device`, `network_config`, `infrastructure`, `windows_only`, `macos_only`, `linux_only`, plus `auto` (triggers LLM classification). Source of truth: `VALID_MEMORY_TYPES` in `bin/mcp_catalog/base.py`.
+`note`, `fact`, `fact_enriched`, `decision`, `preference`, `conversation`, `message`, `chat_log`, `task`, `to_do`, `code`, `config`, `observation`, `plan`, `summary`, `snippet`, `reference`, `log`, `migration-log`, `home`, `home_automation`, `user_fact`, `scratchpad`, `knowledge`, `event_extraction`, `security`, `local_device`, `network_config`, `infrastructure`, `windows_only`, `macos_only`, `linux_only`, `belief`, `procedure`, `synthesis`, plus `auto` (triggers LLM classification). Source of truth: `VALID_MEMORY_TYPES` in `bin/catalog/spec.py`.
 
-### Valid Relationship Types (9)
+### Valid Relationship Types (11)
 
-`related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `message`, `handoff`
+`related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `message`, `handoff`, `precedes`, `follows`
 
 ---
 
@@ -423,7 +423,7 @@ Seeds 20 diverse test memories, runs 10 labeled queries, cleans up after. Gracef
 |--------|---------|
 | `bin/migrate_memory.py` | Idempotent schema migration runner |
 | `bin/generate_configs.py` | Auto-sync MCP bridge paths in `claude-settings.json` and `gemini-settings.json` |
-| `bin/install_schedules.py` | Platform-agnostic scheduler: cron (macOS/Linux), Task Scheduler (Windows) |
+| `bin/install_schedules.py` | Platform-agnostic scheduler: launchd (macOS), cron (Linux), Task Scheduler (Windows), all rendered from one set of schedule specs |
 | `bin/pg_sync.py` | Bi-directional PostgreSQL delta sync |
 | `bin/benchmark_memory.py` | Retrieval quality benchmarks |
 | `bin/test_memory_bridge.py` | 41 end-to-end tests |

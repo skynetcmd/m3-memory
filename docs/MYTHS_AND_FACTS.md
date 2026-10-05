@@ -59,7 +59,7 @@ Before trusting any AI-generated description of m3:
 <td valign="top" width="45%"><b>❌ MYTH: m3 doesn't have entity extraction or graph reasoning</b></td>
 <td valign="top" width="55%"><p><strong>✅ Fact:</strong> m3 has both, with caveats:
 - <strong>Entities</strong> are first-class — extraction runs as part of <code>m3_enrich</code>, with stable IDs and an alias table
-- <strong>Knowledge graph</strong> with 9 relationship types and 3-hop traversal exposed via <code>memory_graph</code> and <code>memory_link</code>
+- <strong>Knowledge graph</strong> with 11 relationship types and 3-hop traversal exposed via <code>memory_graph</code> and <code>memory_link</code>
 - <strong>Conflict resolution</strong> via supersedes relationships set automatically on contradicting writes</p>
 <p>What m3 <strong>does not</strong> do is LLM-driven cognitive graph reasoning during retrieval — its graph traversal is deterministic, with no LLM in the retrieval path. Tools that weld extraction and reasoning into the memory layer make the opposite trade. The cognition layer, if you want one, lives above m3 — see <a href="COMPARISON.md#-where-the-cognition-lives">COMPARISON.md § Where the cognition lives</a>.</p></td>
 </tr>
@@ -173,7 +173,7 @@ For positive grounding, here's the short list of what m3 *does* implement (with 
 | Contradiction handling | Three paths: deterministic cosine check on the write path, the cognitive loop's Reflector pass, and curator apply | `bin/memory/write.py` (`_check_contradictions`), `bin/run_reflector.py`, `bin/curator_apply.py` |
 | Document ingestion | Structural splitting of HTML, Office, iWork, and PDFs | `bin/files_memory/chunkers/`, `bin/files_memory/ingest.py` |
 | Entity extraction | Optional SLM pipeline | `bin/m3_enrich.py`, `bin/run_observer.py` |
-| Knowledge graph | 9 relationship types, 3-hop traversal | `mcp__m3_memory__memory_graph`, `memory_link` |
+| Knowledge graph | 11 relationship types, 3-hop traversal | `mcp__m3_memory__memory_graph`, `memory_link` |
 | GDPR | `gdpr_forget` (Art. 17), `gdpr_export` (Art. 20) | `bin/memory_maintenance.py` |
 | Multi-agent | WAL concurrent writes (30s busy_timeout + retry) + optional shared PostgreSQL pool; agent registry; SQL-layer scope isolation; handoffs | `mcp__m3_memory__agent_*`, `memory_handoff`, `bin/pg_sync.py` |
 | Sync | Optional bi-directional delta sync to PostgreSQL | `bin/sync_all.py` |

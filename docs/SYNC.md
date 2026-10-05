@@ -18,11 +18,15 @@ included, add them to `M3_SYNC_DBS` and supply your own warehouse schema — see
 
 ## What gets synced
 
-- **`memory/agent_memory.db`** — your production memory: notes, decisions,
+Both stores live in the engine root (`~/.m3/engine` by default; `M3_ENGINE_ROOT`
+overrides):
+
+- **`agent_memory.db`** — your production memory: notes, decisions,
   facts, conversations, embeddings, relationships. Bidirectional row-level
   delta sync to PostgreSQL via `bin/pg_sync.py`.
-- **`memory/agent_chatlog.db`** — raw chat archive (Claude Code, Codex logs)
-  awaiting promotion. Synced if the file exists; skipped silently if not.
+- **`agent_chatlog.db`** — raw chat archive (Claude Code, Codex logs)
+  awaiting promotion. Synced if the file exists. If the chat log resolves to
+  the main store (a unified install), the two sync as one and the log says so.
 
 That's it. The repo does not ship sync support for bench result DBs or other
 custom databases. If you self-host a more complex layout (e.g., separate
@@ -37,24 +41,34 @@ is no shipped warehouse migration for non-default DBs.
 You need:
 
 1. A reachable PostgreSQL server (your warehouse).
-2. The connection string stored in your OS keyring or env var.
+2. Its connection string (DSN), where the scheduled sync can read it.
 
-Set two env vars (typical values shown):
+**Store the DSN in m3's encrypted vault** under the name `PG_URL`. This is the
+recommended place: the scheduled sync runs under launchd, systemd, cron or Task
+Scheduler, none of which sees your shell's environment, but all of which can
+read the vault. Run the payload's interactive helper and enter `PG_URL` as the
+service name:
 
 ```bash
-export POSTGRES_SERVER=192.0.2.10    # your PostgreSQL host IP; or SYNC_TARGET_IP — same thing
-export M3_CDW_PG_URL='postgresql://user:pass@host:5432/agent_memory'   # warehouse URL (PG_URL still works but is deprecated)
+python <payload>/bin/setup_secret.py     # the payload path: `m3 doctor` prints it ("resolved bridge")
 ```
 
-Or store `M3_CDW_PG_URL` in your OS keyring (macOS Keychain, Windows Credential
-Manager, Linux Secret Service) — the codebase uses `auth_utils.get_api_key`
-to look it up safely.
+For a manual run you can use an environment variable instead; it takes
+precedence over the vault:
+
+```bash
+export M3_CDW_PG_URL='postgresql://user:pass@db.example.com:5432/agent_memory'   # PG_URL works too, deprecated
+```
+
+Sync takes the warehouse host from the DSN. `M3_POSTGRES_SERVER` (or
+`SYNC_TARGET_IP`) is optional and only overrides the host used for the
+reachability check.
 
 Apply the warehouse schema (one-time per warehouse). Postgres-side migrations
 live in `memory/migrations/postgres/`:
 
 ```bash
-psql -h $POSTGRES_SERVER -U $PGUSER -d agent_memory \
+psql -h db.example.com -U $PGUSER -d agent_memory \
   -f memory/migrations/postgres/pg_warehouse_chatlog_v1.sql
 ```
 
@@ -74,8 +88,10 @@ python bin/sync_all.py
 
 What it does:
 
-1. TCP-probes `$POSTGRES_SERVER` (3-second timeout).
-2. If reachable, runs `bin/pg_sync.py` for `agent_memory.db`.
+1. TCP-probes the warehouse host (3-second timeout); the log names the host and
+   where it came from.
+2. If reachable, runs `bin/pg_sync.py` for each store
+   (`Starting synchronization for 2 targets: ['main', 'chatlog']`).
 3. Logs to `~/.m3/logs/sync_all.log` (`M3_LOGS_ROOT` overrides).
 
 Dry-run (just check connectivity, don't write):
@@ -88,11 +104,19 @@ python bin/sync_all.py --dry-run
 
 ## Scheduling
 
-For unattended hourly sync:
+`m3 setup` installs the hourly sync for you, and keeps it installed even though
+the cognitive loop also syncs (the loop can be paused under heavy load; the
+hourly job is the floor):
 
-- **Linux/macOS**: cron — see `bin/pg_sync.sh` for a wrapper that handles env.
-- **Windows**: Scheduled Task. Action: `python.exe bin/sync_all.py`.
-  Working dir: the repo root. Run as your user, schedule hourly.
+| OS | Installed as |
+|---|---|
+| macOS | launchd agent `~/Library/LaunchAgents/com.m3memory.sync_all.plist` (`StartInterval` 3600) |
+| Linux | a line in m3's managed crontab block |
+| Windows | Task Scheduler task `AgentOS_HourlySync` |
+
+Check it with `m3 schedules verify` (each job's interval and command against
+the spec), and restore it with `m3 schedules repair`. On macOS, repair replaces
+a hand-made `com.m3memory.sync_all.plist` and saves the old one as a `.bak-` copy.
 
 The scheduler tolerates outages — if the warehouse is unreachable, sync logs
 a warning and exits cleanly. Next run picks up where it left off.
@@ -132,10 +156,18 @@ the newer one wins. This means:
 
 ## Troubleshooting
 
-**"PostgreSQL data warehouse unreachable"** → TCP probe failed. Check:
-- Is `POSTGRES_SERVER` set?
-- Can you `nc -zv $POSTGRES_SERVER 5432` from this host?
-- Is your warehouse running?
+**"No warehouse configured … skipping sync"** → the job found no DSN. Store
+`PG_URL` in the vault (see Setup); an `export` in your shell rc is invisible to
+scheduled jobs.
+
+**"PostgreSQL data warehouse (host:port, from …) unreachable"** → TCP probe
+failed. Check:
+- Can you `nc -zv <host> <port>` from this host?
+- Is your warehouse running, and is the network path (VPN/tailnet) up?
+
+**Only `['main']` is synced, no chatlog** → the chat log resolved to the main
+store, usually because the job sets `M3_DATABASE`. Run `m3 setup` once (it pins
+the chat log's own path), or set `M3_CHATLOG_DB_PATH`.
 
 **"Another sync is already in progress"** → A previous sync hung. Look in
 `~/.m3/logs/sync_all.log` for orphaned PIDs. The lock file is at
@@ -154,8 +186,8 @@ for `Status: Disabled`. Re-enable with `schtasks /Change /TN "<name>" /ENABLE`.
 
 Setting up a second machine to sync against the same warehouse:
 
-1. Clone the repo on machine B.
-2. Set `POSTGRES_SERVER` and `M3_CDW_PG_URL` env vars (same warehouse as A; the `PG_URL` name still works but is deprecated).
+1. Install m3 on machine B (`pipx install m3-memory && m3 setup`).
+2. Store the same warehouse DSN in B's vault as `PG_URL` (see Setup).
 3. First sync pulls everything from the warehouse — let it finish.
 4. From then on, edits on either machine appear on the other after sync.
 

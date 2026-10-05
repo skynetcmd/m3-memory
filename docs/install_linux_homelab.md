@@ -177,27 +177,18 @@ python3 run_tests.py
 
 ## Step 9 — Set up scheduled tasks for hourly sync *(optional)*
 
-**Option A — Automated:**
+`m3 setup` installs m3's periodic jobs (hourly warehouse sync, chat-embedding
+sweep, monthly secret rotation) as a managed block in your crontab, rendered
+from the schedule specs in `bin/install_schedules.py`. Lines outside that block
+are left alone.
 
 ```bash
-python3 bin/install_schedules.py
+m3 schedules verify    # each job present, with the spec's interval and command
+m3 schedules repair    # re-install them
 ```
 
-This installs m3's periodic jobs as a managed crontab block, rendered from the schedule specs in `bin/install_schedules.py`.
-
-**Option B — Manual (single sync task):**
-
-```bash
-crontab -e
-# Add this line:
-0 * * * * /path/to/m3-memory/bin/pg_sync.sh >> /path/to/m3-memory/logs/cron.log 2>&1
-```
-
-To verify the crontab was installed:
-
-```bash
-crontab -l
-```
+Store the warehouse DSN in m3's vault (see [SYNC.md](SYNC.md#setup)); cron does
+not see the environment of your login shell.
 
 ---
 

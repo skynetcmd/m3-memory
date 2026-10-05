@@ -416,10 +416,12 @@ variant, env_var, ip_address, port, memory_id, ...) and typed
 relationships between them (runs_on, defined_in, references,
 measured_on, supersedes, ...).
 
-The default vocabulary lives at
-`config/lists/entity_graph_m3.yaml` — 33 entity types and 22
-predicates derived from the m3-memory corpus. Override per-call with
-`--entity-vocab-yaml /path/to/your.yaml` if your domain differs.
+The default vocabulary is `config/lists/entity_graph_default.yaml` — 42
+entity types and 34 predicates. Two other profiles ship beside it:
+`entity_graph_m3.yaml` (33 types, 21 predicates, derived from the m3-memory
+corpus) and `entity_graph_v2.yaml` (11 types, 16 predicates). Choose one, or your
+own, with `--entity-vocab-yaml /path/to/your.yaml` per call or
+`M3_ENTITY_VOCAB_YAML` for every process (read at start).
 
 ### When to use it
 

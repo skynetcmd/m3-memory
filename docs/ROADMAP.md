@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory — Roadmap
 
-> Current version: **v2026.9.16.0** — actively maintained, with SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20; 92% end-to-end QA, no oracle metadata on LongMemEval-S). Priorities shift based on community feedback; open an issue to vote on a feature.
+> Current version: **v2026.10.5.0** — actively maintained, with SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20; 92% end-to-end QA, no oracle metadata on LongMemEval-S). Priorities shift based on community feedback; open an issue to vote on a feature.
 
 ---
 
@@ -192,6 +192,7 @@ Memory as a maintained body of knowledge, not a flat index. All additive and
 - [ ] **Stable public API** — `m3_memory.sdk` Python API with semver guarantees
 - [ ] **Full documentation site** — MkDocs or Docusaurus with API reference, tutorials, architecture deep-dives
 - [ ] **Plugin system** — register custom memory types, custom embedders, custom sync backends
+- [ ] **Full refactor to Python 3.12+ standards** — the supported floor is 3.12; bring the whole codebase up to it: native `X | Y` and PEP 695 type syntax instead of quoted annotations and `from __future__ import annotations`, drop pre-3.12 compatibility branches, adopt 3.12-era stdlib (`tomllib`, `itertools.batched`, …), and enforce it with Ruff's pyupgrade rules targeting py312 plus stricter mypy
 
 ---
 

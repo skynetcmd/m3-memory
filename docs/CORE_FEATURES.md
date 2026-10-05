@@ -40,7 +40,7 @@ Write a fact that conflicts with an existing one? m3 detects it automatically. T
 
 ### 🕸️ Knowledge Graph
 
-Memories aren't isolated — they form a web. m3 automatically links related memories on write (cosine >0.7) and supports 11 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `precedes`, `follows`, `message`, `handoff`. Traverse the graph up to 3 hops with a single tool call.
+Memories aren't isolated — they form a web. m3 automatically links related memories on write (cosine >0.7) and supports 11 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `precedes`, `follows`, `message`, `handoff`. Traverse the graph up to 3 hops with a single tool call. Entity extraction feeds the same graph, and its vocabulary is **configurable without code changes**: entity types and predicates come from a YAML profile selected with `M3_ENTITY_VOCAB_YAML` (default `config/lists/entity_graph_default.yaml`, 42 types and 34 predicates).
 
 ### 📖 Auto-Generated Wiki
 

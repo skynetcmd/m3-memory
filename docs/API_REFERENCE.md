@@ -43,7 +43,7 @@ Provide feedback on a memory item to improve quality (useful/not_useful/misleadi
 ## Knowledge Graph
 
 ### `memory_link`
-Creates a directional link between two memory items. Valid types: related, supports, contradicts, extends, supersedes, references, consolidates, message, handoff.
+Creates a directional link between two memory items. Valid types: consolidates, contradicts, extends, follows, handoff, message, precedes, references, related, supersedes, supports.
 - **Args**: `from_id` (str, required), `to_id` (str, required), `relationship_type` (str)
 
 ### `memory_graph`

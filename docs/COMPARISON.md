@@ -102,7 +102,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. m3-Memor
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ⚖️ Time-aware retrieval ranks the right dated instance; no bitemporal as-of query model |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | Basic deduplication; no strong conflict resolution |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | ⚖️ ~94% self-reported, but graded with a **self-authored, more lenient judge** — not comparable to strict-judge numbersᵇ |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — a strong point |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — a strong point |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Native LangChain/CrewAI libraries; no native MCP (needs a custom wrapper) |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Manual; no dedicated GDPR tooling. No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | [Structured JSON export](https://docs.mem0.ai/cookbooks/essentials/exporting-memories) for migration/compliance — not a human-readable wiki |
@@ -146,7 +146,7 @@ m3-Memory is a **dedicated, lightweight memory layer** — a drop-in backend for
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ❌ No bitemporal / as-of queries |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Agent-driven — the agent decides to update its own memory blocks |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | Not published |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | ❌ Tiered memory blocks rather than an entity graph |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | ❌ Tiered memory blocks rather than an entity graph |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | Custom SDKs / REST API; can call external MCP tools |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Not built-in. No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | Reverse direction — the [Letta Obsidian plugin](https://github.com/letta-ai/letta-obsidian) reads an *existing* vault in; memory stays in Letta's DB |
@@ -191,7 +191,7 @@ Zep focuses on temporal knowledge graphs for enterprise multi-agent systems. It 
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | 🏆 Bitemporal at fact/edge grain in a temporal KG — finer grain than m3's item-grain |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Graph-level fact invalidation over time |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | Not published |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — the core abstraction |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — the core abstraction |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Official Python/TypeScript/Go SDKs **and** a first-party [MCP server](https://github.com/getzep/zep) |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | 🏆 Partial GDPR support. No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | Export API / DB dump; markdown↔graph only via a 3rd-party plugin (MegaMem) that *ingests* Obsidian |
@@ -228,7 +228,7 @@ m3 is memory-first rather than graph-first: the primary store is a bitemporal SQ
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | 🏆 Bi-temporal edge validity (fact/edge grain) |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Edge invalidation as facts change |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | Not published |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — it *is* the product |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — it *is* the product |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Via a separate MCP server |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Not a documented focus. No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | No — API / MCP over a graph DB, not a file export |
@@ -268,7 +268,7 @@ m3 is production-and-operations oriented: typed memories, bitemporal supersessio
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ❌ No bitemporal / as-of queries |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 LLM-driven link and attribute updates (Zettelkasten-style evolution) |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | Not published |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — an evolving link network is the core idea |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — an evolving link network is the core idea |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | Library / research code |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Not a focus. No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | Linked "memory notes" in ChromaDB — a note network, not a portable Markdown vault |
@@ -304,7 +304,7 @@ m3's differences are breadth over a single-benchmark peak. Both ship a native MC
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ⚖️ Temporal signature is integrity-oriented, not an as-of query model |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | Merkle-tree integrity + consolidation pipeline; no documented supersession model |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | 🏆 **96.2%** — #1 published, same strict upstream judge as m3ᶜ |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — auto entity extraction + graph spreading activation in retrieval |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — auto entity extraction + graph spreading activation in retrieval |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Native MCP server (`agentmemory mcp`); no framework adapters documented |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Local-only (no dedicated GDPR tooling). No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | Not a documented feature |
@@ -342,7 +342,7 @@ m3 differs on deployment simplicity and openness: zero-infrastructure local SQLi
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | 🏆 ISO-temporal event log — strong for calendar-grained reasoning |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | Event-log / ISO-temporal audit trail |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | ⚖️ **95.6%** self-reported, but the **judge is unpublished** — not independently verifiableᵈ |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | Not a documented feature |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | Not a documented feature |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🛠️ Not documented |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | On-prem posture; no dedicated GDPR tooling. No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | Not a documented feature |
@@ -380,7 +380,7 @@ m3's edges: native MCP with a 100+-tool surface (Hindsight integrates via per-fr
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ⚖️ Traceable, but not an as-of query model |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | Not a documented focus |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | **91.4%** — below m3's 92.0%, but the **judge is unpublished**, so not strictly comparableᵉ |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — graph is one of its recall strategies |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — graph is one of its recall strategies |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Broad — LangGraph/CrewAI/AutoGen + 40+ connectors (adapter-based, no native MCP) |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Local-only. No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | Not a documented feature |
@@ -418,7 +418,7 @@ m3 differs mainly on reach and temporal depth. Mastra OM is memory *for the Mast
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ⚖️ 3-date anchor, not full bitemporal |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Background reflector agents reconcile the observation log |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | 🏆 **94.9%** — exact upstream judge, directly comparable to m3's 92.0%ᶠ |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | Not a documented feature |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | Not a documented feature |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🛠️ Mastra-framework-native only |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | ⚖️ Hybrid posture. No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | Internal working-memory markdown/JSON — not an exported vault |
@@ -456,7 +456,7 @@ m3's differences: a verifiable standard-setting benchmark (Memento's number is f
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | 🏆 Bitemporal KG with Merkle-audit — a genuine peer on temporal modelling |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Contradiction detection with entity resolution over a Merkle-audited bitemporal graph |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | **90.8%** — but in the easier **oracle / evidence-only setting** and graded by a **loosened judge**; the standard S-setting is unpublishedᵍ |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — a bitemporal KG is the core abstraction |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — a bitemporal KG is the core abstraction |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Native MCP server + provider packages for Anthropic, OpenAI, and Gemini |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Local-only. No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | Not a documented feature |
@@ -494,7 +494,7 @@ MemPalace advertises a spatial "memory-palace" (loci-hierarchy) architecture wit
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ❌ Verbatim only — no temporal model |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | ❌ Verbatim only; 🛠️ multi-agent writes can fail silently |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | ⚠️ No QA figure published — its headline 96.6% is **R@5 recall, a different metric**, and independently attributed to ChromaDB rather than the architectureʰ |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | Loci hierarchy rather than an entity graph |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | Loci hierarchy rather than an entity graph |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | Not documented |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Not documented. No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | Not a documented feature |
@@ -525,7 +525,7 @@ m3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ❌ No bitemporal / as-of queries |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Manual / LLM-driven via procedural memory |
 | **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | Not published |
-| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 9 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | ❌ A store abstraction, not a graph |
+| **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | ❌ A store abstraction, not a graph |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Native to LangChain/LangGraph; no MCP. m3 implements its `BaseStore`, so LangMem runs on m3 unchanged |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Custom implementation required. No FIPS posture |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects memories + files into an interlinked Markdown/Obsidian vault | No — a store abstraction, not a knowledge-base generator |
