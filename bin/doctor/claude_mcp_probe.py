@@ -108,6 +108,23 @@ def _direct_servers() -> dict:
     return out
 
 
+def _local_servers() -> list:
+    """m3-owned LOCAL-scope registrations: ~/.claude.json projects[dir].mcpServers.
+    Claude loads these, in addition to the user-scope ones, for any session
+    started in that directory. Returns [(directory, name, entry)]."""
+    d = _read_json(os.path.join(os.path.expanduser("~"), ".claude.json"))
+    projects = d.get("projects") if isinstance(d, dict) else None
+    out: list = []
+    if isinstance(projects, dict):
+        for directory, cfg in projects.items():
+            servers = cfg.get("mcpServers") if isinstance(cfg, dict) else None
+            if isinstance(servers, dict):
+                for name, entry in servers.items():
+                    if _looks_m3(entry):
+                        out.append((directory, name, entry))
+    return out
+
+
 def _plugin_state() -> dict:
     """Plugin install/enabled/server-disabled state. Reuses plugin_version_probe
     for the install+enabled read so there is one source of truth for that."""
@@ -143,8 +160,10 @@ def _assess() -> dict:
     double_run = direct_active and plugin["active"]
     two_direct = direct_present and legacy_present
     legacy_rootless = legacy_present and not _has_root_pins(direct.get(_LEGACY_DIRECT_NAME))
+    local = _local_servers()
 
     return {
+        "local": local,
         "direct": direct,
         "direct_present": direct_present,
         "legacy_present": legacy_present,
@@ -153,21 +172,23 @@ def _assess() -> dict:
         "double_run": double_run,
         "two_direct": two_direct,
         "legacy_rootless": legacy_rootless,
-        "problem": double_run or two_direct or legacy_present,
+        "problem": double_run or two_direct or legacy_present or bool(local),
         # No m3 server anywhere — not this probe's job to register (that's setup),
         # but worth an FYI so the user isn't left guessing.
-        "none": not direct_active and not plugin["installed"],
+        "none": not direct_active and not plugin["installed"] and not local,
     }
 
 
-def _claude_mcp_remove(name: str) -> tuple[bool, str]:
-    """Best-effort `claude mcp remove --scope user <name>`."""
+def _claude_mcp_remove(name: str, scope: str = "user",
+                       cwd: "str | None" = None) -> tuple[bool, str]:
+    """Best-effort `claude mcp remove --scope <scope> <name>`; a local-scope
+    entry belongs to a directory, so it is removed from inside that directory."""
     if not shutil.which("claude"):
         return False, "claude CLI not on PATH"
     try:
         proc = subprocess.run(
-            ["claude", "mcp", "remove", "--scope", "user", name],
-            check=False, capture_output=True, text=True,
+            ["claude", "mcp", "remove", "--scope", scope, name],
+            check=False, capture_output=True, text=True, cwd=cwd,
         )
     except Exception as e:  # noqa: BLE001
         return False, f"{type(e).__name__}: {e}"
@@ -238,6 +259,20 @@ def _fix(a: dict) -> None:
         print("  [skip] legacy `memory` is the only m3 server — not removing it; "
               "run `m3 setup` to migrate it to `m3_memory` (adds root pins).")
 
+    # 3. Local-scope m3 entries (projects[dir] in ~/.claude.json) load beside the
+    #    user-scope server for sessions started in that directory. Remove them
+    #    only while a user-scope or plugin server remains.
+    for directory, name, _entry in a.get("local", ()):
+        if a["direct_present"] or a["plugin"]["active"]:
+            ok, detail = _claude_mcp_remove(name, scope="local",
+                                            cwd=directory if os.path.isdir(directory) else None)
+            print(f"  [{'ok' if ok else 'error'}] remove `{name}` registered for "
+                  f"{directory} (local scope): {detail or 'done'}")
+            acted = acted or ok
+        else:
+            print(f"  [skip] `{name}` for {directory} is the only m3 server there — "
+                  f"not removing it; run `m3 setup` to register m3_memory.")
+
     if not acted:
         print("  (nothing to converge — already single-server)")
     else:
@@ -264,6 +299,12 @@ def run(brief: bool = False, fix: bool = False) -> int:
         return 0
 
     if brief:
+        for directory, name, _e in a.get("local", ()):
+            print(f"⚠️  claude mcp: `{name}` is also registered for {directory} (local "
+                  f"scope) — sessions started there load it beside the user-scope "
+                  f"server. Run `m3 doctor --fix --fix-hooks`")
+        if a.get("local") and not (a["double_run"] or a["two_direct"] or a["legacy_present"]):
+            return 0  # the warning above is the verdict; no "single server" line
         if a["double_run"]:
             print("⚠️  claude mcp: TWO m3 servers live (direct + plugin) — "
                   "run `m3 doctor --fix --fix-hooks`")
@@ -291,6 +332,9 @@ def run(brief: bool = False, fix: bool = False) -> int:
     p = a["plugin"]
     print(f"  direct m3_memory : {'yes' if a['direct_present'] else 'no'}")
     print(f"  legacy memory    : {'yes (roots-less)' if a['legacy_rootless'] else ('yes' if a['legacy_present'] else 'no')}")
+    for directory, name, _e in a.get("local", ()):
+        print(f"  local scope      : `{name}` for {directory} [WARN] — loaded beside "
+              f"the user-scope server in sessions started there")
     print(f"  plugin installed : {p['installed']}  enabled: {p['enabled']}  "
           f"server disabled: {p['server_disabled']}")
 

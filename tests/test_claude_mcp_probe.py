@@ -225,3 +225,30 @@ def test_brief_report_without_claude_installed(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "`claude` CLI not on PATH" in out
     assert "m3 setup" not in out
+
+
+def test_a_local_scope_m3_server_is_reported_and_removed(monkeypatch, tmp_path, capsys):
+    """~/.claude.json projects[dir].mcpServers loads beside the user-scope server
+    for sessions started in that directory. The user-scope-only read reported
+    "single direct server" while those sessions saw mcp__memory__* tools."""
+    from doctor import claude_mcp_probe as p
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".claude.json").write_text(json.dumps({
+        "mcpServers": {"m3_memory": {"command": "m3", "env": {"M3_ENGINE_ROOT": "/e"}}},
+        "projects": {str(home): {"mcpServers": {"memory": {"command": "m3"}}}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(p.os.path, "expanduser", lambda s: s.replace("~", str(home), 1))
+    monkeypatch.setattr(p, "_plugin_state", lambda: _plugin())
+    removed = []
+    monkeypatch.setattr(p, "_claude_mcp_remove",
+                        lambda name, scope="user", cwd=None: removed.append((name, scope, cwd)) or (True, ""))
+
+    a = p._assess()
+    assert a["local"] and a["problem"] is True
+    p.run(brief=True)
+    out = capsys.readouterr().out
+    assert f"`memory` is also registered for {home}" in out
+    assert "single direct server" not in out
+    p._fix(a)
+    assert removed == [("memory", "local", str(home))]
