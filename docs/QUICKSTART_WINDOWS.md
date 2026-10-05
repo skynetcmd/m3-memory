@@ -58,6 +58,10 @@ m3 setup
 
 `m3 setup` detects every agent on PATH, asks a handful of questions, and drives the rest end-to-end:
 
+Run it from a normal (non-elevated) shell. Steps that need administrator rights are
+queued and approved together in **one** Windows admin prompt near the end of setup,
+and each is reported as done or not.
+
 - system payload
 - embedder (everything's bundled — no LM Studio, no Ollama, no internet, no GPU required)
 - per-agent MCP wiring (Claude Code, Gemini CLI, OpenCode, OpenClaw)

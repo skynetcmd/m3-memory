@@ -6,7 +6,10 @@ Installing m3 on Windows is **two phases**:
    **elevated** shell (and installs the Python that everything else runs on), so
    it's a one-time manual step you run yourself.
 2. **User-level setup** — install the m3 package, then configure it with the
-   `m3 setup` wizard (terminal **or** a graphical window). No elevation needed.
+   `m3 setup` wizard (terminal **or** a graphical window). Run it from a normal
+   shell: the few steps that need administrator rights (boot-start tasks, the
+   embed service, removing legacy tasks) are collected and approved in **one**
+   Windows admin prompt near the end, and each is reported as done or not.
 
 There's no one-line bash installer for Windows (PowerShell doesn't have `bash`,
 and the prerequisites differ enough that the Linux script wouldn't apply

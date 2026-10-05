@@ -7,6 +7,24 @@
 - **Solution**: Run `m3 upgrade` (or `m3 upgrade --dry-run` to inspect first). It detects the active installation method (`pip`, `pipx`, `pip --user`, or a host plugin) and executes the correct upgrade steps, identically on Windows, macOS and Linux. A host-plugin install is **refused** rather than guessed at, pointing you to the host's own update flow.
 - **From a git checkout** you can also invoke it directly: `python bin/m3_upgrade.py`.
 
+### `m3 upgrade` stops: "Windows keeps these m3 programs locked while they run"
+- **Cause**: a process is running from one of m3's launchers (`m3.exe`,
+  `mcp-memory.exe`): an agent's m3 server, a chat-capture hook, or `m3 upgrade`
+  itself when its launcher is a symlink into the install. Replacing a held
+  launcher would remove m3 and then fail, so the upgrade stopped first. Nothing
+  was changed.
+- **Solution**: follow the lines it prints under "To upgrade". If it names its own
+  launcher, run the printed `python.exe … m3_upgrade.py` command; if it names an
+  agent, close that session (or end the process), upgrade, then reconnect the
+  agent (Claude Code: `/mcp`).
+
+### "m3 is NOT installed now" after a failed upgrade
+- **Cause**: the package manager removed m3 and then could not install the new
+  version.
+- **Solution**: run the restore command the message prints (a
+  `pip install --force-reinstall --no-deps m3-memory==<previous version>` using the
+  install's own Python), then `m3 setup`.
+
 ---
 
 ## Database Issues
@@ -18,7 +36,7 @@
   - `tasklist | findstr python` (Windows)
 
 ### PostgreSQL sync failures
-- **Check**: Verify `M3_CDW_PG_URL` is set correctly (environment variable or OS keyring). `PG_URL` still works but is deprecated. If your *local* store is PostgreSQL too, `M3_PRIMARY_PG_URL` must point at the primary, not the warehouse — see [SYNC_PG_TO_PG.md](SYNC_PG_TO_PG.md).
+- **Check**: Scheduled jobs do not see your shell's environment. Store the warehouse DSN in m3's vault under `PG_URL` (`python <payload>/bin/setup_secret.py`); `M3_CDW_PG_URL` in the environment overrides it for manual runs. See [SYNC.md](SYNC.md#setup). If your *local* store is PostgreSQL too, `M3_PRIMARY_PG_URL` must point at the primary, not the warehouse — see [SYNC_PG_TO_PG.md](SYNC_PG_TO_PG.md).
 - **Check**: Confirm the PostgreSQL server is reachable from this machine.
 - **Note**: Sync is optional. m3 Memory works fully without PostgreSQL.
 
@@ -64,6 +82,15 @@
   library's SHA-256 — copy it into `M3_WOLFSSL_SHA256`.
 
 See [FIPS_MODULE_BOUNDARY.md](FIPS_MODULE_BOUNDARY.md) for the full model.
+
+## Scheduled Jobs
+
+### The hourly sync (or another background job) is not running
+- **Check**: `m3 schedules verify` — it checks each job is present, loaded, and
+  has the interval and command its spec defines (launchd agents on macOS, m3's
+  crontab block on Linux, Task Scheduler on Windows).
+- **Solution**: `m3 schedules repair` re-installs them. On macOS a hand-made
+  `com.m3memory.sync_all.plist` is replaced and saved as a `.bak-` copy.
 
 ## Scheduled Task Visibility
 

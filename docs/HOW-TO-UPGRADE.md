@@ -50,11 +50,23 @@ reads as success. You stay on the old version believing you upgraded.
 There are two more traps `m3 upgrade` handles for you, both observed on real
 installs:
 
-- **Windows file locking.** pip uninstalls before it installs, and Windows holds
-  an open `.exe` against deletion. With m3 running (MCP servers, cognitive loop,
-  dashboard, embed server) the upgrade **deletes the package and then fails** on
-  `[WinError 32] … Scripts\m3.exe`, leaving **no m3 installed**. Stopping the
-  writers first turns that into an ordinary upgrade.
+- **Windows file locking.** pip removes the old package before installing the
+  new one, and Windows will not let it replace one of m3's launchers
+  (`Scripts\m3.exe`, `Scripts\mcp-memory.exe`) while a process is running from it:
+  an agent's m3 MCP server, a chat-capture hook, or `m3 upgrade` itself when
+  `~/.local/bin/m3.exe` is a symlink into the venv (pipx makes symlinks when
+  Developer Mode is on). The upgrade then **fails with `[WinError 32]` after the
+  package is gone**. `m3 upgrade` checks for this **before changing anything**:
+  if a launcher is in use it stops, names the process holding it, and prints
+  what to do —
+  - held by `m3 upgrade`'s own launcher: run the upgrade through Python, which
+    holds none of them (the exact command is printed, e.g.
+    `"<venv>\Scripts\python.exe" "<payload>\bin\m3_upgrade.py"`);
+  - held by an agent: close that agent session (or end the named process), run
+    `m3 upgrade`, then reconnect the agent (Claude Code: `/mcp`).
+
+  If an upgrade fails anyway, it reports whether m3 is still installed and, if
+  not, prints the one command that restores it.
 - **pip's HTTP cache.** pipx can report "already at latest version" while PyPI is
   serving a newer one.
 

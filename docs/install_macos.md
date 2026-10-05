@@ -217,6 +217,17 @@ for the ready-to-use XML template.
 
 ---
 
+## Touch ID for `sudo` (optional)
+
+On macOS 14 or later with Touch ID, `m3 setup` offers once to let `sudo` accept
+your fingerprint instead of your password. Saying yes adds one line,
+`auth sufficient pam_tid.so`, to `/etc/pam.d/sudo_local` (the file macOS updates
+leave alone); `sudo` asks for your password once to write it, and setup reads
+the file back to confirm. The offer is made only when you run setup at the Mac
+— a fingerprint cannot reach an SSH session — and a "no" is remembered.
+
+Undo it with `sudo sed -i '' '/pam_tid.so/d' /etc/pam.d/sudo_local`.
+
 ## Advanced setup
 
 The full homelab walkthrough — Postgres sync, multi-machine
