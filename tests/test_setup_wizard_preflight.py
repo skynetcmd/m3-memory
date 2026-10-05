@@ -1399,6 +1399,26 @@ def test_existing_install_keeps_settings_with_one_question(monkeypatch):
     assert len(asked) == 1
     assert plan.cognitive_loop is True
     assert plan.targets.claude is False, "existing wiring must be left untouched"
+    assert plan.agents_kept is True
+
+
+def test_kept_wiring_is_not_reported_as_no_agents(monkeypatch, capsys):
+    """Keeping the settings leaves targets empty on purpose; the output must
+    not tell the user that no agent is wired."""
+    plan = setup_wizard.SetupPlan()
+    plan.agents_kept = True
+    setup_wizard._step_wire_agents(plan)
+    setup_wizard._summary(plan)
+    out = capsys.readouterr().out
+    assert "agent wiring kept" in out
+    assert "No agents were wired" not in out
+
+
+def test_unwired_install_still_says_no_agents(capsys):
+    plan = setup_wizard.SetupPlan()
+    setup_wizard._step_wire_agents(plan)
+    setup_wizard._summary(plan)
+    assert "No agents were wired" in capsys.readouterr().out
 
 
 def test_existing_install_can_still_change_settings(monkeypatch):
@@ -1522,3 +1542,21 @@ def test_restore_reports_a_started_but_not_running_service_honestly(monkeypatch,
     out = capsys.readouterr().out
     assert "not running yet" in out
     assert "restarted m3-dashboard.service" not in out
+
+
+def test_pycache_is_not_offered_on_a_packaged_install(monkeypatch, tmp_path):
+    pkg = tmp_path / "lib" / "site-packages" / "m3_memory"
+    (pkg / "__pycache__").mkdir(parents=True)
+    monkeypatch.setattr(setup_wizard, "__file__", str(pkg / "setup_wizard.py"))
+    _root, editable, dirs = setup_wizard._pycache_scope(_setup_args())
+    assert editable is False and dirs == []
+    _root, _e, dirs = setup_wizard._pycache_scope(_setup_args(clean_cache=True))
+    assert dirs == [pkg / "__pycache__"]
+
+
+def test_pycache_is_offered_on_an_editable_checkout(monkeypatch, tmp_path):
+    pkg = tmp_path / "m3-memory" / "m3_memory"
+    (pkg / "__pycache__").mkdir(parents=True)
+    monkeypatch.setattr(setup_wizard, "__file__", str(pkg / "setup_wizard.py"))
+    _root, editable, dirs = setup_wizard._pycache_scope(_setup_args())
+    assert editable is True and dirs == [pkg / "__pycache__"]

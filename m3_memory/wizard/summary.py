@@ -46,6 +46,8 @@ def _summary(plan, governor_result: Optional[dict] = None,
         print("Next step — restart your agent so it picks up the new MCP server:")
         for line in restart_lines:
             print(line)
+    elif plan.agents_kept:
+        print("Agent wiring unchanged. Restart your agents so they load the new version.")
     else:
         print("No agents were wired. Run `m3 setup` again or wire one by hand.")
     print()
@@ -138,6 +140,8 @@ def _summary(plan, governor_result: Optional[dict] = None,
     if plan.targets.any():
         _ok("M3 is installed and live. Restart your agent (above) and your")
         print("    memory + chatlog start working immediately — nothing else to do.")
+    elif plan.agents_kept:
+        _ok("M3 is updated and live. Agent wiring is unchanged.")
     else:
         _ok("M3 is installed. No agents were wired — run `m3 setup` again and")
         print("    pick at least one agent, or add the MCP server by hand.")

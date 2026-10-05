@@ -293,6 +293,9 @@ class SetupPlan:
     use_shared_embedder: bool = True
     endpoint: Optional[str] = None
     cognitive_loop: bool = False
+    # "Keep the current settings": targets is empty because wiring is left as
+    # it is, not because no agent is wired. Output must not say "none".
+    agents_kept: bool = False
     # B15: GGUF path discovered + accepted in preflight. Used by the embedder
     # install step to pin tier-1 into the service config.toml so it persists.
     embed_gguf: Optional[str] = None
@@ -403,6 +406,7 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
             keep.agents = ""           # leave agent wiring exactly as it is
             keep.cognitive_loop = plan.cognitive_loop or bool(_cognitive_loop_installed())
             kept = _gather_plan(AgentTargets(), keep)
+            kept.agents_kept = True
             _say("  Keeping current settings. Run `m3 setup` and answer 'n' to change them.")
             return kept
 
@@ -1388,6 +1392,19 @@ def _kill_stuck_writers(stuck, *, allow_sudo: bool = False) -> bool:
     return all_ok
 
 
+def _pycache_scope(args: argparse.Namespace) -> "tuple[Path, bool, list]":
+    """(package root, is an editable checkout, __pycache__ dirs to offer wiping).
+
+    A packaged install (pipx/pip) gets fresh bytecode from the installer, so
+    asking about it there is a question with no benefit; --clean-cache still
+    forces it."""
+    root = Path(__file__).resolve().parent.parent
+    editable = "site-packages" not in root.parts
+    dirs = list(root.rglob("__pycache__")) \
+        if editable or getattr(args, "clean_cache", False) else []
+    return root, editable, dirs
+
+
 def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
     """B15: pre-install probes that catch the failure modes seen during the
     2026-05-27 wizard-hardening session.
@@ -1514,8 +1531,7 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
     # When the install is editable and pycache contains .pyc files newer
     # than .py source from a previous version, Python may load the stale
     # bytecode. Idempotent wipe — safe to do anytime.
-    canonical_root = Path(__file__).resolve().parent.parent
-    pycache_dirs = list(canonical_root.rglob("__pycache__"))
+    canonical_root, editable, pycache_dirs = _pycache_scope(args)
     if pycache_dirs:
         _say(f"  found {len(pycache_dirs)} __pycache__ dirs in {canonical_root}")
         if getattr(args, "clean_cache", False) or (
@@ -1535,7 +1551,7 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
             # imports one whose source is gone, so leaving them is safe.
             _say(f"  left {len(pycache_dirs)} __pycache__ dirs in place "
                  f"(Python rebuilds any that no longer match their source)")
-    else:
+    elif editable:
         _ok("  no stale __pycache__ to wipe")
 
     # ── Probe 4: tier-1 GGUF auto-discovery + prompt ────────────────────
@@ -1543,11 +1559,14 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
     # (the :8082 service) which is slower. Discover a BGE-M3 GGUF and
     # offer to wire it in.
     discovered = _discover_bge_m3_gguf()
-    if discovered:
+    if discovered and _shared_gguf_is(discovered):
+        plan.embed_gguf = discovered
+        _ok(f"  shared embedder already uses {discovered}")
+    elif discovered:
         _say(f"  discovered BGE-M3 GGUF: {discovered}")
         _say("  wiring it into the SHARED embedder config so the single :8082 "
-             "server loads it (one CUDA context, ~10-85x faster than HTTP tiers)")
-        if args.non_interactive or _shared_gguf_is(discovered) or _ask_yes_no(
+             "server loads it (one model in memory, shared by every m3 process)")
+        if args.non_interactive or _ask_yes_no(
             "  Use this GGUF for the shared embedder?", default=True
         ):
             # Seed the shared config (NOT an env var). An env var would force
@@ -1614,20 +1633,22 @@ def _probe_llm_endpoints(plan: "SetupPlan", args: argparse.Namespace) -> None:
     csv = (_env_compat("M3_LLM_ENDPOINTS_CSV", "LLM_ENDPOINTS_CSV", "") or "").strip()
     if csv:
         _ok(f"  LLM endpoints pinned via LLM_ENDPOINTS_CSV ({csv}); leaving as-is")
+        _record_llm_switch("M3_LLM_ENDPOINTS_CSV", csv)
         return
     if custom:
         live = _endpoint_reachable(custom)
         _ok(f"  M3_LLM_URL set ({custom}) — {'reachable' if live else 'NOT reachable yet'}")
+        _record_llm_switch("M3_LLM_URL", custom)
         return
 
     reachable = [(label, url, var, val) for (label, url, var, val) in _LLM_RUNTIMES
                  if _endpoint_reachable(url)]
     if not reachable:
         _say("  no local LLM runtime detected on :1234 (LM Studio) or :11434 (Ollama)")
-        _say("  enrichment features need a chat model. Point M3 at your server with one of:")
-        _say("    LM Studio (default) — just load a model on :1234")
-        _say('    Ollama              — export M3_ENABLE_OLLAMA_FAILOVER=1')
-        _say('    llama.cpp / vLLM     — export M3_LLM_URL="http://localhost:8080/v1"')
+        _say("  enrichment needs a chat model. Start one, then run `m3 setup` again")
+        _say("  so the background services pick it up:")
+        _say("    LM Studio or Ollama  — load a model; setup detects it")
+        _say('    llama.cpp / vLLM     — M3_LLM_URL="http://localhost:8080/v1" m3 setup')
         _say("  (see ENVIRONMENT_VARIABLES.md → Endpoint discovery & failover)")
         return
 
@@ -1919,15 +1940,14 @@ def _step_cpu_sovereign_embedder() -> bool:
       3. registers it as a systemd / launchd / Windows Service with concurrency=2
       4. starts it
     """
-    _say("Step 2/5: installing sovereign CPU embedder (BGE-M3 on port 8082)")
+    _say("Step 3/5: installing sovereign CPU embedder (BGE-M3 on port 8082)")
     # Lazy import: setup_wizard is imported during install, and embedder_admin
     # pulls in the payload-root helpers (§2 cycle-breaking via lazy imports).
     from m3_memory.embedder_admin import EXIT_REGISTERED_NOT_RUNNING
     cmd = [sys.executable, "-m", "m3_memory.cli", "embedder", "install",
            "--concurrency", "2"]
     try:
-        _run(cmd)
-        _ok("sovereign CPU embedder registered and running on port 8082")
+        _run(cmd)  # reports "running on port 8082" itself
         return True
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         # One nonzero code is NOT benign: the service got registered but is not
@@ -3100,7 +3120,8 @@ def _register_dashboard_task(port: int = 8088) -> None:
 def _step_wire_agents(plan: SetupPlan, *, non_interactive: bool = False) -> bool:
     """Wire MCP entries for every selected agent."""
     if not plan.targets.any():
-        _say("Step 4/5: no agents selected — skipping wiring")
+        _say("Step 4/5: agent wiring kept as it is" if plan.agents_kept
+             else "Step 4/5: no agents selected — skipping wiring")
         return True
     _say("Step 4/5: wiring selected agents")
     if plan.targets.claude:
@@ -3627,7 +3648,8 @@ def run_setup(args: argparse.Namespace) -> int:
         "OpenClaw": plan.targets.openclaw,
         "Hermes Agent": plan.targets.hermes,
     }.items() if v]
-    print(f"  agents       : {', '.join(targets) if targets else '(none)'}")
+    _no_targets = "unchanged (current wiring kept)" if plan.agents_kept else "(none)"
+    print(f"  agents       : {', '.join(targets) if targets else _no_targets}")
     print(f"  capture mode : {plan.capture_mode}")
     print("  Embedder     : sovereign CPU (BGE-M3 on :8082) — always installed")
     _src = "prebuilt; source-build if no match" if plan.allow_native_source_build \
