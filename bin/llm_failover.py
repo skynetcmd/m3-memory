@@ -149,7 +149,13 @@ def is_lmstudio_url(url: str) -> bool:
 
 
 def _flag(name: str, default: bool) -> bool:
-    v = os.environ.get(name, "").strip().lower()
+    # Environment first, then <config_root>/.llm_config.json, which is what a
+    # launchd/systemd daemon can see (it never reads the shell rc).
+    try:
+        from m3_core.llm_config import llm_setting
+        v = (llm_setting(name) or "").lower()
+    except Exception:  # noqa: BLE001 — a bare payload still honours the env
+        v = os.environ.get(name, "").strip().lower()
     if not v:
         return default
     return v in ("1", "true", "yes")

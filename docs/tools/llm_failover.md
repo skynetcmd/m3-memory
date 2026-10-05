@@ -1,8 +1,8 @@
 ---
 tool: bin/llm_failover.py
-sha1: a8353a4ae84a
-mtime_utc: 2026-10-04T05:58:33.365369+00:00
-generated_utc: 2026-10-04T05:58:41.728737+00:00
+sha1: a9bd7b9dfc90
+mtime_utc: 2026-10-05T00:30:51.541101+00:00
+generated_utc: 2026-10-05T00:39:54.401941+00:00
 private: false
 ---
 
@@ -52,7 +52,7 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.get()  → `f"{endpoint.rstrip('/')}/models"`` (line 321)
+- `httpx.get()  → `f"{endpoint.rstrip('/')}/models"`` (line 327)
 
 
 ---
@@ -60,6 +60,7 @@ _(no argparse arguments detected)_
 ## Notable external imports
 
 - `httpx`
+- `m3_core.llm_config (llm_setting)`
 
 ---
 

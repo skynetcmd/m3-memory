@@ -1635,20 +1635,22 @@ def _probe_llm_endpoints(plan: "SetupPlan", args: argparse.Namespace) -> None:
         _ok(f"  detected {label} reachable at {url}")
         # LM Studio is on by default — only persist the explicit enable for the
         # non-default ones, and an explicit disable for LM Studio if it's absent.
-        already = os.environ.get(var, "").strip()
-        if already in ("1", "true", "yes"):
-            continue
-        from m3_memory.wizard.persist import shell_rc_has
-        if shell_rc_has(var, val):
-            os.environ[var] = val  # set for this run; new shells read the rc
-            continue
         if var == "M3_ENABLE_LMSTUDIO_FAILOVER":
             continue  # default already on; nothing to persist
+        already = os.environ.get(var, "").strip()
+        from m3_memory.wizard.persist import shell_rc_has
+        if already in ("1", "true", "yes") or shell_rc_has(var, val):
+            # The shell has it, but launchd/systemd daemons never read the rc;
+            # record it where they look.
+            os.environ[var] = val
+            _record_llm_switch(var, val)
+            continue
         if args.non_interactive or _ask_yes_no(
             f"  Enable {label} for enrichment (persist {var}=1)?", default=True
         ):
             os.environ[var] = val
             _persist_env_var(var, val, non_interactive=args.non_interactive)
+            _record_llm_switch(var, val)
 
     # If LM Studio is NOT reachable but something else is, disable its probe so
     # the user stops paying for a dead :1234 connect on every discovery.
@@ -1657,6 +1659,24 @@ def _probe_llm_endpoints(plan: "SetupPlan", args: argparse.Namespace) -> None:
         _say("  LM Studio (:1234) not reachable — disabling its probe to avoid a dead connect")
         os.environ["M3_ENABLE_LMSTUDIO_FAILOVER"] = "0"
         _persist_env_var("M3_ENABLE_LMSTUDIO_FAILOVER", "0", non_interactive=args.non_interactive)
+    if not lmstudio_live:
+        _record_llm_switch("M3_ENABLE_LMSTUDIO_FAILOVER", "0")
+
+
+def _record_llm_switch(var: str, val: str) -> None:
+    """Write an LLM endpoint switch to <config_root>/.llm_config.json, the copy
+    background daemons read."""
+    try:
+        sys.path.insert(0, str(_bin_dir()))
+        from m3_core.llm_config import read_llm_config, write_llm_setting
+        if str(read_llm_config().get(var, "")) == val:
+            return
+        path = write_llm_setting(var, val)
+    except (ImportError, OSError) as e:
+        _warn(f"    could not record {var}={val} for background services ({e}); "
+              f"they will not see it. inspect: m3 doctor")
+        return
+    _ok(f"    recorded {var}={val} for background services ({path})")
 
 
 # ── B15 helpers ──────────────────────────────────────────────────────────
