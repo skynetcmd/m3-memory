@@ -2024,6 +2024,12 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard
         else:
             # Fail loud (§3): print the real schtasks error, don't swallow it.
             err = (result.stderr or result.stdout).strip()
+            if "access is denied" in err.lower() and _existing_task_covers(task, xml_doc):
+                # Re-registering a boot task needs elevation, but the one already
+                # registered is current; nothing is missing.
+                _safe_print(f"{OK} Kept {task['name']}: already registered to spec "
+                            f"(re-registering it needs an elevated shell; not needed)")
+                continue
             _safe_print(f"{FAIL} Failed to create task {task['name']}: {err}")
             if "access is denied" in err.lower():
                 denied_any = True
@@ -2124,6 +2130,26 @@ def remove_windows_tasks(selector: str | None, m3_memory_root: str):
             _safe_print(f"{OK} Removed: {task['name']}")
         else:
             _safe_print(f"{WARN} Could not remove {task['name']} (may not exist): {r.stderr.strip()}")
+
+_TRIGGER_TAGS = ("BootTrigger", "LogonTrigger", "TimeTrigger", "CalendarTrigger")
+
+
+def _existing_task_covers(task: dict, spec_xml: str) -> bool:
+    """When re-registering is denied (unelevated shell), is the task ALREADY
+    registered with every trigger type the spec has and otherwise to spec? Then
+    nothing is missing and there is nothing for an admin to do."""
+    try:
+        r = _run(["schtasks", "/Query", "/TN", task["name"], "/XML", "ONE"],
+                 capture_output=True, text=True)
+    except subprocess.TimeoutExpired:
+        return False
+    live = r.stdout if r.returncode == 0 else ""
+    if not live.strip():
+        return False
+    if any(f"<{t}" in spec_xml and f"<{t}" not in live for t in _TRIGGER_TAGS):
+        return False
+    return _verify_windows_task(task["name"], _task_arguments(task))
+
 
 def _verify_windows_task(name: str, expected_args: "str | None" = None) -> bool:
     """Read the registered Windows task's XML and confirm the properties the
@@ -2452,7 +2478,8 @@ def main():
             for r in stuck:
                 if not holds_store(r["role"]):
                     _safe_print(f"  Left {r['role']} (pid {r['pid']}) running: "
-                                f"{r['error']}; it holds no database.")
+                                f"{' '.join(str(r['error']).split())}; it holds "
+                                f"no database.")
                     continue
                 _safe_print(f"{WARN} Could not stop {r['role']} (pid {r['pid']}): "
                             f"{r['error']} — re-run elevated or stop it manually, "

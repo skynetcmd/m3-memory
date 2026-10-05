@@ -534,3 +534,27 @@ def test_verify_fails_an_absent_governor_task_when_the_loop_is_missing(monkeypat
     monkeypatch.setattr(governor_migration, "cognitive_loop_installed", lambda: False)
     monkeypatch.setattr(isch, "_windows_task_registered", lambda n: False)
     assert isch._verify_or_explain_absence({"name": "AgentOS_Maintenance", "args": []}) is False
+
+
+class _R:
+    def __init__(self, rc, out=""):
+        self.returncode, self.stdout, self.stderr = rc, out, ""
+
+
+_SPEC = "<Triggers><BootTrigger/><LogonTrigger/></Triggers>"
+
+
+@pytest.mark.parametrize("live_rc, live_xml, verified, expect", [
+    (0, "<Triggers><BootTrigger/><LogonTrigger/></Triggers>", True, True),
+    (0, "<Triggers><LogonTrigger/></Triggers>", True, False),         # no boot start
+    (0, "<Triggers><BootTrigger/><LogonTrigger/></Triggers>", False, False),  # off spec
+    (1, "", True, False),                                              # not registered
+])
+def test_denied_reregister_keeps_only_a_task_already_to_spec(monkeypatch, live_rc, live_xml,
+                                                             verified, expect):
+    """An unelevated re-register of an existing boot task is denied; that is
+    only "nothing to do" when the registered task starts at boot and matches."""
+    monkeypatch.setattr(isch, "_run", lambda *a, **k: _R(live_rc, live_xml))
+    monkeypatch.setattr(isch, "_verify_windows_task", lambda name, args=None: verified)
+    monkeypatch.setattr(isch, "_task_arguments", lambda task: "")
+    assert isch._existing_task_covers({"name": "AgentOS_Dashboard"}, _SPEC) is expect
