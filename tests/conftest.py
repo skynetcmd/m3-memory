@@ -37,6 +37,12 @@ import tempfile as _tempfile  # noqa: E402
 
 _os.environ["M3_CONFIG_ROOT"] = _tempfile.mkdtemp(prefix="m3-test-config-")
 _atexit.register(_shutil.rmtree, _os.environ["M3_CONFIG_ROOT"], True)
+# The trusted wolfSSL directory derives from the config root's parent; keep it
+# on the real installed library so FIPS-mode collection does not fail closed
+# (same remedy as the per-test sandbox below).
+_real_lib_dir = _os.path.join(_os.path.expanduser("~"), ".m3", "lib")
+if _os.path.isdir(_real_lib_dir) and not _os.environ.get("M3_LIB_DIR"):
+    _os.environ["M3_LIB_DIR"] = _real_lib_dir
 import re
 import shutil
 import sqlite3
