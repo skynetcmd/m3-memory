@@ -90,7 +90,8 @@ def _persist_embed_gguf_shell(gguf_path: str, *, non_interactive: bool) -> None:
 
 
 def shell_rc_has(name: str, value: str) -> bool:
-    """Whether the user's shell rc already exports name=value (POSIX only)."""
+    """Whether the user's shell rc exports name=value as its LAST assignment of
+    name (POSIX only). Commented-out lines do not count."""
     if os.name == "nt":
         return False
     try:
@@ -98,7 +99,19 @@ def shell_rc_has(name: str, value: str) -> bool:
         text = rc.read_text(encoding="utf-8") if rc.exists() else ""
     except OSError:
         return False
-    return f"export {name}={value}" in text or f'export {name}="{value}"' in text
+    prefix = f"export {name}="
+    last = None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith(prefix):
+            continue
+        rhs = line[len(prefix):]
+        if rhs[:1] in ('"', "'") and rhs.count(rhs[0]) >= 2:
+            rhs = rhs[1:rhs.index(rhs[0], 1)]
+        else:
+            rhs = rhs.split("#", 1)[0].strip()
+        last = rhs
+    return last == value
 
 
 def _pick_unix_shell_rc() -> Path:
