@@ -1414,6 +1414,17 @@ def test_kept_wiring_is_not_reported_as_no_agents(monkeypatch, capsys):
     assert "No agents were wired" not in out
 
 
+@pytest.mark.parametrize("kept, wired", [(True, False), (False, True), (False, False)])
+def test_failed_verification_never_claims_live(capsys, kept, wired):
+    plan = setup_wizard.SetupPlan()
+    plan.agents_kept = kept
+    plan.targets.claude = wired
+    setup_wizard._summary(plan, verified=False)
+    out = capsys.readouterr().out
+    assert "live" not in out
+    assert "NOT verified healthy" in out
+
+
 def test_unwired_install_still_says_no_agents(capsys):
     plan = setup_wizard.SetupPlan()
     setup_wizard._step_wire_agents(plan)

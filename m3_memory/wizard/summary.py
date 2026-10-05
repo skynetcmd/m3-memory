@@ -137,7 +137,11 @@ def _summary(plan, governor_result: Optional[dict] = None,
 
     # ── clear "you're done" closer ──────────────────────────────────────────
     print("─" * 60)
-    if plan.targets.any():
+    if not verified:
+        # "live" is a health claim; the doctor just declined to make it.
+        _warn("M3 is installed but NOT verified healthy. Fix what `m3 doctor`")
+        print("    reports above, then run `m3 doctor` again.")
+    elif plan.targets.any():
         _ok("M3 is installed and live. Restart your agent (above) and your")
         print("    memory + chatlog start working immediately — nothing else to do.")
     elif plan.agents_kept:
