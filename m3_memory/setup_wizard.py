@@ -1248,6 +1248,37 @@ def _flush_elevation(*, gui: bool = False) -> None:
                 print(f"      {line}")
 
 
+def _offer_touchid_sudo() -> None:
+    """macOS: offer once to let sudo accept Touch ID. Only to someone at the
+    Mac; a "no" is remembered so later setups do not ask again."""
+    if sys.platform != "darwin" or not _stdin_is_interactive():
+        return
+    try:
+        from m3_memory import touchid
+        sys.path.insert(0, str(_bin_dir()))
+        from m3_core.paths import get_m3_config_root
+    except ImportError:
+        return
+    marker = os.path.join(get_m3_config_root(), ".touchid_sudo_declined")
+    if not touchid.at_the_mac() or os.path.exists(marker) or touchid.status() != "available":
+        return
+    if not _ask_yes_no("  Let sudo accept Touch ID instead of your password? (adds one "
+                       f"line to {touchid.SUDO_LOCAL}; asks for your password once now)",
+                       default=True):
+        try:
+            os.makedirs(os.path.dirname(marker), exist_ok=True)
+            open(marker, "w", encoding="utf-8").close()
+        except OSError:
+            pass
+        _say("  not enabled; setup will not ask again.")
+        return
+    ok, detail = touchid.enable()
+    if ok:
+        _ok(f"  Touch ID for sudo: {detail}. undo: {touchid.UNDO}")
+    else:
+        _warn(f"  Touch ID for sudo not enabled: {detail}")
+
+
 def _restart_stale_embed_server() -> None:
     """After a core upgrade, an embed service started earlier still runs the old
     binary. Unix setup restarts its user service itself; a Windows service runs
@@ -3868,6 +3899,7 @@ def run_setup(args: argparse.Namespace) -> int:
         # under the halt reports a healthy daemon as NOT running.
         _lower_halt()
         _pin_chatlog_store()
+        _offer_touchid_sudo()
         # One administrator prompt for every privileged step queued above,
         # before verification so the doctor sees their result.
         _flush_elevation(gui=getattr(args, "gui_child", False))
