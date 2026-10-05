@@ -64,7 +64,7 @@ def test_a_declined_prompt_means_nothing_ran(monkeypatch):
 
 @pytest.fixture
 def batching(monkeypatch):
-    monkeypatch.setattr(setup_wizard.sys, "platform", "win32")
+    monkeypatch.setattr(setup_wizard, "_on_windows", lambda: True)
     monkeypatch.setattr(setup_wizard, "_stdin_is_interactive", lambda: True)
     monkeypatch.setattr(setup_wizard, "_ELEVATION", None)
     setup_wizard._begin_elevation_batch()
@@ -107,7 +107,7 @@ def test_an_early_stop_names_the_steps_that_did_not_run(batching, capsys):
 
 
 def test_without_a_human_nothing_is_queued(monkeypatch):
-    monkeypatch.setattr(setup_wizard.sys, "platform", "win32")
+    monkeypatch.setattr(setup_wizard, "_on_windows", lambda: True)
     monkeypatch.setattr(setup_wizard, "_stdin_is_interactive", lambda: False)
     monkeypatch.setattr(setup_wizard, "_ELEVATION", None)
     setup_wizard._begin_elevation_batch()

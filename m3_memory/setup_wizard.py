@@ -1196,11 +1196,17 @@ def _runas_delete_tasks_windows(task_names: list[str]) -> bool:
 _ELEVATION = None
 
 
+def _on_windows() -> bool:
+    """One place to ask; tests replace this instead of sys.platform, which the
+    test harness restores before each test body runs."""
+    return sys.platform == "win32"
+
+
 def _begin_elevation_batch(*, gui: bool = False) -> None:
     """Queue privileged steps instead of prompting for each, when a human can
     answer the one prompt at the end (interactive Windows or the GUI)."""
     global _ELEVATION
-    if sys.platform == "win32" and (gui or _stdin_is_interactive()):
+    if _on_windows() and (gui or _stdin_is_interactive()):
         from m3_memory.elevate import ElevationBatch
         _ELEVATION = ElevationBatch()
 
@@ -1291,7 +1297,7 @@ def _restart_stale_embed_server() -> None:
     if not stale:
         return
     pids = ", ".join(str(s["pid"]) for s in stale)
-    if sys.platform == "win32":
+    if _on_windows():
         cli = [sys.executable, "-m", "m3_memory.cli", "embedder"]
         if (_queue_elevated(f"stop the embed service still running the previous core (pid {pids})",
                             [*cli, "stop"])
@@ -1322,7 +1328,7 @@ def _offer_elevated_task_delete(task_names: list[str], *, non_interactive: bool,
     (`gui=True`: prompts are pre-answered, but someone is watching the GUI, so we
     still fire the UAC prompt rather than skip it). A plain headless
     --non-interactive run (no GUI) skips — nobody could consent to the dialog."""
-    if sys.platform != "win32" or not task_names:
+    if not _on_windows() or not task_names:
         return False
     if _ELEVATION is not None:
         for n in task_names:
@@ -1406,11 +1412,11 @@ def _offer_elevated_schedule_repair(script: str, *, non_interactive: bool) -> "b
     every `m3 setup` re-runs schedule registration. Returns True if the elevated
     repair succeeded (boot tasks now registered), False otherwise (caller keeps
     the printed banner as the fallback). No-op off interactive Windows."""
-    if sys.platform != "win32":
+    if not _on_windows():
         return False
     # None = queued for the single prompt at the end of setup (not done yet).
     if _queue_elevated("register m3's boot-start services (install_schedules --repair)",
-                       [sys.executable, script, "--repair"]):
+                       [_python_exe(), script, "--repair"]):
         return None
     # `non_interactive` here means "the caller already gathered its choices", NOT
     # "there is no human". `m3 setup` runs its install step non-interactively by
