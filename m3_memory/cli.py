@@ -439,14 +439,23 @@ def _cmd_stop(args: argparse.Namespace) -> int:
         return 0
 
     killed = [r for r in results if r.get("killed")]
-    failed = [r for r in results if not r.get("killed")]
+    survived = [r for r in results if not r.get("killed")]
+    # A survivor that holds no store (the embed server) cannot block an
+    # upgrade; report it as left running, not as a failed stop.
+    left = [r for r in survived if not halt.holds_store(r.get("role", ""))]
+    failed = [r for r in survived if r not in left]
     for r in killed:
         print(f"  stopped {r.get('role', '?')} (pid {r.get('pid')})")
+    for r in left:
+        print(f"  left running: {r.get('role', '?')} (pid {r.get('pid')}) — "
+              f"{' '.join((r.get('error') or 'still alive').split())}; it holds no database, so an "
+              f"upgrade does not need it stopped")
     for r in failed:
         print(f"  [!] could NOT stop {r.get('role', '?')} (pid {r.get('pid')}): "
               f"{r.get('error') or 'unknown'}", file=sys.stderr)
 
-    print(f"[m3] stopped {len(killed)}/{len(results)} writer(s).")
+    note = f"; {len(left)} left running (no database)" if left else ""
+    print(f"[m3] stopped {len(killed)}/{len(results) - len(left)} writer(s){note}.")
     if failed:
         # Almost always an elevated writer an unprivileged shell cannot touch.
         # Say so and exit non-zero — a partial stop must not read as success

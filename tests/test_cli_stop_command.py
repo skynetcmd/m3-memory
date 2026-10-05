@@ -40,6 +40,13 @@ def fake_halt(monkeypatch):
 
     mod.kill_stale_daemons = kill_stale_daemons
     mod.results = []
+    # The real classification, not a copy of it.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_m3_halt_real", _ROOT / "bin" / "m3_halt.py")
+    real = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "_m3_halt_real", real)  # dataclasses need it
+    spec.loader.exec_module(real)
+    mod.holds_store = real.holds_store
     monkeypatch.setitem(sys.modules, "m3_halt", mod)
     # Never stop the developer's real systemd/launchd services.
     sched = types.ModuleType("install_schedules")
@@ -145,3 +152,19 @@ def test_stop_unix_services_stops_units_and_the_watchdog_timer(monkeypatch):
     # An already-stopped unit is neither stopped again nor reported.
     assert "m3-dashboard.service" not in stopped
     assert ["systemctl", "--user", "stop", "m3-dashboard.service"] not in calls
+
+
+def test_a_surviving_embed_server_is_left_running_not_a_failure(fake_halt, capsys):
+    """The embed server holds no database, so an elevated one that cannot be
+    stopped does not block an upgrade; say it was left, never that it stopped."""
+    fake_halt.results = [
+        {"pid": 1, "role": "cognitive-loop", "killed": True, "error": None},
+        {"pid": 2, "role": "embed-server(elevated?)", "killed": False,
+         "error": "ERROR: could not be terminated.\nReason: Access is denied."},
+    ]
+    assert _run() == 0
+    out = capsys.readouterr().out
+    assert "stopped embed-server" not in out
+    assert "left running: embed-server(elevated?) (pid 2)" in out
+    assert "Reason: Access is denied." in out          # one line, not two
+    assert "stopped 1/1 writer(s); 1 left running (no database)" in out

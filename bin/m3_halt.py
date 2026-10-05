@@ -126,10 +126,14 @@ def _pid_is_alive(pid: int) -> bool:
         import ctypes  # local import keeps non-Windows clean
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        ERROR_ACCESS_DENIED = 5
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if not handle:
-            return False
+            # Access denied means the process EXISTS but runs elevated or as
+            # another user (an SCM service). Reading it as "gone" reported such a
+            # process stopped without any kill being attempted.
+            return ctypes.get_last_error() == ERROR_ACCESS_DENIED
         try:
             exit_code = ctypes.c_ulong()
             if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
@@ -549,6 +553,11 @@ def _role_blocks(role: str) -> bool:
     classify the same as a clean registry role.
     """
     return base_role(role) not in NON_BLOCKING_ROLES
+
+
+# Public name for callers outside this module (m3 stop, the install reaper): a
+# role that holds no store does not have to be stopped for an upgrade.
+holds_store = _role_blocks
 
 
 def list_all_db_writers(engine_root: Optional[str] = None) -> list[ProcInfo]:

@@ -2448,7 +2448,12 @@ def main():
                 # behind a warning naming a role that IS mapped.
                 from m3_halt import base_role
                 _reaped_roles.update(base_role(r["role"]) for r in killed)
+            from m3_halt import holds_store
             for r in stuck:
+                if not holds_store(r["role"]):
+                    _safe_print(f"  Left {r['role']} (pid {r['pid']}) running: "
+                                f"{r['error']}; it holds no database.")
+                    continue
                 _safe_print(f"{WARN} Could not stop {r['role']} (pid {r['pid']}): "
                             f"{r['error']} — re-run elevated or stop it manually, "
                             f"else a duplicate may linger.")
