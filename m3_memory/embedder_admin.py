@@ -628,7 +628,8 @@ def _wait_serving_impl(port: int, timeout: float = _SERVE_WAIT_S) -> bool:
     deadline = time.monotonic() + timeout
     while True:
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as r:
+            with urllib.request.urlopen(  # nosec B310 — fixed http:// loopback URL
+                    f"http://127.0.0.1:{port}/health", timeout=2) as r:
                 if r.status == 200:
                     return True
         except OSError:
