@@ -278,7 +278,7 @@ def run(brief: bool = False, fix: bool = False) -> int:
         elif a["plugin"]["active"]:
             print("✅ claude mcp: single plugin server (mcp__plugin_m3_memory__)")
         elif a["none"] and not shutil.which("claude"):
-            print("claude mcp: Claude Code not installed — nothing to check")
+            print("claude mcp: `claude` CLI not on PATH — nothing to check")
         elif a["none"]:
             print("claude mcp: no m3 memory server registered (to add one: "
                   "`m3 setup --non-interactive --agents claude`)")

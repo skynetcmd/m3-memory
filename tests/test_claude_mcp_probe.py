@@ -223,5 +223,5 @@ def test_brief_report_without_claude_installed(monkeypatch, capsys):
     monkeypatch.setattr(p.shutil, "which", lambda name: None)
     p.run(brief=True)
     out = capsys.readouterr().out
-    assert "Claude Code not installed" in out
+    assert "`claude` CLI not on PATH" in out
     assert "m3 setup" not in out
