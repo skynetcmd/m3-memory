@@ -711,14 +711,8 @@ def _detect_governor_eligible_tasks() -> list[str]:
 
 
 def _shared_gguf_is(path: str) -> bool:
-    """Whether the shared embedder config already names this GGUF."""
-    try:
-        from m3_memory.embedder_admin import _embed_config_path
-        with open(_embed_config_path(), encoding="utf-8") as f:
-            current = (json.load(f) or {}).get("gguf_path") or ""
-    except (OSError, ValueError):
-        return False
-    return os.path.normcase(os.path.abspath(current)) == os.path.normcase(os.path.abspath(path))
+    from m3_memory.embedder_admin import shared_gguf_is
+    return shared_gguf_is(path)
 
 
 def _cognitive_loop_installed() -> "bool | None":

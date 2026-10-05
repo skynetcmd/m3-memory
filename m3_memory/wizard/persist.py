@@ -197,16 +197,8 @@ def _persist_env_var_shell(name: str, value: str, *, non_interactive: bool) -> N
     ):
         _warn(f"    skipped — set it later: echo 'export {name}={value}' >> {rc_path}")
         return
-    try:
-        existing = rc_path.read_text(encoding="utf-8") if rc_path.exists() else ""
-    except OSError as e:
-        _warn(f"    could not read {rc_path} ({e}); skipping shell rc persistence")
-        return
-    # Idempotent: if the exact assignment is already present, do nothing; if a
-    # stale value for the same var exists, append the new one (last wins in sh).
-    if f"export {name}={value}" in existing or f'export {name}="{value}"' in existing:
-        _ok(f"    {name}={value} already present in {rc_path}")
-        return
+    # An exact assignment already returned above (shell_rc_has); a stale value
+    # for the same var gets the new one appended (last wins in sh).
     block = f'\n# Added by m3 setup — LLM endpoint failover\nexport {name}="{value}"\n'
     try:
         with rc_path.open("a", encoding="utf-8") as f:

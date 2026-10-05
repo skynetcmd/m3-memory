@@ -1074,6 +1074,16 @@ def shared_mode_enabled() -> bool:
         return False
 
 
+def shared_gguf_is(path: str) -> bool:
+    """Whether .embed_config.json already names this GGUF for the shared server."""
+    try:
+        with open(_embed_config_path(), encoding="utf-8") as f:
+            current = (json.load(f) or {}).get("gguf_path") or ""
+    except (OSError, ValueError):
+        return False
+    return os.path.normcase(os.path.abspath(current)) == os.path.normcase(os.path.abspath(path))
+
+
 def seed_shared_config(
     config_root: str | None = None,
     *,
