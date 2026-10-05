@@ -90,3 +90,15 @@ The check blames only the test that BROKE the namespace, never one that
 inherited it, and purges afterwards so a single breakage cannot cascade. The
 first version blamed whichever test was running and turned one cause into 2819
 teardown errors.
+
+# A platform patched in a fixture is gone before the test body runs
+
+`conftest.pytest_runtest_makereport` restores the real `sys.platform` and
+`os.name` when pytest reports EACH phase, including setup. So
+`monkeypatch.setattr(mod.sys, "platform", "darwin")` inside a fixture is undone
+before the test body executes, and the code under test sees the real platform.
+On the platform you develop on the test still passes, so the mistake shows up
+only on the other OSes (hit twice on 2026-10-05).
+
+Route the check through a small module function (`_is_mac()`, `_on_windows()`)
+and patch that, or patch `sys.platform` inside the test body.
