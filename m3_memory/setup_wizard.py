@@ -729,6 +729,21 @@ def _cognitive_loop_installed() -> "bool | None":
         return None
 
 
+def _pin_chatlog_store() -> None:
+    """Record the separate chatlog store in its config so a process that sets
+    M3_DATABASE (a scheduled job, the loop) cannot fold it into the main store."""
+    try:
+        sys.path.insert(0, str(_bin_dir()))
+        import chatlog_config
+        pinned = chatlog_config.pin_split_path()
+    except (ImportError, OSError) as e:
+        _warn(f"  could not record the chatlog store path ({e}); a job that sets "
+              f"M3_DATABASE may sync only the main store. inspect: m3 chatlog status")
+        return
+    if pinned:
+        _ok(f"  recorded the chatlog store: {pinned}")
+
+
 def _existing_install() -> "str | None":
     """The existing store or capture config, or None on a first install."""
     try:
@@ -3739,6 +3754,7 @@ def run_setup(args: argparse.Namespace) -> int:
         # writer paused by it drops out of the PID registry, so verification
         # under the halt reports a healthy daemon as NOT running.
         _lower_halt()
+        _pin_chatlog_store()
         verified = _step_doctor(plan)
         _trace(f"after step_doctor -> verified={verified}")
         # An install/upgrade STOPS the daemons (preflight must quiesce them so

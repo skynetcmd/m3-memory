@@ -1,8 +1,8 @@
 ---
 tool: bin/pg_sync.py
-sha1: dc78cf558b28
-mtime_utc: 2026-09-21T00:16:24.888091+00:00
-generated_utc: 2026-09-21T00:22:33.665965+00:00
+sha1: 48d4f100be9b
+mtime_utc: 2026-10-05T11:28:35.529219+00:00
+generated_utc: 2026-10-05T11:29:43.906335+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 1647)
+- `def main()` (line 1660)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -39,6 +39,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `chatlog_config (chatlog_db_path)`
 - `m3_halt (pid_is_alive)`
 - `m3_sdk (M3Context, resolve_db_path)`
 - `m3_sdk (resolve_cdw_pg_dsn, resolve_venv_python)`

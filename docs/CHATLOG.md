@@ -8,14 +8,18 @@ The chat log subsystem ingests chat transcripts from Claude Code, Gemini CLI, Op
 
 Chat logs write to whatever path `chatlog_db_path()` resolves to. Resolution order:
 
-1. `CHATLOG_DB_PATH` env var — explicit chatlog-only override
-2. `M3_DATABASE` env var — unified main DB (chatlog shares it)
-3. `.chatlog_config.json` `db_path` field
-4. Default: `memory/agent_chatlog.db` (separate file)
+1. `M3_CHATLOG_DB_PATH` (or legacy `CHATLOG_DB_PATH`) env var — explicit chatlog-only override
+2. `.chatlog_config.json` `db_path` field, when one is pinned there
+3. `M3_DATABASE` env var — unified main DB (chatlog shares it)
+4. Default: `agent_chatlog.db` in the engine root (separate file)
+
+`m3 setup` pins the separate path in `.chatlog_config.json` unless `M3_DATABASE`
+is set in its environment. A pinned path keeps a job or daemon that sets
+`M3_DATABASE` for its own main store from folding the chatlog into it.
 
 If the resolved chatlog path **equals** the main memory DB path, the two are a single file and full vector/hybrid search is delegated to the main search impl (what the old "integrated" mode did). If they **differ**, chatlog writes are append-tuned and `chatlog_promote` ATTACHes the main DB to copy rows across (what the old "separate"/"hybrid" modes did). The choice is now implicit in the path, not a configuration enum.
 
-> **Deprecation**: the `CHATLOG_MODE` env var and the `mode` field in `.chatlog_config.json` are ignored (a warning is emitted once per process if `CHATLOG_MODE` is set). To keep everything in a single file, set `M3_DATABASE` and `CHATLOG_DB_PATH` to the same path, or leave `CHATLOG_DB_PATH` unset so it follows `M3_DATABASE`.
+> **Deprecation**: the `CHATLOG_MODE` env var and the `mode` field in `.chatlog_config.json` are ignored (a warning is emitted once per process if `CHATLOG_MODE` is set). To keep everything in a single file, set `M3_DATABASE` and `CHATLOG_DB_PATH` to the same path, or leave `CHATLOG_DB_PATH` unset and no `db_path` pinned in `.chatlog_config.json` so it follows `M3_DATABASE`.
 
 > **Splitting an integrated store after the fact**: if you ran integrated (`CHATLOG_DB_PATH` equal to the main DB) and later want separate files, repointing `CHATLOG_DB_PATH` only affects *new* turns — the existing `type='chat_log'` rows stay in the main DB. Move them with `bin/split_chatlog_from_core.py` (copies rows + existing embeddings + FTS into the chatlog DB, verifies counts, then deletes them from core). It is dry-run by default; pass `--commit` to execute. **Take a filesystem backup of both DBs first** — the script does not. Then repoint `CHATLOG_DB_PATH` at the chatlog DB in every host-agent hook *and* confirm the MCP server resolves the same path (see the split-brain note in `docs/OPERATIONS.md`), or new turns keep landing in core.
 >

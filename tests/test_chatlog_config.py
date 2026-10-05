@@ -2,8 +2,8 @@
 
 The three-mode (integrated/separate/hybrid) system was removed in the
 2026-04-21 DB-parameter refactor. The chatlog DB path now resolves via:
-    CHATLOG_DB_PATH env > active_database() ContextVar > M3_DATABASE env
-    > .chatlog_config.json db_path > default (agent_chatlog.db).
+    CHATLOG_DB_PATH env > active_database() ContextVar > a db_path pinned in
+    .chatlog_config.json > M3_DATABASE env > default (agent_chatlog.db).
 The legacy ``mode`` field in .chatlog_config.json and the CHATLOG_MODE env
 var are silently ignored (a one-time warning is emitted for CHATLOG_MODE).
 """
@@ -205,3 +205,59 @@ def test_defaults_when_no_config(tmp_path, monkeypatch):
     assert cfg.queue_max_depth == 20_000
     assert cfg.redaction.enabled is False
     assert cfg.cost_tracking.enabled is True
+
+
+def test_pinned_chatlog_path_beats_m3_database(tmp_path, monkeypatch):
+    """A split install pins its chatlog in the config file. M3_DATABASE set for
+    one process (the cognitive loop, a launchd/systemd job) names the MAIN store
+    and must not pull the chatlog onto it: sync then drops the chatlog target
+    as "the same file" and the scheduled job never replicates it."""
+    import chatlog_config
+
+    config_path = tmp_path / ".chatlog_config.json"
+    config_path.write_text(json.dumps({"db_path": "/engine/agent_chatlog.db"}))
+    monkeypatch.setattr(chatlog_config, "CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("CHATLOG_DB_PATH", raising=False)
+    monkeypatch.delenv("M3_CHATLOG_DB_PATH", raising=False)
+    monkeypatch.setenv("M3_DATABASE", "/engine/agent_memory.db")
+    chatlog_config.invalidate_cache()
+
+    assert chatlog_config.chatlog_db_path() == "/engine/agent_chatlog.db"
+    assert chatlog_config.resolve_config().db_path == "/engine/agent_chatlog.db"
+
+
+def _pin_env(monkeypatch, tmp_path, file_data=None):
+    import chatlog_config
+
+    config_path = tmp_path / ".chatlog_config.json"
+    if file_data is not None:
+        config_path.write_text(json.dumps(file_data))
+    monkeypatch.setattr(chatlog_config, "CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(chatlog_config, "DEFAULT_DB_PATH", "/engine/agent_chatlog.db")
+    for k in ("CHATLOG_DB_PATH", "M3_CHATLOG_DB_PATH", "M3_DATABASE"):
+        monkeypatch.delenv(k, raising=False)
+    chatlog_config.invalidate_cache()
+    return chatlog_config, config_path
+
+
+def test_setup_pins_the_split_path_when_nothing_pins_one(tmp_path, monkeypatch):
+    cc, path = _pin_env(monkeypatch, tmp_path, {"capture_mode": "both"})
+    assert cc.pin_split_path() == "/engine/agent_chatlog.db"
+    assert json.loads(path.read_text()) == {"capture_mode": "both",
+                                            "db_path": "/engine/agent_chatlog.db"}
+    assert cc.pin_split_path() is None          # idempotent
+
+
+def test_pin_leaves_a_unified_or_explicit_choice_alone(tmp_path, monkeypatch):
+    cc, path = _pin_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("M3_DATABASE", "/unified/main.db")   # documented unify
+    assert cc.pin_split_path() is None and not path.exists()
+    monkeypatch.delenv("M3_DATABASE")
+    monkeypatch.setenv("M3_CHATLOG_DB_PATH", "/explicit/chat.db")
+    assert cc.pin_split_path() is None and not path.exists()
+
+
+def test_pin_keeps_an_existing_pin(tmp_path, monkeypatch):
+    cc, path = _pin_env(monkeypatch, tmp_path, {"db_path": "/custom/chat.db"})
+    assert cc.pin_split_path() is None
+    assert json.loads(path.read_text())["db_path"] == "/custom/chat.db"

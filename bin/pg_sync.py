@@ -1598,6 +1598,19 @@ def resolve_sync_targets(main_uri: "str | None" = None) -> "list[SyncTarget]":
     except Exception as exc:  # noqa: BLE001 — fall back to the single main store
         logger.warning(f"Could not enumerate SQLite sync targets ({exc}); using main only.")
         out = [SyncTarget("main", main_uri, dict(core_map))]
+    if not any(t.name == "chatlog" for t in out):
+        # A unified store is valid, but it is also what a stray M3_DATABASE
+        # produces on a split install; name it so the reader can tell which.
+        try:
+            from chatlog_config import chatlog_db_path
+            chat = chatlog_db_path()
+        except Exception as exc:  # noqa: BLE001 — diagnostic only
+            chat = f"unresolved ({exc})"
+        main = next((t.uri for t in out if t.name == "main"), main_uri)
+        logger.info(f"No separate chatlog target: the chatlog resolves to {chat} and "
+                    f"the main store is {main}, so both sync as one. If they should "
+                    f"be separate, pin db_path in .chatlog_config.json or set "
+                    f"M3_CHATLOG_DB_PATH.")
     return out
 
 

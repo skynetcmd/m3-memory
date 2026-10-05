@@ -155,6 +155,27 @@ class TestSqliteShape:
         assert targets[0].table("items") == "memory_items"
 
 
+def test_a_single_sqlite_target_names_both_paths(as_backend, monkeypatch, caplog):
+    """One target is valid (unified) and is also what a stray M3_DATABASE makes
+    of a split install; the log must let the reader tell which."""
+    as_backend("sqlite")
+    import logging
+
+    import chatlog_config
+    import migrate_memory
+
+    class _T:
+        def __init__(self, name, path):
+            self.name, self.db_path = name, path
+
+    monkeypatch.setattr(migrate_memory, "targets", lambda _sel="all": [_T("main", "/m/main.db")])
+    monkeypatch.setattr(chatlog_config, "chatlog_db_path", lambda: "/m/main.db")
+    with caplog.at_level(logging.INFO):
+        assert [t.name for t in pg_sync.resolve_sync_targets()] == ["main"]
+    assert "No separate chatlog target" in caplog.text
+    assert "/m/main.db" in caplog.text and "M3_CHATLOG_DB_PATH" in caplog.text
+
+
 def test_table_names_come_from_the_dialect_not_a_local_literal():
     """§2: one source for the naming.
 

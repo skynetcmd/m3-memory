@@ -195,6 +195,47 @@ def _path_from_env() -> Optional[str]:
     return v or None
 
 
+def _pinned_path(file_data: dict) -> Optional[str]:
+    """The db_path written into .chatlog_config.json, if one is pinned there."""
+    v = file_data.get("db_path")
+    return (v.strip() or None) if isinstance(v, str) else None
+
+
+def _unified_fallback(file_data: dict) -> Optional[str]:
+    """M3_DATABASE as the chatlog path, unless the config file pins one.
+
+    Hazard: M3_DATABASE also names the MAIN store for a single process (the
+    cognitive loop, a launchd/systemd job, a harness). Followed unconditionally
+    it collapses a split install onto the main DB, and sync then drops the
+    chatlog as "the same file". A pinned db_path is the install's own answer,
+    so it wins; with no pin, M3_DATABASE still unifies (docs/CHATLOG.md).
+    """
+    if _pinned_path(file_data):
+        return None
+    return _main_path_from_env()
+
+
+def pin_split_path() -> Optional[str]:
+    """Write the default (separate) chatlog path into .chatlog_config.json when
+    nothing pins one, so a later M3_DATABASE cannot collapse this install onto
+    the main store. Leaves alone an explicit CHATLOG_DB_PATH, a unified
+    M3_DATABASE in this environment, and a file that already pins a path.
+    Returns the path written, or None."""
+    if _path_from_env() is not None or _main_path_from_env() is not None:
+        return None
+    data = _load_file()
+    if _pinned_path(data):
+        return None
+    data["db_path"] = DEFAULT_DB_PATH
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, CONFIG_PATH)
+    invalidate_cache()
+    return DEFAULT_DB_PATH
+
+
 def _main_path_from_env() -> Optional[str]:
     """Respect M3_DATABASE: if the user unified on a single DB, chatlog shares it
     unless CHATLOG_DB_PATH explicitly says otherwise."""
@@ -303,9 +344,7 @@ def resolve_config() -> ChatlogConfig:
         if env_path is not None:
             cfg.db_path = env_path
         else:
-            # No explicit chatlog override — honor the unified M3_DATABASE so
-            # a caller that set one env var gets a single-DB experience.
-            main_env = _main_path_from_env()
+            main_env = _unified_fallback(file_data)
             if main_env is not None:
                 cfg.db_path = main_env
 
@@ -319,8 +358,8 @@ def chatlog_db_path() -> str:
 
     Re-resolved on every call so the ContextVar override set by the MCP tool
     dispatcher (when a caller passes `database` on a chatlog_* tool) wins.
-    Order: CHATLOG_DB_PATH env > active_database() ContextVar > M3_DATABASE
-    env > .chatlog_config.json db_path > default. Using the cached config's
+    Order: CHATLOG_DB_PATH env > active_database() ContextVar > pinned
+    .chatlog_config.json db_path > M3_DATABASE env > default. Using the cached config's
     db_path directly would miss the ContextVar since the cache is populated
     at first-call time.
     """
@@ -336,7 +375,7 @@ def chatlog_db_path() -> str:
             return ctx_val
     except ImportError:
         pass
-    main_env = _main_path_from_env()
+    main_env = _unified_fallback(_load_file())
     if main_env is not None:
         return main_env
     # Fall back to the cached config's stored db_path (file or default).
