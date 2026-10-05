@@ -1191,8 +1191,76 @@ def _runas_delete_tasks_windows(task_names: list[str]) -> bool:
         return False
 
 
+# Privileged steps queued during setup and run under ONE UAC prompt at the end
+# (see m3_memory/elevate.py). Off unless _begin_elevation_batch() turned it on.
+_ELEVATION = None
+
+
+def _begin_elevation_batch(*, gui: bool = False) -> None:
+    """Queue privileged steps instead of prompting for each, when a human can
+    answer the one prompt at the end (interactive Windows or the GUI)."""
+    global _ELEVATION
+    if sys.platform == "win32" and (gui or _stdin_is_interactive()):
+        from m3_memory.elevate import ElevationBatch
+        _ELEVATION = ElevationBatch()
+
+
+def _queue_elevated(label: str, argv: "list[str]") -> bool:
+    """Queue a privileged step if batching is on. True when queued."""
+    if _ELEVATION is None:
+        return False
+    _ELEVATION.add(label, argv)
+    _say(f"  queued for the administrator prompt at the end of setup: {label}")
+    return True
+
+
+def _flush_elevation(*, gui: bool = False) -> None:
+    """Run every queued privileged step under one UAC prompt and report each."""
+    global _ELEVATION
+    batch, _ELEVATION = _ELEVATION, None
+    if not batch:
+        return
+    print()
+    _say(f"Setup needs administrator rights for {len(batch)} step(s):")
+    for label, _argv in batch.actions:
+        print(f"    - {label}")
+    if not gui and not _ask_yes_no("  Approve them in one Windows admin prompt?", default=True):
+        _warn("  skipped; run `m3 schedules repair` from an admin shell later.")
+        return
+    outcome: dict = {}
+
+    def _run() -> bool:
+        res = batch.run()
+        if res is None:
+            return False
+        outcome.update(res)
+        return True
+
+    if not _retry_elevated(_run, what="the administrator steps"):
+        return
+    for label, _argv in batch.actions:
+        r = outcome.get(label, {"rc": -1, "output": ""})
+        if r["rc"] == 0:
+            _ok(f"  {label}: done")
+        else:
+            _warn(f"  {label}: failed (exit {r['rc']})")
+            for line in (r.get("output") or "").splitlines():
+                print(f"      {line}")
+
+
+def _report_unrun_elevation() -> None:
+    """Setup ended before the queued privileged steps ran; name them."""
+    global _ELEVATION
+    batch, _ELEVATION = _ELEVATION, None
+    if batch:
+        _warn("  these administrator steps did not run because setup stopped early:")
+        for label, _argv in batch.actions:
+            print(f"    - {label}")
+        print("    run `m3 schedules repair` from an admin shell once setup completes.")
+
+
 def _offer_elevated_task_delete(task_names: list[str], *, non_interactive: bool,
-                                gui: bool = False) -> bool:
+                                gui: bool = False) -> "bool | None":
     """On Windows with a HUMAN PRESENT, elevate deleting the governor-eligible
     scheduled tasks that an unelevated remove was denied — the UAC dialog itself
     is the user's consent. Returns True if the elevated delete succeeded.
@@ -1203,6 +1271,11 @@ def _offer_elevated_task_delete(task_names: list[str], *, non_interactive: bool,
     --non-interactive run (no GUI) skips — nobody could consent to the dialog."""
     if sys.platform != "win32" or not task_names:
         return False
+    if _ELEVATION is not None:
+        for n in task_names:
+            _queue_elevated(f"remove legacy scheduled task {n}",
+                            ["schtasks", "/Delete", "/TN", n, "/F"])
+        return None  # queued; reported when the batch runs
     if non_interactive and not gui:
         return False  # truly headless — no one to approve UAC
     if not gui:
@@ -1274,7 +1347,7 @@ def _stdin_is_interactive() -> bool:
         return False
 
 
-def _offer_elevated_schedule_repair(script: str, *, non_interactive: bool) -> bool:
+def _offer_elevated_schedule_repair(script: str, *, non_interactive: bool) -> "bool | None":
     """On interactive Windows, OFFER to UAC-elevate the boot-task registration a
     prior unelevated attempt was denied. Applies to first install AND upgrade —
     every `m3 setup` re-runs schedule registration. Returns True if the elevated
@@ -1282,6 +1355,10 @@ def _offer_elevated_schedule_repair(script: str, *, non_interactive: bool) -> bo
     the printed banner as the fallback). No-op off interactive Windows."""
     if sys.platform != "win32":
         return False
+    # None = queued for the single prompt at the end of setup (not done yet).
+    if _queue_elevated("register m3's boot-start services (install_schedules --repair)",
+                       [sys.executable, script, "--repair"]):
+        return None
     # `non_interactive` here means "the caller already gathered its choices", NOT
     # "there is no human". `m3 setup` runs its install step non-interactively by
     # design — every question was answered up front — so gating the UAC offer on
@@ -2273,8 +2350,10 @@ def _register_embed_server_task(*, non_interactive: bool = False) -> None:
             # (Linux/macOS use USER-level systemd --user / LaunchAgents — no privilege
             # needed, so they never reach this denied branch). Offer it; on success we
             # skip the manual hint. Applies to install AND upgrade (both re-run this).
-            if denied and _offer_elevated_schedule_repair(script, non_interactive=non_interactive):
-                return  # registered elevated — done
+            if denied:
+                elevated = _offer_elevated_schedule_repair(script, non_interactive=non_interactive)
+                if elevated or elevated is None:
+                    return  # registered elevated, or queued for the prompt at the end
             print("    [!] embed-server task not fully registered (see above). Shared mode")
             print("        still works once the server runs; re-run elevated to auto-start it:")
             print(f'            "{sys.executable}" "{script}" --repair   # from an admin shell')
@@ -2329,7 +2408,11 @@ def _verify_and_report_schedules(script: str, *, non_interactive: bool) -> None:
     print("            m3 schedules repair")
     if sys.platform == "win32":
         print("        (Windows: boot-triggered tasks need an ADMIN shell.)")
-        if _offer_elevated_schedule_repair(script, non_interactive=non_interactive):
+        elevated = _offer_elevated_schedule_repair(script, non_interactive=non_interactive)
+        if elevated is None:
+            print("    The repair runs with the administrator prompt at the end of setup;")
+            print("    the final verification below checks the result.")
+        elif elevated:
             print("    Repaired elevated; re-verifying...")
             re_proc = subprocess.run(
                 [_python_exe(), script, "--verify"],
@@ -3197,7 +3280,13 @@ def _step_governor_migration(plan: SetupPlan, *, non_interactive: bool = False,
         # On interactive Windows, OFFER inline UAC to delete them now — consistent
         # with how setup already elevates process-kills and boot-task registration,
         # instead of only printing commands the user must run in an admin shell.
-        if _offer_elevated_task_delete(failed, non_interactive=non_interactive, gui=gui):
+        elevated = _offer_elevated_task_delete(failed, non_interactive=non_interactive, gui=gui)
+        if elevated is None:
+            # Queued for the administrator prompt at the end of setup; the
+            # removal is reported there, not as commands to run by hand.
+            result["queued"] = failed
+            result["failed"] = []
+        elif elevated:
             # verify each is actually gone before claiming success
             still = [n for n in failed if n in gm.detect_scheduled_tasks().get("eligible", [])]
             result["removed"] = removed + [n for n in failed if n not in still]
@@ -3729,6 +3818,7 @@ def run_setup(args: argparse.Namespace) -> int:
         _restore_stopped_services()
         return 2  # preflight cleared its own HALT on any abort path
     try:
+        _begin_elevation_batch(gui=getattr(args, "gui_child", False))
         if not _step_install_m3(plan):
             _err("setup aborted")
             return 2
@@ -3755,6 +3845,9 @@ def run_setup(args: argparse.Namespace) -> int:
         # under the halt reports a healthy daemon as NOT running.
         _lower_halt()
         _pin_chatlog_store()
+        # One administrator prompt for every privileged step queued above,
+        # before verification so the doctor sees their result.
+        _flush_elevation(gui=getattr(args, "gui_child", False))
         verified = _step_doctor(plan)
         _trace(f"after step_doctor -> verified={verified}")
         # An install/upgrade STOPS the daemons (preflight must quiesce them so
@@ -3778,6 +3871,7 @@ def run_setup(args: argparse.Namespace) -> int:
         # Idempotent backstop for every exit path, including exceptions.
         _lower_halt()
         _restore_stopped_services()
+        _report_unrun_elevation()
 
 
 def _lower_halt() -> None:

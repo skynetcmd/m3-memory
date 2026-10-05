@@ -888,9 +888,10 @@ def _register_dashboard_task(skip_if_exists: bool = False,
         if "access is denied" not in out.lower():
             return  # a non-privilege failure: the printed output is the report
         from .setup_wizard import _offer_elevated_schedule_repair
-        if _offer_elevated_schedule_repair(str(script),
-                                           non_interactive=non_interactive):
-            return  # registered elevated — the banner above is now moot
+        elevated = _offer_elevated_schedule_repair(str(script),
+                                                   non_interactive=non_interactive)
+        if elevated or elevated is None:
+            return  # registered elevated, or queued for setup's admin prompt
         print("    [!] dashboard boot task NOT registered — it will not start after")
         print("        a reboot. Register it later with:  m3 schedules repair")
     except Exception as e:  # noqa: BLE001 — never fail install on the task step

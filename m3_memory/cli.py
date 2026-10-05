@@ -684,21 +684,20 @@ def _elevate_schedules_windows(script: str, argv: list, sub: str) -> bool:
                        default=True):
         return False
 
-    import subprocess as _sp
+    from .elevate import ElevationBatch
+
+    label = f"m3 schedules {sub}"
+    batch = ElevationBatch()
+    batch.add(label, [sys.executable, script, *argv])
 
     def _run() -> bool:
-        arg_list = ",".join(f"'{a}'" for a in [script, *argv])
-        ps = (
-            f"$p = Start-Process -FilePath '{sys.executable}' "
-            f"-ArgumentList {arg_list} -Verb RunAs -PassThru -Wait; "
-            "exit $p.ExitCode"
-        )
-        try:
-            out = _sp.run(["powershell", "-NoProfile", "-NonInteractive",
-                           "-Command", ps], timeout=300, check=False)
-            return out.returncode == 0
-        except Exception:  # noqa: BLE001 — UAC cancelled / powershell missing
+        res = batch.run()
+        if res is None:
             return False
+        r = res.get(label, {"rc": -1, "output": ""})
+        if r["output"]:
+            print(r["output"])
+        return r["rc"] == 0
 
     return _retry_elevated(_run, what=f"elevated `m3 schedules {sub}`")
 
