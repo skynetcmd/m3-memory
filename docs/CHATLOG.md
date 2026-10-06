@@ -276,9 +276,9 @@ Prints a human-readable summary; add `--json` for machine-readable output (abrid
 {
   "unified": false,
   "db_paths": {
-    "main": "/home/you/.m3/engine/agent_memory.db",
-    "chatlog": "/home/you/.m3/engine/agent_chatlog.db",
-    "files": "/home/you/.m3/engine/files_database.db"
+    "main": "~/.m3/engine/agent_memory.db",
+    "chatlog": "~/.m3/engine/agent_chatlog.db",
+    "files": "~/.m3/engine/files_database.db"
   },
   "row_counts": {"main_chat_log_rows": 45, "chatlog_rows": 1250, "chatlog_without_embed": 203},
   "queue": {"depth": 12, "max": 20000, "last_flush_ms_ago": 850},
