@@ -193,3 +193,45 @@ def test_ensure_sync_tables_no_target_for_main_path(tmp_path, monkeypatch):
     assert "--target" not in captured["cmd"], (
         f"expected NO --target flag, got {captured['cmd']}"
     )
+
+
+def test_pending_migrations_lists_only_unapplied_versions(tmp_path, monkeypatch):
+    """`m3 doctor --fix` runs migrations only when this says one is due."""
+    mig = tmp_path / "migs"
+    mig.mkdir()
+    for v in (1, 2):
+        (mig / f"{v:03d}_step.up.sql").write_text("SELECT 1;", encoding="utf-8")
+    db = tmp_path / "agent_memory.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE schema_versions (version INTEGER PRIMARY KEY, filename TEXT)")
+    conn.execute("INSERT INTO schema_versions VALUES (1, '001_step.up.sql')")
+    conn.commit()
+    conn.close()
+    target = migrate_memory.MigrationTarget(name="main", db_path=str(db), migrations_dir=str(mig))
+    monkeypatch.setattr(migrate_memory, "targets", lambda selected="all": [target])
+    assert migrate_memory.pending_migrations() == {"main": [2]}
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO schema_versions VALUES (2, '002_step.up.sql')")
+    conn.commit()
+    conn.close()
+    assert migrate_memory.pending_migrations() == {"main": []}
+
+
+def test_pending_migrations_raises_when_it_cannot_check(tmp_path, monkeypatch):
+    """A missing migrations directory must not read as "nothing pending" or
+    as "run them": the caller reports it."""
+    target = migrate_memory.MigrationTarget(
+        name="main", db_path=str(tmp_path / "x.db"), migrations_dir=str(tmp_path / "absent"))
+    monkeypatch.setattr(migrate_memory, "targets", lambda selected="all": [target])
+    import pytest
+    with pytest.raises(FileNotFoundError):
+        migrate_memory.pending_migrations()
+
+
+def test_the_doctor_asks_the_runner_and_does_not_rebuild_its_path():
+    """The doctor's own copy of the migrations path pointed at a directory that
+    does not exist; the runner is the one owner of where migrations live."""
+    from pathlib import Path
+    src = Path(BIN_DIR, "memory", "doctor.py").read_text(encoding="utf-8")
+    assert "migrate_memory.pending_migrations()" in src
+    assert '"memory", "migrations"' not in src

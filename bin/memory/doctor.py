@@ -498,36 +498,21 @@ async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
     db_path = resolve_db_path(None)
 
     # ── Action 1: Run pending migrations ──────────────────────────────────────
-    migration_needed = diag["db"]["status"] != "online"
+    # Ask the migration runner itself which versions are unapplied, for every
+    # target it manages. A check that cannot run is recorded as an error, not
+    # read as "run them anyway", which would report success over a state that
+    # was never checked.
+    migration_needed: "bool | None" = diag["db"]["status"] != "online"
     if not migration_needed:
-        # Check whether DB version is behind the latest migration file
         try:
-            import os
-            import re
-            import sqlite3 as _sq
-            mig_dir = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "memory", "migrations",
-            )
-            file_versions = sorted(
-                int(m.group(1))
-                for fn in os.listdir(mig_dir)
-                if (m := re.match(r"^(\d+)_.*\.up\.sql$", fn))
-            )
-            latest_file = max(file_versions) if file_versions else 0
-            conn = _sq.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
-            try:
-                row = conn.execute(
-                    "SELECT MAX(CAST(version AS INTEGER)) FROM schema_versions "
-                    "WHERE CAST(version AS INTEGER) > 0"
-                ).fetchone()
-                db_ver = int(row[0]) if row and row[0] else 0
-            finally:
-                conn.close()
-            migration_needed = db_ver < latest_file
-        except Exception as e:
-            migration_needed = True
-            logger.debug("doctor --fix migration check failed: %s", e)
+            import migrate_memory
+            pending = {t: v for t, v in migrate_memory.pending_migrations().items() if v}
+            migration_needed = bool(pending)
+        except Exception as e:  # noqa: BLE001 — recorded as an error here, not swallowed
+            _record("run_migrations", "error",
+                    f"could not check for pending migrations ({type(e).__name__}: {e}); "
+                    "inspect: `python bin/migrate_memory.py status`")
+            migration_needed = None
 
     if migration_needed:
         if dry_run:
@@ -564,8 +549,8 @@ async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
                         _record("run_migrations", "error", stderr[:300])
             except Exception as e:
                 _record("run_migrations", "error", str(e))
-    else:
-        _record("run_migrations", "skipped", "DB already at latest migration version")
+    elif migration_needed is False:
+        _record("run_migrations", "skipped", "no pending migrations")
 
     # ── Action 2: Rebuild FTS5 index ──────────────────────────────────────────
     try:

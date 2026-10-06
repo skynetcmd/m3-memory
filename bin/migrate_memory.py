@@ -497,6 +497,34 @@ def current_version(conn) -> int:
     applied = get_applied_versions(conn)
     return max(applied) if applied else 0
 
+
+def pending_migrations(selected: str = "all") -> "dict[str, list[int]]":
+    """{target name: unapplied versions} for every configured target, read-only.
+
+    The one place that answers "is a migration due?" — `m3 doctor --fix` asks
+    this before running `up`. Raises when a migrations directory has no files
+    or a store cannot be read, so a caller never mistakes "could not check"
+    for "nothing pending".
+    """
+    out: dict[str, list[int]] = {}
+    for target in targets(selected):
+        migs = discover_migrations(target.migrations_dir)
+        if not migs:
+            raise FileNotFoundError(f"no migrations found in {target.migrations_dir}")
+        if not os.path.exists(target.db_path):
+            out[target.name] = sorted(migs)
+            continue
+        conn = sqlite3.connect(f"file:{target.db_path}?mode=ro", uri=True, timeout=5.0)
+        try:
+            has_table = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_versions'"
+            ).fetchone() is not None
+            applied = set(get_applied_versions(conn)) if has_table else set()
+        finally:
+            conn.close()
+        out[target.name] = sorted(v for v in migs if v not in applied)
+    return out
+
 # ── Core apply / revert ─────────────────────────────────────────────────────
 
 def _run_sql_transaction(conn, filepath: str):
