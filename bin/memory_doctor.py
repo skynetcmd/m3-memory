@@ -150,19 +150,28 @@ def main() -> int:
     if args.fix:
         import asyncio
 
+        # Same default as the report: one line per healthy check, full detail
+        # with --verbose. Repairs print either way (each probe repairs first).
+        brief = not args.verbose
+
         from memory.doctor import memory_doctor_fix_impl
 
         mode = "Dry-Run " if args.dry_run else ""
         print(f"==> Running m3-memory {mode}self-repair...")
         res = asyncio.run(memory_doctor_fix_impl(dry_run=args.dry_run))
 
-        print(f"\nRepair Summary: {res['summary'].upper()}")
-        print("-" * 50)
-        for act in res["actions"]:
-            status_char = "[OK]" if act["status"] == "ok" else "[SKIP]" if act["status"] == "skipped" else "[ERR]"
-            print(f"  {status_char} {act['action']}")
-            print(f"         Detail: {act['detail']}")
-        print("-" * 50)
+        errored = any(a["status"] not in ("ok", "skipped") for a in res["actions"])
+        if brief and not errored:
+            done = ", ".join(f"{a['action']} {a['status']}" for a in res["actions"])
+            print(f"Repair Summary: {res['summary'].upper()} ({done})")
+        else:
+            print(f"\nRepair Summary: {res['summary'].upper()}")
+            print("-" * 50)
+            for act in res["actions"]:
+                status_char = "[OK]" if act["status"] == "ok" else "[SKIP]" if act["status"] == "skipped" else "[ERR]"
+                print(f"  {status_char} {act['action']}")
+                print(f"         Detail: {act['detail']}")
+            print("-" * 50)
 
         # Shared-embedder repair lives in its own probe (it writes config, starts
         # the server, and registers the keep-alive task — actions outside the DB-
@@ -171,13 +180,13 @@ def main() -> int:
         shared_rc = 0
         if not args.skip_shared_embedder:
             from doctor import shared_embedder_probe
-            shared_rc = shared_embedder_probe.run(brief=False, fix=not args.dry_run)
+            shared_rc = shared_embedder_probe.run(brief=brief, fix=not args.dry_run)
 
         # Dashboard self-heal: kill a wedged instance, reap its stale registry
         # entry, and restart it on its recorded host/port. Dry-run only reports.
         if not args.skip_dashboard:
             from doctor import dashboard_probe
-            dashboard_probe.run(brief=False, fix=not args.dry_run)
+            dashboard_probe.run(brief=brief, fix=not args.dry_run)
 
         # Hook re-wiring is opt-in even under --fix: ~/.claude/settings.json is
         # the USER'S file (their own non-m3 hooks live there), so a bad merge
@@ -192,7 +201,7 @@ def main() -> int:
                 if env_res.get("backup"):
                     print(f"  settings.json backed up to {env_res['backup']}")
             else:
-                rc = environment_probe.run(brief=False, fix=False)
+                rc = environment_probe.run(brief=brief, fix=False)
                 if rc:
                     print("  (hook repair not attempted — re-run with "
                           "`--fix --fix-hooks` to re-wire)")
@@ -203,9 +212,9 @@ def main() -> int:
         if not args.skip_agent_paths:
             from doctor import agent_paths_probe
             if args.fix_hooks:
-                agent_paths_probe.run(brief=False, fix=not args.dry_run)
+                agent_paths_probe.run(brief=brief, fix=not args.dry_run)
             else:
-                rc = agent_paths_probe.run(brief=False, fix=False)
+                rc = agent_paths_probe.run(brief=brief, fix=False)
                 if rc:
                     print("  (agent stale-payload rewrite not attempted — re-run "
                           "with `--fix --fix-hooks`)")
@@ -218,9 +227,9 @@ def main() -> int:
         if not args.skip_claude_mcp:
             from doctor import claude_mcp_probe
             if args.fix_hooks:
-                claude_mcp_probe.run(brief=False, fix=not args.dry_run)
+                claude_mcp_probe.run(brief=brief, fix=not args.dry_run)
             else:
-                claude_mcp_probe.run(brief=False, fix=False)
+                claude_mcp_probe.run(brief=brief, fix=False)
                 print("  (Claude single-server convergence not attempted — re-run "
                       "with `--fix --fix-hooks`)")
 

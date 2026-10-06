@@ -215,3 +215,12 @@ def test_doctor_cli_does_not_print_repair_results_twice():
     each action duplicated every line."""
     src = (Path(_BIN) / "memory_doctor.py").read_text(encoding="utf-8")
     assert 'getLogger("memory.doctor").setLevel(logging.INFO)' not in src
+
+
+def test_doctor_fix_uses_the_brief_default():
+    """`m3 doctor --fix` printed every healthy section in full (the report-only
+    doctor is brief unless --verbose); the --fix branch must follow the same flag."""
+    src = (Path(_BIN) / "memory_doctor.py").read_text(encoding="utf-8")
+    fix_branch = src[src.index("    if args.fix:\n"):src.index('if res["summary"] == "failed"')]
+    assert "brief=False" not in fix_branch
+    assert "brief = not args.verbose" in fix_branch
