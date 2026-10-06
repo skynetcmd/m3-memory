@@ -25,6 +25,12 @@ m3u = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(m3u)
 
 
+@pytest.fixture(autouse=True)
+def _step3_runs_nothing(monkeypatch):
+    """Step 3 captures `m3 stop --quiet`; tests stub `run`, so stub this too."""
+    monkeypatch.setattr(m3u, "run_captured", lambda cmd, **k: "")
+
+
 def _mk(base: pathlib.Path, rel: str) -> pathlib.Path:
     p = base / rel
     p.mkdir(parents=True, exist_ok=True)
@@ -630,3 +636,19 @@ def test_a_changed_version_tells_the_user_to_restart_agents():
     lines = m3u.summary_lines(old="1", new="1", unchanged=True, agents_stopped=0,
                               failed_step="", rc=0, log="")
     assert not any("agents" in ln for ln in lines)
+
+
+
+@pytest.mark.parametrize("survivor", ["", "  stopped cognitive-loop (pid 9)\n"])
+def test_step_three_is_one_line_when_nothing_survived(tmp_path, monkeypatch, capsys, survivor):
+    scripts, pkg = _pip_install(tmp_path)
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    monkeypatch.setattr(m3u, "run", lambda cmd, **k: 0)
+    monkeypatch.setattr(m3u, "run_captured", lambda cmd, **k: survivor)
+    m3u.main(["--yes"])
+    out = capsys.readouterr().out
+    assert ("[3/5] no daemon survived on old code" in out) is (survivor == "")
+    assert ("stopped cognitive-loop (pid 9)" in out) is (survivor != "")

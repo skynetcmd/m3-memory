@@ -170,7 +170,7 @@ def test_a_surviving_embed_server_is_left_running_not_a_failure(fake_halt, capsy
     assert _run() == 0
     out = capsys.readouterr().out
     assert "stopped embed-server" not in out
-    assert "embed-server (pid 2) left running: it runs as administrator" in out
+    assert "embed-server (pid 2) left running (it runs as administrator); it holds no data." in out
     assert "Access is denied" not in out                # stated in words, not raw OS text
     assert "stopped 1/1 writer(s); 1 left running (no database)" in out
 

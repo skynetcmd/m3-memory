@@ -538,6 +538,19 @@ def run(cmd: list[str], *, dry: bool, timeout: int = 900,
         return 124
 
 
+def run_captured(cmd: list[str], *, timeout: int = 900) -> str:
+    """Run ``cmd`` and return its combined output, for the caller to print only
+    when there is something to say. A failure to launch comes back as text."""
+    try:
+        cp = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",  # nosec B603
+                            errors="replace", timeout=timeout)
+        return (cp.stdout or "") + (cp.stderr or "")
+    except OSError:
+        return f"      !! could not run: {cmd[0]}\n"
+    except subprocess.TimeoutExpired:
+        return f"      !! timed out after {timeout}s\n"
+
+
 def summary_lines(*, old: str | None, new: str | None, unchanged: bool,
                   agents_stopped: int, failed_step: str, rc: int, log: str) -> list[str]:
     """The end-of-run summary: the lines a user needs after the step output
@@ -810,9 +823,18 @@ def main(argv: list[str] | None = None) -> int:
     # (`m3 stop` already owns the per-OS mechanism), and non-fatal because
     # "nothing running" is a fine state.
     if not args.skip_stop:
-        print("\n[3/5] stopping any daemon that survived on OLD code ...")
-        # --quiet: step 1 already reported anything left running.
-        run([m3, "stop", "--quiet"], dry=dry, timeout=180)
+        # --quiet: step 1 already reported anything left running. Captured so a
+        # step that found nothing reads as one line, not a header and a command.
+        if dry:
+            print("\n[3/5] stopping any daemon that survived on OLD code ...")
+            run([m3, "stop", "--quiet"], dry=dry, timeout=180)
+        else:
+            out = run_captured([m3, "stop", "--quiet"], timeout=180)
+            if out.strip():
+                print("\n[3/5] stopping daemons that survived on OLD code:")
+                print(out.rstrip())
+            else:
+                print("\n[3/5] no daemon survived on old code")
 
     # --force-quiesce: step 1's `m3 stop` is best-effort and non-fatal, so a
     # writer that did not exit would leave `setup --non-interactive` waiting on

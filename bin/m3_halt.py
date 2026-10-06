@@ -569,11 +569,11 @@ def describe_left_running(role: str, pid: object, error: object) -> str:
     """
     text = " ".join(str(error or "").split())
     if "access is denied" in text.lower() or "access denied" in text.lower():
-        why = "it runs as administrator, so stopping it needs an elevated shell"
+        why = "it runs as administrator"
     else:
         why = text or "it is still running"
-    return (f"{base_role(role)} (pid {pid}) left running: {why}. It holds no database "
-            f"and keeps its current binary until restarted.")
+    # doctor reports it separately if it runs an outdated binary.
+    return f"{base_role(role)} (pid {pid}) left running ({why}); it holds no data."
 
 
 def list_all_db_writers(engine_root: Optional[str] = None) -> list[ProcInfo]:

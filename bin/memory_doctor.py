@@ -242,6 +242,8 @@ def main() -> int:
             from doctor import plugin_version_probe
             prv = plugin_version_probe.repair(dry_run=args.dry_run)
             for act in prv.get("actions", []):
+                if brief and act["action"] == "marketplace" and act["status"] == "ok":
+                    continue   # the plugin line that follows carries the outcome
                 print(f"  [{act['status']}] plugin {act['action']}: {act['detail']}")
 
         if res["summary"] == "failed" or shared_rc != 0:
