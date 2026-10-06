@@ -388,11 +388,25 @@ def launcher_holders(locked: list[pathlib.Path]) -> tuple[list[int], bool]:
 
 
 def interactive_console() -> bool:
-    """True when a person is at this console (stdin is a terminal)."""
+    """True when a person is at this console.
+
+    On Windows, isatty() is not enough: the NUL device reports itself as a
+    character device, so `< NUL` (how scripts and schedulers detach stdin) reads
+    as a terminal. GetConsoleMode succeeds only for a real console input handle.
+    """
     try:
-        return sys.stdin is not None and sys.stdin.isatty()
+        if sys.stdin is None or not sys.stdin.isatty():
+            return False
     except (AttributeError, ValueError):
         return False
+    if os.name != "nt":
+        return True
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    handle = kernel32.GetStdHandle(wintypes.DWORD(-10 & 0xFFFFFFFF))  # STD_INPUT_HANDLE
+    mode = wintypes.DWORD()
+    return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
 
 
 def wait_for_exit(pids: list[int], timeout: float = 60.0) -> bool:
