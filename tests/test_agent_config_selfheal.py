@@ -296,3 +296,22 @@ def test_non_claude_hosts_still_get_their_mcpservers_entry(canonical, tmp_path, 
         "a non-Claude host lost its mcpServers registration"
     )
     assert msg and msg.lstrip().startswith("[+]")
+
+
+def test_opencode_is_not_treated_as_an_mcpservers_host():
+    """The repair sweep over this list ADDED `mcpServers.memory` to opencode.json,
+    which OpenCode never reads (it uses `mcp`)."""
+    assert "OpenCode" not in [label for label, _ in I._known_agent_settings()]
+
+
+def test_wiring_opencode_prunes_the_unused_mcpservers_entry(tmp_path, monkeypatch):
+    cfg = tmp_path / "opencode.json"
+    cfg.write_text(json.dumps({
+        "mcp": {"memory": {"type": "local", "command": ["m3"], "enabled": True}},
+        "mcpServers": {"memory": {"command": "python"}, "other": {"command": "x"}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(W, "_opencode_config_paths", lambda: [cfg])
+    W._wire_opencode()
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert data["mcpServers"] == {"other": {"command": "x"}}      # only m3's entry goes
+    assert data["mcp"]["memory"]["command"] == ["m3"]

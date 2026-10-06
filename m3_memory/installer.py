@@ -1974,11 +1974,9 @@ def _known_agent_settings() -> "list[tuple[str, Path]]":
         ("Claude Code", home / ".claude" / "settings.json"),
         ("Gemini CLI",  home / ".gemini" / "settings.json"),
         ("Antigravity", home / ".gemini" / "antigravity-cli" / "settings.json"),
-        # OpenCode uses opencode.json under XDG ~/.config (or %APPDATA% on
-        # Windows), NOT ~/.opencode/settings.json — the old path matched nothing,
-        # so the duplicate-registration detector skipped OpenCode entirely. Use
-        # the canonical resolver's primary path (doctor/wizard already use it).
-        ("OpenCode",    home / ".config" / "opencode" / "opencode.json"),
+        # Not OpenCode: its opencode.json registers servers under `mcp`, not
+        # `mcpServers`, so a repair over this list would write an entry OpenCode
+        # never reads. setup_wizard._wire_opencode owns that file.
         ("Aider",       home / ".aider" / "settings.json"),
         ("Cursor",      _cursor_config_path()),
         ("Cline",       _cline_config_path()),

@@ -31,6 +31,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
 import m3_memory.setup_wizard as sw  # noqa: E402
 
+# The real check, captured before the autouse fixture below pins it.
+_REAL_OPENCLAW_CURRENT = sw._openclaw_entry_current
+
 _REAL_BANNER = "OpenClaw 2026.3.28 (f9b1079)"
 _FAKE_EXE = "/usr/local/bin/openclaw"       # POSIX-shaped on purpose: the test
 _FAKE_EXE_WIN = "C:/npm/openclaw.CMD"       # must not bake in a .CMD assumption
@@ -303,3 +306,24 @@ def test_spec_is_complete_because_mcp_set_overwrites(wired):
     spec = _payload(calls)
     for k in ("command", "env", "transport", "enabled"):
         assert k in spec, f"incomplete spec would silently drop {k}: {spec}"
+
+
+@pytest.fixture(autouse=True)
+def _not_already_registered(monkeypatch):
+    """The "already registered" checks read the developer's real ~/.claude.json
+    and ~/.openclaw; pin them so these tests exercise registration everywhere."""
+    from m3_memory import setup_wizard as _sw
+    monkeypatch.setattr(_sw, "_claude_registration_current", lambda env: False)
+    monkeypatch.setattr(_sw, "_openclaw_entry_current", lambda spec: False)
+
+
+def test_an_identical_openclaw_entry_is_not_rewritten(monkeypatch, tmp_path, capsys):
+    """`openclaw mcp set` with the same entry only bumps lastTouchedAt and
+    replaces OpenClaw's single .bak; skip it."""
+    spec = {"command": "m3", "enabled": True, "transport": "stdio"}
+    cfg = tmp_path / ".openclaw" / "openclaw.json"
+    cfg.parent.mkdir()
+    cfg.write_text(json.dumps({"mcp": {"servers": {"m3_memory": spec}}}), encoding="utf-8")
+    monkeypatch.setattr(sw.Path, "home", classmethod(lambda cls: tmp_path))
+    assert _REAL_OPENCLAW_CURRENT(spec) is True
+    assert _REAL_OPENCLAW_CURRENT({**spec, "enabled": False}) is False

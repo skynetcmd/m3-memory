@@ -145,3 +145,12 @@ def test_claude_mcp_add_already_exists_is_success(monkeypatch, capsys, rc, blob,
     assert sw._wire_claude("both") is expect
     if rc != 0 and expect:
         assert "already registered" in capsys.readouterr().out.lower()
+
+
+@pytest.fixture(autouse=True)
+def _not_already_registered(monkeypatch):
+    """The "already registered" checks read the developer's real ~/.claude.json
+    and ~/.openclaw; pin them so these tests exercise registration everywhere."""
+    from m3_memory import setup_wizard as _sw
+    monkeypatch.setattr(_sw, "_claude_registration_current", lambda env: False)
+    monkeypatch.setattr(_sw, "_openclaw_entry_current", lambda spec: False)

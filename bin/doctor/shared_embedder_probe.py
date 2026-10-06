@@ -72,7 +72,6 @@ def _known_agent_settings() -> "list[tuple[str, str]]":
         ("Claude Code", j(home, ".claude", "settings.json")),
         ("Gemini CLI",  j(home, ".gemini", "settings.json")),
         ("Antigravity", j(home, ".gemini", "antigravity-cli", "settings.json")),
-        ("OpenCode",    j(home, ".opencode", "settings.json")),
         ("Aider",       j(home, ".aider", "settings.json")),
     ]
 

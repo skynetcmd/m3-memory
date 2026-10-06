@@ -944,16 +944,12 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
         all_procs = live = halt.list_all_db_writers()
 
     informational = [p for p in all_procs if p not in live]
-    if informational:
+    # `m3 upgrade` already reported these in its first step. A server left on a
+    # replaced binary is reported, and its restart queued, by the embedder step
+    # (_restart_stale_embed_server) when that is actually the case.
+    if informational and not _called_by_upgrade():
         noted = ", ".join(f"{p.role}(pid {p.pid})" for p in informational)
         _say(f"  note: {noted} running but holds no DB — not a quiesce blocker")
-        # "Not a quiesce blocker" answers only the DB question. An upgrade also
-        # REPLACES these processes' binaries on disk, and they keep running the
-        # old image until restarted — so say so rather than letting the note
-        # read as "nothing to do here". The embedder step restarts a stale
-        # service itself; this makes the situation visible if it doesn't.
-        _say("        (these keep running their OLD binary until restarted — "
-             "the embedder step below handles that)")
 
     if not live:
         _ok("  no autonomous m3 DB-writers running (nothing to quiesce)")
@@ -1590,7 +1586,7 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
     Returns False ONLY for fatal issues that would make install-m3 hang
     (running mcp-memory.exe + non-interactive without --force-kill-mcp).
     """
-    _say("Step 0/5: pre-install checks (B15)")
+    _step(0, "pre-install checks (B15)")
     ok = True
 
     # ── Probe 0: decoupled paths and FIPS configuration ─────────────────
@@ -2045,7 +2041,7 @@ def _step_install_m3(plan: SetupPlan) -> bool:
     """
     from m3_memory.installer import find_bridge
 
-    _say("Step 1/5: fetching m3-memory system payload (install-m3)")
+    _step(1, "fetching m3-memory system payload (install-m3)")
 
     # If find_bridge() already resolves (packaged payload or dev checkout),
     # skip the fetch. The payload is already present.
@@ -2117,7 +2113,7 @@ def _step_cpu_sovereign_embedder() -> bool:
       3. registers it as a systemd / launchd / Windows Service with concurrency=2
       4. starts it
     """
-    _say("Step 3/5: installing sovereign CPU embedder (BGE-M3 on port 8082)")
+    _step(3, "installing sovereign CPU embedder (BGE-M3 on port 8082)")
     # Lazy import: setup_wizard is imported during install, and embedder_admin
     # pulls in the payload-root helpers (§2 cycle-breaking via lazy imports).
     from m3_memory.embedder_admin import EXIT_REGISTERED_NOT_RUNNING
@@ -2248,6 +2244,7 @@ def _step_rust_core(plan: "SetupPlan") -> bool:
         _warn(f"could not probe the native core ({e}); continuing")
         return False
 
+    _step(2, "native core m3-core-rs (shared by every embedder tier)")
     try:
         if is_rust_core_current():
             cur = active_embedder_tier()
@@ -2257,8 +2254,7 @@ def _step_rust_core(plan: "SetupPlan") -> bool:
     except Exception:  # noqa: BLE001 — fall through and (re)install
         pass
 
-    _say(f"Step 2/5: installing native core m3-core-rs {M3_CORE_RS_VERSION} "
-         "(shared by every embedder tier)")
+    _say(f"  installing m3-core-rs {M3_CORE_RS_VERSION}")
     cmd = _m3_cli("embedder", "install-gpu")
     if not plan.allow_native_source_build:
         cmd.append("--no-source-fallback")
@@ -2300,7 +2296,7 @@ def _step_gpu_embedder(plan: "SetupPlan") -> bool:
     to pure-Python instead of triggering a surprise multi-minute compile.
     Always non-fatal — m3 works either way.
     """
-    _say("Step 3/5: installing Project Oxidation native in-process embedder")
+    _say("  tier 1: installing the native in-process embedder (Project Oxidation)")
     cmd = _m3_cli("embedder", "install-gpu")
     if not plan.allow_native_source_build:
         cmd.append("--no-source-fallback")
@@ -2613,6 +2609,13 @@ def _wire_claude(capture_mode: str) -> bool:
     # roots-less install has an empty env dict and registers fine.
     add_cmd += ["--", "m3_memory", "m3"]
 
+    if _claude_registration_current(env):
+        # Already registered with these roots and no legacy entry: re-adding
+        # would only rewrite ~/.claude.json. Still pin the plugin disable.
+        _disable_claude_plugin_server()
+        _ok("  Claude Code: m3 memory server already registered (mcp__m3_memory__)")
+        return True
+
     _say("  · registering m3 memory server in Claude Code (mcp__m3_memory__, user scope)")
     # Drop the legacy roots-less `memory` entry a prior setup created (migration),
     # then drop any existing `m3_memory` so the re-add REFRESHES the env (root
@@ -2639,6 +2642,20 @@ def _wire_claude(capture_mode: str) -> bool:
         print("     plugin instead, remove \"plugin:m3:memory\" from disabledMcpServers")
         print("     in ~/.claude/settings.json.")
     return reg_ok or hooks_ok
+
+
+def _claude_registration_current(env: "dict[str, str]") -> bool:
+    """True when ~/.claude.json already registers `m3_memory` as `m3` with
+    exactly ``env`` and carries no legacy `memory` entry to migrate."""
+    try:
+        with open(Path(os.path.expanduser("~")) / ".claude.json", encoding="utf-8") as fh:
+            servers = (json.load(fh) or {}).get("mcpServers") or {}
+    except (OSError, ValueError, AttributeError):
+        return False
+    entry = servers.get("m3_memory")
+    return (isinstance(entry, dict) and "memory" not in servers
+            and entry.get("command") == "m3" and not entry.get("args")
+            and (entry.get("env") or {}) == env)
 
 
 def _claude_mcp_remove(name: str) -> None:
@@ -2820,6 +2837,7 @@ def _wire_opencode() -> bool:
         except json.JSONDecodeError:
             _warn(f"{cfg_path} is unreadable; skipping OpenCode wiring")
             continue
+        _prune_opencode_mcpservers(cfg_path, existing)
         mcp = existing.setdefault("mcp", {})
         cur = mcp.get("memory")
         if cur == canonical:
@@ -2855,6 +2873,22 @@ def _wire_opencode() -> bool:
         )
         _say(f"  · wrote OpenCode config to {cfg_path}")
     return True
+
+
+def _prune_opencode_mcpservers(cfg_path: Path, data: dict) -> None:
+    """Drop m3's `mcpServers.memory` entry from opencode.json: OpenCode reads
+    `mcp` only, so that entry is inert. Writes only when the entry is present."""
+    servers = data.get("mcpServers")
+    if not isinstance(servers, dict) or "memory" not in servers:
+        return
+    del servers["memory"]
+    if not servers:
+        del data["mcpServers"]
+    try:
+        cfg_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        _say(f"  · removed an unused m3 `mcpServers` entry from {cfg_path}")
+    except OSError as e:
+        _warn(f"could not tidy {cfg_path}: {e}")
 
 
 def _wire_antigravity() -> bool:
@@ -2933,9 +2967,9 @@ def _openclaw_startup_tools() -> "list[str]":
     _ensure_payload_importable()
     import logging  # noqa: PLC0415
 
-    # Importing the bridge configures logging at INFO and binds the store, which
-    # printed `M3_SDK: [INFO] ...` lines into setup's output. Drop INFO during
-    # the import and undo the logging setup it leaves behind in this process.
+    # Importing the bridge configures logging at INFO and binds the store, whose
+    # INFO lines do not belong in setup's output. Drop INFO during the import and
+    # undo the logging setup it leaves behind in this process.
     root = logging.getLogger()
     handlers, level = list(root.handlers), root.level
     logging.disable(logging.INFO)
@@ -3125,6 +3159,12 @@ def _wire_openclaw() -> bool:
     payload = json.dumps(spec, separators=(",", ":"), sort_keys=True)
     argv = [exe, "mcp", "set", _OPENCLAW_SERVER_NAME, payload]
 
+    if _openclaw_entry_current(spec):
+        # Writing an identical entry only bumps OpenClaw's lastTouchedAt and
+        # replaces its single .bak with a copy of the same config.
+        _ok(f"  OpenClaw: m3 memory server already registered (mcp__{_OPENCLAW_SERVER_NAME}__)")
+        return True
+
     _say(f"  · registering m3 memory server in OpenClaw (mcp__{_OPENCLAW_SERVER_NAME}__, "
          f"{len(startup) or 'all'} tools exposed)")
     ok = _openclaw_mcp_set(argv)
@@ -3136,6 +3176,16 @@ def _wire_openclaw() -> bool:
             print("     name and `tools_load_domain` loads a whole domain on demand.")
         print(f"     Verify: openclaw mcp show {_OPENCLAW_SERVER_NAME}")
     return ok
+
+
+def _openclaw_entry_current(spec: dict) -> bool:
+    """True when ~/.openclaw/openclaw.json already holds exactly ``spec`` for m3."""
+    try:
+        with open(Path.home() / ".openclaw" / "openclaw.json", encoding="utf-8") as fh:
+            servers = ((json.load(fh) or {}).get("mcp") or {}).get("servers") or {}
+    except (OSError, ValueError, AttributeError):
+        return False
+    return servers.get(_OPENCLAW_SERVER_NAME) == spec
 
 
 # Files copied into the user's hermes-agent plugin dir. README/test stay behind
@@ -3297,18 +3347,20 @@ def _register_dashboard_task(port: int = 8088) -> None:
         print("    [!] boot task not registered (install_schedules.py not found);")
         print(f'        add it later with `python bin/install_schedules.py --add dashboard --port {port}`.')
         return
-    print(f"    Registering the dashboard to auto-start on boot (windowless, :{port})...")
     try:
         proc = subprocess.run(
             [_python_exe(), script, "--add", "dashboard", "--port", str(port)],
             check=False, capture_output=True, text=True,
             **_hidden_window_kwargs(),
         )
-        if proc.stdout:
-            print(proc.stdout, end="")
+        # The scheduler's step-by-step output (platform, project root, each
+        # check) is only worth showing when something needs attention.
+        out = proc.stdout or ""
+        if proc.returncode != 0 or any(m in out for m in ("[WARN]", "[FAIL]", "[!]")):
+            print(out, end="")
         if proc.returncode == 0:
-            print(f"    [OK] dashboard will start on boot → http://127.0.0.1:{port}")
-            print("         (running now: `m3 dashboard`; stop: `m3 dashboard --stop`)")
+            print(f"    [OK] dashboard starts on boot → http://127.0.0.1:{port} "
+                  "(stop: `m3 dashboard --stop`)")
         else:
             print("    [!] boot task not registered (see above). The dashboard still")
             print(f'        runs on demand: `m3 dashboard`. Retry: `python bin/install_schedules.py --add dashboard --port {port}`')
@@ -3320,10 +3372,10 @@ def _register_dashboard_task(port: int = 8088) -> None:
 def _step_wire_agents(plan: SetupPlan, *, non_interactive: bool = False) -> bool:
     """Wire MCP entries for every selected agent."""
     if not plan.targets.any():
-        _say("Step 4/5: agent wiring kept as it is" if plan.agents_kept
-             else "Step 4/5: no agents selected — skipping wiring")
+        _step(4, "agent wiring kept as it is" if plan.agents_kept
+              else "no agents selected — skipping wiring")
         return True
-    _say("Step 4/5: wiring selected agents")
+    _step(4, "wiring selected agents")
     if plan.targets.claude:
         _wire_claude(plan.capture_mode)
     if plan.targets.gemini:
@@ -3716,7 +3768,7 @@ def _step_doctor(plan=None) -> bool:
     changes is that the user is TOLD, and the exit code says so, rather than
     being handed a green summary over a red system.
     """
-    _say("Step 5/5: verifying the install (m3 doctor)")
+    _step(5, "verifying the install (m3 doctor)")
     argv = _m3_cli("doctor")
     # Do NOT grade a subsystem the user just declined. `--no-shared-embedder`
     # makes setup print "SKIPPED (not installed). This is fine", and then an
@@ -3979,7 +4031,7 @@ def run_setup(args: argparse.Namespace) -> int:
             # `m3 upgrade` runs `m3 doctor --fix --fix-hooks` next and reports
             # its verdict. A report-only doctor here warned about state that
             # step then repaired.
-            _say("Step 5/5: verification follows in `m3 upgrade` (m3 doctor --fix --fix-hooks)")
+            _step(5, "verification follows in `m3 upgrade` (m3 doctor --fix --fix-hooks)")
             verified = True
         else:
             verified = _step_doctor(plan)
@@ -4019,6 +4071,12 @@ def _called_by_upgrade() -> bool:
     unknown flag but ignores an unknown variable.
     """
     return os.environ.get(UPGRADE_CALLER_ENV) == "upgrade"
+
+
+def _step(n: int, text: str) -> None:
+    """A numbered setup step header. Under `m3 upgrade` it is labelled as
+    setup's, since the upgrade numbers its own steps around it."""
+    _say(f"{'setup step' if _called_by_upgrade() else 'Step'} {n}/5: {text}")
 
 
 def _lower_halt() -> None:

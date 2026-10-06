@@ -1650,3 +1650,64 @@ def test_the_plan_is_shown_only_when_setup_is_run_directly(monkeypatch, capsys, 
         monkeypatch.delenv(setup_wizard.UPGRADE_CALLER_ENV, raising=False)
     setup_wizard.run_setup(argparse.Namespace(non_interactive=True))
     assert ("Plan:" in capsys.readouterr().out) is not from_upgrade
+
+
+class _HaltWithEmbedServer(_FakeHalt):
+    """An embed server that holds no DB: listed, but not blocking."""
+    def __init__(self):
+        super().__init__(live=[], quiesce_results=[])
+
+    def list_all_db_writers(self):
+        return [_FakeProc("embed-server(elevated?)", 4242)]
+
+    def list_blocking_db_writers(self):
+        return []
+
+
+@pytest.mark.parametrize("from_upgrade", [False, True])
+def test_a_non_blocking_embed_server_is_noted_without_promises(monkeypatch, capsys, from_upgrade):
+    """The note claimed every such server runs an OLD binary that the embedder
+    step "handles"; the embedder step reports a stale one itself. Under
+    `m3 upgrade` the server was already reported by its first step."""
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: _HaltWithEmbedServer())
+    if from_upgrade:
+        monkeypatch.setenv(setup_wizard.UPGRADE_CALLER_ENV, "upgrade")
+    else:
+        monkeypatch.delenv(setup_wizard.UPGRADE_CALLER_ENV, raising=False)
+    assert setup_wizard._quiesce_db_writers(_q_args()) is True
+    out = capsys.readouterr().out
+    assert "OLD binary" not in out
+    assert ("not a quiesce blocker" in out) is not from_upgrade
+
+
+def test_step_headers_are_numbered_in_order_and_labelled_under_upgrade(monkeypatch, capsys):
+    """Step 2 printed only when the core was installed, so a current core went
+    1/5 -> 3/5; inside `m3 upgrade` "[4/5]", setup's own "Step N/5" read as the
+    upgrade's steps."""
+    import re
+    src = Path(setup_wizard.__file__).read_text(encoding="utf-8")
+    assert not re.search(r'_say\(f?"Step \d/5', src), "step headers go through _step()"
+    assert sorted(set(int(n) for n in re.findall(r"_step\((\d),", src))) == [0, 1, 2, 3, 4, 5]
+    monkeypatch.setenv(setup_wizard.UPGRADE_CALLER_ENV, "upgrade")
+    setup_wizard._step(2, "native core")
+    monkeypatch.delenv(setup_wizard.UPGRADE_CALLER_ENV)
+    setup_wizard._step(2, "native core")
+    out = capsys.readouterr().out
+    assert "setup step 2/5: native core" in out and "Step 2/5: native core" in out
+
+
+@pytest.mark.parametrize("stdout,rc,shown", [
+    ("M3 Memory: Detecting platform... Windows\n[OK] AgentOS_Dashboard: registered\n", 0, False),
+    ("[WARN] AgentOS_Dashboard: needs an elevated shell\n", 0, True),
+    ("[FAIL] schtasks refused\n", 1, True),
+])
+def test_dashboard_registration_shows_detail_only_when_it_matters(monkeypatch, capsys, tmp_path,
+                                                                    stdout, rc, shown):
+    (tmp_path / "install_schedules.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(setup_wizard, "_bin_dir", lambda: tmp_path)
+    monkeypatch.setattr(setup_wizard.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=rc, stdout=stdout, stderr=""))
+    setup_wizard._register_dashboard_task(8088)
+    out = capsys.readouterr().out
+    assert (stdout.strip() in out) is shown
+    assert ("dashboard starts on boot" in out) is (rc == 0)

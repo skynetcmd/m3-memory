@@ -28,6 +28,10 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
 
+# The real check, captured before the autouse fixture at the end pins it.
+from m3_memory.setup_wizard import _claude_registration_current as _REAL_CLAUDE_CURRENT  # noqa: E402
+
+
 @pytest.fixture(autouse=True)
 def _guard_repo_writes(monkeypatch):
     """Apply the repo-write guard to EVERY test in this module.
@@ -320,3 +324,28 @@ def test_a_dry_run_writes_and_announces_nothing(monkeypatch, tmp_path, capsys):
     gc.install_claude_settings(settings_path=str(settings), dry_run=True)
     assert writes == []
     assert "Generated" not in capsys.readouterr().out
+
+
+@pytest.fixture(autouse=True)
+def _not_already_registered(monkeypatch):
+    """The "already registered" checks read the developer's real ~/.claude.json
+    and ~/.openclaw; pin them so these tests exercise registration everywhere."""
+    from m3_memory import setup_wizard as _sw
+    monkeypatch.setattr(_sw, "_claude_registration_current", lambda env: False)
+    monkeypatch.setattr(_sw, "_openclaw_entry_current", lambda spec: False)
+
+
+def test_claude_registration_is_current_only_when_identical(monkeypatch, tmp_path):
+    from m3_memory import setup_wizard as sw
+    monkeypatch.setattr(sw.os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+    env = {"M3_ENGINE_ROOT": "/e", "M3_CONFIG_ROOT": "/c"}
+    entry = {"type": "stdio", "command": "m3", "args": [], "env": env}
+
+    def write(servers):
+        (tmp_path / ".claude.json").write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
+
+    write({"m3_memory": entry})
+    assert _REAL_CLAUDE_CURRENT(env) is True
+    assert _REAL_CLAUDE_CURRENT({**env, "M3_ENGINE_ROOT": "/other"}) is False
+    write({"m3_memory": entry, "memory": {"command": "python"}})   # legacy entry to migrate
+    assert _REAL_CLAUDE_CURRENT(env) is False
