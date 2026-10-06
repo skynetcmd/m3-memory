@@ -142,9 +142,7 @@ def _hook_env_prefix(engine_root: str, config_root: str) -> str:
 def generate_configs():
     """Generates gemini-settings.json and claude-settings.json from templates."""
     # m3_repo_root  = the repo directory (where bin/ lives)
-    # m3_state_root = parent of repo = M3_MEMORY_ROOT for bridge env vars
     m3_repo_root  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    m3_state_root = os.path.dirname(m3_repo_root)
     config_dir    = os.path.join(m3_repo_root, "config")
 
     python_cmd = _resolve_python_cmd(m3_repo_root)
@@ -211,7 +209,7 @@ def generate_configs():
     # Decoupled roots (CLAUDE.md "Split-brain hazard"): the MCP server does NOT
     # inherit the shell env, so its env block AND the capture hooks must carry the
     # DATA roots explicitly. Resolve them the way the rest of m3 does — NEVER from
-    # the code location (m3_state_root is the wheel's parent = site-packages under
+    # the code location (the repo's parent is site-packages under
     # an installed layout, which would point the server at a nonexistent
     # site-packages/engine and silently orphan the real DB on the next restart).
     try:
@@ -346,7 +344,8 @@ def generate_configs():
         "mcpServers": mcp_servers,
     }
     _write_json(os.path.join(config_dir, "claude-settings.json"), claude)
-    print(f"Generated claude-settings.json ({python_cmd}, M3_MEMORY_ROOT={m3_state_root})")
+    print(f"Generated claude-settings.json ({python_cmd}, engine root {engine_root}, "
+          f"config root {config_root})")
     generate_configs._last_claude = claude  # reused by install_claude_settings()
 
     # ── gemini-settings.json ──────────────────────────────────────────────────

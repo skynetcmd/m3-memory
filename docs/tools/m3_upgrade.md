@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_upgrade.py
-sha1: e22f56038190
-mtime_utc: 2026-10-05T10:40:55.834768+00:00
-generated_utc: 2026-10-05T10:41:02.710869+00:00
+sha1: f17db3168ade
+mtime_utc: 2026-10-06T03:11:42.533582+00:00
+generated_utc: 2026-10-06T03:13:04.256484+00:00
 private: false
 ---
 
@@ -59,8 +59,8 @@ is stopped or replaced.
 
 ## Entry points
 
-- `def run()` (line 375)
-- `def main()` (line 391)
+- `def run()` (line 384)
+- `def main()` (line 400)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -72,6 +72,7 @@ is stopped or replaced.
 | `--dry-run` | Show the plan; change nothing. | `False` |  | store_true |  |
 | `--skip-stop` | Do not stop DB writers first. | `False` |  | store_true |  |
 | `--yes` | Do not prompt (for scripted use). | `False` |  | store_true |  |
+| `--from-pypi` | pipx installs: reinstall from PyPI, moving the recorded source off a local wheel or path. | `False` |  | store_true |  |
 
 ---
 
@@ -93,9 +94,9 @@ _(none detected)_
 
 - `subprocess.run()  → `[exe, '--version']`` (line 84)
 - `subprocess.run()  → `[sys.executable, '-c', code]`` (line 165)
-- `subprocess.run()  → `cmd`` (line 382)
+- `subprocess.run()  → `cmd`` (line 391)
 - `subprocess.run()` (line 109)
-- `subprocess.run()` (line 513)
+- `subprocess.run()` (line 532)
 
 
 ---

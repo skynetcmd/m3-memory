@@ -261,11 +261,20 @@ def source_is_missing_path(spec: str) -> bool:
     return looks_local and not os.path.exists(os.path.expanduser(s))
 
 
-def upgrade_command(method: str, python: str = sys.executable) -> list[str] | None:
+def upgrade_command(method: str, python: str = sys.executable,
+                    from_pypi: bool = False) -> list[str] | None:
     """The package-level upgrade command for a method, or None when we must not
-    run one (plugin-managed or undetermined installs)."""
+    run one (plugin-managed or undetermined installs).
+
+    ``from_pypi`` (pipx only): reinstall from the PyPI name, which also moves the
+    source pipx records from a wheel/path to PyPI. pip installs already resolve
+    against the index, so the flag changes nothing for them.
+    """
     if method == PIPX:
-        return [shutil.which("pipx") or "pipx", "upgrade", "m3-memory"]
+        pipx = shutil.which("pipx") or "pipx"
+        if from_pypi:
+            return [pipx, "install", "--force", "m3-memory"]
+        return [pipx, "upgrade", "m3-memory"]
     if method == PIP:
         return [python, "-m", "pip", "install", "--upgrade", "m3-memory"]
     if method == PIP_USER:
@@ -395,7 +404,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="Show the plan; change nothing.")
     ap.add_argument("--skip-stop", action="store_true", help="Do not stop DB writers first.")
     ap.add_argument("--yes", action="store_true", help="Do not prompt (for scripted use).")
+    ap.add_argument("--from-pypi", dest="from_pypi", action="store_true",
+                    help="pipx installs: reinstall from PyPI, moving the recorded "
+                         "source off a local wheel or path.")
     args = ap.parse_args(argv)
+    # Line-buffer our own output: the steps run child processes that write to the
+    # same stream, and block-buffered prints would appear after their output.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)  # type: ignore[union-attr]
+    except (AttributeError, ValueError):
+        pass
 
     m3 = shutil.which("m3") or shutil.which("mcp-memory")
     if not m3:
@@ -406,23 +424,24 @@ def main(argv: list[str] | None = None) -> int:
     method, evidence = detect_install_method(pkg)
     print(f"[detect] install method: {method}")
     print(f"         evidence      : {evidence}")
+    spec = pipx_source(pkg) if method == PIPX else None
     if method == PIPX:
-        spec = pipx_source(pkg)
         print(f"         source        : {spec or 'unknown (no pipx metadata)'}")
-        if spec and not source_is_pypi(spec):
+        if args.from_pypi:
+            print("         --from-pypi   : reinstalling from PyPI (the source becomes m3-memory)")
+        elif spec and not source_is_pypi(spec):
             if source_is_missing_path(spec):
                 # pipx upgrade would fail after the services were already
                 # stopped; stop here instead, with the way back to PyPI.
                 print(f"\nThe source pipx installed m3 from no longer exists:\n"
                       f"    {spec}\n"
-                      f"so `pipx upgrade` cannot run. Reinstall from PyPI instead:\n"
-                      f"    pipx uninstall m3-memory && pipx install m3-memory && m3 setup\n"
+                      f"so `pipx upgrade` cannot run. Upgrade from PyPI instead:\n"
+                      f"    m3 upgrade --from-pypi\n"
                       f"Your memories and settings under ~/.m3 are kept.")
                 return 2
             # `pipx upgrade` rebuilds from the recorded spec, not from PyPI.
             print("  [!] pipx will upgrade from this source, NOT the PyPI release.\n"
-                  "      To track PyPI instead: pipx uninstall m3-memory && "
-                  "pipx install m3-memory, then m3 setup")
+                  "      To move to the PyPI release instead: m3 upgrade --from-pypi")
 
     if method == PLUGIN:
         print(
@@ -453,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
             if owner_python != sys.executable:
                 break
 
-    up = upgrade_command(method, owner_python)
+    up = upgrade_command(method, owner_python, from_pypi=args.from_pypi)
     if up is None:  # defensive: PLUGIN/UNKNOWN already returned above
         print(f"\nNo upgrade command is defined for method {method!r}.")
         return 2
@@ -530,6 +549,18 @@ def main(argv: list[str] | None = None) -> int:
     # Re-resolve: step 2 may have replaced the executable we started with.
     m3 = shutil.which("m3") or shutil.which("mcp-memory") or m3
 
+    # Say plainly when step 2 changed nothing. A package manager exits 0 when the
+    # source already holds the installed version, and without this the run ends
+    # in "Done." with the old version still installed.
+    new_version = None if dry else installed_version(find_m3_package(m3) or pkg)
+    unchanged = (not dry and old_version is not None and new_version == old_version)
+    if unchanged:
+        where = spec if (spec and not args.from_pypi) else "the package index"
+        print(f"\n  [!] m3 is still {old_version}: {where} has no newer version.")
+        if spec and not source_is_pypi(spec) and not args.from_pypi:
+            print("      This install tracks that source, not PyPI. To move to the "
+                  "PyPI release: m3 upgrade --from-pypi")
+
     # A long-lived daemon that SURVIVED step 1 now runs the OLD code against a
     # NEW package, and step 4's verify only restarts services it finds STOPPED —
     # so a survivor is reported "running" and keeps serving stale code
@@ -595,7 +626,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return rc
 
-    print("\nDry run complete; nothing was changed." if dry else "\nDone.")
+    if dry:
+        print("\nDry run complete; nothing was changed.")
+    elif unchanged:
+        print(f"\nDone. m3 {old_version} was already installed; nothing was upgraded.")
+    else:
+        print(f"\nDone. m3 {old_version or '?'} -> {new_version or '?'}.")
     return 0
 
 

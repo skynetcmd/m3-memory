@@ -39,6 +39,9 @@ m3 upgrade --dry-run
 | `--dry-run` | print the detected method and the exact plan; change nothing |
 | `-y`, `--yes` | do not prompt (scripted / unattended upgrades) |
 | `--skip-stop` | skip step 1 — only if you have already stopped the writers |
+| `--from-pypi` | pipx installs only: reinstall from PyPI. Use it when m3 was installed from a local wheel or path — `m3 upgrade` otherwise upgrades from that source — or when that source no longer exists |
+
+When nothing newer is available, `m3 upgrade` says so: it ends with *"m3 X was already installed; nothing was upgraded"* instead of reporting an upgrade.
 
 ### Why not just `pipx upgrade m3-memory`?
 

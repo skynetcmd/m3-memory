@@ -377,3 +377,66 @@ def test_a_failed_upgrade_reports_what_is_actually_installed(tmp_path, monkeypat
     assert "still on its previous version" not in out
     if not importable:
         assert "--force-reinstall --no-deps m3-memory==2026.10.4.2" in out
+
+
+def test_from_pypi_reinstalls_pipx_from_the_index():
+    """--from-pypi moves a pipx install's recorded source to PyPI; pip installs
+    already resolve against the index and keep their upgrade command."""
+    cmd = m3u.upgrade_command(m3u.PIPX, python="/fake/python", from_pypi=True)
+    assert cmd[1:] == ["install", "--force", "m3-memory"]
+    assert m3u.upgrade_command(m3u.PIP, python="/fake/python", from_pypi=True) == \
+        m3u.upgrade_command(m3u.PIP, python="/fake/python")
+
+
+def test_from_pypi_proceeds_when_the_recorded_source_is_gone(tmp_path, monkeypatch, capsys):
+    """A deleted wheel blocks `pipx upgrade`, but --from-pypi does not need it."""
+    import json
+
+    venv = _mk(tmp_path, "pipx/venvs/m3-memory")
+    (venv / "pipx_metadata.json").write_text(json.dumps(
+        {"main_package": {"package_or_url": str(tmp_path / "gone.whl")}}), encoding="utf-8")
+    pkg = _mk(venv, "Lib/site-packages/m3_memory")
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: "/bin/" + n)
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    calls = []
+    monkeypatch.setattr(m3u, "run", lambda cmd, **k: calls.append(cmd) or 0)
+    assert m3u.main(["--yes", "--from-pypi"]) == 0
+    assert ["/bin/pipx", "install", "--force", "m3-memory"] in calls
+    assert "no longer exists" not in capsys.readouterr().out
+
+
+def test_an_upgrade_that_changes_nothing_says_so(tmp_path, monkeypatch, capsys):
+    """A package manager exits 0 when its source holds the installed version; the
+    run must not end in a bare "Done." with the old version still installed."""
+    scripts, pkg = _pip_install(tmp_path, version="2026.10.5.0")
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    monkeypatch.setattr(m3u, "run", lambda cmd, **k: 0)
+    assert m3u.main(["--yes"]) == 0
+    out = capsys.readouterr().out
+    assert "m3 is still 2026.10.5.0" in out
+    assert "nothing was upgraded" in out
+
+
+def test_an_upgrade_that_changes_the_version_reports_both(tmp_path, monkeypatch, capsys):
+    scripts, pkg = _pip_install(tmp_path, version="2026.10.4.3")
+
+    def _run(cmd, **k):
+        if "install" in cmd:  # the package manager replaces the dist-info
+            old = pkg.parent / "m3_memory-2026.10.4.3.dist-info"
+            old.rename(pkg.parent / "m3_memory-2026.10.5.0.dist-info")
+        return 0
+
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    monkeypatch.setattr(m3u, "run", _run)
+    assert m3u.main(["--yes"]) == 0
+    out = capsys.readouterr().out
+    assert "m3 2026.10.4.3 -> 2026.10.5.0" in out
+    assert "nothing was upgraded" not in out

@@ -519,6 +519,8 @@ def _cmd_upgrade(args: argparse.Namespace) -> int:
         cmd.append("--yes")
     if getattr(args, "skip_stop", False):
         cmd.append("--skip-stop")
+    if getattr(args, "from_pypi", False):
+        cmd.append("--from-pypi")
     try:
         return subprocess.run(cmd).returncode  # nosec B603 - argv list, no shell
     except KeyboardInterrupt:
@@ -1853,6 +1855,11 @@ Examples:
         help="Do not stop DB writers first. Only when you have already stopped "
              "them; on Windows an upgrade with writers running can delete the "
              "package and then fail, leaving NO m3 installed.",
+    )
+    p_upgrade.add_argument(
+        "--from-pypi", dest="from_pypi", action="store_true",
+        help="pipx installs: reinstall from PyPI, moving an install that tracks "
+             "a local wheel or path onto the PyPI release.",
     )
     p_upgrade.set_defaults(func=_cmd_upgrade)
 

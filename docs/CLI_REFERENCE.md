@@ -12,7 +12,7 @@ a backwards-compatible alias). Run `m3 <command> --help` for flags.
 | `m3 setup` | Interactive one-command setup: payload, embedder, agent wiring, chatlog hooks, final `m3 doctor` (`--gui` for a window) |
 | `m3 install-m3` | Fetch the system payload into the M3 root (default `~/.m3-memory/repo`); `--db-backend postgres` for a PostgreSQL primary store |
 | `m3 reinstall` | Wipe and reinstall the payload (alias for `install-m3 --force`) |
-| `m3 upgrade` | Upgrade the package end to end with the right installer (pipx / pip / pip --user), then re-wire and verify |
+| `m3 upgrade` | Upgrade the package end to end with the right installer (pipx / pip / pip --user), then re-wire and verify; `--from-pypi` moves a pipx install off a local wheel onto PyPI |
 | `m3 update` | Re-sync the payload for the installed version (not a package upgrade) |
 | `m3 uninstall` | Remove the payload and its config file (your databases are kept) |
 | `m3 stop` | Stop every running m3 DB writer (cognitive loop, embed server, dashboard, MCP) |
