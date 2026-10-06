@@ -234,3 +234,18 @@ def test_quiet_with_nothing_running_prints_nothing(fake_halt, capsys):
     fake_halt.results = []
     assert cli._cmd_stop(argparse.Namespace(timeout=8.0, quiet=True)) == 0
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="service managers are macOS/Linux")
+@pytest.mark.parametrize("from_upgrade", [True, False])
+def test_services_are_one_line_under_the_upgrade(fake_halt, capsys, monkeypatch, from_upgrade):
+    fake_halt.sched.stopped = ["m3-cognitive-loop.service", "m3-dashboard.service"]
+    fake_halt.results = []
+    if from_upgrade:
+        monkeypatch.setenv("M3_SETUP_CALLER", "upgrade")
+    else:
+        monkeypatch.delenv("M3_SETUP_CALLER", raising=False)
+    assert _run() == 0
+    out = capsys.readouterr().out
+    assert ("stopped 2 m3 service(s); setup restarts them" in out) is from_upgrade
+    assert ("stopped service m3-dashboard.service" in out) is not from_upgrade

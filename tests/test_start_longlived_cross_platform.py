@@ -158,3 +158,17 @@ def test_darwin_embed_server_starts_one_resolved_label(spy, monkeypatch):
     monkeypatch.setattr(isch, "_service_exists", lambda n: n == "com.m3memory.embedserver")
     isch._start_longlived_tasks([{"name": "AgentOS_EmbedServer"}])
     assert ["launchctl", "start", "com.m3memory.embedserver"] in spy
+
+
+@pytest.mark.parametrize("platform,unit", [("darwin", "com.m3memory.dashboard"),
+                                           ("linux", "m3-dashboard.service")])
+def test_the_report_names_the_service_this_platform_started(spy, monkeypatch, platform, unit):
+    """`[OK] Started AgentOS_Dashboard` on macOS/Linux named a Windows task that
+    does not exist there; the line must name what was actually started."""
+    printed = []
+    monkeypatch.setattr(isch, "_safe_print", lambda msg, *a, **k: printed.append(msg))
+    monkeypatch.setattr(isch, "_confirm_service_live", lambda *a, **k: True)
+    monkeypatch.setattr(isch, "_platform_key", lambda: platform)
+    isch._start_longlived_tasks([{"name": "AgentOS_Dashboard"}])
+    started = [m for m in printed if "Started" in m]
+    assert started and unit in started[0] and "AgentOS_" not in started[0], printed

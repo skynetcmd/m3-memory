@@ -2042,12 +2042,14 @@ def _start_longlived_tasks(tasks: list) -> None:
             # install reported success over a dead service. Confirm the thing is
             # actually SERVING before claiming it started.
             detail = _confirm_service_live(name, deadline_s=25.0)
+            # `name` is the task name the caller used (AgentOS_*); report the
+            # service this platform actually started.
             if detail is None:
-                _safe_print(f"{OK} Started {name}")
+                _safe_print(f"{OK} Started {service}")
             elif detail is True:
-                _safe_print(f"{OK} Started {name} (serving)")
+                _safe_print(f"{OK} Started {service} (serving)")
             else:
-                _safe_print(f"{WARN} Started {name} but it is NOT serving: {detail}")
+                _safe_print(f"{WARN} Started {service} but it is NOT serving: {detail}")
                 _safe_print(f"        check its log, then: {' '.join(cmd)}")
         else:
             err = (res.stderr or res.stdout).strip() or (

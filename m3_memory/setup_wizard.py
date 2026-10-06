@@ -1824,6 +1824,11 @@ def _probe_llm_endpoints(plan: "SetupPlan", args: argparse.Namespace) -> None:
     reachable = [(label, url, var, val) for (label, url, var, val) in _LLM_RUNTIMES
                  if _endpoint_reachable(url)]
     if not reachable:
+        if _called_by_upgrade():
+            # Unchanged since the last setup, which gave the full guidance.
+            _say("  no local LLM runtime detected; enrichment stays off "
+                 "(see `m3 setup` for how to add one)")
+            return
         _say("  no local LLM runtime detected on :1234 (LM Studio) or :11434 (Ollama)")
         _say("  enrichment needs a chat model. Start one, then run `m3 setup` again")
         _say("  so the background services pick it up:")

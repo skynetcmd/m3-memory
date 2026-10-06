@@ -762,7 +762,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_stop:
         print("\n[1/5] stopping m3 DB writers ...")
         # Non-fatal: nothing may be running, and that is a fine state to upgrade from.
-        run([m3, "stop"], dry=dry, timeout=180)
+        # The caller variable makes the stop summarize its services in one line.
+        run([m3, "stop"], dry=dry, timeout=180, env={**os.environ, "M3_SETUP_CALLER": "upgrade"})
 
     print("\n[2/5] upgrading the package ...")
     # Re-probe: a hook or agent may have started an m3 launcher since the check

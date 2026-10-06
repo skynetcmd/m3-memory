@@ -431,15 +431,23 @@ def _cmd_stop(args: argparse.Namespace) -> int:
         except Exception as e:  # noqa: BLE001 — the PID reap below still runs
             print(f"  [!] could not stop m3's services ({type(e).__name__}: {e}); "
                   f"supervised daemons may restart.", file=sys.stderr)
-        for name in services:
-            print(f"  stopped service {name}")
-        if services:
-            print("[m3] services stay stopped until `m3 setup` starts them.")
+        from m3_memory.wizard.ui import called_by_upgrade
+        if services and called_by_upgrade():
+            # The upgrade's setup step restarts them two steps later.
+            print(f"  stopped {len(services)} m3 service(s); setup restarts them")
+        else:
+            for name in services:
+                print(f"  stopped service {name}")
+            if services:
+                print("[m3] services stay stopped until `m3 setup` starts them.")
 
     results = halt.kill_stale_daemons(timeout=getattr(args, "timeout", 8.0),
                                       exclude_roles=keep_roles)
     if not results:
-        if not getattr(args, "quiet", False):   # --quiet: silent when nothing ran
+        from m3_memory.wizard.ui import called_by_upgrade
+        # --quiet: silent when nothing ran. Under the upgrade, the services
+        # line above already says what happened.
+        if not getattr(args, "quiet", False) and not (services and called_by_upgrade()):
             print("[m3] no other m3 DB-writers running." if services else
                   "[m3] nothing to stop — no m3 DB-writers running.")
         return 0

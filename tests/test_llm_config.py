@@ -115,3 +115,20 @@ def test_shell_rc_has_reads_the_effective_assignment(monkeypatch, tmp_path, text
     rc.write_text(text, encoding="utf-8")
     monkeypatch.setattr(persist, "_pick_unix_shell_rc", lambda: rc)
     assert persist.shell_rc_has("M3_ENABLE_OLLAMA_FAILOVER", "1") is expected
+
+
+@pytest.mark.parametrize("from_upgrade", [True, False])
+def test_no_runtime_guidance_is_one_line_under_the_upgrade(monkeypatch, capsys, from_upgrade):
+    """The full how-to-add-a-model guidance is for setup; under `m3 upgrade` the
+    same unchanged state was six lines on every run."""
+    for var in ("M3_LLM_URL", "LLM_ENDPOINTS_CSV", "M3_LLM_ENDPOINTS_CSV"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(setup_wizard, "_endpoint_reachable", lambda url, **k: False)
+    if from_upgrade:
+        monkeypatch.setenv(setup_wizard.UPGRADE_CALLER_ENV, "upgrade")
+    else:
+        monkeypatch.delenv(setup_wizard.UPGRADE_CALLER_ENV, raising=False)
+    setup_wizard._probe_llm_endpoints(object(), argparse.Namespace(non_interactive=True))
+    out = [ln for ln in capsys.readouterr().out.splitlines() if ln.strip()]
+    assert any("no local LLM runtime detected" in ln for ln in out)
+    assert (len(out) == 1) is from_upgrade, out
