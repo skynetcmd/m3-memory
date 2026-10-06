@@ -15,9 +15,10 @@
   was changed.
 - **Solution**: follow the lines it prints under "To upgrade": close the agent
   session it names (or end the process), upgrade, then reconnect the agent
-  (Claude Code: `/mcp`). From 2026.10.5.1 a launcher held only by `m3 upgrade`
-  itself is no longer an error: the upgrade continues in a new window. On
-  earlier versions, run the printed `python.exe … m3_upgrade.py` command.
+  (Claude Code: `/mcp`). From 2026.10.6.0, when someone is at the console, a
+  launcher held only by `m3 upgrade` itself is no longer an error: the upgrade
+  continues in a new window. Unattended runs and earlier versions: run the
+  printed `python.exe … m3_upgrade.py` command.
 
 ### "m3 is NOT installed now" after a failed upgrade
 - **Cause**: the package manager removed m3 and then could not install the new

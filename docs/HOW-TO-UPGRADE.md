@@ -63,7 +63,11 @@ installs:
   - held only by `m3 upgrade`'s own `m3.exe`: the upgrade continues in a **new
     window**, run by Python, once the command you typed has exited. That window
     stays open until you press Enter, and its output is also saved to the log
-    file the first window names (`%TEMP%\m3-upgrade-<time>.log`);
+    file the first window names (`%TEMP%\m3-upgrade-<time>.log`). This needs
+    someone at the console; a script or scheduled job gets a non-zero exit and
+    the command to run instead — run the upgrade helper through the venv's
+    Python, `"<venv>\Scripts\python.exe" "<venv>\Lib\site-packages\m3_memory\bin\m3_upgrade.py" --yes`,
+    which waits for the upgrade and returns its result;
   - held by an agent: it stops, names the process, and asks you to close that
     agent session (or end the named process), run `m3 upgrade`, then reconnect
     the agent (Claude Code: `/mcp`).
