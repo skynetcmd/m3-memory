@@ -119,3 +119,14 @@ def test_no_wired_hosts_is_benign(monkeypatch, capsys):
     monkeypatch.setattr(P, "_scan_hermes", lambda: [])
     assert P.run(brief=False) == 0
     assert "nothing to check" in capsys.readouterr().out.lower()
+
+
+def test_one_row_per_config_file_dead_if_either_scan_says_so():
+    """An opencode.json carrying both `mcp` and `mcpServers` entries is reported
+    by two scanners; it was listed twice."""
+    from doctor import agent_paths_probe as ap
+    rows = ap._merge_rows([("OpenCode", "/c/opencode.json", False),
+                           ("OpenCode", "/c/opencode.json", True),
+                           ("Gemini CLI", "/g/settings.json", False)])
+    assert rows == [("OpenCode", "/c/opencode.json", True),
+                    ("Gemini CLI", "/g/settings.json", False)]

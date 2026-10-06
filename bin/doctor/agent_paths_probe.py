@@ -242,9 +242,19 @@ def _remediate() -> bool:
         return False
 
 
+def _merge_rows(rows: list[tuple[str, str, bool]]) -> list[tuple[str, str, bool]]:
+    """One row per (host, file). An opencode.json can carry both OpenCode's own
+    `mcp` entry and an `mcpServers` one; both scanners report that file, and it
+    was listed twice. Dead if either scanner found a dead path."""
+    merged: dict[tuple[str, str], bool] = {}
+    for label, path, is_dead in rows:
+        merged[(label, path)] = merged.get((label, path), False) or is_dead
+    return [(label, path, is_dead) for (label, path), is_dead in merged.items()]
+
+
 def run(brief: bool = False, fix: bool = False) -> int:
-    rows = _scan_mcpservers_hosts() + _scan_opencode() + _scan_hermes()
-    dead = [(lbl, path) for (lbl, path, is_dead) in rows if is_dead]
+    rows = _merge_rows(_scan_mcpservers_hosts() + _scan_opencode() + _scan_hermes())
+    dead =[(lbl, path) for (lbl, path, is_dead) in rows if is_dead]
     stale = _scan_stale_payload()
 
     # --fix-hooks: repair the Claude config via the canonical writer. NOT gated on

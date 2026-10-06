@@ -208,3 +208,10 @@ def test_repair_asks_for_a_restart_only_when_the_plugin_changed(monkeypatch):
     assert "restart" not in [a["action"] for a in P.repair()["actions"]]
     _fake_cli(monkeypatch, ["2026.9.20.1", "2026.10.5.0"])
     assert "restart" in [a["action"] for a in P.repair()["actions"]]
+
+
+def test_doctor_cli_does_not_print_repair_results_twice():
+    """The CLI prints the Repair Summary itself; memory.doctor's INFO record of
+    each action duplicated every line."""
+    src = (Path(_BIN) / "memory_doctor.py").read_text(encoding="utf-8")
+    assert 'getLogger("memory.doctor").setLevel(logging.INFO)' not in src

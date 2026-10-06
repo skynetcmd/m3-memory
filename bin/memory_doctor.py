@@ -25,10 +25,11 @@ import os
 import sys
 
 logging.basicConfig(level=logging.WARNING, format='%(name)s: [%(levelname)s] %(message)s')
-# The doctor's own INFO lines (repair results) stay visible; library INFO
-# chatter (connection pools, HTTP requests) would bury the readable report.
+# This script's own INFO lines stay visible; library INFO chatter (connection
+# pools, HTTP requests) would bury the readable report. memory.doctor stays at
+# WARNING: its INFO lines are the repair results this script prints itself as
+# the "Repair Summary", so enabling them printed every result twice.
 logging.getLogger("memory_doctor").setLevel(logging.INFO)
-logging.getLogger("memory.doctor").setLevel(logging.INFO)
 logger = logging.getLogger("memory_doctor")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
