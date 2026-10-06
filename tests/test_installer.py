@@ -188,6 +188,10 @@ def test_install_m3_refuses_overwrite_without_force(tmp_path, monkeypatch):
     repo_path.mkdir()
     monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
     monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
+    # The packaged-payload path registers services on the way; `systemctl --user`
+    # would act on the developer's real user manager whatever HOME says.
+    monkeypatch.setattr(installer, "_register_dashboard_task", lambda *a, **k: None)
+    monkeypatch.setattr(installer, "_register_cognitive_loop_task", lambda *a, **k: True)
 
     # Refuses without --force, with a clear, actionable message (the improved
     # UX message names `m3 setup` / `m3 update` / `m3 install-m3 --force`).
