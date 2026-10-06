@@ -9,6 +9,17 @@ from __future__ import annotations
 import os
 import sys
 
+# Set by `m3 upgrade` on the setup it runs (and inherited by setup's children):
+# the upgrade verifies and summarizes, so they report only changes and problems.
+# An environment variable rather than a flag: an upgrade can install an OLDER
+# release, whose setup would reject an unknown flag but ignores this.
+UPGRADE_CALLER_ENV = "M3_SETUP_CALLER"
+
+
+def called_by_upgrade() -> bool:
+    """True when this process runs on behalf of `m3 upgrade`."""
+    return os.environ.get(UPGRADE_CALLER_ENV) == "upgrade"
+
 
 def _color(code: str, msg: str) -> str:
     if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):

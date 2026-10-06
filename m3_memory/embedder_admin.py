@@ -703,7 +703,8 @@ def _wait_serving_impl(port: int, timeout: float = _SERVE_WAIT_S) -> bool:
 _wait_serving = _wait_serving_impl  # tests stub this name (conftest)
 
 
-def _verify_started_or_explain(binary: Path, gguf: Path, *, start_rc: int = 0) -> int:
+def _verify_started_or_explain(binary: Path, gguf: Path, *, start_rc: int = 0,
+                               quiet_ok: bool = False) -> int:
     """Confirm the embedder is really up; explain loudly if it is not (§3).
 
     A success line must never rest on an exit code alone. On 2026-09-27
@@ -720,7 +721,8 @@ def _verify_started_or_explain(binary: Path, gguf: Path, *, start_rc: int = 0) -
         # RUNNING means the process exists; it answers only once the model has
         # loaded. A check fired in between (setup's doctor) reads tier-2 offline.
         if _wait_serving(port):
-            print(f"[OK] sovereign CPU embedder running on port {port}")
+            if not quiet_ok:
+                print(f"[OK] sovereign CPU embedder running on port {port}")
         else:
             print(f"[!] m3-embed-server is running but port {port} has not answered "
                   f"after {_SERVE_WAIT_S:.0f}s (model still loading, or stuck).\n"
@@ -956,14 +958,18 @@ def cmd_install(args: argparse.Namespace) -> int:
     if not gguf:
         return 2
     size_mb = _gguf_size_bytes(gguf) // (1024 * 1024)
-    print(f"[=] using bundled GGUF: {gguf} ({size_mb} MB)")
+    from .wizard.ui import called_by_upgrade
+    quiet = called_by_upgrade()   # under `m3 upgrade`: changes and problems only
 
     # Registered, running and on the current binary: nothing to install or
     # start, and a port-in-use notice would be about this same service.
     registered = _service_reports_installed(binary, gguf) or _service_defined_on_disk()
     if (registered and _service_reports_running(binary, gguf)
             and not _service_binary_is_stale(binary)):
-        return _verify_started_or_explain(binary, gguf)
+        if not quiet:
+            print(f"[=] using bundled GGUF: {gguf} ({size_mb} MB)")
+        return _verify_started_or_explain(binary, gguf, quiet_ok=quiet)
+    print(f"[=] using bundled GGUF: {gguf} ({size_mb} MB)")
     # Re-registering a known service refreshes its definition (binary and model
     # paths) and is routine on every macOS/Linux upgrade; its output (unit path,
     # log location, the linger note) matters on the first install or a failure.

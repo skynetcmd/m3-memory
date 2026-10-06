@@ -113,3 +113,21 @@ def test_reregistering_a_known_service_is_quiet_first_install_is_not(monkeypatch
     assert ea.cmd_install(argparse.Namespace(concurrency=2)) == 0
     mode = "quiet" if registered else "loud"
     assert used == [(mode, "install"), (mode, "start")]
+
+
+@pytest.mark.parametrize("from_upgrade", [True, False])
+def test_an_unchanged_embedder_is_silent_under_the_upgrade(monkeypatch, capsys, from_upgrade):
+    calls: list = []
+    _patch_common(monkeypatch, calls)
+    monkeypatch.setattr(ea, "_service_reports_installed", lambda b, g: True)
+    monkeypatch.setattr(ea, "_service_binary_is_stale", lambda b: False)
+    monkeypatch.setattr(ea, "_wait_serving", lambda port: True)
+    monkeypatch.setattr(ea, "_confirm_started", lambda b, g: True)
+    if from_upgrade:
+        monkeypatch.setenv("M3_SETUP_CALLER", "upgrade")
+    else:
+        monkeypatch.delenv("M3_SETUP_CALLER", raising=False)
+    assert ea.cmd_install(argparse.Namespace(concurrency=2)) == 0
+    out = capsys.readouterr().out
+    assert (out == "") is from_upgrade
+    assert calls == []

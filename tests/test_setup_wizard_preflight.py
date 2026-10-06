@@ -1688,12 +1688,9 @@ def test_step_headers_are_numbered_in_order_and_labelled_under_upgrade(monkeypat
     src = Path(setup_wizard.__file__).read_text(encoding="utf-8")
     assert not re.search(r'_say\(f?"Step \d/5', src), "step headers go through _step()"
     assert sorted(set(int(n) for n in re.findall(r"_step\((\d),", src))) == [0, 1, 2, 3, 4, 5]
-    monkeypatch.setenv(setup_wizard.UPGRADE_CALLER_ENV, "upgrade")
+    monkeypatch.delenv(setup_wizard.UPGRADE_CALLER_ENV, raising=False)
     setup_wizard._step(2, "native core")
-    monkeypatch.delenv(setup_wizard.UPGRADE_CALLER_ENV)
-    setup_wizard._step(2, "native core")
-    out = capsys.readouterr().out
-    assert "setup step 2/5: native core" in out and "Step 2/5: native core" in out
+    assert "Step 2/5: native core" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("stdout,rc,shown", [
@@ -1728,3 +1725,27 @@ def test_unchanged_state_lines_show_only_when_setup_runs_directly(monkeypatch, c
     assert ("launchers on PATH" in out) is not from_upgrade
     assert ("payload already present" in out) is not from_upgrade
     assert "a real problem" in out
+
+
+def test_hermes_home_is_read_without_a_deprecation_warning(monkeypatch, tmp_path, caplog, capsys):
+    """HERMES_HOME belongs to Hermes Agent; m3 told users to rename it, which
+    would break Hermes. M3_HERMES_HOME still overrides it."""
+    import logging
+    own = tmp_path / "hermes_own"
+    (own / "plugins" / "memory").mkdir(parents=True)
+    monkeypatch.delenv("M3_HERMES_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(own))
+    with caplog.at_level(logging.WARNING):
+        assert setup_wizard._find_hermes_plugins_dir() == own / "plugins" / "memory"
+    assert "Deprecated env var HERMES_HOME" not in caplog.text + capsys.readouterr().err
+
+    override = tmp_path / "m3_override"
+    (override / "plugins" / "memory").mkdir(parents=True)
+    monkeypatch.setenv("M3_HERMES_HOME", str(override))
+    assert setup_wizard._find_hermes_plugins_dir() == override / "plugins" / "memory"
+
+
+def test_step_headers_are_not_printed_under_the_upgrade(monkeypatch, capsys):
+    monkeypatch.setenv(setup_wizard.UPGRADE_CALLER_ENV, "upgrade")
+    setup_wizard._step(2, "native core")
+    assert capsys.readouterr().out == ""

@@ -32,7 +32,10 @@ from ._platform import python_exe as _python_exe
 # ── small UI helpers ──────────────────────────────────────────────────────────
 # Pure output helpers (never monkeypatched, never call a patched fn) live in
 # wizard/ui.py; re-imported here so `setup_wizard._say` etc. keep resolving.
+# The upgrade-caller check has one owner, wizard.ui: embedder_admin, run as
+# setup's child, needs it too.
 from .wizard.ui import (  # noqa: F401 — re-exported for setup_wizard.<name> access
+    UPGRADE_CALLER_ENV,  # noqa: F401
     _color,
     _err,
     _ok,
@@ -41,6 +44,7 @@ from .wizard.ui import (  # noqa: F401 — re-exported for setup_wizard.<name> a
     _say,
     _warn,
 )
+from .wizard.ui import called_by_upgrade as _called_by_upgrade
 
 
 def _prompt(text: str) -> "str | None":
@@ -211,7 +215,10 @@ def _find_hermes_plugins_dir() -> Optional[Path]:
     presence is what lets us drop the m3 provider into place.
     """
     roots = []
-    env_home = _env_compat("M3_HERMES_HOME", "HERMES_HOME")
+    # HERMES_HOME is Hermes Agent's own variable, not an old m3 name, so it is
+    # read directly rather than through the deprecation shim (which told users
+    # to rename it, breaking Hermes). M3_HERMES_HOME is an m3-only override.
+    env_home = os.environ.get("M3_HERMES_HOME") or os.environ.get("HERMES_HOME")
     if env_home:
         roots.append(Path(env_home))
     # Windows app-data location (the `hermes` CLI's default home).
@@ -4065,18 +4072,6 @@ def run_setup(args: argparse.Namespace) -> int:
         _report_unrun_elevation()
 
 
-UPGRADE_CALLER_ENV = "M3_SETUP_CALLER"
-
-
-def _called_by_upgrade() -> bool:
-    """True when `m3 upgrade` runs this setup as its finalizing step.
-
-    An environment variable, not a flag: an upgrade can install an OLDER
-    release (`--from-pypi` from a pre-release), whose setup would reject an
-    unknown flag but ignores an unknown variable.
-    """
-    return os.environ.get(UPGRADE_CALLER_ENV) == "upgrade"
-
 
 def _ok_unchanged(msg: str) -> None:
     """An [OK] that only confirms something was already as it should be.
@@ -4092,9 +4087,10 @@ def _say_unchanged(msg: str) -> None:
 
 
 def _step(n: int, text: str) -> None:
-    """A numbered setup step header. Under `m3 upgrade` it is labelled as
-    setup's, since the upgrade numbers its own steps around it."""
-    _say(f"{'setup step' if _called_by_upgrade() else 'Step'} {n}/5: {text}")
+    """A numbered setup step header. Not printed under `m3 upgrade`: there setup
+    reports only changes and problems, inside the upgrade's own step 4."""
+    if not _called_by_upgrade():
+        _say(f"Step {n}/5: {text}")
 
 
 def _lower_halt() -> None:
