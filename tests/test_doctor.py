@@ -242,7 +242,12 @@ async def test_doctor_cold_cascade_slo(monkeypatch):
 
     slowest, total = max(spans.values()), sum(spans.values())
     assert len(spans) == 4, spans
-    assert elapsed < slowest + 1.0 and elapsed < 0.85 * total, (
+    # Parallel lands near the slowest probe, sequential near the sum: require the
+    # wall to sit in the lower half of that gap (0.25s floor for scheduling
+    # noise). A fixed fraction of the sum failed parallel runs whenever one
+    # probe dominated (3.35s wall, 3.35s slowest, 3.87s sum on claude-dev).
+    gap = total - slowest
+    assert elapsed < slowest + 1.0 and elapsed < slowest + max(0.5 * gap, 0.25), (
         f"COLD cascade took {elapsed:.1f}s with probes {spans} "
         f"(slowest {slowest:.1f}s, sum {total:.1f}s): the probes ran "
         f"sequentially, not in parallel."
