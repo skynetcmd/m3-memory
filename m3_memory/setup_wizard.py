@@ -3115,6 +3115,11 @@ def _wire_openclaw() -> bool:
     exe = shutil.which("openclaw")
     if not exe:
         leftover = (Path.home() / ".openclaw").is_dir()
+        if _called_by_upgrade():
+            # Same state on every upgrade; `m3 setup` gives the full guidance.
+            _warn("OpenClaw CLI not found; skipped"
+                  + (" (delete ~/.openclaw if you no longer use OpenClaw)" if leftover else ""))
+            return False
         _warn("OpenClaw CLI not on PATH; skipping MCP registration. Install it "
               "(`npm install -g openclaw`) and re-run `m3 setup`"
               + (", or delete ~/.openclaw if you no longer use OpenClaw "
@@ -3755,8 +3760,11 @@ def _step_verify_daemons(plan=None) -> bool:
         except Exception:  # noqa: BLE001 — keep the pre-restart verdict
             pass
 
-    for role in expected:
-        if role in live_roles:
+    running = [r for r in expected if r in live_roles]
+    if running and _called_by_upgrade():
+        _ok(f"  running: {', '.join(running)}")   # one line under the upgrade
+    else:
+        for role in running:
             _ok(f"  {role}: running")
     for role in missing:
         _warn(f"  {role}: NOT running")

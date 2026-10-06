@@ -548,3 +548,13 @@ def test_brief_summary_is_short_and_keeps_failures():
     with contextlib.redirect_stdout(buf):
         s._summary(plan, None, verified=False, brief=True)
     assert "VERIFICATION FAILED" in buf.getvalue()
+
+
+def test_running_services_are_one_line_under_the_upgrade(wizard, monkeypatch, capsys):
+    monkeypatch.setenv(wizard.UPGRADE_CALLER_ENV, "upgrade")
+    monkeypatch.setattr(wizard, "_import_m3_halt",
+                        lambda: _fake_halt(["cognitive-loop", "dashboard"]))
+    assert wizard._step_verify_daemons(_P(loop=True, dash=True)) is True
+    out = capsys.readouterr().out
+    assert "running: cognitive-loop, dashboard" in out
+    assert "cognitive-loop: running" not in out

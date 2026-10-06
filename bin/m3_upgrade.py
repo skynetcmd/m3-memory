@@ -515,7 +515,7 @@ def run(cmd: list[str], *, dry: bool, timeout: int = 900,
     if dry:
         print(f"      would run: {printable}")
         return 0
-    print(f"      $ {printable}")
+    # Not echoed: each step header names its command (see _cmd_label).
     try:
         if isinstance(sys.stdout, _Tee):
             # Logging: relay the child's output so it reaches the log as well.
@@ -536,6 +536,12 @@ def run(cmd: list[str], *, dry: bool, timeout: int = 900,
     except subprocess.TimeoutExpired:
         print(f"      !! timed out after {timeout}s")
         return 124
+
+
+def _cmd_label(cmd: list[str]) -> str:
+    """A command as a person would type it: launcher name without its path or
+    .exe, then the arguments ("m3 stop", "pipx upgrade m3-memory")."""
+    return " ".join([pathlib.Path(cmd[0]).stem, *cmd[1:]])
 
 
 def run_captured(cmd: list[str], *, timeout: int = 900) -> str:
@@ -760,12 +766,12 @@ def main(argv: list[str] | None = None) -> int:
           f"{'yes' if loop_was_installed else 'no' if loop_was_installed is False else 'unknown'}")
 
     if not args.skip_stop:
-        print("\n[1/5] stopping m3 DB writers ...")
+        print(f"\n[1/5] stopping m3 DB writers: {_cmd_label([m3, 'stop'])}")
         # Non-fatal: nothing may be running, and that is a fine state to upgrade from.
         # The caller variable makes the stop summarize its services in one line.
         run([m3, "stop"], dry=dry, timeout=180, env={**os.environ, "M3_SETUP_CALLER": "upgrade"})
 
-    print("\n[2/5] upgrading the package ...")
+    print(f"\n[2/5] upgrading the package: {_cmd_label(up)}")
     # Re-probe: a hook or agent may have started an m3 launcher since the check
     # above, and step 1 stops DB writers, not those.
     locked = [] if dry else locked_launchers(scripts_dir, launchers)
@@ -841,7 +847,6 @@ def main(argv: list[str] | None = None) -> int:
     # writer that did not exit would leave `setup --non-interactive` waiting on
     # a quiesce that never completes -- an unattended upgrade that hangs instead
     # of finishing. Reported by antigravity-agent in review of this script.
-    print("\n[4/5] finalizing (agent configs, migrations, services) ...")
     setup_cmd = [m3, "setup", "--non-interactive", "--force-quiesce"]
     # Carry the CURRENT cognitive-loop choice across the upgrade. Without this,
     # `--non-interactive` leaves plan.cognitive_loop False, the role never
@@ -852,7 +857,8 @@ def main(argv: list[str] | None = None) -> int:
         setup_cmd.append("--cognitive-loop")
     elif loop_was_installed is False:
         setup_cmd.append("--no-cognitive-loop")
-    else:
+    print("\n[4/5] finalizing (agent configs, migrations, services): m3 setup")
+    if loop_was_installed is None:
         print("  note: could not determine whether the cognitive loop is "
               "installed; leaving that choice untouched. If it was running, "
               "`m3 doctor --fix` or `m3 schedules repair` will bring it back.")
@@ -885,8 +891,9 @@ def main(argv: list[str] | None = None) -> int:
     # rewires them, so skipping it is how an upgrade leaves capture silently
     # pointing at the old install. It backs ~/.claude/settings.json up with a
     # timestamp before writing (see environment_probe.repair).
-    print("\n[5/5] verifying and repairing ...")
-    rc = run([m3, "doctor", "--fix", "--fix-hooks"], dry=dry, timeout=300)
+    doctor_cmd = [m3, "doctor", "--fix", "--fix-hooks"]
+    print(f"\n[5/5] verifying and repairing: {_cmd_label(doctor_cmd)}")
+    rc = run(doctor_cmd, dry=dry, timeout=300)
     if rc != 0:
         print(
             f"\n`m3 doctor --fix --fix-hooks` reported problems (exit {rc}). The\n"

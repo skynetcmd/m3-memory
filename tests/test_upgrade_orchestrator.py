@@ -652,3 +652,25 @@ def test_step_three_is_one_line_when_nothing_survived(tmp_path, monkeypatch, cap
     out = capsys.readouterr().out
     assert ("[3/5] no daemon survived on old code" in out) is (survivor == "")
     assert ("stopped cognitive-loop (pid 9)" in out) is (survivor != "")
+
+
+def test_step_headers_name_their_commands_without_echo_lines(tmp_path, monkeypatch, capsys):
+    """The command is part of the step header; a separate `$ <full path>` line
+    after every header only repeated it."""
+    scripts, pkg = _pip_install(tmp_path)
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    monkeypatch.setattr(m3u, "run", lambda cmd, **k: 0)
+    m3u.main(["--yes"])
+    out = capsys.readouterr().out
+    assert "[1/5] stopping m3 DB writers: m3 stop" in out
+    assert "[5/5] verifying and repairing: m3 doctor --fix --fix-hooks" in out
+    assert "\n      $ " not in out
+
+
+def test_run_does_not_echo_the_command(monkeypatch, capsys):
+    monkeypatch.setattr(m3u.subprocess, "run", lambda cmd, **k: type("R", (), {"returncode": 0})())
+    m3u.run(["/full/path/m3", "stop"], dry=False)
+    assert "$ " not in capsys.readouterr().out

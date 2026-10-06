@@ -327,3 +327,14 @@ def test_an_identical_openclaw_entry_is_not_rewritten(monkeypatch, tmp_path, cap
     monkeypatch.setattr(sw.Path, "home", classmethod(lambda cls: tmp_path))
     assert _REAL_OPENCLAW_CURRENT(spec) is True
     assert _REAL_OPENCLAW_CURRENT({**spec, "enabled": False}) is False
+
+
+def test_missing_cli_is_one_short_line_under_the_upgrade(wired, capsys, monkeypatch, tmp_path):
+    (tmp_path / ".openclaw").mkdir()
+    monkeypatch.setattr(sw.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv(sw.UPGRADE_CALLER_ENV, "upgrade")
+    wired(exe=None)
+    assert sw._wire_openclaw() is False
+    out = capsys.readouterr().out
+    assert "OpenClaw CLI not found; skipped (delete ~/.openclaw" in out
+    assert "npm install -g openclaw" not in out
