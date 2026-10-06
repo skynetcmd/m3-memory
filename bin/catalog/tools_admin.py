@@ -15,6 +15,7 @@ memory_core = LazyModuleProxy("memory_core")
 memory_maintenance = LazyModuleProxy("memory_maintenance")
 
 import tool_loader as _tool_loader  # provides lazy domain-expansion impls
+from tool_domains import ESSENTIAL_TOOL_NAMES as _ESSENTIAL_TOOL_NAMES  # one owner of the startup set
 
 TOOLS: list[ToolSpec] = [
     # ── Meta-tools: lazy domain loading ──────────────────────────────────────
@@ -39,8 +40,8 @@ TOOLS: list[ToolSpec] = [
         name="tools_load_domain",
         description=(
             "Register a tool domain's full surface for the current MCP session. "
-            "Use when you need tools beyond the essentials (memory_search, "
-            "memory_write, memory_get, chatlog_search, chatlog_write, files_search). "
+            "Use when you need tools beyond the essentials ("
+            + ", ".join(sorted(_ESSENTIAL_TOOL_NAMES)) + "). "
             "Valid domains: memory, chatlog, files, entity, agent, tasks, "
             "conversations, diagnostics, admin."
         ),

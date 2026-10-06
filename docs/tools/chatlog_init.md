@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_init.py
-sha1: 8a681ab26e6b
-mtime_utc: 2026-10-04T08:37:04.190856+00:00
-generated_utc: 2026-10-04T08:38:00.054775+00:00
+sha1: 9b7df9c2cd81
+mtime_utc: 2026-10-06T01:29:57.749301+00:00
+generated_utc: 2026-10-06T01:29:58.110423+00:00
 private: false
 ---
 
@@ -44,7 +44,7 @@ path equality.
 | `--enable-stop-hook` | Enable per-turn capture via Claude Code's Stop hook in addition to PreCompact. Writes config and prints an updated settings.json snippet. Default is PreCompact-only. | `False` | PreCompact-only hook in Claude Code | store_true | Enables Stop hook; toggles stop_hook config, persists, re-prints settings.json snippet |
 | `--disable-stop-hook` | Disable the Stop hook (revert to PreCompact-only capture). | `False` | PreCompact-only hook in Claude Code | store_true | Disables Stop hook; toggles stop_hook config, persists, re-prints settings.json snippet |
 | `--apply-claude` | Merge chatlog hooks + statusLine into ~/.claude/settings.json (creates the file if missing, backs up before writing, idempotent). Without this flag, init prints the snippet for manual paste. | `False` |  | store_true |  |
-| `--apply-gemini` | Add the SessionEnd chatlog hook to ~/.gemini/settings.json (idempotent, backs up before writing). Requires Gemini CLI to be installed first; the memory MCP entry is written by install-m3. | `False` |  | store_true |  |
+| `--apply-gemini` | Write the memory MCP entry, auth method and SessionEnd chatlog hook to ~/.gemini/settings.json (idempotent, backs up before writing). Requires Gemini CLI to be installed first. | `False` |  | store_true |  |
 | `--capture-mode` | Configure Claude Code Stop-hook policy in non-interactive mode. 'both' / 'stop' enable the Stop hook; 'precompact' / 'none' leave it disabled. Without this flag, non-interactive uses PreCompact-only. | None |  | str |  |
 
 ---

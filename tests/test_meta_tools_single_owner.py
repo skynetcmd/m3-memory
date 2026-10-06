@@ -99,7 +99,7 @@ def test_startup_surface_matches_the_documented_count():
     """The startup set is 10 tools: 2 meta + 8 essentials.
 
     Pins the number quoted in _register_initial_tools()'s docstring and measured
-    by bin/measure_tool_tokens.py (3,929 MCP-wire tokens). If this count moves,
+    by bin/measure_tool_tokens.py (3,962 MCP-wire tokens). If this count moves,
     that docstring and the OpenClaw toolFilter both need re-deriving -- which is
     the point of failing here.
     """

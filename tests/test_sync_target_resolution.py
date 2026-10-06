@@ -266,3 +266,17 @@ class TestTheResolverIsActuallyWired:
             _BIN.parent / "tests" / "test_raw_connection_drift.py"
         ).read_text(encoding="utf-8")
         assert '"bin/pg_sync.py"' not in src
+
+
+def test_sync_dbs_override_keeps_windows_drive_letters(monkeypatch):
+    """M3_SYNC_DBS splits on commas and os.pathsep, never on a bare ':' -- a
+    drive-letter path such as C:/x/agent_memory.db must survive intact."""
+    import os
+
+    import sync_all
+
+    a, b = os.path.abspath("one.db"), os.path.abspath("two.db")
+    monkeypatch.setenv("M3_SYNC_DBS", f"{a},{b}")
+    assert [str(p) for p in sync_all._resolve_dbs()] == [a, b]
+    monkeypatch.setenv("M3_SYNC_DBS", f"{a}{os.pathsep}{b}")
+    assert [str(p) for p in sync_all._resolve_dbs()] == [a, b]

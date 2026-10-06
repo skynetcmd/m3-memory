@@ -205,7 +205,9 @@ def main() -> int:
             "human_matrix": "docs/CAPABILITY_MATRIX.md",
         },
         "benchmarks": {
-            # Published in the whitelisted LME-S report.
+            # @10/@20 are in the whitelisted LME-S report; @8 comes from the same
+            # m3-search retrieval run (496/500 at both k=8 and k=10).
+            "longmemeval_s_retrieval_shr_at_8": "99.2% (496/500) — memory_search default k",
             "longmemeval_s_retrieval_shr_at_10": "99.2% (496/500)",
             "longmemeval_s_retrieval_shr_at_20": "100%",
             "longmemeval_s_qa_accuracy": "92.0% (frontier answer model, gpt-4o judge, no oracle metadata)",

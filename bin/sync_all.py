@@ -126,7 +126,9 @@ def _resolve_dbs() -> list[pathlib.Path]:
     """Return list of DB paths to sync.
 
     Priority:
-      1. M3_SYNC_DBS env var (explicit override; colon- or comma-separated paths).
+      1. M3_SYNC_DBS env var (explicit override; paths separated by commas or the
+         OS path separator -- ':' on POSIX, ';' on Windows, where ':' appears in
+         every drive-letter path).
       2. m3_sdk.resolve_db_path() — the Homecoming-aware resolver (honours
          M3_ENGINE_ROOT / M3_MEMORY_ROOT / M3_DATABASE).
       3. Repo-relative fallback (memory/agent_memory.db) if m3_sdk is not importable.
@@ -136,7 +138,7 @@ def _resolve_dbs() -> list[pathlib.Path]:
     """
     raw = os.environ.get("M3_SYNC_DBS", "")
     if raw:
-        parts = [p.strip() for p in raw.replace(",", ":").split(":") if p.strip()]
+        parts = [p.strip() for p in raw.replace(",", os.pathsep).split(os.pathsep) if p.strip()]
         resolved = []
         for p in parts:
             path = pathlib.Path(p)

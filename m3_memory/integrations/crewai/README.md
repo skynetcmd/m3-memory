@@ -65,11 +65,11 @@ M3StorageBackend(
 - **CrewAI ≥ 1.10** (the unified-memory `StorageBackend` protocol shipped in
   v1.10, Feb 2026; v1.0 GA predates it). Older versions fail loud with an upgrade
   hint. This adapter targets CrewAI **v1.x** only.
-- **Python ≥ 3.10 and < 3.14 (default path).** This is a CrewAI constraint
-  (every CrewAI 1.x release, through 1.15.4, declares `>=3.10,<3.14`), not m3's —
-  a plain `pip install m3-memory[crewai]` can only resolve on a supported
-  interpreter. m3 itself runs on 3.14; the simplest path is a 3.10–3.13
-  environment for the crew that talks to it.
+- **Python 3.12–3.13 (default path).** CrewAI 1.x (through 1.15.4) declares
+  `>=3.10,<3.14` and m3 requires `>=3.12`, so a plain
+  `pip install m3-memory[crewai]` can only resolve on 3.12 or 3.13. m3 itself
+  runs on 3.14; the simplest path is a 3.12–3.13 environment for the crew that
+  talks to it.
 - No mem0 dependency — m3 satisfies CrewAI's contract natively.
 
 ### Python 3.14 escape hatch (unofficial — verified 2026-07-17)
@@ -96,7 +96,7 @@ Caveats: (1) the `chromadb>=1.5` bump **violates CrewAI's own `chromadb~=1.1.0`
 pin** — m3's save/search path was verified, but CrewAI's *other* Chroma-backed
 subsystems (e.g. its built-in short-term memory) were not exercised and may
 misbehave under the override. (2) This is **not tested or supported by CrewAI**;
-`--ignore-requires-python` bypasses their guard deliberately. Prefer the 3.10–3.13
+`--ignore-requires-python` bypasses their guard deliberately. Prefer the 3.12–3.13
 path for production until CrewAI lifts the cap upstream (which only needs the
 chromadb pin bumped).
 

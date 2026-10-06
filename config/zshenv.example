@@ -3,8 +3,10 @@
 # It is sourced by Zsh on all shell startups (interactive and non-interactive).
 
 # --- 1. CORE CONFIGURATION (USER MUST SET THIS) ---
-# Set this to the absolute path of your m3-memory repository
-export M3_MEMORY_ROOT="$HOME/m3-memory"
+# Set this to the absolute path of your m3-memory repository clone. It is used
+# only by the aliases in zshrc.example; m3 itself does not read it. Do NOT use
+# M3_MEMORY_ROOT for this: that variable relocates all of m3's data.
+export M3_CHECKOUT="$HOME/m3-memory"
 
 # --- 2. OS-AWARE SECRET MANAGEMENT ---
 # Universal function to get secrets from the native OS secret store.
@@ -108,4 +110,4 @@ export GEMINI_API_KEY=$(get_secret "GEMINI_API_KEY")
 export OPENCLAW_GATEWAY_TOKEN=$(get_secret "OPENCLAW_GATEWAY_TOKEN")
 
 # Add project's bin directory to the path for all shells
-export PATH="$M3_MEMORY_ROOT/bin:$PATH"
+export PATH="$M3_CHECKOUT/bin:$PATH"

@@ -8,7 +8,7 @@ complete setup, no ``git clone`` step required from the user.
 
 Resolution order for finding the bridge (see ``find_bridge``):
 
-1. ``$M3_BRIDGE_PATH`` env var — power-user override, honored first.
+1. ``$M3_PATH_BIN`` env var (the payload ``bin/`` directory) — power-user override, honored first.
 2. ``~/.m3-memory/config.json`` — written by ``install_m3``.
 3. Walk up from this file looking for a sibling ``bin/memory_bridge.py`` —
    catches the developer case where someone did ``pip install -e .`` from
@@ -2874,11 +2874,11 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
     else:
         print("  (none — expected for a pip/pipx install, which runs the packaged payload)")
 
-    env = os.environ.get("M3_BRIDGE_PATH")
+    env = os.environ.get("M3_PATH_BIN")
     if env:
-        print(f"M3_BRIDGE_PATH (env):      {env}")
+        print(f"M3_PATH_BIN (env):         {env}")
     else:
-        print("M3_BRIDGE_PATH (env):      (unset)")
+        print("M3_PATH_BIN (env):         (unset)")
 
     dev = _developer_bridge()
     if dev:

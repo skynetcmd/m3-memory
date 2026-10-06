@@ -23,9 +23,9 @@ from multiprocessing import get_context
 import pytest
 
 # Spawn, not the Linux default fork: forking the pytest process copies any lock
-# another thread holds at that instant, and the child then waits on it forever
-# (seen on the claude-dev PostgreSQL lane, 2026-10-05). Windows and macOS
-# already spawn, so this also makes every OS run the same start method.
+# another thread holds at that instant, and the child can then wait on it
+# forever. Windows and macOS already spawn, so this also makes every OS run the
+# same start method.
 Pool = get_context("spawn").Pool
 
 _HERE = os.path.dirname(__file__)

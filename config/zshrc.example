@@ -1,6 +1,6 @@
 # M3 Memory: Interactive Shell Configuration (.zshrc)
 # This file should be copied to ~/.zshrc.
-# It depends on variables loaded from ~/.zshenv, especially $M3_MEMORY_ROOT.
+# It depends on variables loaded from ~/.zshenv, especially $M3_CHECKOUT.
 
 # --- 1. HISTORY & COMPLETION ---
 HISTFILE=~/.zsh_history
@@ -19,25 +19,25 @@ alias la='eza -alh --git --group-directories-first --icons'
 alias cat='bat --style=plain --paging=never'
 
 # --- 3. AGENT OS ALIASES & FUNCTIONS ---
-# These rely on $M3_MEMORY_ROOT being set in .zshenv
+# These rely on $M3_CHECKOUT being set in .zshenv
 
-# Check if M3_MEMORY_ROOT is set
-if [ -z "$M3_MEMORY_ROOT" ] || [ ! -d "$M3_MEMORY_ROOT" ]; then
-    echo "Warning: \$M3_MEMORY_ROOT is not set or is not a valid directory." >&2
+# Check if M3_CHECKOUT is set
+if [ -z "$M3_CHECKOUT" ] || [ ! -d "$M3_CHECKOUT" ]; then
+    echo "Warning: \$M3_CHECKOUT is not set or is not a valid directory." >&2
     echo "Please set it in your ~/.zshenv file." >&2
 else
     # Core Tools
-    alias pulse='python3 $M3_MEMORY_ROOT/bin/mission_control.py'
-    alias ai-audit='$M3_MEMORY_ROOT/bin/ai-audit.sh'
-    alias mcp-check='$M3_MEMORY_ROOT/bin/mcp_check.sh'
+    alias pulse='python3 $M3_CHECKOUT/bin/mission_control.py'
+    alias ai-audit='$M3_CHECKOUT/bin/ai-audit.sh'
+    alias mcp-check='$M3_CHECKOUT/bin/mcp_check.sh'
 
     # Aider Functions (with dynamic path)
     # These functions call aider with the correct project-specific configuration.
     _run_aider() {
         local model_flag="$1"
         shift
-        aider --config "$M3_MEMORY_ROOT/.aider.conf.yml" 
-              --model-metadata-file "$M3_MEMORY_ROOT/.aider.model.metadata.json" 
+        aider --config "$M3_CHECKOUT/.aider.conf.yml" 
+              --model-metadata-file "$M3_CHECKOUT/.aider.model.metadata.json" 
               "$model_flag" "$@"
     }
 
@@ -50,7 +50,7 @@ else
     # examples/sandbox-openclaw. Without it every claw-* function below cd'd into
     # a directory that does not exist and `docker compose` failed with no useful
     # message.
-    _OPENCLAW_SANDBOX="$M3_MEMORY_ROOT/examples/sandbox-openclaw"
+    _OPENCLAW_SANDBOX="$M3_CHECKOUT/examples/sandbox-openclaw"
 
     _claw_switch() {
         # This is a simplified helper for switching OpenClaw models.

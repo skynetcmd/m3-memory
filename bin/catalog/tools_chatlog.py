@@ -192,7 +192,7 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="chatlog_set_redaction",
-        description="Flip redaction on/off and update patterns. Persists to memory/.chatlog_config.json.",
+        description="Flip redaction on/off and update patterns. Persists to .chatlog_config.json under the config root.",
         parameters={
             "type": "object",
             "properties": {

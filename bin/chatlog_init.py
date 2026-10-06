@@ -656,9 +656,9 @@ def main() -> int:
         "--apply-gemini",
         action="store_true",
         help=(
-            "Add the SessionEnd chatlog hook to ~/.gemini/settings.json "
-            "(idempotent, backs up before writing). Requires Gemini CLI to be "
-            "installed first; the memory MCP entry is written by install-m3."
+            "Write the memory MCP entry, auth method and SessionEnd chatlog hook "
+            "to ~/.gemini/settings.json (idempotent, backs up before writing). "
+            "Requires Gemini CLI to be installed first."
         ),
     )
     parser.add_argument(

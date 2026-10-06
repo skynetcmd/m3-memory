@@ -2086,7 +2086,7 @@ def _step_cpu_sovereign_embedder() -> bool:
     no internet' default. Concurrency=2; OpenAI-compatible HTTP endpoint.
 
     Delegates to `m3 embedder install` which:
-      1. fetches bge-m3 Q4_K_M.gguf into ~/.m3-memory/models/ (one-time, ~300MB)
+      1. fetches bge-m3 Q4_K_M.gguf into ~/.m3/models/ (one-time, ~300MB)
       2. locates the m3-embed-server binary (from the m3-core-rs `oxidation` extra)
       3. registers it as a systemd / launchd / Windows Service with concurrency=2
       4. starts it
@@ -2894,15 +2894,15 @@ def _openclaw_startup_tools() -> "list[str]":
     list here would drift from the bridge silently, which is the same defect the
     bridge's own `_META_TOOLS` seam had.
 
-    Why filter at all: the full catalog is 115 tools / 29,658 tokens on the MCP
-    wire, vs 10 tools / 3,929 tokens for this set (measured with
-    `python bin/measure_tool_tokens.py`; 86.8% saved). Nothing is lost — `m3_call`
+    Why filter at all: the full catalog is 118 tools / 30,701 tokens on the MCP
+    wire, vs 10 tools / 3,962 tokens for this set (measured with
+    `python bin/measure_tool_tokens.py`; 87.1% saved). Nothing is lost — `m3_call`
     is in the set and dispatches ANY catalog tool by name, and `tools_load_domain`
     pulls a whole domain live. Omitting the meta-tools would make the filter a
     dead end, which is why they are included rather than just the 8 essentials.
 
     Returns [] if the payload is not importable; the caller then registers with no
-    toolFilter (all 115 tools — heavier, still correct) and says so.
+    toolFilter (all 118 tools — heavier, still correct) and says so.
     """
     _ensure_payload_importable()
     import mcp_tool_catalog  # noqa: PLC0415
@@ -3066,7 +3066,7 @@ def _wire_openclaw() -> bool:
         startup = _openclaw_startup_tools()
     except Exception as e:  # noqa: BLE001
         startup = []
-        # Loud, not silent: registering all 115 tools is correct but costs ~26K
+        # Loud, not silent: registering all 118 tools is correct but costs ~27K
         # extra tokens of schema every session, and a silent 7x regression in
         # context cost is exactly the kind of thing that goes unnoticed.
         _warn(f"could not derive the startup tool set ({type(e).__name__}: {e}); "

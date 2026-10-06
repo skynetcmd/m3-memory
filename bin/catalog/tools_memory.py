@@ -31,8 +31,10 @@ TOOLS: list[ToolSpec] = [
         name="memory_write",
         description=(
             "Creates a MemoryItem and optionally embeds it for semantic search. "
-            "Contradiction detection is automatic — if new content conflicts with an existing "
-            "memory of the same type/title, the old one is superseded. "
+            "Contradiction detection is automatic when the write is embedded — if new content "
+            "closely matches an existing memory of the same type from the same agent "
+            "(cosine > 0.92 by default; "
+            "titles need not match) but says something different, the old one is superseded. "
             "Use type='auto' to let the LLM decide the best category."
         ),
         parameters={

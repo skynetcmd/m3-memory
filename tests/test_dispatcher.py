@@ -240,9 +240,8 @@ def test_m3_call_async_tool_dispatches():
 
 
 def test_destructive_gate_reads_the_m3_name_and_the_legacy_name(monkeypatch):
-    """m3_call and the MCP proxy share one reading of the opt-in. m3_call once
-    read only the legacy name, so an operator who set the M3_ name still had
-    destructive tools refused through m3_call."""
+    """m3_call and the MCP proxy share one reading of the opt-in, and both the
+    M3_ name and the legacy name enable it."""
     import m3_sdk
 
     for name in ("M3_MCP_PROXY_ALLOW_DESTRUCTIVE", "MCP_PROXY_ALLOW_DESTRUCTIVE"):

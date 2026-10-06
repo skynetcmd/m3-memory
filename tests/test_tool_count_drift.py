@@ -107,12 +107,15 @@ _SUBCOUNT_EXCEPTIONS = (
     "26 MCP tools",        # files_memory.md title — the files-memory DOMAIN count
     "All 26 tools",        # files_memory.md — the files-memory domain itself
     "26-tool files-memory",  # README — the files-memory domain as a sub-layer
+    "25 MCP tools",        # files_memory.md — the files domain count
+    "All 25 tools",        # files_memory.md — same
     "(5 tools)",           # files_memory.md — files_corpus_* module
     # Surfaced when _TOOLS_RE was widened to hyphen/interposed-qualifier forms.
     # All three are genuine SUBCOUNTS the older, narrower pattern could not see —
     # not newly-introduced drift. Each is far below the catalog total, which is
     # what makes them safe to whitelist rather than rephrase.
     "26-tool",             # README — files-memory domain, hyphenated form
+    "25-tool",             # README/ROADMAP — files-memory domain (25 in the catalog)
     "10-tool",             # README — a per-layer subcount
     "18 essential tools",  # MYTHS_AND_FACTS — the lazy-mode essentials set
 )

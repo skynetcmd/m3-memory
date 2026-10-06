@@ -258,7 +258,7 @@ def _server_binary() -> Optional[Path]:
 
     Resolution order:
       1. $M3_EMBED_SERVER_BIN (explicit override)
-      2. Inside the m3_core_rs Python wheel (installed as the `oxidation` extra)
+      2. Inside the m3-core-rs Python wheel (installed by `m3 embedder install-gpu`)
       3. PATH lookup for `m3-embed-server`
     """
     env_bin = os.environ.get("M3_EMBED_SERVER_BIN")
@@ -327,7 +327,7 @@ def exec_bit_status(binary: "str | os.PathLike[str] | None" = None) -> dict:
 
         'ok'            — executable, or Windows (no exec bit exists there)
         'not-executable'— present but missing the exec bit: the failure below
-        'absent'        — no binary resolved; the oxidation extra is optional
+        'absent'        — no binary resolved; the m3-core-rs wheel is not installed
         'unknown'       — could not stat it
 
     ⚠ WHY IT IS WORTH A CHECK OF ITS OWN. `_ensure_executable` repairs this at

@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_ingest.py
-sha1: 86a1078d2a1a
-mtime_utc: 2026-09-20T05:47:31.481639+00:00
-generated_utc: 2026-09-20T05:51:47.935487+00:00
+sha1: 48a8eaca5f7d
+mtime_utc: 2026-10-06T01:43:22.894829+00:00
+generated_utc: 2026-10-06T01:43:33.753211+00:00
 private: false
 ---
 
@@ -23,7 +23,7 @@ CLI:
                                --transcript-path FILE
                                [--session-id ID] [--variant LABEL]
 
-A per-session cursor at memory/.chatlog_ingest_cursor.json records which
+A per-session cursor at <engine_root>/.chatlog_ingest_cursor.json records which
 message ids / indices have been ingested so re-invoking on the same transcript
 (e.g. Stop hook every turn) stays idempotent.
 
@@ -31,7 +31,7 @@ message ids / indices have been ingested so re-invoking on the same transcript
 
 ## Entry points
 
-- `async def main()` (line 858)
+- `async def main()` (line 868)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -80,7 +80,7 @@ message ids / indices have been ingested so re-invoking on the same transcript
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 630)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 640)
 
 
 ---

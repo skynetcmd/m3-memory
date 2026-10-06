@@ -176,6 +176,7 @@
     "human_matrix": "docs/CAPABILITY_MATRIX.md"
   },
   "benchmarks": {
+    "longmemeval_s_retrieval_shr_at_8": "99.2% (496/500) \u2014 memory_search default k",
     "longmemeval_s_retrieval_shr_at_10": "99.2% (496/500)",
     "longmemeval_s_retrieval_shr_at_20": "100%",
     "longmemeval_s_qa_accuracy": "92.0% (frontier answer model, gpt-4o judge, no oracle metadata)",

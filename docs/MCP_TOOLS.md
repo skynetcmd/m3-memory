@@ -35,7 +35,7 @@ This document provides a comprehensive inventory of all 118 MCP tools available 
 | `memory_update` | Memory Operations | Updates a MemoryItem by ID. |
 | `memory_update_bulk` | Memory Operations | Apply many metadata-only updates in one transaction per chunk. Designed for curation passes that retroactively set retention, importance, or supersession metadata. Per-id reembed is NOT supported here (use memory_update for reembed, or re_embed_all for the bulk reembed case). Returns structured {succeeded, not_found, no_change, total}. |
 | `memory_verify` | Memory Operations | Verify content integrity by comparing stored hash with computed hash. Returns OK if content hasn't been tampered with. |
-| `memory_write` | Memory Operations | Creates a MemoryItem and optionally embeds it for semantic search. Contradiction detection is automatic — if new content conflicts with an existing memory of the same type/title, the old one is superseded. Use type='auto' to let the LLM decide the best category. |
+| `memory_write` | Memory Operations | Creates a MemoryItem and optionally embeds it for semantic search. Contradiction detection is automatic when the write is embedded — if new content closely matches an existing memory of the same type from the same agent (cosine > 0.92 by default; titles need not match) but says something different, the old one is superseded. Use type='auto' to let the LLM decide the best category. |
 | `memory_write_from_file` | Memory Operations | Write a memory whose content is read from a file on disk. Use this when the memory body is large (>1k chars) to avoid the autoregressive decode latency of streaming a multi-thousand-token JSON `input` field through tool_use — write the body with the Write tool first (off the streaming path, fast), then call this tool with just the path + tiny metadata. The MCP server reads the file, writes the row through the same path as memory_write (all gates apply), and by default deletes the source file on success. Path must be absolute on the host running this MCP server. Files >200000 bytes are rejected; underlying content is still capped at 50000 chars by memory_write_impl. |
 | `memory_write_slim` | Memory Operations | Write a memory. Common parameters only; contradiction detection still runs and supersedes a conflicting memory automatically. For metadata, scope, user_id, validity windows, auto-classification or embedding control, call memory_write via m3_call, or load the memory domain with tools_load_domain. |
 | `enrich_pending` | Knowledge Graph | Enrich pending memory items with SLM-distilled facts. Default dry_run=true reports count + ETA; pass dry_run=false to execute. |
@@ -79,7 +79,7 @@ This document provides a comprehensive inventory of all 118 MCP tools available 
 | `chatlog_rescrub` | Chat Log System | Re-apply redaction to existing chat_log rows. Requires redaction.enabled=true. |
 | `chatlog_search` | Chat Log System | Search chat_log rows. FTS5 keyword when query is non-empty; filter-only when empty. |
 | `chatlog_search_slim` | Chat Log System | Search captured chat turns (FTS5 keyword; filter-only when query is empty). Common parameters only. For host_agent, provider, model_id, agent_id or search_mode filters, call chatlog_search via m3_call, or load the chatlog domain with tools_load_domain. |
-| `chatlog_set_redaction` | Chat Log System | Flip redaction on/off and update patterns. Persists to memory/.chatlog_config.json. |
+| `chatlog_set_redaction` | Chat Log System | Flip redaction on/off and update patterns. Persists to .chatlog_config.json under the config root. |
 | `chatlog_status` | Chat Log System | One-call health summary of the chat log subsystem: mode, DB paths, row counts, queue depth, spill files, embed backlog, hook timestamps, redaction state, warnings. |
 | `chatlog_write` | Chat Log System | Append one chat turn to the chat log DB. Provenance (host_agent, provider, model_id, conversation_id) is required. Writes are async-queued — returns the row id immediately. |
 | `chatlog_write_bulk` | Chat Log System | Bulk-append N chat turns. Each item needs the same required fields as chatlog_write. |
@@ -121,7 +121,7 @@ This document provides a comprehensive inventory of all 118 MCP tools available 
 | `memory_maintenance` | Lifecycle & Maintenance | Runs maintenance tasks on the memory store. |
 | `memory_set_retention` | Lifecycle & Maintenance | Set or update per-agent memory retention policy. Controls max memory count, TTL expiry, and auto-archival. |
 | `tools_list_domains` | Lifecycle & Maintenance | List m3 tool domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin) and their tool counts. Call `tools_load_domain` to expose a domain's full tool surface. |
-| `tools_load_domain` | Lifecycle & Maintenance | Register a tool domain's full surface for the current MCP session. Use when you need tools beyond the essentials (memory_search, memory_write, memory_get, chatlog_search, chatlog_write, files_search). Valid domains: memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin. |
+| `tools_load_domain` | Lifecycle & Maintenance | Register a tool domain's full surface for the current MCP session. Use when you need tools beyond the essentials (chatlog_search, chatlog_status, files_search, m3_call, memory_get, memory_search, memory_supersede, memory_write). Valid domains: memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin. |
 | `gdpr_export` | Data Governance | Export all memories for a data subject (GDPR data portability). Returns JSON with all memory items for the given user_id. |
 | `gdpr_forget` | Data Governance | Right to be forgotten — hard-deletes ALL data for a user_id including memories, embeddings, relationships, and history. |
 | `memory_export` | Data Governance | Export memories as portable JSON. Filter by agent, type, or date. |
@@ -615,7 +615,7 @@ Verify content integrity by comparing stored hash with computed hash. Returns OK
 
 ### `memory_write`
 
-Creates a MemoryItem and optionally embeds it for semantic search. Contradiction detection is automatic — if new content conflicts with an existing memory of the same type/title, the old one is superseded. Use type='auto' to let the LLM decide the best category.
+Creates a MemoryItem and optionally embeds it for semantic search. Contradiction detection is automatic when the write is embedded — if new content closely matches an existing memory of the same type from the same agent (cosine > 0.92 by default; titles need not match) but says something different, the old one is superseded. Use type='auto' to let the LLM decide the best category.
 
 **Source:** mcp_tool_catalog.py
 
@@ -1394,7 +1394,7 @@ Search captured chat turns (FTS5 keyword; filter-only when query is empty). Comm
 
 ### `chatlog_set_redaction`
 
-Flip redaction on/off and update patterns. Persists to memory/.chatlog_config.json.
+Flip redaction on/off and update patterns. Persists to .chatlog_config.json under the config root.
 
 **Source:** mcp_tool_catalog.py
 
@@ -2087,7 +2087,7 @@ List m3 tool domains (memory, chatlog, files, entity, agent, tasks, conversation
 
 ### `tools_load_domain`
 
-Register a tool domain's full surface for the current MCP session. Use when you need tools beyond the essentials (memory_search, memory_write, memory_get, chatlog_search, chatlog_write, files_search). Valid domains: memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin.
+Register a tool domain's full surface for the current MCP session. Use when you need tools beyond the essentials (chatlog_search, chatlog_status, files_search, m3_call, memory_get, memory_search, memory_supersede, memory_write). Valid domains: memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin.
 
 **Source:** mcp_tool_catalog.py
 

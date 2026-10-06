@@ -351,16 +351,18 @@ def test_resolve_chatlog_db_uses_engine_root(tmp_path, monkeypatch):
 
 
 def test_doctor_flags_divergent_bridge_vs_config(tmp_path, monkeypatch, capsys):
-    """When the LIVE bridge (M3_BRIDGE_PATH / dev checkout) differs from the
+    """When the LIVE bridge (M3_PATH_BIN / dev checkout) differs from the
     config's recorded install, doctor must NOT present the config version as
     'installed' — it labels it the last fetch and points at the live code."""
     from m3_memory import installer
 
-    # A live bridge via M3_BRIDGE_PATH that is NOT the config's bridge_path.
+    # A live bridge via M3_PATH_BIN (the honoured override) that is NOT the
+    # config's bridge_path. Use the honoured variable: a removed one would only
+    # be echoed back by doctor, and str(live) would match without testing anything.
     live = tmp_path / "dev" / "bin" / "memory_bridge.py"
     live.parent.mkdir(parents=True)
     live.write_text("# live dev bridge")
-    monkeypatch.setenv("M3_BRIDGE_PATH", str(live))
+    monkeypatch.setenv("M3_PATH_BIN", str(live.parent))
     monkeypatch.setattr(installer, "load_config", lambda: {
         "version": "2026.6.23.2", "tag": "v2026.6.23.2", "installed_at": "old",
         "bridge_path": "/some/other/repo/bin/memory_bridge.py",

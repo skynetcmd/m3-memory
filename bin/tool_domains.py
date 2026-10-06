@@ -2,8 +2,8 @@
 
 Problem this solves
 -------------------
-m3 ships 115 tools in `mcp_tool_catalog.TOOLS`. Their JSON schemas serialize
-to ~29,700 tokens on the MCP wire. Paid up-front at session init, that is
+m3 ships 118 tools in `mcp_tool_catalog.TOOLS`. Their JSON schemas serialize
+to ~30,700 tokens on the MCP wire. Paid up-front at session init, that is
 ~15 % of a 200K context window spent on schemas the agent may never touch —
 for every client (Claude Code, Gemini CLI, OpenCode, OpenClaw, claude.ai
 connector). Lazy mode brings it to ~3,900 tokens (~2 %).
@@ -85,7 +85,7 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
 # `bin/measure_tool_usage.py` over 88 transcripts (527 direct MCP calls).
 #
 # These + m3_call + the 2 meta-tools cover 95.4% of all observed direct calls
-# for 3,929 tokens. The previous 19-tool set cost 5,170 tokens and covered
+# for 3,962 tokens. The previous 19-tool set cost 5,170 tokens and covered
 # 90.5% -- so this is cheaper AND higher-coverage, not a tradeoff. The old set
 # spent 1,672 tokens on six tools with ZERO direct calls (chatlog_write,
 # files_search, files_index, files_health, task_list, and m3_call's own

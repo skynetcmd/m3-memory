@@ -7,8 +7,8 @@
   "license": "Apache-2.0",
   "tags": ["memory", "agents", "mcp", "local", "sqlite", "vector-search", "knowledge-graph"],
   "server": {
-    "command": "python",
-    "args": ["bin/memory_bridge.py"],
+    "command": "m3",
+    "args": [],
     "env": {}
   },
   "//tools": "The full, authoritative tool list is generated from bin/mcp_tool_catalog.py — see docs/tools/MCP_CATALOG.json and docs/MCP_TOOLS.md. A hardcoded array here (previously 25 stale names) drifts silently, so it is intentionally not duplicated."

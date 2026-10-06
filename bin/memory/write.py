@@ -381,8 +381,9 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
     # This turns a degraded/unconfigured embedder from a multi-minute cascade
     # (tier-2 30s read timeout + tier-3 3-retry + 30s semaphore, per chunk) into
     # a zero-lag write. Correctly-configured installs hit the fast path and are
-    # unchanged. Contradiction check below is already `if vec`-gated, so it
-    # naturally skips on the deferred path and runs when the vector backfills.
+    # unchanged. Contradiction check below is `if vec`-gated, so it skips on the
+    # deferred path -- and embed_backfill.py does NOT run it later: a deferred
+    # write is never contradiction-checked. Known gap; not yet addressed.
     _embed_deferred = False
     # Call via the module (not the value-bound import) so tests monkeypatching
     # memory.embed.fast_embedder_available take effect, matching the dynamic-lookup

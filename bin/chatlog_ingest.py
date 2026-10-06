@@ -11,7 +11,7 @@ CLI:
                                --transcript-path FILE
                                [--session-id ID] [--variant LABEL]
 
-A per-session cursor at memory/.chatlog_ingest_cursor.json records which
+A per-session cursor at <engine_root>/.chatlog_ingest_cursor.json records which
 message ids / indices have been ingested so re-invoking on the same transcript
 (e.g. Stop hook every turn) stays idempotent.
 """
@@ -243,14 +243,24 @@ def _parse_gemini_cli(raw: str) -> tuple[list[dict], Optional[str]]:
 
 # ─── Cursor (per-sessionId idempotency) ───────────────────────────────────────
 
-def _cursor_path() -> str:
+def _legacy_cursor_path() -> str:
+    """Where the cursor lived before 2026.10.5.0: inside the payload, which a reinstall wipes."""
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "memory", ".chatlog_ingest_cursor.json")
 
 
+def _cursor_path() -> str:
+    """The ingest cursor, under the engine root (chatlog_config owns the location)."""
+    import chatlog_config
+    return str(chatlog_config.INGEST_CURSOR)
+
+
 def _load_cursor() -> dict:
     try:
-        with open(_cursor_path(), "r", encoding="utf-8") as f:
+        path = _cursor_path()
+        if not os.path.exists(path) and os.path.exists(_legacy_cursor_path()):
+            path = _legacy_cursor_path()  # first run after the move: keep the progress
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}

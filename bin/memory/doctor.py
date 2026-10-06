@@ -2,8 +2,8 @@
 
 Probes the four things that go wrong silently in deployments:
 
-  1. Tier 1 — in-process Rust GGUF embedder. Needs M3_EMBED_GGUF env +
-     m3_core_rs Rust binding.
+  1. Tier 1 — in-process Rust GGUF embedder. Opt-in: needs M3_EMBED_INPROC=1
+     (or a permitting .embed_config.json), a GGUF, and the m3_core_rs binding.
   2. Tier 2 — always-on m3-embed-server HTTP service (default :8082).
      Independent of tier 1; either can be present, both is normal.
   3. DB integrity — SQLite open + sentinel-row read on the active DB.
@@ -297,8 +297,8 @@ async def memory_doctor_impl() -> dict[str, Any]:
     if not t1_ok and tier1["status"] == "not-configured":
         if not tier1["gguf_path"]:
             recommendations.append(
-                "Set M3_EMBED_GGUF to a BGE-M3 GGUF path to enable tier-1 "
-                "in-process embedding (~10-85x faster than HTTP fallback)."
+                "Tier-1 in-process embedding is opt-in: set M3_EMBED_INPROC=1 and "
+                "M3_EMBED_GGUF to a BGE-M3 GGUF path (costs one model copy per process)."
             )
         elif not tier1["gguf_exists"]:
             issues.append(
