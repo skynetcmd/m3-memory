@@ -509,7 +509,8 @@ class _Tee:
         self._log.flush()
 
 
-def run(cmd: list[str], *, dry: bool, timeout: int = 900) -> int:
+def run(cmd: list[str], *, dry: bool, timeout: int = 900,
+        env: dict[str, str] | None = None) -> int:
     printable = " ".join(cmd)
     if dry:
         print(f"      would run: {printable}")
@@ -519,7 +520,7 @@ def run(cmd: list[str], *, dry: bool, timeout: int = 900) -> int:
         if isinstance(sys.stdout, _Tee):
             # Logging: relay the child's output so it reaches the log as well.
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,  # nosec B603
-                                    text=True, encoding="utf-8", errors="replace")
+                                    text=True, encoding="utf-8", errors="replace", env=env)
             deadline = time.monotonic() + timeout
             assert proc.stdout is not None
             for line in proc.stdout:
@@ -528,7 +529,7 @@ def run(cmd: list[str], *, dry: bool, timeout: int = 900) -> int:
                     proc.kill()
                     raise subprocess.TimeoutExpired(cmd, timeout)
             return proc.wait()
-        return subprocess.run(cmd, timeout=timeout).returncode  # nosec B603 - argv list, no shell
+        return subprocess.run(cmd, timeout=timeout, env=env).returncode  # nosec B603 - argv list, no shell
     except FileNotFoundError:
         print(f"      !! not found: {cmd[0]}")
         return 127
@@ -550,6 +551,10 @@ def summary_lines(*, old: str | None, new: str | None, unchanged: bool,
     if agents_stopped:
         lines.append(f"  agents  : m3 was stopped in {agents_stopped} agent session(s); "
                      "reconnect them (Claude Code: /mcp)")
+    elif not unchanged:
+        # Setup leaves this to us when we call it (its own list is suppressed).
+        lines.append("  agents  : restart your agents, or reconnect m3 (Claude Code: /mcp), "
+                     "to load the new version")
     if failed_step:
         lines.append(f"  health  : {failed_step} reported problems (exit {rc}); "
                      "see its output above")
@@ -837,7 +842,8 @@ def main(argv: list[str] | None = None) -> int:
                 agents_stopped=stopped_agents, failed_step=failed_step, rc=rc,
                 log=args.log)))
 
-    rc = run(setup_cmd, dry=dry)
+    # Tells setup that this run verifies and summarizes (see setup_wizard._called_by_upgrade).
+    rc = run(setup_cmd, dry=dry, env={**os.environ, "M3_SETUP_CALLER": "upgrade"})
     if rc != 0:
         print(
             f"\n`m3 setup` failed (exit {rc}). The package IS upgraded; re-run\n"

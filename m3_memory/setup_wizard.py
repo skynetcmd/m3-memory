@@ -2931,9 +2931,23 @@ def _openclaw_startup_tools() -> "list[str]":
     toolFilter (all 118 tools — heavier, still correct) and says so.
     """
     _ensure_payload_importable()
-    import mcp_tool_catalog  # noqa: PLC0415
-    import memory_bridge  # noqa: PLC0415
-    import tool_domains  # noqa: PLC0415
+    import logging  # noqa: PLC0415
+
+    # Importing the bridge configures logging at INFO and binds the store, which
+    # printed `M3_SDK: [INFO] ...` lines into setup's output. Drop INFO during
+    # the import and undo the logging setup it leaves behind in this process.
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    logging.disable(logging.INFO)
+    try:
+        import mcp_tool_catalog  # noqa: PLC0415
+        import memory_bridge  # noqa: PLC0415
+        import tool_domains  # noqa: PLC0415
+    finally:
+        logging.disable(logging.NOTSET)
+        for h in [h for h in root.handlers if h not in handlers]:
+            root.removeHandler(h)
+        root.setLevel(level)
 
     meta = set(getattr(memory_bridge, "_META_TOOLS", None) or ())
     names = {
@@ -3954,7 +3968,15 @@ def run_setup(args: argparse.Namespace) -> int:
         # One administrator prompt for every privileged step queued above,
         # before verification so the doctor sees their result.
         _flush_elevation(gui=getattr(args, "gui_child", False))
-        verified = _step_doctor(plan)
+        from_upgrade = _called_by_upgrade()
+        if from_upgrade:
+            # `m3 upgrade` runs `m3 doctor --fix --fix-hooks` next and reports
+            # its verdict. A report-only doctor here warned about state that
+            # step then repaired.
+            _say("Step 5/5: verification follows in `m3 upgrade` (m3 doctor --fix --fix-hooks)")
+            verified = True
+        else:
+            verified = _step_doctor(plan)
         _trace(f"after step_doctor -> verified={verified}")
         # An install/upgrade STOPS the daemons (preflight must quiesce them so
         # nothing holds the DB through a migration) and owns restarting them.
@@ -3965,7 +3987,7 @@ def run_setup(args: argparse.Namespace) -> int:
         daemons_up = _step_verify_daemons(plan)
         _trace(f"after verify_daemons -> up={daemons_up}")
         verified = verified and daemons_up
-        _summary(plan, governor_result, verified=verified)
+        _summary(plan, governor_result, verified=verified, brief=from_upgrade)
         _trace("after summary")
         # Exit 3 = "installed but not verified healthy". Distinct from 0
         # (clean) and from 2 (aborted, nothing installed) so a scripted
@@ -3978,6 +4000,19 @@ def run_setup(args: argparse.Namespace) -> int:
         _lower_halt()
         _restore_stopped_services()
         _report_unrun_elevation()
+
+
+UPGRADE_CALLER_ENV = "M3_SETUP_CALLER"
+
+
+def _called_by_upgrade() -> bool:
+    """True when `m3 upgrade` runs this setup as its finalizing step.
+
+    An environment variable, not a flag: an upgrade can install an OLDER
+    release (`--from-pypi` from a pre-release), whose setup would reject an
+    unknown flag but ignores an unknown variable.
+    """
+    return os.environ.get(UPGRADE_CALLER_ENV) == "upgrade"
 
 
 def _lower_halt() -> None:

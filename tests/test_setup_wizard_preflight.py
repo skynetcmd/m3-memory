@@ -1591,3 +1591,50 @@ def test_setup_children_import_the_same_m3_package(monkeypatch, tmp_path):
     assert os.environ["PYTHONPATH"].split(os.pathsep)[0] == root
     sw._m3_cli("doctor")  # idempotent: the root is not added twice
     assert os.environ["PYTHONPATH"].split(os.pathsep).count(root) == 1
+
+
+def _stub_setup_steps(monkeypatch, events):
+    for name in dir(setup_wizard):
+        if name.startswith("_step_"):
+            monkeypatch.setattr(setup_wizard, name, lambda *a, **k: True)
+    monkeypatch.setattr(setup_wizard, "_step_doctor", lambda *a, **k: events.append("doctor") or True)
+    monkeypatch.setattr(setup_wizard, "_step_verify_daemons", lambda *a, **k: events.append("verify") or True)
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: None)
+    monkeypatch.setattr(setup_wizard, "_should_use_gui", lambda a: False)
+    monkeypatch.setattr(setup_wizard, "_detect_agents", lambda: {})
+    monkeypatch.setattr(setup_wizard, "_gather_plan", lambda d, a: setup_wizard.SetupPlan())
+    monkeypatch.setattr(setup_wizard, "_summary",
+                        lambda *a, **k: events.append(("summary", k.get("brief"))))
+
+
+def test_setup_run_by_upgrade_leaves_verification_to_it(monkeypatch):
+    """`m3 upgrade` runs doctor --fix --fix-hooks after setup; a report-only
+    doctor inside setup warned about what that step then repaired."""
+    events: list = []
+    _stub_setup_steps(monkeypatch, events)
+    monkeypatch.setenv(setup_wizard.UPGRADE_CALLER_ENV, "upgrade")
+    assert setup_wizard.run_setup(argparse.Namespace(non_interactive=True)) == 0
+    assert "doctor" not in events
+    assert "verify" in events                       # daemons are still checked
+    assert ("summary", True) in events
+
+
+def test_setup_run_directly_still_verifies(monkeypatch):
+    events: list = []
+    _stub_setup_steps(monkeypatch, events)
+    monkeypatch.delenv(setup_wizard.UPGRADE_CALLER_ENV, raising=False)
+    assert setup_wizard.run_setup(argparse.Namespace(non_interactive=True)) == 0
+    assert "doctor" in events and ("summary", False) in events
+
+
+def test_openclaw_tool_derivation_leaves_no_logging_behind(monkeypatch):
+    """Importing the bridge configured INFO logging in setup's own process."""
+    import logging
+    root = logging.getLogger()
+    before = (list(root.handlers), root.level)
+    try:
+        setup_wizard._openclaw_startup_tools()
+    except Exception:  # noqa: BLE001 — payload may be absent; logging must still be restored
+        pass
+    assert (list(root.handlers), root.level) == before
+    assert logging.root.manager.disable == logging.NOTSET

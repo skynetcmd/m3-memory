@@ -14,14 +14,21 @@ from .ui import _ok, _warn
 
 
 def _summary(plan, governor_result: Optional[dict] = None,
-             verified: bool = True) -> None:
+             verified: bool = True, brief: bool = False) -> None:
     """End-of-run summary so the user knows exactly what to do next.
 
     ``verified`` is the doctor's verdict from _step_doctor. It used to print
     "Setup complete." unconditionally — including over a doctor run that had
     just failed — which is the silent-success pattern the doctor exists to
     catch. The headline now states what is actually true.
+
+    ``brief`` is for `m3 upgrade`, which prints its own summary after this:
+    only what needs action is kept (a failed verification, governor tasks
+    that could not be removed).
     """
+    if brief:
+        _brief_summary(plan, governor_result, verified)
+        return
     print()
     if verified:
         _ok("Setup complete — verified healthy.")
@@ -155,6 +162,18 @@ def _summary(plan, governor_result: Optional[dict] = None,
     print("            m3 --help      # every command")
     print("─" * 60)
     print()
+
+
+def _brief_summary(plan, governor_result: Optional[dict], verified: bool) -> None:
+    print()
+    if verified:
+        _ok("Setup finished.")
+    else:
+        _warn("Setup finished, but VERIFICATION FAILED — see the output above.")
+    failed = (governor_result or {}).get("failed", [])
+    if failed:
+        _warn(f"Could not remove {len(failed)} legacy scheduled task(s) — insufficient "
+              "privilege. Run `m3 setup` from an elevated shell to finish.")
 
 
 def _os_name_for_summary() -> str:

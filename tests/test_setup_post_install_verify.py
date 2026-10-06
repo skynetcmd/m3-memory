@@ -520,3 +520,29 @@ def test_verify_waits_before_grading_a_restarted_service(wizard, monkeypatch, ca
         f"setup must wait for the restarted role to register, got {waited}"
     )
     assert "NOT running" not in "".join(capsys.readouterr())
+
+
+def test_brief_summary_is_short_and_keeps_failures():
+    """`m3 upgrade` prints its own summary; setup's agent list, tips and status
+    blocks only repeated it."""
+    import contextlib
+    import io
+
+    from m3_memory.setup_wizard import SetupPlan
+    from m3_memory.wizard import summary as s
+
+    plan = SetupPlan()
+    plan.targets.claude = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s._summary(plan, {"failed": ["T1"], "not_migratable": ["  • X"]}, verified=True, brief=True)
+    out = buf.getvalue()
+    assert "Setup finished." in out
+    assert "Could not remove 1 legacy scheduled task" in out
+    for gone in ("restart your agent", "Try it:", "Left on their schedule", "Project Oxidation"):
+        assert gone not in out, gone
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s._summary(plan, None, verified=False, brief=True)
+    assert "VERIFICATION FAILED" in buf.getvalue()

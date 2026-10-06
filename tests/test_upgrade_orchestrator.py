@@ -598,3 +598,35 @@ def test_a_failed_doctor_ends_in_an_incomplete_summary(tmp_path, monkeypatch, ca
     assert "Upgrade incomplete." in out
     assert "health  : m3 doctor reported problems (exit 3)" in out
     assert "\nDone.\n" not in out
+
+
+def test_setup_is_told_it_runs_inside_an_upgrade(tmp_path, monkeypatch):
+    """Setup then skips its own doctor and long summary; only the setup child
+    gets the variable, not the doctor step that follows."""
+    scripts, pkg = _pip_install(tmp_path)
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    envs = {}
+    monkeypatch.setattr(m3u, "run", lambda cmd, **k: envs.setdefault(cmd[1], k.get("env")) and 0 or 0)
+    assert m3u.main(["--yes"]) == 0
+    assert envs["setup"]["M3_SETUP_CALLER"] == "upgrade"
+    assert envs.get("doctor") is None
+
+
+def test_the_caller_variable_matches_setups():
+    """m3_upgrade.py must not import m3_memory (the package is replaced under
+    it), so the name is written twice; keep the two in step."""
+    from m3_memory import setup_wizard
+    src = (_BIN / "m3_upgrade.py").read_text(encoding="utf-8")
+    assert f'"{setup_wizard.UPGRADE_CALLER_ENV}": "upgrade"' in src
+
+
+def test_a_changed_version_tells_the_user_to_restart_agents():
+    lines = m3u.summary_lines(old="1", new="2", unchanged=False, agents_stopped=0,
+                              failed_step="", rc=0, log="")
+    assert any("restart your agents" in ln for ln in lines)
+    lines = m3u.summary_lines(old="1", new="1", unchanged=True, agents_stopped=0,
+                              failed_step="", rc=0, log="")
+    assert not any("agents" in ln for ln in lines)
