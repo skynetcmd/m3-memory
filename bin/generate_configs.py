@@ -139,8 +139,12 @@ def _hook_env_prefix(engine_root: str, config_root: str) -> str:
     return f"M3_ENGINE_ROOT={engine_root} M3_CONFIG_ROOT={config_root} "
 
 
-def generate_configs():
-    """Generates gemini-settings.json and claude-settings.json from templates."""
+def generate_configs(write: bool = True):
+    """Generates gemini-settings.json and claude-settings.json from templates.
+
+    ``write=False`` only computes the settings (for a dry run, which must not
+    write templates or seed config, or print as if it had).
+    """
     # m3_repo_root  = the repo directory (where bin/ lives)
     m3_repo_root  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config_dir    = os.path.join(m3_repo_root, "config")
@@ -173,13 +177,14 @@ def generate_configs():
             if os.path.exists(candidate):
                 embed_gguf = candidate
                 break
-    try:
-        from m3_memory.embedder_admin import seed_shared_config
-        _cfg_path, _wrote = seed_shared_config(gguf_path=embed_gguf or None)
-        if _wrote:
-            print(f"[generate_configs] seeded shared embedder config: {_cfg_path}")
-    except Exception as _e:  # noqa: BLE001 — config gen must not hard-fail on this
-        print(f"[generate_configs] WARN: could not seed shared embedder config: {_e}")
+    if write:
+        try:
+            from m3_memory.embedder_admin import seed_shared_config
+            _cfg_path, _wrote = seed_shared_config(gguf_path=embed_gguf or None)
+            if _wrote:
+                print(f"[generate_configs] seeded shared embedder config: {_cfg_path}")
+        except Exception as _e:  # noqa: BLE001 — config gen must not hard-fail on this
+            print(f"[generate_configs] WARN: could not seed shared embedder config: {_e}")
 
     # Root bin/ scripts at the AUTHORITATIVE payload — the wheel-packaged bin/
     # when installed (the same resolver the core memory bridge uses), a
@@ -343,10 +348,13 @@ def generate_configs():
         "skipDangerousModePermissionPrompt": True,
         "mcpServers": mcp_servers,
     }
+    # Reused by install_claude_settings(), which reads it back with getattr.
+    generate_configs._last_claude = claude  # type: ignore[attr-defined]
+    if not write:
+        return
     _write_json(os.path.join(config_dir, "claude-settings.json"), claude)
     print(f"Generated claude-settings.json ({python_cmd}, engine root {engine_root}, "
           f"config root {config_root})")
-    generate_configs._last_claude = claude  # reused by install_claude_settings()
 
     # ── gemini-settings.json ──────────────────────────────────────────────────
     gemini_path = os.path.join(config_dir, "gemini-settings.json")
@@ -507,8 +515,9 @@ def install_claude_settings(settings_path=None, assume_yes=False, dry_run=False,
     repo_root = _m3_repo_root()
     repo_root_fwd = repo_root.replace("\\", "/")
 
-    # Build the canonical m3 settings via the generator (writes the template too).
-    generate_configs()
+    # Build the canonical m3 settings via the generator (writes the template too,
+    # except on a dry run).
+    generate_configs(write=not dry_run)
     m3 = getattr(generate_configs, "_last_claude", None)
     if not m3:
         raise RuntimeError("generate_configs did not produce claude settings")

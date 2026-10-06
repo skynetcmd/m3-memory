@@ -305,3 +305,18 @@ def test_install_claude_settings_removes_legacy_and_keeps_foreign(tmp_path, monk
         "a user's own MCP server was removed -- m3 prunes only what it wrote")
     assert after.get("somethingElse") == {"keep": True}, (
         "an unrelated settings key was lost")
+
+
+def test_a_dry_run_writes_and_announces_nothing(monkeypatch, tmp_path, capsys):
+    """doctor --fix asks install_claude_settings(dry_run=True) whether anything
+    would change; that check wrote the three templates and printed
+    "Generated ..." for each on every run."""
+    import generate_configs as gc
+
+    writes = []
+    monkeypatch.setattr(gc, "_write_json", lambda path, data: writes.append(str(path)))
+    settings = tmp_path / "settings.json"
+    settings.write_text("{}", encoding="utf-8")
+    gc.install_claude_settings(settings_path=str(settings), dry_run=True)
+    assert writes == []
+    assert "Generated" not in capsys.readouterr().out
