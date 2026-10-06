@@ -26,6 +26,17 @@ import pytest
 
 from m3_memory import setup_wizard
 
+# The real preflight stop, captured before the autouse stub below replaces it.
+_REAL_STOP_SUPERVISED = setup_wizard._stop_supervised_services
+
+
+@pytest.fixture(autouse=True)
+def _no_real_supervised_stop(monkeypatch):
+    """The quiesce path stops m3's launchd/systemd services; on a developer's
+    macOS/Linux box that is THEIR live loop. Tests of the stop itself call
+    _REAL_STOP_SUPERVISED with a stubbed install_schedules."""
+    monkeypatch.setattr(setup_wizard, "_stop_supervised_services", lambda: None)
+
 # ────────────────────────────────────────────────────────────────────────
 # _discover_bge_m3_gguf
 # ────────────────────────────────────────────────────────────────────────
@@ -1504,7 +1515,7 @@ def test_aborted_setup_restarts_the_services_it_stopped(monkeypatch):
     monkeypatch.setitem(sys.modules, "install_schedules", sched)
     monkeypatch.setattr("time.sleep", lambda s: None)
     monkeypatch.setattr(setup_wizard, "_STOPPED_SERVICES", [])
-    setup_wizard._stop_supervised_services()
+    _REAL_STOP_SUPERVISED()
     monkeypatch.setattr(setup_wizard, "_should_use_gui", lambda a: False)
     monkeypatch.setattr(setup_wizard, "_detect_agents", lambda: setup_wizard.AgentTargets())
     monkeypatch.setattr(setup_wizard, "_gather_plan", lambda d, a: setup_wizard.SetupPlan())

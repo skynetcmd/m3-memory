@@ -176,6 +176,7 @@ def test_ancestor_aborts_the_quiesce_instead_of_looping(monkeypatch, capsys):
             return _Result()
 
     monkeypatch.setattr(sw, "_import_m3_halt", lambda: _Halt())
+    monkeypatch.setattr(sw, "_stop_supervised_services", lambda: None)   # real services
     monkeypatch.setattr(sw, "_is_own_ancestor", lambda pid: pid == 777777)
     monkeypatch.setattr(sw, "_quiesce_tick", lambda args: None)
     monkeypatch.setattr(sw, "_quiesce_tick_done", lambda args: None)

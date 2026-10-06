@@ -313,6 +313,8 @@ def test_a_stopped_daemon_fails_verification(wizard, monkeypatch, capsys):
     """
     monkeypatch.setattr(wizard, "_import_m3_halt",
                         lambda: _fake_halt(["dashboard"]))
+    # The restart attempt would start the developer's REAL loop service.
+    monkeypatch.setattr(wizard, "_start_service_for_role", lambda role: True)
     assert wizard._step_verify_daemons(_P(loop=True, dash=True)) is False
     blob = "".join(capsys.readouterr())
     assert "cognitive-loop: NOT running" in blob

@@ -560,6 +560,91 @@ def _real_service_units_untouched():
         )
 
 
+# launchctl / systemctl stand-ins, first on PATH for the whole session. A service
+# manager acts on the developer's REAL session whatever HOME a test sets: a
+# `launchctl unload` of ~/Library/LaunchAgents/com.m3memory.cognitiveloop.plist
+# stopped the live loop and its watchdog, and a `load` of a tmp plist registers
+# that job in the real gui domain. _real_service_units_untouched cannot see this
+# (no file changes). Read-only subcommands pass through; anything else is
+# recorded and NOT run, so no test can stop, start or (re)load a real service.
+_SVC_READ_ONLY = {
+    "launchctl": "list print print-disabled getenv version help blame",
+    "systemctl": "is-active is-enabled is-failed status show cat list-units "
+                 "list-unit-files list-timers --version",
+}
+_SVC_LOG_ENV = "M3_TEST_SERVICE_CALLS"
+
+
+def _write_service_shims(shim_dir: Path, log: Path) -> None:
+    for tool, readonly in _SVC_READ_ONLY.items():
+        real = shutil.which(tool)
+        script = shim_dir / tool
+        script.write_text(
+            "#!/bin/sh\n"
+            "# test stand-in: see tests/conftest.py _service_manager_shim\n"
+            'sub=""\n'
+            'for a in "$@"; do case "$a" in --*) [ "$a" = "--version" ] && sub="$a" ;; '
+            '*) sub="$a"; break ;; esac; done\n'
+            f'case " {readonly} " in *" $sub "*) '
+            + (f'exec "{real}" "$@" ;; ' if real else "exit 0 ;; ")
+            + "esac\n"
+            f'echo "${{PYTEST_CURRENT_TEST:-?}} | {tool} $*" >> "{log}"\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _service_manager_shim(tmp_path_factory):
+    if sys.platform == "win32":
+        yield None
+        return
+    shim_dir = tmp_path_factory.mktemp("service-manager-shim")
+    log = shim_dir / "calls.log"
+    log.write_text("", encoding="utf-8")
+    _write_service_shims(shim_dir, log)
+    saved = (_os.environ.get("PATH", ""), _os.environ.get(_SVC_LOG_ENV))
+    _os.environ["PATH"] = f"{shim_dir}{_os.pathsep}{saved[0]}"
+    _os.environ[_SVC_LOG_ENV] = str(log)
+    try:
+        yield log
+    finally:
+        _os.environ["PATH"] = saved[0]
+        if saved[1] is None:
+            _os.environ.pop(_SVC_LOG_ENV, None)
+        else:
+            _os.environ[_SVC_LOG_ENV] = saved[1]
+
+
+_REAL_SERVICE_TARGET = re.compile(
+    re.escape(str(_REAL_HOME)) + r"|(?<![/\w.-])(com\.(m3memory|skynetcmd)\.[\w.-]+|m3-[\w.-]+\.(service|timer))\b")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_service_manager_calls(_service_manager_shim):
+    """Fail the test that tried to change a REAL m3 service (a bare m3 label, or
+    a path under the real home). The shim already refused to run it; this names
+    the test, so it gets a stub instead of quietly relying on the shim. Calls on
+    a tmp-dir plist are not flagged: with the shim in place they reach nothing."""
+    log = _service_manager_shim
+    start = log.stat().st_size if log is not None else 0
+    yield
+    if log is None:
+        return
+    with open(log, encoding="utf-8") as fh:
+        fh.seek(start)
+        new = [ln.split(" | ", 1)[-1].strip() for ln in fh if ln.strip()]
+    tmp_root = str(Path(tempfile.gettempdir()).resolve())
+    real = [c for c in new if _REAL_SERVICE_TARGET.search(c.replace(tmp_root, "<tmp>"))
+            and "<tmp>" not in c.replace(tmp_root, "<tmp>")]
+    if real:
+        pytest.fail("this test tried to change REAL m3 services (refused by the "
+                    "test shim): " + "; ".join(real) + ". Stub the service "
+                    "manager call (e.g. setup_wizard._stop_supervised_services).",
+                    pytrace=False)
+
+
 @pytest.fixture(autouse=True)
 def _restore_platform_identity():
     """Guarantee `os.name` AND `sys.platform` are restored after every test.
