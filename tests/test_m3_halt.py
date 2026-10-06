@@ -673,3 +673,19 @@ def test_a_process_we_may_not_open_is_still_alive():
     stopped without attempting the kill. PID 4 (System) always exists and
     always refuses an unprivileged open."""
     assert m3_halt._pid_is_alive(4) is True
+
+
+def test_kill_stale_daemons_roles_limits_the_kill(root, monkeypatch):
+    """roles= targets only those roles (suffix-normalised), so setup can stop m3's
+    scheduled daemons without touching an agent session's MCP server."""
+    monkeypatch.setattr(m3_halt, "list_all_db_writers", lambda engine_root=None: [
+        m3_halt.ProcInfo(pid=_DEAD_PID, role="cognitive-loop", started_at="",
+                         engine_root=root, path=Path()),
+        m3_halt.ProcInfo(pid=_DEAD_PID + 1, role="mcp", started_at="",
+                         engine_root=root, path=Path()),
+        m3_halt.ProcInfo(pid=_DEAD_PID + 2, role="dashboard(elevated?)", started_at="",
+                         engine_root=root, path=Path()),
+    ])
+    monkeypatch.setattr(m3_halt, "_pid_is_alive", lambda pid: False)
+    res = m3_halt.kill_stale_daemons(engine_root=root, roles=("cognitive-loop", "dashboard"))
+    assert sorted(r["role"] for r in res) == ["cognitive-loop", "dashboard(elevated?)"]

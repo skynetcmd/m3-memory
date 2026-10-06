@@ -852,6 +852,30 @@ def _stop_supervised_services() -> None:
              f"setup starts them again")
 
 
+# m3's own scheduled daemons that do not release the store promptly under HALT:
+# the dashboard does not pause for it, and the loop only notices between cycles.
+# Setup's service verification starts both again; agent MCP servers are left alone.
+_WINDOWS_SLOW_TO_QUIESCE = ("cognitive-loop", "dashboard")
+
+
+def _stop_scheduled_daemons_windows(halt) -> None:
+    """Windows: stop m3's scheduled daemons before the HALT wait (best-effort).
+
+    Task Scheduler is not a supervisor that can stop them, so without this the
+    wait runs its full timeout and then force-stops them anyway.
+    """
+    try:
+        results = halt.kill_stale_daemons(timeout=8.0, roles=_WINDOWS_SLOW_TO_QUIESCE)
+    except TypeError:
+        return  # m3_halt from the payload being upgraded FROM: no role filter yet
+    except Exception as e:  # noqa: BLE001 — the HALT quiesce below still runs
+        _warn(f"  could not stop m3's scheduled daemons first ({type(e).__name__}: {e})")
+        return
+    stopped = [r for r in results if r.get("killed")]
+    if stopped:
+        _say(f"  stopped {len(stopped)} m3 service(s) for the update; setup starts them again")
+
+
 def _restore_stopped_services() -> None:
     """Start any service this run stopped that is still down at the end, so an
     aborted or partial setup does not leave m3 stopped."""
@@ -899,6 +923,8 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
     # kill prompt. Setup's later steps start them again.
     if sys.platform != "win32":
         _stop_supervised_services()
+    else:
+        _stop_scheduled_daemons_windows(halt)
 
     # Union of registered writers AND a cmdline scan — so an UPGRADE from an
     # older m3 (whose loop/embed/MCP predate the PID registry + HALT protocol and
