@@ -433,6 +433,9 @@ def _service_cmd(binary: Path, gguf: Path, sub: str, *extra: str) -> int:
     env = os.environ.copy()
     env.setdefault("M3_EMBED_GGUF", str(gguf))
     env.setdefault("M3_EMBED_SERVER_PORT", "8082")
+    # The child writes straight to the same stream; flush ours first so a piped
+    # (block-buffered) stdout does not print our lines after its output.
+    sys.stdout.flush()
     return subprocess.run([str(binary), sub, *extra], env=env, check=False).returncode
 
 
@@ -940,6 +943,13 @@ def cmd_install(args: argparse.Namespace) -> int:
         return 2
     size_mb = _gguf_size_bytes(gguf) // (1024 * 1024)
     print(f"[=] using bundled GGUF: {gguf} ({size_mb} MB)")
+
+    # Registered, running and on the current binary: nothing to install. Running
+    # `install` and `start` anyway printed "nothing to do" twice around a
+    # port-in-use notice about this same service.
+    if (_service_reports_installed(binary, gguf) and _service_reports_running(binary, gguf)
+            and not _service_binary_is_stale(binary)):
+        return _verify_started_or_explain(binary, gguf)
 
     _warn_if_port_busy("install")
     # getattr default: cmd_start delegates here to auto-install, and the `start`

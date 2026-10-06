@@ -15,6 +15,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
 import m3_memory.embedder_admin as ea  # noqa: E402
@@ -64,3 +66,28 @@ def test_start_uses_normal_path_when_registered(monkeypatch):
 
     assert rc == 0
     assert calls == [("start", [])]  # no install; straight to start
+
+
+def test_install_on_a_running_current_service_runs_nothing(monkeypatch, capsys):
+    """Setup calls install on every run; a service already registered, running
+    and on the current binary must not be re-installed or re-started (that
+    printed "nothing to do" twice around a port-in-use notice about itself)."""
+    calls: list = []
+    _patch_common(monkeypatch, calls)
+    monkeypatch.setattr(ea, "_service_reports_installed", lambda b, g: True)
+    monkeypatch.setattr(ea, "_service_binary_is_stale", lambda b: False)
+    monkeypatch.setattr(ea, "_warn_if_port_busy",
+                        lambda phase: pytest.fail("no port notice for our own service"))
+    assert ea.cmd_install(argparse.Namespace(concurrency=2)) == 0
+    assert calls == []
+    assert "running on port" in capsys.readouterr().out
+
+
+def test_install_on_a_stale_running_service_still_restarts_it(monkeypatch):
+    calls: list = []
+    _patch_common(monkeypatch, calls)
+    monkeypatch.setattr(ea, "_service_reports_installed", lambda b, g: True)
+    monkeypatch.setattr(ea, "_service_binary_is_stale", lambda b: True)
+    monkeypatch.setattr(ea, "_service_cmd", lambda b, g, action, *e: calls.append(action) or (1 if action == "install" else 0))
+    assert ea.cmd_install(argparse.Namespace(concurrency=2)) == 0
+    assert calls == ["install", "stop", "start"]
