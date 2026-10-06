@@ -519,6 +519,8 @@ def _cmd_upgrade(args: argparse.Namespace) -> int:
         cmd.append("--skip-stop")
     if getattr(args, "from_pypi", False):
         cmd.append("--from-pypi")
+    if getattr(args, "stop_agents", False):
+        cmd.append("--stop-agents")
     try:
         return subprocess.run(cmd).returncode  # nosec B603 - argv list, no shell
     except KeyboardInterrupt:
@@ -1858,6 +1860,12 @@ Examples:
         "--from-pypi", dest="from_pypi", action="store_true",
         help="pipx installs: reinstall from PyPI, moving an install that tracks "
              "a local wheel or path onto the PyPI release.",
+    )
+    p_upgrade.add_argument(
+        "--stop-agents", dest="stop_agents", action="store_true",
+        help="Windows: stop m3 in agent sessions that hold its launcher, so the "
+             "upgrade can replace it (they reconnect afterwards). At a console "
+             "the upgrade asks instead; use this for unattended runs.",
     )
     p_upgrade.set_defaults(func=_cmd_upgrade)
 

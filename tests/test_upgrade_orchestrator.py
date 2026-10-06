@@ -456,7 +456,7 @@ def _held_pip_install(tmp_path, monkeypatch, own, others):
 def test_own_launcher_only_hands_off_to_a_new_window(tmp_path, monkeypatch, capsys):
     """Windows: `m3 upgrade` runs from m3.exe, the file it must replace. When that
     is the only holder, continue from Python in a new window instead of refusing."""
-    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=False)
+    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=[])
     handed = []
     monkeypatch.setattr(m3u, "hand_off_to_new_window",
                         lambda py, argv, pids: handed.append((argv, pids)))
@@ -467,7 +467,7 @@ def test_own_launcher_only_hands_off_to_a_new_window(tmp_path, monkeypatch, caps
 
 
 def test_a_dry_run_held_only_by_its_own_launcher_shows_the_plan(tmp_path, monkeypatch, capsys):
-    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=False)
+    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=[])
     monkeypatch.setattr(m3u, "hand_off_to_new_window",
                         lambda *a: pytest.fail("a dry run must not hand off"))
     assert m3u.main(["--dry-run"]) == 0
@@ -478,7 +478,7 @@ def test_a_dry_run_held_only_by_its_own_launcher_shows_the_plan(tmp_path, monkey
 
 def test_another_holder_still_refuses(tmp_path, monkeypatch, capsys):
     """An agent's MCP server holding m3.exe cannot be waited out by a hand-off."""
-    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=True)
+    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=[5555])
     monkeypatch.setattr(m3u, "hand_off_to_new_window", lambda *a: pytest.fail("no hand-off"))
     monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
     assert m3u.main(["--yes"]) == 2
@@ -488,7 +488,7 @@ def test_another_holder_still_refuses(tmp_path, monkeypatch, capsys):
 def test_an_unattended_run_is_refused_not_handed_off(tmp_path, monkeypatch, capsys):
     """No person at the console: a script would read the hand-off's exit 0 as
     "upgraded" before the upgrade starts. Refuse with the command to run instead."""
-    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=False)
+    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=[])
     monkeypatch.setattr(m3u, "interactive_console", lambda: False)
     monkeypatch.setattr(m3u, "hand_off_to_new_window", lambda *a: pytest.fail("no hand-off"))
     monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
@@ -496,3 +496,64 @@ def test_an_unattended_run_is_refused_not_handed_off(tmp_path, monkeypatch, caps
     out = capsys.readouterr().out
     assert "Cannot upgrade now" in out
     assert "m3_upgrade.py\" --yes" in out
+
+
+def test_agent_sessions_are_listed_and_stopped_after_the_proceed_prompt(tmp_path, monkeypatch, capsys):
+    """An agent's m3 server holds m3.exe. At a console, the plan lists it as step 0
+    and the one Proceed answer is the consent to stop it."""
+    _held_pip_install(tmp_path, monkeypatch, own=[], others=[5555])
+    monkeypatch.setattr(m3u, "describe_holders", lambda locked: ["    pid   5555  m3.exe  (started by claude.exe)"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+    stopped = []
+    def _stop(pids):  # stopping the holders releases the launcher, as on Windows
+        stopped.append(list(pids))
+        monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "stop_holders", _stop)
+    monkeypatch.setattr(m3u, "run", lambda cmd, **k: 0)
+    assert m3u.main([]) == 0
+    out = capsys.readouterr().out
+    assert "started by claude.exe" in out
+    assert "first: stop m3 in the 1 agent session(s)" in out
+    assert stopped == [[5555]]
+
+
+def test_agent_sessions_are_not_stopped_when_the_prompt_is_declined(tmp_path, monkeypatch):
+    _held_pip_install(tmp_path, monkeypatch, own=[], others=[5555])
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    monkeypatch.setattr(m3u, "stop_holders", lambda pids: pytest.fail("declined: nothing stopped"))
+    monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
+    assert m3u.main([]) == 1
+
+
+def test_stop_agents_is_the_unattended_consent(tmp_path, monkeypatch):
+    _held_pip_install(tmp_path, monkeypatch, own=[], others=[5555])
+    monkeypatch.setattr(m3u, "interactive_console", lambda: False)
+    stopped = []
+    def _stop(pids):  # stopping the holders releases the launcher, as on Windows
+        stopped.append(list(pids))
+        monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "stop_holders", _stop)
+    monkeypatch.setattr(m3u, "run", lambda cmd, **k: 0)
+    assert m3u.main(["--yes", "--stop-agents"]) == 0
+    assert stopped == [[5555]]
+
+
+def test_the_hand_off_passes_the_agent_pids_it_was_allowed_to_stop(tmp_path, monkeypatch):
+    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=[5555])
+    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+    handed = []
+    monkeypatch.setattr(m3u, "hand_off_to_new_window",
+                        lambda py, argv, pids: handed.append((argv, pids)) or "log")
+    monkeypatch.setattr(m3u, "stop_holders", lambda pids: pytest.fail("the new window stops them"))
+    assert m3u.main([]) == 0
+    assert handed == [(["--stop-pids", "5555"], [4242])]
+
+
+def test_the_hand_off_window_refuses_an_agent_it_was_not_told_about(tmp_path, monkeypatch, capsys):
+    """Consent covers the pids passed on; a server that appeared since is left alone."""
+    _held_pip_install(tmp_path, monkeypatch, own=[], others=[7777])
+    monkeypatch.setattr(m3u, "wait_for_exit", lambda pids, timeout=60.0: True)
+    monkeypatch.setattr(m3u, "stop_holders", lambda pids: None)
+    monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
+    assert m3u.main(["--yes", "--wait-for-pid", "4242", "--stop-pids", "5555"]) == 2
+    assert "Cannot upgrade now" in capsys.readouterr().out

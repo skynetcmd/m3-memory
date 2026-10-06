@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_upgrade.py
-sha1: 1c2e89f24af6
-mtime_utc: 2026-10-06T04:35:00.026830+00:00
-generated_utc: 2026-10-06T04:35:18.355181+00:00
+sha1: b0ca59d5aa5c
+mtime_utc: 2026-10-06T04:52:15.712170+00:00
+generated_utc: 2026-10-06T04:52:19.878140+00:00
 private: false
 ---
 
@@ -59,8 +59,8 @@ is stopped or replaced.
 
 ## Entry points
 
-- `def run()` (line 477)
-- `def main()` (line 505)
+- `def run()` (line 507)
+- `def main()` (line 535)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -76,6 +76,8 @@ is stopped or replaced.
 | `--wait-for-pid` | argparse.SUPPRESS | `` |  | str |  |
 | `--pause-at-end` | argparse.SUPPRESS | `False` |  | store_true |  |
 | `--log` | argparse.SUPPRESS | `` |  | str |  |
+| `--stop-agents` | Windows: stop m3 in agent sessions that hold its launcher (they reconnect afterwards). Asked interactively otherwise. | `False` |  | store_true |  |
+| `--stop-pids` | argparse.SUPPRESS | `` |  | str |  |
 
 ---
 
@@ -95,13 +97,13 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.Popen()  → `cmd`` (line 437)
-- `subprocess.Popen()  → `cmd`` (line 486)
+- `subprocess.Popen()  → `cmd`` (line 464)
+- `subprocess.Popen()  → `cmd`` (line 516)
 - `subprocess.run()  → `[exe, '--version']`` (line 85)
 - `subprocess.run()  → `[sys.executable, '-c', code]`` (line 166)
-- `subprocess.run()  → `cmd`` (line 496)
+- `subprocess.run()  → `cmd`` (line 526)
 - `subprocess.run()` (line 110)
-- `subprocess.run()` (line 667)
+- `subprocess.run()` (line 731)
 
 
 ---

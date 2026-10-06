@@ -364,27 +364,54 @@ def describe_holders(locked: list[pathlib.Path]) -> list[str]:
     return lines
 
 
-def launcher_holders(locked: list[pathlib.Path]) -> tuple[list[int], bool]:
-    """(pids of OUR OWN ancestors holding a locked launcher, whether any OTHER
-    process holds one). Unknown holders count as other: never hand off on a guess."""
+def launcher_holders(locked: list[pathlib.Path]) -> tuple[list[int], list[int]]:
+    """(pids of OUR OWN ancestors, pids of OTHER processes) running from a locked
+    launcher. Both empty when the holders cannot be identified: nothing is
+    handed off or stopped on a guess."""
     try:
         import psutil
     except ImportError:
-        return [], True
+        return [], []
     want = {os.path.normcase(str(p)) for p in locked}
     try:
         ancestors = {p.pid for p in psutil.Process().parents()}
     except psutil.Error:
-        return [], True
-    own, other = [], False
+        return [], []
+    own: list[int] = []
+    others: list[int] = []
     for proc in psutil.process_iter(["pid", "exe"]):
         if os.path.normcase(proc.info.get("exe") or "") not in want:
             continue
-        if proc.info["pid"] in ancestors:
-            own.append(proc.info["pid"])
-        else:
-            other = True
-    return own, other or not own
+        (own if proc.info["pid"] in ancestors else others).append(proc.info["pid"])
+    return own, others
+
+
+def stop_holders(pids: list[int], timeout: float = 10.0) -> None:
+    """Stop these m3 launcher processes and their children (the real server is
+    the launcher's child). Precise pids only, never a name match."""
+    import psutil
+    procs = []
+    for pid in pids:
+        try:
+            p = psutil.Process(pid)
+            procs.extend(p.children(recursive=True))
+            procs.append(p)
+        except psutil.Error:
+            continue
+    for p in procs:
+        try:
+            p.terminate()
+        except psutil.Error:
+            pass
+    _gone, alive = psutil.wait_procs(procs, timeout=timeout)
+    for p in alive:
+        try:
+            p.kill()
+        except psutil.Error:
+            pass
+    for pid in pids:
+        print(f"  stopped m3 in an agent session (pid {pid}); reconnect that agent "
+              f"afterwards (Claude Code: /mcp)")
 
 
 def interactive_console() -> bool:
@@ -455,6 +482,9 @@ def explain_locked(locked: list[pathlib.Path], owner_python: str) -> None:
     if any("own launcher" not in h for h in holders) or not holders:
         print("  - close the agent sessions using m3 (or end the processes above),")
         print("    then re-run; agents reconnect afterwards (Claude Code: /mcp).")
+    if any("own launcher" not in h for h in holders):
+        print("  - or let the upgrade stop m3 in those sessions for you:")
+        print("      m3 upgrade --stop-agents")
 
 
 class _Tee:
@@ -517,6 +547,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pause-at-end", dest="pause_at_end", action="store_true",
                     help=argparse.SUPPRESS)
     ap.add_argument("--log", dest="log", default="", help=argparse.SUPPRESS)
+    ap.add_argument("--stop-agents", dest="stop_agents", action="store_true",
+                    help="Windows: stop m3 in agent sessions that hold its launcher "
+                         "(they reconnect afterwards). Asked interactively otherwise.")
+    ap.add_argument("--stop-pids", dest="stop_pids", default="", help=argparse.SUPPRESS)
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = ap.parse_args(raw_argv)
     if args.log:
@@ -598,25 +632,48 @@ def main(argv: list[str] | None = None) -> int:
         print("waiting for the m3 command that started this window to exit ...")
         if waited and not wait_for_exit(waited):
             print("  it is still running after 60s; checking the launchers anyway.")
+    # Agent sessions this run was asked to stop (passed on by the hand-off).
+    handed_stop = [int(p) for p in args.stop_pids.split(",") if p.strip().isdigit()]
+    if handed_stop and not args.dry_run:
+        stop_holders(handed_stop)
     locked = locked_launchers(scripts_dir, launchers)
     hand_off_pids: list[int] = []
+    agent_pids: list[int] = []
+    console = interactive_console()
     if locked:
         own, others = launcher_holders(locked)
-        if own and not others and not args.wait_for_pid and interactive_console():
-            # Only this command's own m3.exe holds a launcher: continue from
-            # Python in a new window once it has exited. Only with a person at
-            # the console: an unattended caller would read this command's exit 0
-            # as "upgraded" while the upgrade has not started. It gets the
-            # refusal below instead, with the command to run.
+        if not own and not others:
+            explain_locked(locked, owner_python)  # holders unknown: never guess
+            return 2
+        if others:
+            # Agent sessions (an MCP server, a hook) run from m3.exe. Stop them
+            # only with consent: --stop-agents, or the Proceed prompt below,
+            # which lists them. Never in a hand-off window (consent was given
+            # for the pids it received; anything newer is left alone).
+            if args.wait_for_pid or not (args.stop_agents or (console and not args.yes)):
+                explain_locked(locked, owner_python)
+                return 2
+            agent_pids = others
+        if own:
+            # This command's own m3.exe holds a launcher: continue from Python in
+            # a new window once it has exited. Only with a person at the console:
+            # an unattended caller would read this command's exit 0 as
+            # "upgraded" while the upgrade has not started.
+            if args.wait_for_pid or not console:
+                explain_locked(locked, owner_python)
+                return 2
             hand_off_pids = own
             print("\nWindows will not let pip replace m3.exe while this command runs "
                   "from it,\nso the upgrade continues in a new window once this one exits.")
-        else:
-            explain_locked(locked, owner_python)
-            return 2
+        if agent_pids:
+            print("\nThese agent sessions run m3 and must stop for the upgrade "
+                  "(they reconnect afterwards; Claude Code: /mcp):")
+            print("\n".join(h for h in describe_holders(locked) if "own launcher" not in h))
 
     if not args.yes and not args.dry_run:
         print("\nPlan:")
+        if agent_pids:
+            print(f"  first: stop m3 in the {len(agent_pids)} agent session(s) listed above")
         print("  1. m3 stop            (release DB-writer file locks)")
         print(f"  2. {' '.join(up)}")
         print("  3. m3 stop            (again: no daemon may survive on OLD code)")
@@ -635,10 +692,17 @@ def main(argv: list[str] | None = None) -> int:
 
     dry = args.dry_run
     if hand_off_pids and not dry:
-        log = hand_off_to_new_window(owner_python, raw_argv, hand_off_pids)
+        argv_out = raw_argv + (["--stop-pids", ",".join(str(p) for p in agent_pids)]
+                               if agent_pids else [])
+        log = hand_off_to_new_window(owner_python, argv_out, hand_off_pids)
         print("Opened the upgrade window. Nothing has changed yet in this one.")
         print(f"Its full output is also written to:\n    {log}")
         return 0
+    if agent_pids:
+        if dry:
+            print(f"\n  would stop m3 in {len(agent_pids)} agent session(s)")
+        else:
+            stop_holders(agent_pids)
 
     # Read the current choice BEFORE anything is stopped or replaced: detection
     # looks for an installed SERVICE (unit / plist / scheduled task), which a
