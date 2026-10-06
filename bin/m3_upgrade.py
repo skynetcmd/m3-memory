@@ -53,6 +53,7 @@ import pathlib
 import shutil
 import subprocess  # nosec B404 - orchestrates known package managers, never a shell
 import sys
+import time
 
 # How m3_memory got onto this machine. The upgrade command differs per method.
 PIPX = "pipx"
@@ -363,6 +364,58 @@ def describe_holders(locked: list[pathlib.Path]) -> list[str]:
     return lines
 
 
+def launcher_holders(locked: list[pathlib.Path]) -> tuple[list[int], bool]:
+    """(pids of OUR OWN ancestors holding a locked launcher, whether any OTHER
+    process holds one). Unknown holders count as other: never hand off on a guess."""
+    try:
+        import psutil
+    except ImportError:
+        return [], True
+    want = {os.path.normcase(str(p)) for p in locked}
+    try:
+        ancestors = {p.pid for p in psutil.Process().parents()}
+    except psutil.Error:
+        return [], True
+    own, other = [], False
+    for proc in psutil.process_iter(["pid", "exe"]):
+        if os.path.normcase(proc.info.get("exe") or "") not in want:
+            continue
+        if proc.info["pid"] in ancestors:
+            own.append(proc.info["pid"])
+        else:
+            other = True
+    return own, other or not own
+
+
+def wait_for_exit(pids: list[int], timeout: float = 60.0) -> bool:
+    """True once none of ``pids`` is running (or ``timeout`` passed: False)."""
+    import psutil
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not any(psutil.pid_exists(p) for p in pids):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def hand_off_to_new_window(owner_python: str, argv: list[str], pids: list[int]) -> str:
+    """Continue the upgrade in a new console, run by Python rather than m3.exe.
+
+    The only holder is this command's own launcher, which cannot be released
+    while this process runs. The new window waits for it to exit, then upgrades,
+    stays open until Enter, and records everything in the returned log file.
+    """
+    import tempfile
+    log = os.path.join(tempfile.gettempdir(),
+                       time.strftime("m3-upgrade-%Y%m%d-%H%M%S.log"))
+    cmd = [owner_python, str(pathlib.Path(__file__).resolve()), *argv, "--yes",
+           "--wait-for-pid", ",".join(str(p) for p in pids), "--pause-at-end",
+           "--log", log]
+    flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    subprocess.Popen(cmd, creationflags=flags, close_fds=True)  # nosec B603 - argv list, no shell
+    return log
+
+
 def explain_locked(locked: list[pathlib.Path], owner_python: str) -> None:
     print("\nCannot upgrade now: Windows keeps these m3 programs locked while they")
     print("run, and replacing them would remove m3 and then fail:")
@@ -381,6 +434,23 @@ def explain_locked(locked: list[pathlib.Path], owner_python: str) -> None:
         print("    then re-run; agents reconnect afterwards (Claude Code: /mcp).")
 
 
+class _Tee:
+    """Write to the console and to a log file (the hand-off window's record)."""
+
+    def __init__(self, stream, path: str) -> None:
+        self._stream = stream
+        self._log = open(path, "a", encoding="utf-8")  # noqa: SIM115 - lives for the run
+
+    def write(self, text: str) -> int:
+        self._log.write(text)
+        self._log.flush()
+        return self._stream.write(text)
+
+    def flush(self) -> None:
+        self._stream.flush()
+        self._log.flush()
+
+
 def run(cmd: list[str], *, dry: bool, timeout: int = 900) -> int:
     printable = " ".join(cmd)
     if dry:
@@ -388,6 +458,18 @@ def run(cmd: list[str], *, dry: bool, timeout: int = 900) -> int:
         return 0
     print(f"      $ {printable}")
     try:
+        if isinstance(sys.stdout, _Tee):
+            # Logging: relay the child's output so it reaches the log as well.
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,  # nosec B603
+                                    text=True, encoding="utf-8", errors="replace")
+            deadline = time.monotonic() + timeout
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                print(line, end="")
+                if time.monotonic() > deadline:
+                    proc.kill()
+                    raise subprocess.TimeoutExpired(cmd, timeout)
+            return proc.wait()
         return subprocess.run(cmd, timeout=timeout).returncode  # nosec B603 - argv list, no shell
     except FileNotFoundError:
         print(f"      !! not found: {cmd[0]}")
@@ -407,7 +489,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--from-pypi", dest="from_pypi", action="store_true",
                     help="pipx installs: reinstall from PyPI, moving the recorded "
                          "source off a local wheel or path.")
-    args = ap.parse_args(argv)
+    # Internal: set by the Windows hand-off (see hand_off_to_new_window).
+    ap.add_argument("--wait-for-pid", dest="wait_for_pid", default="", help=argparse.SUPPRESS)
+    ap.add_argument("--pause-at-end", dest="pause_at_end", action="store_true",
+                    help=argparse.SUPPRESS)
+    ap.add_argument("--log", dest="log", default="", help=argparse.SUPPRESS)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = ap.parse_args(raw_argv)
+    if args.log:
+        sys.stdout = _Tee(sys.stdout, args.log)  # type: ignore[assignment]
     # Line-buffer our own output: the steps run child processes that write to the
     # same stream, and block-buffered prints would appear after their output.
     try:
@@ -480,10 +570,24 @@ def main(argv: list[str] | None = None) -> int:
     scripts_dir = pathlib.Path(owner_python).parent
     launchers = _entry_point_names(pkg)
     old_version = installed_version(pkg)
+    if args.wait_for_pid:
+        waited = [int(p) for p in args.wait_for_pid.split(",") if p.strip().isdigit()]
+        print("waiting for the m3 command that started this window to exit ...")
+        if waited and not wait_for_exit(waited):
+            print("  it is still running after 60s; checking the launchers anyway.")
     locked = locked_launchers(scripts_dir, launchers)
+    hand_off_pids: list[int] = []
     if locked:
-        explain_locked(locked, owner_python)
-        return 2
+        own, others = launcher_holders(locked)
+        if own and not others and not args.wait_for_pid:
+            # Only this command's own m3.exe holds a launcher: continue from
+            # Python in a new window once it has exited.
+            hand_off_pids = own
+            print("\nWindows will not let pip replace m3.exe while this command runs "
+                  "from it,\nso the upgrade continues in a new window once this one exits.")
+        else:
+            explain_locked(locked, owner_python)
+            return 2
 
     if not args.yes and not args.dry_run:
         print("\nPlan:")
@@ -504,6 +608,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     dry = args.dry_run
+    if hand_off_pids and not dry:
+        log = hand_off_to_new_window(owner_python, raw_argv, hand_off_pids)
+        print("Opened the upgrade window. Nothing has changed yet in this one.")
+        print(f"Its full output is also written to:\n    {log}")
+        return 0
 
     # Read the current choice BEFORE anything is stopped or replaced: detection
     # looks for an installed SERVICE (unit / plist / scheduled task), which a
@@ -636,4 +745,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if "--pause-at-end" in sys.argv[1:]:
+        try:
+            input(f"\nm3 upgrade finished (exit code {_rc}). Press Enter to close this window.")
+        except EOFError:
+            pass
+    sys.exit(_rc)

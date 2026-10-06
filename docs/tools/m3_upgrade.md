@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_upgrade.py
-sha1: f17db3168ade
-mtime_utc: 2026-10-06T03:11:42.533582+00:00
-generated_utc: 2026-10-06T03:13:04.256484+00:00
+sha1: 2e40dd465642
+mtime_utc: 2026-10-06T03:17:18.340140+00:00
+generated_utc: 2026-10-06T03:17:23.895425+00:00
 private: false
 ---
 
@@ -59,8 +59,8 @@ is stopped or replaced.
 
 ## Entry points
 
-- `def run()` (line 384)
-- `def main()` (line 400)
+- `def run()` (line 454)
+- `def main()` (line 482)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -73,6 +73,9 @@ is stopped or replaced.
 | `--skip-stop` | Do not stop DB writers first. | `False` |  | store_true |  |
 | `--yes` | Do not prompt (for scripted use). | `False` |  | store_true |  |
 | `--from-pypi` | pipx installs: reinstall from PyPI, moving the recorded source off a local wheel or path. | `False` |  | store_true |  |
+| `--wait-for-pid` | argparse.SUPPRESS | `` |  | str |  |
+| `--pause-at-end` | argparse.SUPPRESS | `False` |  | store_true |  |
+| `--log` | argparse.SUPPRESS | `` |  | str |  |
 
 ---
 
@@ -92,11 +95,13 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[exe, '--version']`` (line 84)
-- `subprocess.run()  → `[sys.executable, '-c', code]`` (line 165)
-- `subprocess.run()  → `cmd`` (line 391)
-- `subprocess.run()` (line 109)
-- `subprocess.run()` (line 532)
+- `subprocess.Popen()  → `cmd`` (line 415)
+- `subprocess.Popen()  → `cmd`` (line 463)
+- `subprocess.run()  → `[exe, '--version']`` (line 85)
+- `subprocess.run()  → `[sys.executable, '-c', code]`` (line 166)
+- `subprocess.run()  → `cmd`` (line 473)
+- `subprocess.run()` (line 110)
+- `subprocess.run()` (line 641)
 
 
 ---

@@ -440,3 +440,45 @@ def test_an_upgrade_that_changes_the_version_reports_both(tmp_path, monkeypatch,
     out = capsys.readouterr().out
     assert "m3 2026.10.4.3 -> 2026.10.5.0" in out
     assert "nothing was upgraded" not in out
+
+
+def _held_pip_install(tmp_path, monkeypatch, own, others):
+    scripts, pkg = _pip_install(tmp_path)
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [scripts / "m3.exe"])
+    monkeypatch.setattr(m3u, "launcher_holders", lambda locked: (own, others))
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    return scripts
+
+
+def test_own_launcher_only_hands_off_to_a_new_window(tmp_path, monkeypatch, capsys):
+    """Windows: `m3 upgrade` runs from m3.exe, the file it must replace. When that
+    is the only holder, continue from Python in a new window instead of refusing."""
+    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=False)
+    handed = []
+    monkeypatch.setattr(m3u, "hand_off_to_new_window",
+                        lambda py, argv, pids: handed.append((argv, pids)))
+    monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run here"))
+    assert m3u.main(["--yes"]) == 0
+    assert handed == [(["--yes"], [4242])]
+    assert "continues in a new window" in capsys.readouterr().out
+
+
+def test_a_dry_run_held_only_by_its_own_launcher_shows_the_plan(tmp_path, monkeypatch, capsys):
+    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=False)
+    monkeypatch.setattr(m3u, "hand_off_to_new_window",
+                        lambda *a: pytest.fail("a dry run must not hand off"))
+    assert m3u.main(["--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "Dry run complete" in out
+    assert "Cannot upgrade now" not in out
+
+
+def test_another_holder_still_refuses(tmp_path, monkeypatch, capsys):
+    """An agent's MCP server holding m3.exe cannot be waited out by a hand-off."""
+    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=True)
+    monkeypatch.setattr(m3u, "hand_off_to_new_window", lambda *a: pytest.fail("no hand-off"))
+    monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
+    assert m3u.main(["--yes"]) == 2
+    assert "Cannot upgrade now" in capsys.readouterr().out
