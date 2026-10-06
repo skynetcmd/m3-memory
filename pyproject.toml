@@ -344,7 +344,7 @@ Documentation = "https://github.com/skynetcmd/m3-memory/blob/main/docs/GETTING_S
 # handled in setup.py's mapping / MANIFEST graft.)
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"   # the supported floor (requires-python)
 line-length = 120
 
 [tool.ruff.lint]

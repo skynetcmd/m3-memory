@@ -48,7 +48,7 @@ python run_tests.py
 python bin/bench_memory.py
 
 # Lint (Ruff)
-ruff check bin/ memory/
+ruff check bin/ memory/ m3_memory/ tests/
 
 # Type check (Mypy)
 mypy bin/ --ignore-missing-imports
@@ -124,7 +124,7 @@ Open an issue on GitHub with:
 ## Code Style
 
 - Python 3.12+
-- Ruff for linting (`ruff check bin/ memory/`)
+- Ruff for linting (`ruff check bin/ memory/ m3_memory/ tests/`)
 - Mypy for type checking (`mypy bin/ --ignore-missing-imports`)
 - No external cloud APIs — all features must work fully offline
 

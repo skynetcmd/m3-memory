@@ -39,7 +39,7 @@ hypotheses, judge scores, and CSV/JSONL artifacts for offline analysis.
 
 `.github/workflows/ci.yml` runs three jobs on every push + PR to `main`:
 
-1. **Lint (Ruff)** — `ruff check bin/ memory/`
+1. **Lint (Ruff)** — `ruff check bin/ memory/ m3_memory/ tests/`
 2. **Type check (Mypy)** — `mypy bin/ --ignore-missing-imports`
 3. **Test** — PRs run the floor (`ubuntu × 3.12`); pushes to `main` run
    the full matrix `{ubuntu, macos, windows} × {3.12, 3.13, 3.14, 3.15}`, each
@@ -153,7 +153,7 @@ When merging a large change and you want maximum coverage:
 
 ```bash
 # 1. CI-equivalent (fast, no external deps)
-ruff check bin/ memory/
+ruff check bin/ memory/ m3_memory/ tests/
 mypy bin/ --ignore-missing-imports
 python -m pytest tests/
 

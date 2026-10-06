@@ -29,7 +29,9 @@ jobs:
       # lint debt, but editing them trips the pre-push bench-data guard (their
       # source references private benchmark dataset paths). Lint them via a
       # separate bench-aware change, not the standard CI gate.
-      run: ruff check bin/ memory/ --exclude 'bench_*.py' --exclude 'benchmark_*.py'
+      # m3_memory/ (the installed package) and tests/ too: left out, both
+      # accumulated findings that no gate reported.
+      run: ruff check bin/ memory/ m3_memory/ tests/ --exclude 'bench_*.py' --exclude 'benchmark_*.py'
 
   typecheck:
     name: Type Check (Mypy)
