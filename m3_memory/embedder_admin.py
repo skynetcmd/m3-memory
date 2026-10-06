@@ -580,14 +580,15 @@ def _service_reports_running(binary: Path, gguf: Path) -> bool:
 _STATUS_NOT_RUNNING = (
     "not installed", "not running", "isn't running", "is not running",
     "not started", "stopped", "inactive", "activating", "start_pending",
-    "dead", "failed", "unknown",
+    "dead", "failed", "unknown", "-pending",
 )
 _STATUS_RUNNING = ("running", "active", "started")
 # Every state word a registered service can be reported in — transitional ones
 # included. "not installed" is handled separately, before this is consulted.
+# m3-embed-server prints SCM's transitional states hyphenated ("start-pending").
 _STATUS_REGISTERED = _STATUS_RUNNING + (
     "stopped", "inactive", "activating", "start_pending", "stop_pending",
-    "paused", "dead", "failed", "disabled", "loaded",
+    "-pending", "paused", "dead", "failed", "disabled", "loaded",
 )
 
 

@@ -70,6 +70,8 @@ def pair(tmp_path):
     ("inactive", False),                 # contains "active"
     ("activating", False),               # still coming up, not up
     ("START_PENDING", False),            # SCM transitional
+    ("start-pending", False),            # ...as m3-embed-server prints it
+    ("stopped\nthe unit failed; see `journalctl`", False),  # status + stderr
     ("not installed", False),
     ("failed", False),
     ("dead", False),
@@ -90,6 +92,8 @@ def test_status_says_running_is_negation_aware(blob, expected):
     ("running", True),
     ("stopped", True),
     ("START_PENDING", True),     # registered, merely transitional
+    ("start-pending", True),     # the word m3-embed-server prints on Windows
+    ("stop-pending", True),
     ("activating", True),
     ("not installed", False),
     ("", False),
