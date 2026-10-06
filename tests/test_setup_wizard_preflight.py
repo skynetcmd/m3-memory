@@ -1638,3 +1638,15 @@ def test_openclaw_tool_derivation_leaves_no_logging_behind(monkeypatch):
         pass
     assert (list(root.handlers), root.level) == before
     assert logging.root.manager.disable == logging.NOTSET
+
+
+@pytest.mark.parametrize("from_upgrade", [True, False])
+def test_the_plan_is_shown_only_when_setup_is_run_directly(monkeypatch, capsys, from_upgrade):
+    events: list = []
+    _stub_setup_steps(monkeypatch, events)
+    if from_upgrade:
+        monkeypatch.setenv(setup_wizard.UPGRADE_CALLER_ENV, "upgrade")
+    else:
+        monkeypatch.delenv(setup_wizard.UPGRADE_CALLER_ENV, raising=False)
+    setup_wizard.run_setup(argparse.Namespace(non_interactive=True))
+    assert ("Plan:" in capsys.readouterr().out) is not from_upgrade

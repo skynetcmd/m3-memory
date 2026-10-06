@@ -3849,15 +3849,8 @@ def _m3_cli(*args: str) -> "list[str]":
     return [sys.executable, "-P", "-m", "m3_memory.cli", *args]
 
 
-def run_setup(args: argparse.Namespace) -> int:
-    """Top-level entry point invoked by `m3 setup`."""
-    if _should_use_gui(args):
-        from m3_memory.setup_gui import run_gui
-        return run_gui()
-
-    detected = _detect_agents()
-    plan = _gather_plan(detected, args)
-
+def _print_plan(plan) -> None:
+    """The plan summary shown before an interactive or scripted setup runs."""
     print()
     _say("Plan:")
     targets = [n for n, v in {
@@ -3898,6 +3891,20 @@ def run_setup(args: argparse.Namespace) -> int:
     if plan.fips_mode and plan.install_wolfssl:
         print("    wolfSSL    : build + install open-source build during setup")
     print()
+
+
+def run_setup(args: argparse.Namespace) -> int:
+    """Top-level entry point invoked by `m3 setup`."""
+    if _should_use_gui(args):
+        from m3_memory.setup_gui import run_gui
+        return run_gui()
+
+    detected = _detect_agents()
+    plan = _gather_plan(detected, args)
+    # Run by `m3 upgrade`: nothing was chosen here, so the plan is not shown.
+    from_upgrade = _called_by_upgrade()
+    if not from_upgrade:
+        _print_plan(plan)
 
     if not args.non_interactive and not _ask_yes_no("Proceed?", default=True):
         _warn("aborted by user — no changes made")
@@ -3968,7 +3975,6 @@ def run_setup(args: argparse.Namespace) -> int:
         # One administrator prompt for every privileged step queued above,
         # before verification so the doctor sees their result.
         _flush_elevation(gui=getattr(args, "gui_child", False))
-        from_upgrade = _called_by_upgrade()
         if from_upgrade:
             # `m3 upgrade` runs `m3 doctor --fix --fix-hooks` next and reports
             # its verdict. A report-only doctor here warned about state that
