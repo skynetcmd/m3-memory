@@ -243,9 +243,8 @@ def _remediate() -> bool:
 
 
 def _merge_rows(rows: list[tuple[str, str, bool]]) -> list[tuple[str, str, bool]]:
-    """One row per (host, file). An opencode.json can carry both OpenCode's own
-    `mcp` entry and an `mcpServers` one; both scanners report that file, and it
-    was listed twice. Dead if either scanner found a dead path."""
+    """One row per (host, file): a file reported by more than one scanner is
+    listed once, dead if either scanner found a dead path."""
     merged: dict[tuple[str, str], bool] = {}
     for label, path, is_dead in rows:
         merged[(label, path)] = merged.get((label, path), False) or is_dead

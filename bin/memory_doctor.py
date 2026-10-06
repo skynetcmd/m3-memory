@@ -27,8 +27,8 @@ import sys
 logging.basicConfig(level=logging.WARNING, format='%(name)s: [%(levelname)s] %(message)s')
 # This script's own INFO lines stay visible; library INFO chatter (connection
 # pools, HTTP requests) would bury the readable report. memory.doctor stays at
-# WARNING: its INFO lines are the repair results this script prints itself as
-# the "Repair Summary", so enabling them printed every result twice.
+# WARNING: its INFO lines repeat the repair results this script prints as the
+# "Repair Summary".
 logging.getLogger("memory_doctor").setLevel(logging.INFO)
 logger = logging.getLogger("memory_doctor")
 
@@ -235,8 +235,7 @@ def main() -> int:
 
         # The plugin repair belongs to --fix --fix-hooks (it touches ~/.claude).
         # It must run in THIS branch: the report-only section further down is
-        # never reached under --fix, which left the plugin un-updated by every
-        # `m3 upgrade` that relied on it.
+        # not reached under --fix.
         if args.fix_hooks and not args.skip_plugin:
             from doctor import plugin_version_probe
             prv = plugin_version_probe.repair(dry_run=args.dry_run)

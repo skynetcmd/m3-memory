@@ -652,9 +652,9 @@ def test_lock_timeout_param_accepted_and_acquires(tmp_path):
 def test_kill_stale_daemons_spares_daemons_started_after_the_cutoff(monkeypatch):
     """The installer reaps only daemons running code older than its payload;
     one started since (by the same setup run) is already current."""
-    import m3_halt as h
-
     from pathlib import Path
+
+    import m3_halt as h
 
     old = h.ProcInfo(pid=1001, role="cognitive-loop", started_at="", engine_root="", path=Path("a"))
     new = h.ProcInfo(pid=1002, role="embed-server", started_at="", engine_root="", path=Path("b"))
