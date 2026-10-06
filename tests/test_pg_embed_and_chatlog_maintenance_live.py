@@ -9,7 +9,6 @@ only those rows are asserted on, because the test database is shared.
 """
 from __future__ import annotations
 
-import os
 import sys
 import time
 import types

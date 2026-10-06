@@ -12,8 +12,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 SCANNER = Path(__file__).resolve().parent.parent / "bin" / "prepush" / "scan_diff.py"
 
 # A key-shaped pattern, assembled so this file does not itself carry a literal

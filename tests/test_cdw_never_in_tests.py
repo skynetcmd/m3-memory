@@ -199,8 +199,8 @@ def test_no_test_reads_the_warehouse_before_the_sandbox_runs():
 def test_the_warehouse_dsn_does_not_resolve():
     """The resolver also reads the keyring / Keychain / vault, which the env
     scrub does not reach; conftest blocks that path too."""
-    from m3_sdk import resolve_warehouse_dsn
     import sync_all
+    from m3_sdk import resolve_warehouse_dsn
 
     assert resolve_warehouse_dsn() is None
     assert sync_all.warehouse_target() is None

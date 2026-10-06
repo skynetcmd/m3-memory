@@ -18,6 +18,7 @@ for _p in (os.path.join(_ROOT, "bin"), _ROOT):
         sys.path.insert(0, _p)
 
 from doctor import embed_server_probe as esp  # noqa: E402
+
 from m3_memory import installer  # noqa: E402
 
 

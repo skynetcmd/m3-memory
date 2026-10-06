@@ -595,10 +595,42 @@ def _write_service_shims(shim_dir: Path, log: Path) -> None:
         script.chmod(0o755)
 
 
+_SCHTASKS_MUTATING = {"/create", "/change", "/run", "/end", "/delete"}
+
+
+def _install_schtasks_guard(log: Path) -> "object":
+    """Windows counterpart of the launchctl/systemctl shim. schtasks resolves
+    from System32 before PATH, so it cannot be shadowed there; instead every
+    process launch is screened, and a task-changing schtasks call is recorded
+    and replaced by a no-op. Queries pass through. Returns the original Popen."""
+    real_popen = subprocess.Popen
+
+    class _GuardedPopen(real_popen):  # type: ignore[misc, valid-type]
+        def __init__(self, args, *a, **k):
+            parts = [args] if isinstance(args, (str, bytes)) else list(args or [])
+            text = " ".join(str(p) for p in parts)
+            first = Path(str(parts[0]).split()[0]).name.lower() if parts else ""
+            if first in ("schtasks", "schtasks.exe") and any(
+                    f in text.lower().split() for f in _SCHTASKS_MUTATING):
+                with open(log, "a", encoding="utf-8") as fh:
+                    fh.write(f"{_os.environ.get('PYTEST_CURRENT_TEST', '?')} | {text}\n")
+                args = ["cmd", "/c", "exit", "0"]
+            super().__init__(args, *a, **k)
+
+    subprocess.Popen = _GuardedPopen  # type: ignore[misc]
+    return real_popen
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _service_manager_shim(tmp_path_factory):
     if sys.platform == "win32":
-        yield None
+        log = tmp_path_factory.mktemp("service-manager-guard") / "calls.log"
+        log.write_text("", encoding="utf-8")
+        real_popen = _install_schtasks_guard(log)
+        try:
+            yield log
+        finally:
+            subprocess.Popen = real_popen  # type: ignore[misc]
         return
     shim_dir = tmp_path_factory.mktemp("service-manager-shim")
     log = shim_dir / "calls.log"
@@ -636,8 +668,11 @@ def _no_real_service_manager_calls(_service_manager_shim):
         fh.seek(start)
         new = [ln.split(" | ", 1)[-1].strip() for ln in fh if ln.strip()]
     tmp_root = str(Path(tempfile.gettempdir()).resolve())
-    real = [c for c in new if _REAL_SERVICE_TARGET.search(c.replace(tmp_root, "<tmp>"))
-            and "<tmp>" not in c.replace(tmp_root, "<tmp>")]
+    if sys.platform == "win32":
+        real = new   # the Task Scheduler is machine-global: any change is real
+    else:
+        real = [c for c in new if _REAL_SERVICE_TARGET.search(c.replace(tmp_root, "<tmp>"))
+                and "<tmp>" not in c.replace(tmp_root, "<tmp>")]
     if real:
         pytest.fail("this test tried to change REAL m3 services (refused by the "
                     "test shim): " + "; ".join(real) + ". Stub the service "

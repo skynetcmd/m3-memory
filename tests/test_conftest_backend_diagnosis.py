@@ -15,7 +15,6 @@ ignored and one that never fires is dead code.
 """
 from __future__ import annotations
 
-import os
 import sqlite3
 import sys
 from pathlib import Path

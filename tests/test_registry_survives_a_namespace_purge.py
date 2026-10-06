@@ -48,7 +48,7 @@ def test_a_held_registry_adopts_a_live_registration(backend, monkeypatch):
     from memory.backends import registry as held
 
     held._ensure_registered(backend)
-    entry = held._REGISTRY[backend]          # the real entry, to hand back later
+    assert backend in held._REGISTRY, "precondition: the backend is registered"
 
     with monkeypatch.context() as m:
         # The held module is no longer the live one; the live one has the entry.
@@ -71,7 +71,7 @@ def test_backend_factory_for_shares_the_adoption(backend, monkeypatch):
     from memory.backends import registry as held
 
     held._ensure_registered(backend)
-    entry = held._REGISTRY[backend]
+    assert backend in held._REGISTRY, "precondition: the backend is registered"
 
     with monkeypatch.context() as m:
         live = _second_instance()
