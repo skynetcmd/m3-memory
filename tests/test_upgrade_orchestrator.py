@@ -627,10 +627,12 @@ def test_setup_is_told_it_runs_inside_an_upgrade(tmp_path, monkeypatch):
 
 def test_the_caller_variable_matches_setups():
     """m3_upgrade.py must not import m3_memory (the package is replaced under
-    it), so the name is written twice; keep the two in step."""
-    from m3_memory import setup_wizard
+    it), so the name is declared twice; keep the two in step, and keep the
+    script to its one constant."""
+    from m3_memory.wizard import ui
+    assert m3u.UPGRADE_CALLER_ENV == ui.UPGRADE_CALLER_ENV
     src = (_BIN / "m3_upgrade.py").read_text(encoding="utf-8")
-    assert f'"{setup_wizard.UPGRADE_CALLER_ENV}": "upgrade"' in src
+    assert src.count('"M3_SETUP_CALLER"') == 1
 
 
 def test_a_changed_version_tells_the_user_to_restart_agents():

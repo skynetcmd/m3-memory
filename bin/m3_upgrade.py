@@ -568,6 +568,16 @@ def run_captured(cmd: list[str], *, timeout: int = 900) -> str:
 # Lines `m3 doctor --fix --fix-hooks` prints when a check passed and nothing
 # was changed. A run made only of these collapses to its health line; any other
 # line (a repair, a warning, a probe added later) shows the full output.
+# Tells m3 stop and m3 setup they run on behalf of this upgrade. The owner of
+# the name is m3_memory.wizard.ui (UPGRADE_CALLER_ENV); this script cannot import
+# m3_memory, since the package is replaced under it. A test pins the two.
+UPGRADE_CALLER_ENV = "M3_SETUP_CALLER"
+
+
+def _as_upgrade() -> dict[str, str]:
+    return {**os.environ, UPGRADE_CALLER_ENV: "upgrade"}
+
+
 _DOCTOR_HEALTHY = re.compile(
     r"^(\[OK\] m3 HEALTHY|agent MCP configs: all healthy\.|\[OK\] memory bridge found"
     r"|==> Running m3-memory self-repair|Repair Summary: NOTHING_TO_DO"
@@ -795,7 +805,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n[1/5] stopping m3 DB writers: {_cmd_label([m3, 'stop'])}")
         # Non-fatal: nothing may be running, and that is a fine state to upgrade from.
         # The caller variable makes the stop summarize its services in one line.
-        run([m3, "stop"], dry=dry, timeout=180, env={**os.environ, "M3_SETUP_CALLER": "upgrade"})
+        run([m3, "stop"], dry=dry, timeout=180, env=_as_upgrade())
 
     print(f"\n[2/5] upgrading the package: {_cmd_label(up)}")
     # Re-probe: a hook or agent may have started an m3 launcher since the check
@@ -905,7 +915,7 @@ def main(argv: list[str] | None = None) -> int:
                 log=args.log)))
 
     # Tells setup that this run verifies and summarizes (see setup_wizard._called_by_upgrade).
-    rc = run(setup_cmd, dry=dry, env={**os.environ, "M3_SETUP_CALLER": "upgrade"})
+    rc = run(setup_cmd, dry=dry, env=_as_upgrade())
     if rc != 0:
         print(
             f"\n`m3 setup` failed (exit {rc}). The package IS upgraded; re-run\n"
