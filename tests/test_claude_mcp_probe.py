@@ -268,3 +268,20 @@ def test_a_local_scope_m3_server_is_reported_and_removed(monkeypatch, tmp_path, 
     assert "single direct server" not in out
     p._fix(a)
     assert removed == [("memory", "local", str(home))]
+
+
+@pytest.mark.parametrize("brief", [True, False])
+def test_a_converged_fix_is_one_line_when_brief(monkeypatch, capsys, brief):
+    """`m3 doctor --fix` matches the report: one line for a healthy check."""
+    from doctor import claude_mcp_probe as p
+    a = {
+        "direct": {}, "direct_present": True, "legacy_present": False,
+        "plugin": _plugin(), "direct_active": True,
+        "double_run": False, "two_direct": False, "legacy_rootless": False,
+        "problem": False, "none": False, "local": [],
+    }
+    monkeypatch.setattr(p, "_assess", lambda: a)
+    p.run(brief=brief, fix=True)
+    out = capsys.readouterr().out
+    assert ("convergence (fix)" in out) is not brief
+    assert ("✅ claude mcp: single direct server" in out) is brief

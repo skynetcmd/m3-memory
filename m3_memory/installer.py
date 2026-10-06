@@ -2827,7 +2827,7 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
         _deprecated_env_config_section()
         bridge = find_bridge()
         if bridge and bridge.is_file():
-            print(f"[OK] resolved bridge: {bridge}")
+            print("[OK] memory bridge found")   # its path: `m3 doctor --verbose`
             return 0
         print("[X] no bridge found. Run `mcp-memory install-m3` to fetch the system.")
         print("\nFor full detail, run:  m3 doctor --verbose")

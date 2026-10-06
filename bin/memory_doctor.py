@@ -197,6 +197,8 @@ def main() -> int:
             if args.fix_hooks:
                 env_res = environment_probe.repair(dry_run=args.dry_run)
                 for act in env_res["actions"]:
+                    if brief and act["status"] == "skipped":
+                        continue   # nothing was wrong; --verbose lists it
                     print(f"  [{act['status']}] {act['action']}: {act['detail']}")
                 if env_res.get("backup"):
                     print(f"  settings.json backed up to {env_res['backup']}")

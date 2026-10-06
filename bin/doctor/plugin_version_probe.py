@@ -318,6 +318,11 @@ def repair(dry_run: bool = False) -> dict:
     installed_before = _installed_version()
     if installed_before is None:
         return {"actions": actions}
+    # The plugin ships with each release, so one at the installed package's
+    # release has nothing newer to fetch; skip the two network calls.
+    pkg = _package_version()
+    if pkg and _release_key(installed_before) >= _release_key(pkg):
+        return {"actions": actions}
 
     def _disabled_servers() -> list:
         try:

@@ -228,7 +228,7 @@ def _disable_plugin_server_in_settings() -> tuple[bool, str | None, str]:
     return True, backup, f"disabled {', '.join(to_add)}"
 
 
-def _fix(a: dict) -> None:
+def _fix(a: dict, brief: bool = False) -> None:
     """Converge to a single active m3 server. Callers gate this behind
     --fix --fix-hooks (it edits the user's ~/.claude files)."""
     acted = False
@@ -274,7 +274,8 @@ def _fix(a: dict) -> None:
                   f"not removing it; run `m3 setup` to register m3_memory.")
 
     if not acted:
-        print("  (nothing to converge — already single-server)")
+        print("✅ claude mcp: single direct server (mcp__m3_memory__)" if brief
+              else "  (nothing to converge — already single-server)")
     else:
         print("  Restart Claude Code for the change to take effect "
               "(server env re-resolves only on restart).")
@@ -293,9 +294,10 @@ def run(brief: bool = False, fix: bool = False) -> int:
     a = _assess()
 
     if fix:
-        print()
-        print("=== Claude MCP single-server convergence (fix) ===")
-        _fix(a)
+        if not brief:
+            print()
+            print("=== Claude MCP single-server convergence (fix) ===")
+        _fix(a, brief=brief)
         return 0
 
     if brief:

@@ -180,6 +180,7 @@ def test_repair_does_nothing_without_an_installed_plugin(monkeypatch):
 
 def test_repair_updates_an_installed_plugin(monkeypatch):
     monkeypatch.setattr(P, "_installed_version", lambda: "2026.9.20.1")
+    monkeypatch.setattr(P, "_package_version", lambda: "2026.10.6.0")
     res = P.repair(dry_run=True)
     assert [a["action"] for a in res["actions"]] == ["marketplace", "plugin"]
 
@@ -197,6 +198,7 @@ def _fake_cli(monkeypatch, versions):
     """installed_plugins.json reads return `versions` in turn; the CLI succeeds."""
     seq = iter(versions)
     monkeypatch.setattr(P, "_installed_version", lambda: next(seq))
+    monkeypatch.setattr(P, "_package_version", lambda: "2026.10.6.0")
     import subprocess
     from types import SimpleNamespace
     monkeypatch.setattr(subprocess, "run",
@@ -224,3 +226,13 @@ def test_doctor_fix_uses_the_brief_default():
     fix_branch = src[src.index("    if args.fix:\n"):src.index('if res["summary"] == "failed"')]
     assert "brief=False" not in fix_branch
     assert "brief = not args.verbose" in fix_branch
+
+
+def test_repair_skips_the_marketplace_when_the_plugin_matches_the_package(monkeypatch):
+    """Every `m3 upgrade` ran two network calls that could find nothing newer."""
+    monkeypatch.setattr(P, "_installed_version", lambda: "2026.10.6.0")
+    monkeypatch.setattr(P, "_package_version", lambda: "2026.10.6.0")
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("no CLI call for a current plugin")))
+    assert P.repair() == {"actions": []}
