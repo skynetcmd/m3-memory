@@ -387,6 +387,14 @@ def launcher_holders(locked: list[pathlib.Path]) -> tuple[list[int], bool]:
     return own, other or not own
 
 
+def interactive_console() -> bool:
+    """True when a person is at this console (stdin is a terminal)."""
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def wait_for_exit(pids: list[int], timeout: float = 60.0) -> bool:
     """True once none of ``pids`` is running (or ``timeout`` passed: False)."""
     import psutil
@@ -428,7 +436,8 @@ def explain_locked(locked: list[pathlib.Path], owner_python: str) -> None:
     print("\nNothing was changed. To upgrade:")
     if any("own launcher" in h for h in holders) or not holders:
         print("  - run the upgrade through Python, which holds none of them:")
-        print(f'      "{owner_python}" "{pathlib.Path(__file__).resolve()}"')
+        unattended = "" if interactive_console() else " --yes"
+        print(f'      "{owner_python}" "{pathlib.Path(__file__).resolve()}"{unattended}')
     if any("own launcher" not in h for h in holders) or not holders:
         print("  - close the agent sessions using m3 (or end the processes above),")
         print("    then re-run; agents reconnect afterwards (Claude Code: /mcp).")
@@ -579,9 +588,12 @@ def main(argv: list[str] | None = None) -> int:
     hand_off_pids: list[int] = []
     if locked:
         own, others = launcher_holders(locked)
-        if own and not others and not args.wait_for_pid:
+        if own and not others and not args.wait_for_pid and interactive_console():
             # Only this command's own m3.exe holds a launcher: continue from
-            # Python in a new window once it has exited.
+            # Python in a new window once it has exited. Only with a person at
+            # the console: an unattended caller would read this command's exit 0
+            # as "upgraded" while the upgrade has not started. It gets the
+            # refusal below instead, with the command to run.
             hand_off_pids = own
             print("\nWindows will not let pip replace m3.exe while this command runs "
                   "from it,\nso the upgrade continues in a new window once this one exits.")

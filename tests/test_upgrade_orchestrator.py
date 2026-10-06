@@ -449,6 +449,7 @@ def _held_pip_install(tmp_path, monkeypatch, own, others):
     monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [scripts / "m3.exe"])
     monkeypatch.setattr(m3u, "launcher_holders", lambda locked: (own, others))
     monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    monkeypatch.setattr(m3u, "interactive_console", lambda: True)
     return scripts
 
 
@@ -482,3 +483,16 @@ def test_another_holder_still_refuses(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
     assert m3u.main(["--yes"]) == 2
     assert "Cannot upgrade now" in capsys.readouterr().out
+
+
+def test_an_unattended_run_is_refused_not_handed_off(tmp_path, monkeypatch, capsys):
+    """No person at the console: a script would read the hand-off's exit 0 as
+    "upgraded" before the upgrade starts. Refuse with the command to run instead."""
+    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=False)
+    monkeypatch.setattr(m3u, "interactive_console", lambda: False)
+    monkeypatch.setattr(m3u, "hand_off_to_new_window", lambda *a: pytest.fail("no hand-off"))
+    monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
+    assert m3u.main(["--yes"]) == 2
+    out = capsys.readouterr().out
+    assert "Cannot upgrade now" in out
+    assert "m3_upgrade.py\" --yes" in out
