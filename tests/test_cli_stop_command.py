@@ -226,3 +226,11 @@ def test_stop_unix_services_keeps_the_rust_embed_unit(monkeypatch):
     stopped = sched.stop_unix_services()
     assert sched._LINUX_EMBED_UNIT not in stopped
     assert "m3-cognitive-loop.service" in stopped
+
+
+def test_quiet_with_nothing_running_prints_nothing(fake_halt, capsys):
+    """`m3 upgrade` step 3 prints one line when nothing survived; a quiet stop
+    that found nothing must give it nothing to print."""
+    fake_halt.results = []
+    assert cli._cmd_stop(argparse.Namespace(timeout=8.0, quiet=True)) == 0
+    assert capsys.readouterr().out == ""

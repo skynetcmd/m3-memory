@@ -439,8 +439,9 @@ def _cmd_stop(args: argparse.Namespace) -> int:
     results = halt.kill_stale_daemons(timeout=getattr(args, "timeout", 8.0),
                                       exclude_roles=keep_roles)
     if not results:
-        print("[m3] no other m3 DB-writers running." if services else
-              "[m3] nothing to stop — no m3 DB-writers running.")
+        if not getattr(args, "quiet", False):   # --quiet: silent when nothing ran
+            print("[m3] no other m3 DB-writers running." if services else
+                  "[m3] nothing to stop — no m3 DB-writers running.")
         return 0
 
     killed = [r for r in results if r.get("killed")]
