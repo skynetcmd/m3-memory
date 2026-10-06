@@ -223,6 +223,16 @@ def main() -> int:
                 print("  (Claude single-server convergence not attempted — re-run "
                       "with `--fix --fix-hooks`)")
 
+        # The plugin repair belongs to --fix --fix-hooks (it touches ~/.claude).
+        # It must run in THIS branch: the report-only section further down is
+        # never reached under --fix, which left the plugin un-updated by every
+        # `m3 upgrade` that relied on it.
+        if args.fix_hooks and not args.skip_plugin:
+            from doctor import plugin_version_probe
+            prv = plugin_version_probe.repair(dry_run=args.dry_run)
+            for act in prv.get("actions", []):
+                print(f"  [{act['status']}] plugin {act['action']}: {act['detail']}")
+
         if res["summary"] == "failed" or shared_rc != 0:
             return 1
         return 0
@@ -357,17 +367,11 @@ def main() -> int:
 
     if not args.skip_plugin:
         from doctor import plugin_version_probe
-        # Report-only by default: a stale or disabled plugin is user-recoverable
-        # and never bumps the exit code. Under `--fix --fix-hooks` it is also
-        # repairable — `claude plugin marketplace update` + `claude plugin
-        # update` are real CLI commands, unlike the /plugin slash-commands.
-        # Shares the --fix-hooks gate with the other probes that touch the
-        # user's ~/.claude, since a plugin upgrade can flip the enabled flag.
+        # Report-only: a stale or disabled plugin is user-recoverable and never
+        # bumps the exit code. The repair (`claude plugin marketplace update` +
+        # `claude plugin update`) runs in the --fix branch above, under the
+        # --fix-hooks gate shared by every probe that touches ~/.claude.
         plugin_version_probe.run(brief=brief)
-        if args.fix and args.fix_hooks:
-            res = plugin_version_probe.repair(dry_run=args.dry_run)
-            for act in res.get("actions", []):
-                print(f"  [{act['status']}] plugin {act['action']}: {act['detail']}")
 
     if not args.skip_entrypoints:
         from doctor import entrypoint_probe

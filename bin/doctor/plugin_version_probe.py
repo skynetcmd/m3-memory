@@ -158,6 +158,14 @@ def _package_version() -> str | None:
         return None
 
 
+def _release_key(v: str) -> tuple[int, ...]:
+    """Numeric release parts only ("2026.10.6.0rc13" -> (2026, 10, 6, 0)), so a
+    pre-release package is not counted as ahead of the matching plugin."""
+    import re
+    return tuple(int(m.group()) for p in str(v).split(".")[:4]
+                 if (m := re.match(r"\d+", p)))
+
+
 def run(brief: bool = False) -> int:
     installed = _installed_version()
     enabled = _enabled()
@@ -166,7 +174,14 @@ def run(brief: bool = False) -> int:
     age_days = _marketplace_age_days()
 
     # A newer version sits in the cache than what's installed -> update available.
-    stale = bool(installed and latest and _ver_key(latest) > _ver_key(installed))
+    # Also behind when older than the installed PACKAGE: the plugin ships with
+    # every release, and a cache that was never refreshed cannot show the gap.
+    behind_pkg = bool(installed and pkg and _release_key(installed) < _release_key(pkg))
+    cache_newer = bool(installed and latest and _ver_key(latest) > _ver_key(installed))
+    stale = cache_newer or behind_pkg
+    # Name only what is known: a cached version IS available; the package
+    # version says the plugin is behind, not that the marketplace has caught up.
+    gap = f"{latest} available" if cache_newer else f"older than m3 {pkg}"
     disabled = enabled is False and installed is not None
     # `latest` is bounded by what the clone has fetched, so "installed == latest"
     # only means "current" if the clone is fresh. An old clone makes this probe
@@ -187,7 +202,8 @@ def run(brief: bool = False) -> int:
         elif disabled:
             print(f"⚠️  plugin: {installed} but DISABLED — enable it + /reload-plugins")
         elif stale:
-            print(f"⚠️  plugin: {installed} installed, {latest} available — run `m3 doctor`")
+            print(f"⚠️  plugin: {installed} installed, {gap} — update: "
+                  "`m3 doctor --fix --fix-hooks`, then restart Claude Code")
         elif clone_cold:
             # No ⚠️ — an unrefreshed clone is not a fault (air-gapped installs
             # never refresh), so this stays a plain FYI in the one-line summary.
@@ -226,8 +242,10 @@ def run(brief: bool = False) -> int:
         print(f"                 set \"{PLUGIN_KEY}\": true")
         print("              2. /reload-plugins")
     if stale:
-        print(f"  status    : [NAG] {installed} installed but {latest} is available. Update:")
-        print("  fix       : /plugin marketplace update skynetcmd")
+        print(f"  status    : [NAG] {installed} installed, {gap}. Update:")
+        print("  fix       : m3 doctor --fix --fix-hooks   (then restart Claude Code)")
+        print("              or, inside Claude Code:")
+        print("              /plugin marketplace update skynetcmd")
         print("              /plugin install m3@skynetcmd")
         print("              /reload-plugins")
         print("              (if m3 then vanishes from /mcp, see the DISABLED fix above —")
@@ -295,6 +313,11 @@ def repair(dry_run: bool = False) -> dict:
     import subprocess
 
     actions: list = []
+    # No m3 plugin installed (the common case: m3 from pipx, or no Claude Code):
+    # nothing to update, and running the CLI would report a failure that is not one.
+    installed_before = _installed_version()
+    if installed_before is None:
+        return {"actions": actions}
 
     def _disabled_servers() -> list:
         try:
@@ -339,7 +362,8 @@ def repair(dry_run: bool = False) -> dict:
             ),
         })
 
-    if not dry_run and any(a["status"] == "ok" for a in actions):
+    # Only when the installed version moved: "already at the latest" exits 0 too.
+    if not dry_run and _installed_version() != installed_before:
         actions.append({"action": "restart", "status": "ok",
                         "detail": "restart Claude Code to load the new version"})
     return {"actions": actions}

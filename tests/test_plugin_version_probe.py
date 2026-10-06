@@ -147,3 +147,64 @@ def test_real_stale_version_still_nags(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "[NAG]" in out
     assert "/plugin marketplace update skynetcmd" in out
+
+
+def test_a_plugin_older_than_the_package_is_flagged_even_with_a_cold_clone(monkeypatch, capsys):
+    """The marketplace clone can be as old as the plugin, so "newest in cache"
+    hides the gap; the installed package is the reference that cannot."""
+    _patch(monkeypatch, installed="2026.9.20.1", enabled=True, latest="2026.9.20.1",
+           pkg="2026.10.6.0", age_days=15.0)
+    assert P.run(brief=True) == 0                      # report-only: no exit bump
+    out = capsys.readouterr().out
+    assert "⚠️" in out and "older than m3 2026.10.6.0" in out
+    assert "m3 doctor --fix --fix-hooks" in out
+
+
+def test_a_prerelease_package_does_not_flag_the_matching_plugin(monkeypatch, capsys):
+    _patch(monkeypatch, installed="2026.10.6.0", enabled=True, latest="2026.10.6.0",
+           pkg="2026.10.6.0rc13")
+    assert P.run(brief=True) == 0
+    assert "⚠️" not in capsys.readouterr().out
+
+
+def test_repair_does_nothing_without_an_installed_plugin(monkeypatch):
+    """`m3 upgrade` runs doctor --fix --fix-hooks everywhere; with no m3 plugin
+    (pipx-only, or no Claude Code) the repair must not run the CLI and report a
+    failure that is not one."""
+    monkeypatch.setattr(P, "_installed_version", lambda: None)
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("no CLI call without an installed plugin")))
+    assert P.repair() == {"actions": []}
+
+
+def test_repair_updates_an_installed_plugin(monkeypatch):
+    monkeypatch.setattr(P, "_installed_version", lambda: "2026.9.20.1")
+    res = P.repair(dry_run=True)
+    assert [a["action"] for a in res["actions"]] == ["marketplace", "plugin"]
+
+
+def test_doctor_fix_reaches_the_plugin_repair():
+    """The --fix branch of memory_doctor returns before the report section, so a
+    repair placed there never ran under --fix (plugins stayed releases behind)."""
+    src = (Path(_BIN) / "memory_doctor.py").read_text(encoding="utf-8")
+    repair_at = src.index("plugin_version_probe.repair(")
+    fix_return_at = src.index('if res["summary"] == "failed" or shared_rc != 0:')
+    assert repair_at < fix_return_at
+
+
+def _fake_cli(monkeypatch, versions):
+    """installed_plugins.json reads return `versions` in turn; the CLI succeeds."""
+    seq = iter(versions)
+    monkeypatch.setattr(P, "_installed_version", lambda: next(seq))
+    import subprocess
+    from types import SimpleNamespace
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=0, stdout="ok", stderr=""))
+
+
+def test_repair_asks_for_a_restart_only_when_the_plugin_changed(monkeypatch):
+    _fake_cli(monkeypatch, ["2026.10.5.0", "2026.10.5.0"])
+    assert "restart" not in [a["action"] for a in P.repair()["actions"]]
+    _fake_cli(monkeypatch, ["2026.9.20.1", "2026.10.5.0"])
+    assert "restart" in [a["action"] for a in P.repair()["actions"]]
