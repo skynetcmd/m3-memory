@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: 35814b83f5e4
-mtime_utc: 2026-10-05T12:52:35.081635+00:00
-generated_utc: 2026-10-05T12:53:14.521931+00:00
+sha1: 2177d495387e
+mtime_utc: 2026-10-06T03:30:07.199281+00:00
+generated_utc: 2026-10-06T03:30:20.143873+00:00
 private: false
 ---
 
@@ -53,7 +53,7 @@ Uses project virtual environment paths and ensures log directories exist.
 - `governor_migration (_cron_line_is)`
 - `governor_migration (cognitive_loop_installed)`
 - `m3_halt (base_role)`
-- `m3_halt (holds_store)`
+- `m3_halt (describe_left_running, holds_store)`
 - `m3_sdk (ensure_governor_config)`
 - `m3_sdk (get_m3_engine_root)`
 - `m3_sdk (kill_stale_daemons)`

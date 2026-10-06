@@ -47,6 +47,7 @@ def fake_halt(monkeypatch):
     monkeypatch.setitem(sys.modules, "_m3_halt_real", real)  # dataclasses need it
     spec.loader.exec_module(real)
     mod.holds_store = real.holds_store
+    mod.describe_left_running = real.describe_left_running
     monkeypatch.setitem(sys.modules, "m3_halt", mod)
     # Never stop the developer's real systemd/launchd services.
     sched = types.ModuleType("install_schedules")
@@ -165,6 +166,6 @@ def test_a_surviving_embed_server_is_left_running_not_a_failure(fake_halt, capsy
     assert _run() == 0
     out = capsys.readouterr().out
     assert "stopped embed-server" not in out
-    assert "left running: embed-server(elevated?) (pid 2)" in out
-    assert "Reason: Access is denied." in out          # one line, not two
+    assert "embed-server (pid 2) left running: it runs as administrator" in out
+    assert "Access is denied" not in out                # stated in words, not raw OS text
     assert "stopped 1/1 writer(s); 1 left running (no database)" in out

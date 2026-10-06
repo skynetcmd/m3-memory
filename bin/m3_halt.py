@@ -560,6 +560,22 @@ def _role_blocks(role: str) -> bool:
 holds_store = _role_blocks
 
 
+def describe_left_running(role: str, pid: object, error: object) -> str:
+    """One line for a writer that holds no store and could not be stopped.
+
+    The single wording for `m3 stop` and setup. An access-denied stop is the
+    expected state of a service running as administrator, so it is said in
+    words, not as the raw OS error text, which reads as a failure.
+    """
+    text = " ".join(str(error or "").split())
+    if "access is denied" in text.lower() or "access denied" in text.lower():
+        why = "it runs as administrator, so stopping it needs an elevated shell"
+    else:
+        why = text or "it is still running"
+    return (f"{base_role(role)} (pid {pid}) left running: {why}. It holds no database "
+            f"and keeps its current binary until restarted.")
+
+
 def list_all_db_writers(engine_root: Optional[str] = None) -> list[ProcInfo]:
     """Union of registered writers (list_live_processes) and cmdline-discovered
     writers (scan_db_writer_processes), deduplicated by pid.

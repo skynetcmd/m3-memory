@@ -447,9 +447,7 @@ def _cmd_stop(args: argparse.Namespace) -> int:
     for r in killed:
         print(f"  stopped {r.get('role', '?')} (pid {r.get('pid')})")
     for r in left:
-        print(f"  left running: {r.get('role', '?')} (pid {r.get('pid')}) — "
-              f"{' '.join((r.get('error') or 'still alive').split())}; it holds no database and "
-              f"does not block an upgrade, but keeps its current binary until restarted")
+        print("  " + halt.describe_left_running(r.get("role", "?"), r.get("pid"), r.get("error")))
     for r in failed:
         print(f"  [!] could NOT stop {r.get('role', '?')} (pid {r.get('pid')}): "
               f"{r.get('error') or 'unknown'}", file=sys.stderr)
