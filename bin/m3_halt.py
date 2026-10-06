@@ -646,6 +646,7 @@ def kill_stale_daemons(
     timeout: float = 8.0,
     started_before: Optional[float] = None,
     roles: Optional[Iterable[str]] = None,
+    exclude_roles: Optional[Iterable[str]] = None,
 ) -> "list[dict]":
     """Terminate every running m3 DB-writer for this engine root. Call this at the
     START of an install/upgrade so no OLD-version daemon survives across the swap:
@@ -692,6 +693,7 @@ def kill_stale_daemons(
             pass
 
     wanted = {base_role(r) for r in roles} if roles is not None else None
+    skipped = {base_role(r) for r in exclude_roles or ()}
     results: list[dict] = []
     for w in list_all_db_writers(engine_root):
         if w.pid in protected:
@@ -699,6 +701,8 @@ def kill_stale_daemons(
         # roles: limit the kill to these roles (e.g. setup stopping only m3's own
         # scheduled daemons, never an agent session's MCP server).
         if wanted is not None and base_role(w.role) not in wanted:
+            continue
+        if base_role(w.role) in skipped:
             continue
         # started_before (epoch seconds): a daemon started after the payload was
         # installed already runs the current code and is not stale.

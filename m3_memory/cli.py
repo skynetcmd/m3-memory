@@ -420,9 +420,13 @@ def _cmd_stop(args: argparse.Namespace) -> int:
     # Supervised daemons are stopped through their service manager first;
     # killing them alone lets systemd/launchd start them again.
     services: list = []
+    keep_roles: list = []
     if sys.platform != "win32":
         try:
             import install_schedules  # type: ignore
+            # The Rust embed server stays up (see keeps_rust_embed_server).
+            if install_schedules.keeps_rust_embed_server():
+                keep_roles = ["embed-server"]
             services = install_schedules.stop_unix_services()
         except Exception as e:  # noqa: BLE001 — the PID reap below still runs
             print(f"  [!] could not stop m3's services ({type(e).__name__}: {e}); "
@@ -432,7 +436,8 @@ def _cmd_stop(args: argparse.Namespace) -> int:
         if services:
             print("[m3] services stay stopped until `m3 setup` starts them.")
 
-    results = halt.kill_stale_daemons(timeout=getattr(args, "timeout", 8.0))
+    results = halt.kill_stale_daemons(timeout=getattr(args, "timeout", 8.0),
+                                      exclude_roles=keep_roles)
     if not results:
         print("[m3] no other m3 DB-writers running." if services else
               "[m3] nothing to stop — no m3 DB-writers running.")
@@ -1826,9 +1831,10 @@ Examples:
 
     p_stop = subparsers.add_parser(
         "stop",
-        help="Stop every running m3 DB-writer (cognitive loop, embed server, "
-             "dashboard, MCP). `m3 upgrade` does this for you; run it by hand "
-             "only for a manual package upgrade on Windows.",
+        help="Stop every running m3 DB-writer (cognitive loop, dashboard, MCP). "
+             "On macOS/Linux the Rust embed server holds no data and keeps "
+             "running (stop it with `m3 embedder stop`). `m3 upgrade` does this "
+             "for you; run it by hand only for a manual package upgrade on Windows.",
     )
     p_stop.add_argument(
         "--timeout", type=float, default=8.0, metavar="SECONDS",

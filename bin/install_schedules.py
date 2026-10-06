@@ -1669,6 +1669,21 @@ _ROLE_TO_SERVICE: "dict[str, dict[str, str | tuple[str, ...] | None]]" = {
 }
 
 
+def keeps_rust_embed_server() -> bool:
+    """macOS/Linux: True when the Rust m3-embed-server service is registered, so
+    `m3 stop` and setup leave it running.
+
+    It holds no store, and its binary comes from the native core rather than
+    the m3 payload, so an m3 upgrade does not replace it; setup restarts it when
+    a core install does (see setup_wizard._restart_stale_embed_server). Stopping
+    it only cut agents off from embeddings for the length of the upgrade. The
+    Python fallback server is not covered: it runs payload code and must stop.
+    """
+    if _platform_key() not in ("linux", "darwin"):
+        return False
+    return _rust_embed_service_loaded() is True
+
+
 def stop_unix_services() -> list:
     """Stop m3's macOS/Linux services through the service manager.
 
@@ -1678,11 +1693,14 @@ def stop_unix_services() -> list:
     stopped; `m3 setup` starts them again.
     """
     key = _platform_key()
+    keep = None
+    if keeps_rust_embed_server():
+        keep = _RUST_EMBED_LABEL if key == "darwin" else _LINUX_EMBED_UNIT
     names: list = []
     for entry in _ROLE_TO_SERVICE.values():
         val = entry.get(key) if key in ("linux", "darwin") else None
         for name in (val if isinstance(val, tuple) else (val,)):
-            if name and name not in names:
+            if name and name not in names and name != keep:
                 names.append(name)
     stopped: list = []
     if key == "linux":

@@ -34,8 +34,9 @@ def fake_halt(monkeypatch):
     mod = types.ModuleType("m3_halt")
     mod.calls = []
 
-    def kill_stale_daemons(engine_root=None, *, timeout=8.0):
+    def kill_stale_daemons(engine_root=None, *, timeout=8.0, exclude_roles=None):
         mod.calls.append(timeout)
+        mod.excluded = list(exclude_roles or [])
         return mod.results
 
     mod.kill_stale_daemons = kill_stale_daemons
@@ -53,6 +54,8 @@ def fake_halt(monkeypatch):
     sched = types.ModuleType("install_schedules")
     sched.stopped = []
     sched.stop_unix_services = lambda: list(sched.stopped)
+    sched.keep = False
+    sched.keeps_rust_embed_server = lambda: sched.keep
     monkeypatch.setitem(sys.modules, "install_schedules", sched)
     mod.sched = sched
     monkeypatch.setattr(cli, "_resolve_bin_script",
@@ -143,6 +146,7 @@ def test_stop_unix_services_stops_units_and_the_watchdog_timer(monkeypatch):
         return _R()
 
     monkeypatch.setattr(sched, "_platform_key", lambda: "linux")
+    monkeypatch.setattr(sched, "keeps_rust_embed_server", lambda: False)
     monkeypatch.setattr(sched, "_service_exists",
                         lambda n: n != "m3-notification-waiter.service")
     monkeypatch.setattr(sched, "_run", fake_run)
@@ -192,3 +196,33 @@ def test_quiet_still_reports_what_it_stopped_and_failures(fake_halt, capsys):
     assert "stopped cognitive-loop (pid 1)" in cap.out
     assert "stopped 1/2 writer(s)" in cap.out
     assert "could NOT stop mcp (pid 3)" in cap.err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="service managers are macOS/Linux")
+def test_a_registered_rust_embed_server_is_left_running(fake_halt):
+    """It holds no store and its binary is not part of the m3 payload; stopping
+    it only cut agents off from embeddings for the length of an upgrade."""
+    fake_halt.sched.keep = True
+    fake_halt.results = []
+    _run()
+    assert fake_halt.excluded == ["embed-server"]
+
+
+def test_stop_unix_services_keeps_the_rust_embed_unit(monkeypatch):
+    sys.path.insert(0, str(_ROOT / "bin"))
+    import install_schedules as sched
+
+    calls = []
+
+    class _R:
+        returncode = 0
+        stderr = ""
+        stdout = "active"
+
+    monkeypatch.setattr(sched, "_platform_key", lambda: "linux")
+    monkeypatch.setattr(sched, "keeps_rust_embed_server", lambda: True)
+    monkeypatch.setattr(sched, "_service_exists", lambda n: True)
+    monkeypatch.setattr(sched, "_run", lambda cmd, **k: calls.append(cmd) or _R())
+    stopped = sched.stop_unix_services()
+    assert sched._LINUX_EMBED_UNIT not in stopped
+    assert "m3-cognitive-loop.service" in stopped

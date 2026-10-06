@@ -711,3 +711,15 @@ def test_a_refused_kill_does_not_wait_out_the_timeout(root, monkeypatch):
     monkeypatch.setattr(m3_halt.time, "sleep", lambda s: pytest.fail("waited after a refused kill"))
     res = m3_halt.kill_stale_daemons(engine_root=root, timeout=8.0)
     assert res[0]["killed"] is False and "denied" in res[0]["error"].lower()
+
+
+def test_excluded_roles_are_not_killed(monkeypatch):
+    """`m3 stop` on macOS/Linux leaves the Rust embed server running."""
+    from types import SimpleNamespace
+
+    import m3_halt as H
+    procs = [SimpleNamespace(pid=11, role="embed-server"), SimpleNamespace(pid=12, role="cognitive-loop")]
+    monkeypatch.setattr(H, "list_all_db_writers", lambda engine_root=None: procs)
+    monkeypatch.setattr(H, "_pid_is_alive", lambda pid: False)
+    out = H.kill_stale_daemons(exclude_roles=["embed-server"])
+    assert [r["pid"] for r in out] == [12]
