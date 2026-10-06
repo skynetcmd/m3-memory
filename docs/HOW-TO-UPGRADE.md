@@ -60,13 +60,13 @@ installs:
   `~/.local/bin/m3.exe` is a symlink into the venv (pipx makes symlinks when
   Developer Mode is on). The upgrade then **fails with `[WinError 32]` after the
   package is gone**. `m3 upgrade` checks for this **before changing anything**:
-  if a launcher is in use it stops, names the process holding it, and prints
-  what to do —
-  - held by `m3 upgrade`'s own launcher: run the upgrade through Python, which
-    holds none of them (the exact command is printed, e.g.
-    `"<venv>\Scripts\python.exe" "<payload>\bin\m3_upgrade.py"`);
-  - held by an agent: close that agent session (or end the named process), run
-    `m3 upgrade`, then reconnect the agent (Claude Code: `/mcp`).
+  - held only by `m3 upgrade`'s own `m3.exe`: the upgrade continues in a **new
+    window**, run by Python, once the command you typed has exited. That window
+    stays open until you press Enter, and its output is also saved to the log
+    file the first window names (`%TEMP%\m3-upgrade-<time>.log`);
+  - held by an agent: it stops, names the process, and asks you to close that
+    agent session (or end the named process), run `m3 upgrade`, then reconnect
+    the agent (Claude Code: `/mcp`).
 
   If an upgrade fails anyway, it reports whether m3 is still installed and, if
   not, prints the one command that restores it.

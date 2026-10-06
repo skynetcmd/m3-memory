@@ -13,10 +13,11 @@
   itself when its launcher is a symlink into the install. Replacing a held
   launcher would remove m3 and then fail, so the upgrade stopped first. Nothing
   was changed.
-- **Solution**: follow the lines it prints under "To upgrade". If it names its own
-  launcher, run the printed `python.exe … m3_upgrade.py` command; if it names an
-  agent, close that session (or end the process), upgrade, then reconnect the
-  agent (Claude Code: `/mcp`).
+- **Solution**: follow the lines it prints under "To upgrade": close the agent
+  session it names (or end the process), upgrade, then reconnect the agent
+  (Claude Code: `/mcp`). From 2026.10.5.1 a launcher held only by `m3 upgrade`
+  itself is no longer an error: the upgrade continues in a new window. On
+  earlier versions, run the printed `python.exe … m3_upgrade.py` command.
 
 ### "m3 is NOT installed now" after a failed upgrade
 - **Cause**: the package manager removed m3 and then could not install the new
