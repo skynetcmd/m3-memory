@@ -689,3 +689,25 @@ def test_kill_stale_daemons_roles_limits_the_kill(root, monkeypatch):
     monkeypatch.setattr(m3_halt, "_pid_is_alive", lambda pid: False)
     res = m3_halt.kill_stale_daemons(engine_root=root, roles=("cognitive-loop", "dashboard"))
     assert sorted(r["role"] for r in res) == ["cognitive-loop", "dashboard(elevated?)"]
+
+
+def test_a_refused_kill_does_not_wait_out_the_timeout(root, monkeypatch):
+    """Access denied (an administrator service) means nothing was delivered, so
+    there is no death to wait for. Waiting cost every Windows `m3 stop` and
+    setup reaper the full timeout."""
+    monkeypatch.setattr(m3_halt, "list_all_db_writers", lambda engine_root=None: [
+        m3_halt.ProcInfo(pid=4244, role="embed-server(elevated?)", started_at="",
+                         engine_root=root, path=Path())])
+    monkeypatch.setattr(m3_halt.os, "name", "nt")
+    monkeypatch.setattr(m3_halt, "_pid_is_alive", lambda pid: True)
+
+    class _CP:
+        returncode = 1
+        stderr = "ERROR: Access is denied."
+        stdout = ""
+
+    import subprocess as _sp
+    monkeypatch.setattr(_sp, "run", lambda cmd, **kw: _CP())
+    monkeypatch.setattr(m3_halt.time, "sleep", lambda s: pytest.fail("waited after a refused kill"))
+    res = m3_halt.kill_stale_daemons(engine_root=root, timeout=8.0)
+    assert res[0]["killed"] is False and "denied" in res[0]["error"].lower()

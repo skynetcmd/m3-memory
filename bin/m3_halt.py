@@ -736,8 +736,10 @@ def kill_stale_daemons(
                 if _pid_is_alive(w.pid):
                     os.kill(w.pid, _signal.SIGKILL)  # type: ignore[attr-defined]  # POSIX-only; this branch is os.name != "nt"
             # Confirm death (bounded) and reap its registry entry so a later
-            # list_live_processes doesn't resurrect a ghost.
-            for _ in range(int(timeout * 10)):
+            # list_live_processes doesn't resurrect a ghost. Skipped when the
+            # kill was refused (e.g. access denied to an administrator service):
+            # nothing was delivered, so waiting only burns the full timeout.
+            for _ in range(0 if entry["error"] else int(timeout * 10)):
                 if not _pid_is_alive(w.pid):
                     break
                 time.sleep(0.1)

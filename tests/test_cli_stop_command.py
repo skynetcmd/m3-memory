@@ -169,3 +169,26 @@ def test_a_surviving_embed_server_is_left_running_not_a_failure(fake_halt, capsy
     assert "embed-server (pid 2) left running: it runs as administrator" in out
     assert "Access is denied" not in out                # stated in words, not raw OS text
     assert "stopped 1/1 writer(s); 1 left running (no database)" in out
+
+
+def test_quiet_omits_a_survivor_already_reported(fake_halt, capsys):
+    """`m3 upgrade` stops twice; the second stop must not repeat the
+    left-running line the first one printed, nor a 0/0 summary."""
+    fake_halt.results = [
+        {"pid": 2, "role": "embed-server(elevated?)", "killed": False,
+         "error": "Access is denied."},
+    ]
+    assert cli._cmd_stop(argparse.Namespace(timeout=8.0, quiet=True)) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_quiet_still_reports_what_it_stopped_and_failures(fake_halt, capsys):
+    fake_halt.results = [
+        {"pid": 1, "role": "cognitive-loop", "killed": True, "error": None},
+        {"pid": 3, "role": "mcp", "killed": False, "error": "AccessDenied"},
+    ]
+    assert cli._cmd_stop(argparse.Namespace(timeout=8.0, quiet=True)) == 1
+    cap = capsys.readouterr()
+    assert "stopped cognitive-loop (pid 1)" in cap.out
+    assert "stopped 1/2 writer(s)" in cap.out
+    assert "could NOT stop mcp (pid 3)" in cap.err

@@ -446,14 +446,16 @@ def _cmd_stop(args: argparse.Namespace) -> int:
     failed = [r for r in survived if r not in left]
     for r in killed:
         print(f"  stopped {r.get('role', '?')} (pid {r.get('pid')})")
-    for r in left:
+    quiet = getattr(args, "quiet", False)
+    for r in ([] if quiet else left):
         print("  " + halt.describe_left_running(r.get("role", "?"), r.get("pid"), r.get("error")))
     for r in failed:
         print(f"  [!] could NOT stop {r.get('role', '?')} (pid {r.get('pid')}): "
               f"{r.get('error') or 'unknown'}", file=sys.stderr)
 
     note = f"; {len(left)} left running (no database)" if left else ""
-    print(f"[m3] stopped {len(killed)}/{len(results) - len(left)} writer(s){note}.")
+    if not (quiet and not killed and not failed):  # --quiet: silent when nothing was stopped
+        print(f"[m3] stopped {len(killed)}/{len(results) - len(left)} writer(s){note}.")
     if failed:
         # Almost always an elevated writer an unprivileged shell cannot touch.
         # Say so and exit non-zero — a partial stop must not read as success
@@ -1832,6 +1834,12 @@ Examples:
         "--timeout", type=float, default=8.0, metavar="SECONDS",
         help="Seconds to wait for a writer to exit before reporting it stuck "
              "(default: 8).",
+    )
+    p_stop.add_argument(
+        "--quiet", action="store_true",
+        help="Report only writers actually stopped or that failed to stop; omit "
+             "writers left running that hold no database (used by `m3 upgrade` "
+             "after its first stop).",
     )
     p_stop.set_defaults(func=_cmd_stop)
 
