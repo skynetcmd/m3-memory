@@ -3381,8 +3381,9 @@ def _register_dashboard_task(port: int = 8088) -> None:
         if proc.returncode != 0 or any(m in out for m in ("[WARN]", "[FAIL]", "[!]")):
             print(out, end="")
         if proc.returncode == 0:
-            print(f"    [OK] dashboard starts on boot → http://127.0.0.1:{port} "
-                  "(stop: `m3 dashboard --stop`)")
+            if not _called_by_upgrade():   # routine re-registration under the upgrade
+                print(f"    [OK] dashboard starts on boot → http://127.0.0.1:{port} "
+                      "(stop: `m3 dashboard --stop`)")
         else:
             print("    [!] boot task not registered (see above). The dashboard still")
             print(f'        runs on demand: `m3 dashboard`. Retry: `python bin/install_schedules.py --add dashboard --port {port}`')
@@ -3640,8 +3641,20 @@ def _start_service_for_role(role: str) -> bool:
         bd = bin_dir()
         if bd and str(bd) not in sys.path:
             sys.path.insert(0, str(bd))
+        import contextlib
+        import io
+
         import install_schedules  # type: ignore
-        install_schedules._start_longlived_tasks([{"name": task}])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            install_schedules._start_longlived_tasks([{"name": task}])
+        # Under the upgrade the verified "services running" line reports the
+        # outcome; a start attempt's own [OK] would say it twice. Anything else
+        # (a warning, a NOT serving) still prints.
+        quiet = _called_by_upgrade()
+        for line in buf.getvalue().splitlines():
+            if not (quiet and line.lstrip().startswith("[OK]")):
+                print(line)
         return True
     except Exception as e:  # noqa: BLE001 — never fail setup on a restart attempt
         _warn(f"    could not start {task}: {type(e).__name__}: {e}")
@@ -3693,7 +3706,7 @@ def _step_verify_daemons(plan=None) -> bool:
     if not expected:
         return True  # nothing was enabled → nothing to verify
 
-    _say("Verifying background services are running")
+    _say_unchanged("Verifying background services are running")
     halt = _import_m3_halt()
     # m3_halt owns role normalisation (base_role). Deliberately NOT re-implemented
     # here: a local copy is the §10a defect independent of correctness — copies
@@ -3762,7 +3775,7 @@ def _step_verify_daemons(plan=None) -> bool:
 
     running = [r for r in expected if r in live_roles]
     if running and _called_by_upgrade():
-        _ok(f"  running: {', '.join(running)}")   # one line under the upgrade
+        _ok(f"  services running: {', '.join(running)}")   # verified; one line under the upgrade
     else:
         for role in running:
             _ok(f"  {role}: running")

@@ -165,10 +165,9 @@ def _summary(plan, governor_result: Optional[dict] = None,
 
 
 def _brief_summary(plan, governor_result: Optional[dict], verified: bool) -> None:
-    print()
-    if verified:
-        _ok("Setup finished.")
-    else:
+    # Verified: the "services running" line and the upgrade's own summary say it.
+    if not verified:
+        print()
         _warn("Setup finished, but VERIFICATION FAILED — see the output above.")
     failed = (governor_result or {}).get("failed", [])
     if failed:

@@ -249,3 +249,18 @@ def test_services_are_one_line_under_the_upgrade(fake_halt, capsys, monkeypatch,
     out = capsys.readouterr().out
     assert ("stopped 2 m3 service(s); setup restarts them" in out) is from_upgrade
     assert ("stopped service m3-dashboard.service" in out) is not from_upgrade
+
+
+def test_under_the_upgrade_the_tally_names_what_it_stopped(fake_halt, capsys, monkeypatch):
+    """One line instead of one per writer; failures stay on their own lines."""
+    monkeypatch.setenv("M3_SETUP_CALLER", "upgrade")
+    fake_halt.results = [
+        {"pid": 1, "role": "cognitive-loop", "killed": True, "error": None},
+        {"pid": 2, "role": "dashboard", "killed": True, "error": None},
+        {"pid": 3, "role": "mcp", "killed": False, "error": "AccessDenied"},
+    ]
+    assert _run() == 1
+    cap = capsys.readouterr()
+    assert "stopped cognitive-loop (pid 1)" not in cap.out
+    assert "[m3] stopped 2/3 writer(s) (cognitive-loop, dashboard)." in cap.out
+    assert "could NOT stop mcp (pid 3)" in cap.err

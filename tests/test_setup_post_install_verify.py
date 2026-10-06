@@ -539,7 +539,7 @@ def test_brief_summary_is_short_and_keeps_failures():
     with contextlib.redirect_stdout(buf):
         s._summary(plan, {"failed": ["T1"], "not_migratable": ["  • X"]}, verified=True, brief=True)
     out = buf.getvalue()
-    assert "Setup finished." in out
+    assert "Setup finished." not in out        # verified: the services line says it
     assert "Could not remove 1 legacy scheduled task" in out
     for gone in ("restart your agent", "Try it:", "Left on their schedule", "Project Oxidation"):
         assert gone not in out, gone
@@ -556,5 +556,28 @@ def test_running_services_are_one_line_under_the_upgrade(wizard, monkeypatch, ca
                         lambda: _fake_halt(["cognitive-loop", "dashboard"]))
     assert wizard._step_verify_daemons(_P(loop=True, dash=True)) is True
     out = capsys.readouterr().out
-    assert "running: cognitive-loop, dashboard" in out
+    assert "services running: cognitive-loop, dashboard" in out
     assert "cognitive-loop: running" not in out
+
+
+@pytest.mark.parametrize("from_upgrade", [True, False])
+def test_a_start_attempts_ok_line_is_left_to_the_verified_line(wizard, monkeypatch, capsys, from_upgrade):
+    """§5: the single services line comes from the registry, not the attempt;
+    a warning from the attempt always prints."""
+    import sys
+    import types
+    sched = types.ModuleType("install_schedules")
+
+    def _start(tasks):
+        print("[OK] Started AgentOS_CognitiveLoop (serving)")
+        print("[WARN] Started AgentOS_Dashboard but it is NOT serving: port closed")
+    sched._start_longlived_tasks = _start
+    monkeypatch.setitem(sys.modules, "install_schedules", sched)
+    if from_upgrade:
+        monkeypatch.setenv(wizard.UPGRADE_CALLER_ENV, "upgrade")
+    else:
+        monkeypatch.delenv(wizard.UPGRADE_CALLER_ENV, raising=False)
+    assert wizard._start_service_for_role("cognitive-loop") is True
+    out = capsys.readouterr().out
+    assert ("[OK] Started AgentOS_CognitiveLoop" in out) is not from_upgrade
+    assert "NOT serving: port closed" in out

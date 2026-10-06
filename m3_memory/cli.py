@@ -458,7 +458,9 @@ def _cmd_stop(args: argparse.Namespace) -> int:
     # upgrade; report it as left running, not as a failed stop.
     left = [r for r in survived if not halt.holds_store(r.get("role", ""))]
     failed = [r for r in survived if r not in left]
-    for r in killed:
+    from m3_memory.wizard.ui import called_by_upgrade
+    in_upgrade = called_by_upgrade()   # the tally below names them instead
+    for r in ([] if in_upgrade else killed):
         print(f"  stopped {r.get('role', '?')} (pid {r.get('pid')})")
     quiet = getattr(args, "quiet", False)
     for r in ([] if quiet else left):
@@ -468,8 +470,9 @@ def _cmd_stop(args: argparse.Namespace) -> int:
               f"{r.get('error') or 'unknown'}", file=sys.stderr)
 
     note = f"; {len(left)} left running (no database)" if left else ""
+    names = (" (" + ", ".join(r.get("role", "?") for r in killed) + ")") if in_upgrade and killed else ""
     if not (quiet and not killed and not failed):  # --quiet: silent when nothing was stopped
-        print(f"[m3] stopped {len(killed)}/{len(results) - len(left)} writer(s){note}.")
+        print(f"[m3] stopped {len(killed)}/{len(results) - len(left)} writer(s){names}{note}.")
     if failed:
         # Almost always an elevated writer an unprivileged shell cannot touch.
         # Say so and exit non-zero — a partial stop must not read as success
