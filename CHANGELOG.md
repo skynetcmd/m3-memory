@@ -19,6 +19,69 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.10.6.0] — 2026-10-06 — upgrades that finish on their own
+
+### Fixed
+
+- **Windows upgrades finish without manual steps.** When the upgrade command's
+  own launcher is the only thing holding `m3.exe`, the upgrade continues in a
+  new window and logs its output. Agent sessions running m3 are listed in the
+  plan and, once you confirm, m3 is stopped in them (unattended runs: pass
+  `--stop-agents`). Setup no longer waits on services it cannot stop. Scripts
+  that cannot hand off get a non-zero exit and the exact command to run.
+  **Affected:** Windows · **Action:** reconnect the listed agents afterwards
+  (Claude Code: `/mcp`); on 2026.10.5.0 and earlier, run the
+  `python.exe … m3_upgrade.py --yes` command it prints · **Data status:** none.
+
+- **Upgrades do only the work that is needed and report it briefly.** Steps
+  print in order and end in a summary (version change, agents to restart or
+  reconnect, health, log file). Configuration, services and the search index
+  are rewritten only when they differ from what is needed; each condition is
+  reported once; healthy checks take one line (`m3 doctor --fix --verbose` for
+  full detail). The loop watchdog no longer restarts a cognitive loop that has
+  only just started, which could stall an upgrade for a minute.
+  **Affected:** all platforms · **Action:** none · **Data status:** none.
+
+- **`m3 upgrade` keeps the Claude Code plugin current,** and `m3 doctor` warns
+  when the plugin is older than the installed package.
+  **Affected:** installs using the m3 Claude Code plugin ·
+  **Action:** run `m3 doctor --fix --fix-hooks`, then restart Claude Code ·
+  **Data status:** none.
+
+- **Agent configuration points at the installed m3, in the format each agent
+  reads.** Setup run from inside a source checkout no longer wires agents to
+  the checkout, and an unused `mcpServers` entry is removed from OpenCode's
+  config.
+  **Affected:** setups run from a source checkout; OpenCode users ·
+  **Action:** if `m3 doctor` reports agent configs at a stale payload clone,
+  run `m3 doctor --fix --fix-hooks` from another directory · **Data status:** none.
+
+- **Setup messages name the actual cause and fix:** an embed server left
+  running as administrator is described in plain words, the "OpenClaw CLI not
+  on PATH" warning names the `~/.openclaw` folder it detects OpenClaw from, and
+  `HERMES_HOME` — Hermes Agent's own variable — is no longer reported as a
+  deprecated m3 setting.
+  **Affected:** Windows installs with an administrator embed server; machines
+  where OpenClaw was uninstalled; Hermes Agent users · **Action:** delete
+  `~/.openclaw` if you no longer use OpenClaw; keep `HERMES_HOME` as it is ·
+  **Data status:** none.
+
+### Changed
+
+- **`m3 stop` on macOS and Linux leaves the Rust embed server running,** as
+  Windows already did: it holds no data, and upgrades no longer interrupt
+  embeddings for agents. Setup still restarts it when its binary is replaced.
+  **Affected:** macOS and Linux with the Rust embed server ·
+  **Action:** to stop it as well, run `m3 embedder stop` · **Data status:** none.
+
+### Added
+
+- **`m3 upgrade --from-pypi`** moves a pipx install that tracks a local wheel or
+  path onto the PyPI release, within the same stop, setup and repair steps.
+  **Affected:** pipx installs made from a wheel or path · **Action:** run
+  `m3 upgrade --from-pypi` once if `m3 upgrade` says it upgrades from that source ·
+  **Data status:** none.
+
 ## [2026.10.5.0] — 2026-10-05 — upgrades that cannot remove m3, and scheduled sync that runs
 
 ### Fixed
