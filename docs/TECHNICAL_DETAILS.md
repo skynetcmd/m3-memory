@@ -201,7 +201,7 @@ After contradiction check, if no contradiction was found and related candidates 
 ### LLM Auto-Classification
 
 When `type="auto"` is passed to `memory_write`:
-1. Local LLM is called via `llm_failover.get_best_llm()` with a prompt listing all 32 classifier-eligible types (canonical `VALID_MEMORY_TYPES` minus the `auto` sentinel)
+1. Local LLM is called via `llm_failover.get_best_llm()` with a prompt listing all 35 classifier-eligible types (canonical `VALID_MEMORY_TYPES` minus the `auto` sentinel)
 2. Response is parsed, stripped, lowercased
 3. If result matches a valid type, it's used; otherwise falls back to `"note"`
 4. Results cached in `_CLASSIFY_CACHE` keyed by content hash
@@ -365,7 +365,7 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 | `M3_INGEST_GIST_MIN_TURNS` | 8 | Threshold before the first gist is written. |
 | `M3_INGEST_GIST_STRIDE` | 8 | Stride between subsequent gist updates. |
 | `M3_INGEST_EVENT_ROWS` | 0 | Regex-extract event sentences from each message and emit `type="event_extraction"` rows linked back via `references`. Deterministic; no LLM. |
-| `M3_QUERY_TYPE_ROUTING` | 0 | When a query matches "when/what date/which day" + a proper noun, shift `vector_weight` to 0.3 (BM25-heavy) so named-entity signal isn't diluted. |
+| `M3_QUERY_TYPE_ROUTING` | 1 | When a query matches "when/what date/which day" + a proper noun, shift `vector_weight` to 0.3 (BM25-heavy) so named-entity signal isn't diluted. |
 
 Always-on: when `metadata.temporal_anchors` is supplied, resolved ISO dates are prefixed to the embed text as `[YYYY-MM-DD] …` so absolute-date queries hit rows even when the source text says "yesterday". No flag; no-op when anchors are absent.
 
@@ -375,7 +375,7 @@ Always-on: when `metadata.temporal_anchors` is supplied, resolved ISO dates are 
 
 ### Valid Relationship Types (11)
 
-`related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `message`, `handoff`, `precedes`, `follows`
+`related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `message`, `handoff`, `precedes`, `follows` (accepted by `memory_link`). Procedure distillation additionally writes internal `distills_from` edges.
 
 ---
 
@@ -383,7 +383,7 @@ Always-on: when `metadata.temporal_anchors` is supplied, resolved ISO dates are 
 
 ### Test Suite (`tests/`)
 
-5,422 collected tests from 3,757 test functions across 406 files (parametrised cases expand the total) across all feature categories — memory CRUD, search, contradictions, GDPR, sync, maintenance, orchestration, refresh lifecycle, multi-agent handoffs, tasks, and notifications. The suite runs with `filterwarnings=error`, so a new warning fails the build. Representative categories:
+5,500+ collected tests from 4,100+ test functions across 430+ files (parametrised cases expand the total) across all feature categories — memory CRUD, search, contradictions, GDPR, sync, maintenance, orchestration, refresh lifecycle, multi-agent handoffs, tasks, and notifications. The suite runs with `filterwarnings=error`, so a new warning fails the build. Representative categories:
 
 | Category | Tests | What's Verified |
 |----------|-------|----------------|

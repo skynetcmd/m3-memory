@@ -93,14 +93,13 @@ python bin/chatlog_init.py
 ```
 
 This prompts you for:
-- Storage mode (integrated, separate, hybrid)
-- Custom DB path (if not separate)
+- Chat log DB path (blank = the dedicated `agent_chatlog.db`; type the main DB's path to keep everything in one file)
 - Which host agents to enable
 - Cost tracking (on by default)
 - Redaction settings (off by default)
 - Whether to install the embed sweeper schedule
 
-The configuration is saved to `memory/.chatlog_config.json`.
+The configuration is saved to `<config_root>/.chatlog_config.json` (`~/.m3/config` by default; `m3 chatlog status` shows the resolved DB paths).
 
 ### Wiring Host Agent Hooks
 
@@ -117,7 +116,7 @@ Claude Code offers two capture triggers:
 
 `PreCompact` alone is enough for most users: it fires whenever the session compacts **and** captures the full transcript up to that point. The `Stop` hook is opt-in because it fires per turn; the per-session UUID cursor in `chatlog_ingest.py` prevents duplicate rows, but each invocation still spawns Python and reads the transcript.
 
-**Selecting the trigger**: the Stop hook is controlled by `host_agents.claude-code.stop_hook` in `memory/.chatlog_config.json`. Toggle it via:
+**Selecting the trigger**: the Stop hook is controlled by `host_agents.claude-code.stop_hook` in `<config_root>/.chatlog_config.json`. Toggle it via:
 
 ```bash
 python bin/chatlog_init.py --enable-stop-hook    # capture per-turn + at compact
@@ -229,10 +228,14 @@ chmod +x ~/.opencode/hooks/session_end
 Start the long-running watcher (typically in tmux or systemd):
 
 ```bash
-python /absolute/path/to/m3-memory/bin/hooks/chatlog/aider_chat_watcher.sh <repo-root>
+bash /absolute/path/to/m3-memory/bin/hooks/chatlog/aider_chat_watcher.sh <repo-root>
 ```
 
-This polls `.aider.chat.history.md` every 30 seconds and sends new messages to the ingest pipeline.
+(On Windows, use `aider_chat_watcher.ps1`.) This polls `.aider.chat.history.md` every 30 seconds and sends new messages to the ingest pipeline.
+
+#### OpenClaw
+
+m3 ships `bin/hooks/chatlog/openclaw_session_end.{py,sh,ps1}`, fired on OpenClaw's `command:new` / `command:reset` events. OpenClaw passes no transcript path, so the hook ingests the newest session JSONL under `~/.openclaw/agents/<agent>/sessions/`. `chatlog_init.py` prints the wiring instructions when you enable it.
 
 ### Installing the Embed Sweeper Schedule
 
@@ -264,31 +267,27 @@ This displays a quiet indicator (no output when healthy) and a short warning tag
 ### Check Subsystem Status
 
 ```bash
-python bin/chatlog_status.py
+m3 chatlog status
 ```
 
-Returns JSON (or human-readable format with `--json`):
+Prints a human-readable summary; add `--json` for machine-readable output (abridged):
 
 ```json
 {
-  "mode": "hybrid",
-  "effective_db_path": "/path/to/agent_chatlog.db",
-  "main_db_path": "/path/to/agent_memory.db",
-  "chatlog_rows": 1250,
-  "main_chat_log_rows": 45,
-  "chatlog_without_embed": 203,
-  "queue_depth": 12,
-  "spill_files": 0,
-  "queue_spill_count": 0,
-  "last_flush_at": "2026-04-18T14:30:45Z",
-  "last_embed_sweep": "2026-04-18T14:00:30Z",
-  "redaction_enabled": false,
-  "host_agents": {
-    "claude-code": {"enabled": true, "last_seen": "2026-04-18T14:35:10Z"},
-    "gemini-cli": {"enabled": false},
-    "opencode": {"enabled": true, "last_seen": "2026-04-18T14:32:00Z"},
-    "aider": {"enabled": false}
-  }
+  "unified": false,
+  "db_paths": {
+    "main": "/home/you/.m3/engine/agent_memory.db",
+    "chatlog": "/home/you/.m3/engine/agent_chatlog.db",
+    "files": "/home/you/.m3/engine/files_database.db"
+  },
+  "row_counts": {"main_chat_log_rows": 45, "chatlog_rows": 1250, "chatlog_without_embed": 203},
+  "queue": {"depth": 12, "max": 20000, "last_flush_ms_ago": 850},
+  "spill": {"files": 0, "bytes": 0, "oldest_ms_ago": null},
+  "capture": {"healthy": true, "recent_rows": 34, "window_min": 15},
+  "hook_wiring": {"status": "ok"},
+  "redaction": {"enabled": false, "groups": ["api_keys", "bearer_tokens", "jwt", "aws_keys", "github_tokens"], "regex_errors": []},
+  "last_write_at": "2026-04-18T14:35:10Z",
+  "warnings": []
 }
 ```
 
@@ -328,8 +327,10 @@ Result is inserted into main DB with type `chat_log`; original remains in separa
 Aggregate tokens and costs by model or date:
 
 ```bash
-python bin/chatlog_core.py --cost-report [--group-by model_id|host_agent|date]
+m3 chat chatlog_cost_report [--group_by provider|model_id|host_agent|conversation_id|day] [--since ISO] [--until ISO]
 ```
+
+(or the `chatlog_cost_report` MCP tool)
 
 Returns:
 
@@ -375,7 +376,7 @@ python bin/chatlog_init.py
 Option B: After the fact (via MCP tool or CLI):
 
 ```bash
-python bin/chatlog_core.py --set-redaction true \
+m3 chat chatlog_set_redaction --enabled \
   --patterns api_keys,bearer_tokens,jwt,github_tokens
 ```
 
@@ -419,7 +420,7 @@ chatlog_set_redaction(
 If you turn redaction on after chat logs already exist, use the CLI to re-scrub:
 
 ```bash
-python bin/chatlog_core.py --rescrub [--since 2026-04-01T00:00:00Z]
+m3 chat chatlog_rescrub [--since 2026-04-01T00:00:00Z] [--limit N]
 ```
 
 This updates all rows (or those since a date) with the current redaction policy. Original hashes are preserved in metadata for auditing.
@@ -431,11 +432,11 @@ This updates all rows (or those since a date) with the current redaction policy.
 ### Status Summary
 
 ```bash
-python bin/chatlog_status.py
+m3 chatlog status
 ```
 
 Single call (<50ms) returns:
-- Mode and DB paths
+- DB paths (and whether chat and main share one store)
 - Row counts (main and separate)
 - Queue depth and spill file count
 - Last flush and embed sweep timestamps
@@ -454,7 +455,7 @@ The status line (if wired into Claude Code) is quiet when healthy and displays a
 
 ### State File
 
-`memory/.chatlog_state.json` tracks:
+`<engine_root>/.chatlog_state.json` tracks:
 
 ```json
 {
@@ -483,7 +484,7 @@ Embedding is lazy by default (`embed=False` at write time). The embed sweeper ru
 
 ### Spill-to-Disk Fallback
 
-If the queue fills (backpressure), rows are written to `memory/chatlog_spill/YYYYMMDD.jsonl` (one JSONL file per day). The sweeper drains spill files on the next run, ensuring no loss.
+If the queue fills (backpressure), rows are written to `<engine_root>/chatlog_spill/YYYYMMDD.jsonl` (one JSONL file per day). The sweeper drains spill files on the next run, ensuring no loss.
 
 ### Provenance Tracking
 
@@ -548,7 +549,7 @@ One row per embedded chat log:
 | id | TEXT | UUID primary key |
 | memory_id | TEXT | Foreign key to memory_items.id |
 | embedding | BLOB | 1024-dim float32 vector |
-| embed_model | TEXT | Usually 'jina-embeddings-v5' |
+| embed_model | TEXT | Embedder tag, usually the bge-m3 tag (`M3_EMBED_GGUF_MODEL_TAG`, default `bge-m3-GGUF-Q4_K_M.gguf`) |
 | dim | INTEGER | Always 1024 |
 | created_at | TEXT | ISO 8601 timestamp |
 
@@ -561,10 +562,10 @@ One row per embedded chat log:
 Check queue depth and spill:
 
 ```bash
-python bin/chatlog_status.py --json | jq '.queue_depth, .spill_files'
+m3 chatlog status --json | jq '.queue, .spill'
 ```
 
-- If `queue_depth` is consistently >5000, increase `queue_flush_rows` in config (e.g., 500).
+- If `queue.depth` is consistently >5000, increase `queue_flush_rows` in config (e.g., 500).
 - If spill files are present, the embed sweeper is backed up; check sweeper logs.
 
 ### "Search returns nothing"
@@ -573,9 +574,9 @@ FTS5 keyword search works as soon as rows land; vector/hybrid search needs the
 rows to be embedded (the embed sweeper runs on a schedule and fills the backlog
 lazily). Check:
 
-1. Unified status: `python bin/chatlog_status.py --json | jq '.unified, .db_paths'`
-2. Row count: `python bin/chatlog_status.py | grep chatlog_rows`
-3. Embed backlog: `chatlog_status.py | grep without_embed`
+1. Unified status: `m3 chatlog status --json | jq '.unified, .db_paths'`
+2. Row count: `m3 chatlog status --json | jq '.row_counts.chatlog_rows'`
+3. Embed backlog: `m3 chatlog status --json | jq '.row_counts.chatlog_without_embed'`
 
 If the backlog is high, wait for the next scheduled sweep or run one now (see
 "Backfilling missing embeddings" below).
@@ -590,7 +591,7 @@ existed). Count the gap, then run the sweeper against the chatlog DB:
 
 ```bash
 # How many rows still need an embedding:
-python bin/chatlog_status.py | grep without_embed
+m3 chatlog status --json | jq '.row_counts.chatlog_without_embed'
 
 # Drain the whole backlog in one pass (unbounded time budget) and flush spill:
 python bin/chatlog_embed_sweeper.py --deadline 0 --drain-spill
@@ -614,8 +615,8 @@ python bin/migrate_memory.py status --target chatlog
 If migrations are out of sync, run:
 
 ```bash
-python bin/migrate_memory.py migrate --target chatlog
-python bin/migrate_memory.py migrate --target main
+python bin/migrate_memory.py up --target chatlog
+python bin/migrate_memory.py up --target main
 ```
 
 ### "My chat_log rows are in the main memory DB, not the chatlog DB"
@@ -627,7 +628,7 @@ routes *new* turns; the accumulated `type='chat_log'` rows stay in the main DB.
 Check where they actually are:
 
 ```bash
-python bin/chatlog_status.py --json | jq '.db_paths, .chatlog_rows'
+m3 chatlog status --json | jq '.db_paths, .row_counts'
 ```
 
 If rows sit in the main DB, move them into the chatlog DB:
@@ -646,13 +647,13 @@ repointed in **every** host-agent hook so future turns land in the chatlog DB.
 
 ### "I want to turn it all off"
 
-Disable all host agents in the config:
+There is no single disable-all flag. Re-run the wizard and decline each host agent:
 
 ```bash
-python bin/chatlog_init.py --disable-all
+python bin/chatlog_init.py --reconfigure
 ```
 
-Or edit `memory/.chatlog_config.json`:
+Or edit `<config_root>/.chatlog_config.json` (`~/.m3/config` by default):
 
 ```json
 {
@@ -678,18 +679,18 @@ The DBs and config remain intact for future re-enablement.
 Adjust the redaction config:
 
 ```bash
-python bin/chatlog_core.py --set-redaction true \
+m3 chat chatlog_set_redaction --enabled \
   --patterns api_keys,github_tokens \
-  --no-pii
+  --no-redact_pii
 ```
 
 Or toggle off:
 
 ```bash
-python bin/chatlog_core.py --set-redaction false
+m3 chat chatlog_set_redaction --no-enabled
 ```
 
-Existing redacted content is not un-redacted (hashes are stored for audit). To change policy retroactively, use `--rescrub`.
+Existing redacted content is not un-redacted (hashes are stored for audit). To change policy retroactively, use `m3 chat chatlog_rescrub`.
 
 ---
 
@@ -715,12 +716,12 @@ python bin/chatlog_ingest.py \
   --variant test
 ```
 
-A per-session UUID cursor at `memory/.chatlog_ingest_cursor.json` makes re-runs idempotent; delete the session's entry if you want to re-ingest the same transcript.
+A per-session UUID cursor at `<engine_root>/.chatlog_ingest_cursor.json` (default `~/.m3/engine`) makes re-runs idempotent; delete the session's entry if you want to re-ingest the same transcript.
 
 Check that it landed:
 
 ```bash
-python bin/chatlog_status.py
+m3 chatlog status
 ```
 
 ### Checking Hook Logs
@@ -748,25 +749,26 @@ Get-Content -Raw envelope.json |
 ### Inspecting Spill Files
 
 ```bash
-ls memory/chatlog_spill/
-cat memory/chatlog_spill/20260418.jsonl | head -3 | jq .
+ls ~/.m3/engine/chatlog_spill/          # <engine_root>/chatlog_spill
+head -3 ~/.m3/engine/chatlog_spill/20260418.jsonl | jq .
 ```
 
 Each line is a complete chat message in JSON format.
 
 ### Resetting the Subsystem (for testing)
 
-```bash
-# Soft reset: clear rows but keep schema
-sqlite3 memory/agent_chatlog.db "DELETE FROM memory_items WHERE type='chat_log';"
+Use a scratch store, never your live one: point `M3_ENGINE_ROOT` (and
+`M3_CONFIG_ROOT`) at a throwaway directory for the test session, and run
+`m3 chatlog status` to confirm which DB paths are in effect before deleting
+anything. To re-bootstrap that scratch store, delete its `agent_chatlog.db` and
+`.chatlog_state.json`, then:
 
-# Hard reset: drop and re-bootstrap
-rm memory/agent_chatlog.db memory/.chatlog_state.json
-python bin/migrate_memory.py migrate --target chatlog
+```bash
+python bin/migrate_memory.py up --target chatlog
 ```
 
 Then re-ingest:
 
 ```bash
-python bin/chatlog_ingest.py --format claude-code < /path/to/test.jsonl
+python bin/chatlog_ingest.py --format claude-code --transcript-path /path/to/test.jsonl
 ```

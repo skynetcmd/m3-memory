@@ -56,7 +56,7 @@ m3 setup
 
 - system payload
 - embedder (everything's bundled — no LM Studio, no Ollama, no internet, no GPU required)
-- per-agent MCP wiring (Claude Code, Gemini CLI, OpenCode, OpenClaw)
+- per-agent MCP wiring (Claude Code, Gemini CLI, Antigravity, OpenCode, Cursor, Cline, OpenClaw; Hermes via its plugin)
 - chatlog Stop + PreCompact hooks
 - final brief `m3 doctor` health check (`--verbose` for full detail)
 
@@ -64,7 +64,7 @@ Restart your agent and you're done. The rest of this doc covers the features.
 
 > **Have a GPU?** The wizard asks once whether to add GPU acceleration on top of the default embedder for ~10-50× faster embeddings. You can also add it later with `m3 embedder install-gpu`.
 
-> **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but groups them into 9 domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin). Only the 20 essentials load at MCP startup (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The agent pulls in a domain on demand — just say "load the files tools" and it does. Set `M3_TOOLS_LAZY=0` to disable.
+> **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but groups them into 9 domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin). Only 10 tools load at MCP startup (~3,962 tokens, ~2% of a 200K window; the rest load on demand). The agent pulls in a domain on demand — just say "load the files tools" and it does. Set `M3_TOOLS_LAZY=0` to disable.
 
 ---
 
@@ -75,6 +75,9 @@ If you ran `m3 setup` (step 1), every agent it detected on PATH is **already wir
 If you skipped the wizard, or you're adding an agent later, here's the manual recipe per agent:
 
 ### Claude Code (recommended: plugin)
+
+Use the plugin **or** `m3 setup`'s direct registration — not both (both gives
+you two live m3 servers; `m3 doctor --fix --fix-hooks` converges back to one).
 
 ```
 /plugin marketplace add skynetcmd/m3-memory
@@ -88,12 +91,12 @@ If you skipped the wizard, or you're adding an agent later, here's the manual re
 > /plugin install m3@skynetcmd
 > ```
 
-Then `/plugin reload` (or restart Claude Code). The plugin auto-registers the MCP, wires the chatlog Stop + PreCompact hooks, and adds 15 `/m3:*` slash commands plus two curator subagents — confirm with `/m3:health`.
+Then `/reload-plugins` (or restart Claude Code). The plugin auto-registers the MCP, wires the chatlog Stop + PreCompact hooks, and adds 15 `/m3:*` slash commands plus two curator subagents — confirm with `/m3:health`.
 
-If you'd rather wire it by hand:
+If you'd rather wire it by hand (without the plugin):
 
 ```bash
-claude mcp add --scope user memory m3
+claude mcp add --scope user -- m3_memory m3
 ```
 
 ### Gemini CLI
@@ -174,8 +177,10 @@ m3 embedder install       # registers + starts the systemd --user unit
 
 ### Run directly (containers, SSH sessions, no systemd)
 
+`m3 embedder fetch-model` downloads the model to `~/.m3/models/` if it isn't there yet.
+
 ```bash
-M3_EMBED_GGUF=~/bge-m3-GGUF-Q4_K_M.gguf \
+M3_EMBED_GGUF=~/.m3/models/bge-m3-Q4_K_M.gguf \
     nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &
 ```
 
@@ -184,7 +189,7 @@ To start automatically on boot without systemd:
 ```bash
 crontab -e
 # Add this line:
-@reboot M3_EMBED_GGUF=~/bge-m3-GGUF-Q4_K_M.gguf m3-embed-server >> ~/.m3/engine/embed-server.log 2>&1 &
+@reboot M3_EMBED_GGUF=~/.m3/models/bge-m3-Q4_K_M.gguf m3-embed-server >> ~/.m3/engine/embed-server.log 2>&1 &
 ```
 
 ### Keep the systemd service alive across logout (headless / server)
@@ -245,20 +250,23 @@ The agent returns the matching paragraphs with their source file and section hea
 
 ## 6. Backfilling old conversations (optional)
 
-If you had conversations before installing m3, ingest them in one shot per format. The cursor (`memory/.chatlog_ingest_cursor.json`) tracks what's already in so re-running is safe.
+If you had conversations before installing m3, ingest them with `chatlog_ingest.py`, which ships inside the m3 package and takes **one transcript per call** (`--transcript-path`). A per-session cursor tracks what's already in, so re-running is safe.
 
 ```bash
+# The Python that has m3 installed (pipx venv shown; with plain pip use python3)
+PY="$(pipx environment --value PIPX_LOCAL_VENVS)/m3-memory/bin/python"
+INGEST="$("$PY" -c 'import m3_memory, os; print(os.path.join(os.path.dirname(m3_memory.__file__), "bin", "chatlog_ingest.py"))')"
+
 # Claude Code
-python3 bin/chatlog_ingest.py --format claude-code \
-    ~/.config/claude/projects/<project-hash>/*.jsonl
+for f in ~/.claude/projects/*/*.jsonl; do
+  "$PY" "$INGEST" --format claude-code --transcript-path "$f"; done
 
 # Gemini CLI
-python3 bin/chatlog_ingest.py --format gemini-cli \
-    ~/.gemini/tmp/*/logs.json
+for f in ~/.gemini/tmp/*/chats/session-*.json*; do
+  "$PY" "$INGEST" --format gemini-cli --transcript-path "$f"; done
 
-# OpenCode (uses the Claude Code JSONL shape)
-python3 bin/chatlog_ingest.py --format claude-code \
-    ~/.local/share/opencode/**/*.jsonl
+# OpenCode has its own format; "auto" finds its store and ingests the most recent session
+"$PY" "$INGEST" --format opencode --transcript-path auto
 ```
 
 ---
@@ -266,8 +274,8 @@ python3 bin/chatlog_ingest.py --format claude-code \
 ## You're done
 
 - **New conversations**: auto-captured (Claude / Gemini hooks).
-- **Old conversations**: one `chatlog_ingest.py` call per client.
+- **Old conversations**: one `chatlog_ingest.py` call per transcript (§6).
 - **Directories**: `files_ingest` when you want fresh indexing.
-- **Stale-file watcher**: `python -m files_memory.tools watch --directory ~/Documents`.
+- **Stale-file watcher**: `m3 files files_watch_once --directory ~/Documents` (one pass; schedule it to repeat). The long-running `python -m files_memory.tools watch` poller needs a source checkout.
 
 Need more? [Full install reference](install_linux.md) · [Files-memory tool reference](tools/files_memory.md) · [Chat-log reference](CHATLOG.md) · [All MCP tools](MCP_TOOLS.md)

@@ -19,7 +19,7 @@
 | **Git** | `git --version` |
 | **PowerShell 5.1+** (ships with Windows) | `$PSVersionTable.PSVersion` |
 
-> If Python is not installed, run `winget install -e --id Python.Python.3.12`
+> If Python is not installed, run `winget install -e --id Python.Python.3.14`
 > in an elevated PowerShell. **Avoid the Microsoft Store Python** — it installs
 > a stub launcher that blocks some installs. The winget version puts a real
 > `python.exe` on PATH.
@@ -143,11 +143,12 @@ $env:POSTGRES_SERVER = "YOUR_SERVER_IP"
 > **Modern path (recommended):** `m3 setup` (or `m3 install-m3`) handles
 > MCP wiring automatically. Use that unless you need the legacy config files.
 
-**Quick wiring:**
+**Quick wiring:** just run `m3 setup` — it is safe to re-run and wires every
+detected agent. By hand, if you must:
 
 ```powershell
-# Claude Code
-claude mcp add --scope user memory m3
+# Claude Code (or the plugin — not both; `m3 doctor --fix --fix-hooks` converges a double registration)
+claude mcp add --scope user -- m3_memory m3
 
 # Gemini CLI
 m3 chatlog init --apply-gemini
@@ -264,9 +265,9 @@ to a user-scoped install. If you hit this on an older install, re-run
 
 If `python` resolves to the Windows Store stub:
 1. **Settings → Apps → App execution aliases** — toggle off both Python entries.
-2. Re-run `winget install -e --id Python.Python.3.12` to install the real interpreter.
+2. Re-run `winget install -e --id Python.Python.3.14` to install the real interpreter.
 3. Open a new terminal and verify: `where.exe python` should point to
-   something under `%LOCALAPPDATA%\Programs\Python\Python312\python.exe`.
+   something under `%LOCALAPPDATA%\Programs\Python\Python314\python.exe`.
 
 ### Python not found / wrong version
 

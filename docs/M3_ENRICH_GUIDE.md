@@ -12,15 +12,15 @@ that are searchable via `mcp__m3_memory__memory_search`.
 > python bin/m3_enrich.py                 # do it
 > ```
 
-> ⚠️ **After enrichment, you MUST do TWO things to actually use the
-> results:** (1) set 3 env vars (`M3_PREFER_OBSERVATIONS=1`,
-> `M3_TWO_STAGE_OBSERVATIONS=1`, `M3_ENABLE_ENTITY_GRAPH=1`), AND
-> (2) **restart your MCP host** (Claude Code: close+reopen the terminal,
-> or `/mcp restart memory`). Without the env vars the default
-> `memory_search` ignores everything you just built; without the
-> restart the env vars never reach the running memory server. Jump to
+> ⚠️ **How retrieval picks up the results:** the entity graph
+> (`M3_ENABLE_ENTITY_GRAPH`) is **on by default**, and the two
+> observation gates (`M3_PREFER_OBSERVATIONS`, `M3_TWO_STAGE_OBSERVATIONS`)
+> **auto-activate** once the store holds `>=100` observation rows (checked
+> about every 5 minutes per process). Below that threshold — or with
+> `M3_DISABLE_AUTO_ACTIVATION=1` — set them explicitly and **restart your
+> MCP host** (Claude Code: `/mcp` and reconnect `m3_memory`, or reopen the
+> session) so the env reaches the running memory server. Jump to
 > [Activate enrichment-aware retrieval](#activate-enrichment-aware-retrieval-required-after-enrichment).
-> This trips up nearly every first-time user.
 
 ---
 
@@ -478,7 +478,9 @@ running simultaneously.
 
 ### Limitations
 
-- One-shot, no daemon mode. Re-run periodically.
+- `bin/m3_entities.py` itself is one-shot. The cognitive loop's
+  `entities` pass re-runs it automatically; without the loop, re-run it
+  periodically.
 - The extractor is conservative on JSON robustness (caps at 25 entities
   + 25 relationships per row). Long entries may yield only the
   highest-signal subset.
@@ -490,14 +492,15 @@ running simultaneously.
 
 ## Activate enrichment-aware retrieval (REQUIRED after enrichment)
 
-**This is the load-bearing step most users miss.** Running `m3_enrich` and
-`m3_entities` writes the enrichment artifacts (observations, entities,
-relationships) to your DBs, but the default `memory_search` path will NOT
-consult them unless three env vars are set. Without these flags, the
-hours of enrichment you just ran sit in tables that retrieval ignores.
+**Know which gates are live.** Running `m3_enrich` and `m3_entities`
+writes the enrichment artifacts (observations, entities, relationships)
+to your DBs. Retrieval consults them through three gates: the entity
+graph is on by default, and the two observation gates turn on
+automatically once enough observations exist (see below) — or when you
+set them explicitly.
 
 > ⚡ **Phase L auto-activation (since 2026-04-28):** the three gates below
-> now auto-flip ON when the underlying tables have meaningful population —
+> auto-flip ON when the underlying tables have meaningful population —
 > `>=100` observation rows for `M3_PREFER_OBSERVATIONS` /
 > `M3_TWO_STAGE_OBSERVATIONS`, and `>0` rows in `entities` for
 > `M3_ENABLE_ENTITY_GRAPH`. Counts are checked once per ~5 minutes per
@@ -513,33 +516,32 @@ hours of enrichment you just ran sit in tables that retrieval ignores.
 
 | Variable | What it does | Default |
 |---|---|---|
-| `M3_PREFER_OBSERVATIONS` | Post-rank observations (`type='observation'`) above raw chat turns. The atomic facts you extracted now lead the result list. | off |
-| `M3_TWO_STAGE_OBSERVATIONS` | Expand observation hits with their source turns (~3 per hit). Gives the answerer the surrounding context, not just the distilled fact. | off |
-| `M3_ENABLE_ENTITY_GRAPH` | Allow entity-graph traversal during retrieval — the `entities` + `entity_relationships` tables become consultable. Required for `memory_search_routed`'s entity branch to fire. | off |
+| `M3_PREFER_OBSERVATIONS` | Post-rank observations (`type='observation'`) above raw chat turns. The atomic facts you extracted now lead the result list. | off; auto-on at `>=100` observations |
+| `M3_TWO_STAGE_OBSERVATIONS` | Expand observation hits with their source turns (~3 per hit). Gives the answerer the surrounding context, not just the distilled fact. | off; auto-on at `>=100` observations |
+| `M3_ENABLE_ENTITY_GRAPH` | Allow entity-graph traversal during retrieval — the `entities` + `entity_relationships` tables become consultable. Required for `memory_search_routed`'s entity branch to fire. Set `0` to disable. | **on** (`1`) |
 
-Set all three to `1` (or `true` / `yes`) to fully activate.
+Set them to `1` (or `true` / `yes`) to activate explicitly — useful below
+the auto-activation threshold or with `M3_DISABLE_AUTO_ACTIVATION=1`.
 
 ### Where to set them — three options, pick the one that matches how you run m3-memory
 
 #### A. MCP server (Claude Code / agents using m3 via MCP)
 
-Edit your `~/.claude/settings.json` (or whatever MCP host config you use)
-and add the env vars to the `memory` server's `env` block:
+Claude Code does not read MCP servers from `~/.claude/settings.json`;
+m3's server is registered with `claude mcp add` (this is what `m3 setup`
+runs). Re-register it with the extra env vars, keeping your root pins:
 
-```json
-"mcpServers": {
-  "memory": {
-    "command": "<path>/.venv/Scripts/python.exe",
-    "args": ["<path>/bin/memory_bridge.py"],
-    "env": {
-      "LM_STUDIO_EMBED_URL": "http://127.0.0.1:1234/v1/embeddings",
-      "M3_PREFER_OBSERVATIONS": "1",
-      "M3_TWO_STAGE_OBSERVATIONS": "1",
-      "M3_ENABLE_ENTITY_GRAPH": "1"
-    }
-  }
-}
+```bash
+claude mcp remove --scope user m3_memory
+claude mcp add --scope user \
+  --env M3_ENGINE_ROOT=<engine root> --env M3_CONFIG_ROOT=<config root> \
+  --env M3_PREFER_OBSERVATIONS=1 --env M3_TWO_STAGE_OBSERVATIONS=1 \
+  -- m3_memory m3
 ```
+
+For other MCP hosts (Gemini, Cursor, Cline, …), add the same vars to the
+`env` block of the m3 server entry in that host's own config file; the
+server command is `m3`.
 
 > 🔁 **Restart your MCP host so the new env reaches the memory server**
 > — MCP servers read their `env` block once at spawn time, so config
@@ -548,7 +550,7 @@ and add the env vars to the `memory` server's `env` block:
 >
 > | Host | Restart command |
 > |---|---|
-> | **Claude Code** (terminal) | Close and reopen the terminal session, OR run `/mcp` and pick "restart memory" from the picker |
+> | **Claude Code** (terminal) | Close and reopen the terminal session, OR run `/mcp` and reconnect `m3_memory` from the picker |
 > | **Claude Desktop** | Quit fully (tray icon → Quit, not just close window) and reopen |
 > | **OpenCode / Aider / custom MCP host** | Whatever your host's "reload tool servers" / "restart" command is — most expose it as `/mcp` or `/restart-tools` |
 > | **No GUI host (CI / headless)** | Kill and re-launch the process that owns the MCP child |
@@ -565,7 +567,6 @@ Add to your `~/.bashrc` / `~/.zshrc` / Windows env:
 ```bash
 export M3_PREFER_OBSERVATIONS=1
 export M3_TWO_STAGE_OBSERVATIONS=1
-export M3_ENABLE_ENTITY_GRAPH=1
 ```
 
 > 🔁 **Open a new shell session** (or `source ~/.bashrc`) for the
@@ -577,7 +578,7 @@ export M3_ENABLE_ENTITY_GRAPH=1
 Wrap the cron command:
 
 ```bash
-M3_PREFER_OBSERVATIONS=1 M3_TWO_STAGE_OBSERVATIONS=1 M3_ENABLE_ENTITY_GRAPH=1 \
+M3_PREFER_OBSERVATIONS=1 M3_TWO_STAGE_OBSERVATIONS=1 \
     python bin/m3_enrich.py --drain-queue --drain-batch 50
 ```
 
@@ -617,7 +618,7 @@ SELECT COUNT(*) FROM entity_relationships;
 ```
 
 > 🔁 **If you set the env vars but observations still don't show up
-> in results**, the restart didn't take. The MCP `memory` server is
+> in results**, the restart didn't take. The MCP `m3_memory` server is
 > still running with the OLD env. Symptoms:
 >
 > - Recent search results contain only `type='message'` / `type='note'`
@@ -628,7 +629,7 @@ SELECT COUNT(*) FROM entity_relationships;
 >
 > Fix: re-run the restart step from the recipe matching your host
 > above. If unsure whether the restart took, in Claude Code run
-> `/mcp` and check that the `memory` server status line reflects a
+> `/mcp` and check that the `m3_memory` server status line reflects a
 > recent start time.
 
 ### Cost / risk
@@ -639,17 +640,17 @@ SELECT COUNT(*) FROM entity_relationships;
 - `M3_ENABLE_ENTITY_GRAPH` adds an extra graph-traversal SQL query when
   the query has named entities. Negligible on a populated graph; no-op
   otherwise.
-- Default-off is for backward-compat with users who haven't run
-  enrichment. Once you HAVE run enrichment, default-off is just leaving
-  the lights off in a furnished house.
+- The observation gates stay off on a store with few or no
+  observations (backward-compat for users who haven't run enrichment)
+  and auto-activate once `>=100` exist.
 
-### Why the gates aren't auto-flipped on data presence
+### Auto-activation and how to pin behavior
 
-A common question: "shouldn't the search auto-detect observations and
-fire the post-rank?" Possibly — that's a Phase J consideration tracked
-in the m3-memory roadmap. The conservative current behavior is
-explicit-opt-in so the retrieval semantics never change without the
-operator knowing.
+The gates auto-flip on data presence (see the Phase L note above), so
+retrieval semantics can change once enrichment populates the tables. If
+you need retrieval to depend only on declared config — benchmarks,
+ablations — set `M3_DISABLE_AUTO_ACTIVATION=1` and set each gate
+explicitly. Set `M3_ENABLE_ENTITY_GRAPH=0` to turn the entity graph off.
 
 ---
 
@@ -764,8 +765,8 @@ Register-ScheduledTask -TaskName "m3 Enrich Drain" `
 | `M3_AUTO_ENRICH` | `0` (off) | Enable enqueue at chatlog ingest |
 | `M3_AUTO_ENRICH_MIN_TURNS` | `10` | Skip enqueue if ingest wrote fewer turns |
 | `M3_REFLECTOR_THRESHOLD` | `50` | Observation count before Reflector fires |
-| `M3_PREFER_OBSERVATIONS` | `0` (off) | Prefer observation rows in retrieval |
-| `M3_TWO_STAGE_OBSERVATIONS` | `0` (off) | Expand top-k obs into source turns |
+| `M3_PREFER_OBSERVATIONS` | `0` (off; auto-on at `>=100` observations) | Prefer observation rows in retrieval |
+| `M3_TWO_STAGE_OBSERVATIONS` | `0` (off; auto-on at `>=100` observations) | Expand top-k obs into source turns |
 | `M3_OBSERVATION_BUDGET_TOKENS` | `4000` | Token budget for obs-only retrieval |
 
 ### Operational notes
@@ -778,23 +779,28 @@ Register-ScheduledTask -TaskName "m3 Enrich Drain" `
   FROM observation_queue WHERE attempts >= 5`).
 - **Keep the drain cadence loose.** Every 30 min is more than enough for
   most workflows. Hourly is fine if your SLM is shared with bench runs.
-- **No daemon needed.** `--drain-queue` exits when the queue is empty.
-  No long-running process to monitor.
+- **The cognitive loop drains it for you.** Its `enrich` pass runs the
+  same drain automatically. A standalone `--drain-queue` run (cron /
+  Task Scheduler) is only needed without the loop; it exits when the
+  queue is empty.
 
 ### Troubleshooting
 
 **Queue isn't draining**
 
-Check the queue depth:
-```bash
-sqlite3 memory/agent_chatlog.db \
-    "SELECT COUNT(*), MAX(attempts) FROM observation_queue"
-```
+Check the queue depth: `m3 dashboard` → System Health shows the
+Enrichment queue length and drain ETA. A manual
+`python bin/m3_enrich.py --drain-queue` also prints the pending count
+(rows with `attempts < 5`) before it drains.
 
-If `attempts >= 5`, the SLM endpoint was unreachable on every retry. Fix
-the endpoint (LM Studio not running, API key missing) and reset:
+If rows sit at `attempts >= 5`, the SLM endpoint was unreachable on every
+retry. Fix the endpoint (LM Studio not running, API key missing), then
+reset them. There is no `m3` command for this reset; run the UPDATE
+against the **core** store (`observation_queue` lives there, not in the
+chatlog store) — on the default SQLite backend that is
+`<engine root>/agent_memory.db`:
 ```bash
-sqlite3 memory/agent_chatlog.db \
+sqlite3 ~/.m3/engine/agent_memory.db \
     "UPDATE observation_queue SET attempts=0, last_error=NULL WHERE attempts >= 5"
 ```
 

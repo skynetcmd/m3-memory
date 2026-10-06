@@ -11,7 +11,7 @@ Get persistent memory + directory ingestion running on Windows in under five min
 **Prerequisites** — run once in an **elevated PowerShell** (right-click → Run as administrator):
 
 ```powershell
-winget install -e --id Python.Python.3.12
+winget install -e --id Python.Python.3.14
 winget install -e --id Git.Git
 winget install -e --id SQLite.SQLite
 ```
@@ -40,10 +40,10 @@ m3 setup
 ```
 
 > **`m3` not found after `pip install --user`?** pip puts the script in
-> `%APPDATA%\Python\Python312\Scripts\` (adjust for your Python version).
+> `%APPDATA%\Python\Python314\Scripts\` (adjust for your Python version).
 > Add that folder to your user PATH:
 > ```powershell
-> $scripts = "$env:APPDATA\Python\Python312\Scripts"
+> $scripts = "$env:APPDATA\Python\Python314\Scripts"
 > [Environment]::SetEnvironmentVariable(
 >     "PATH", "$env:PATH;$scripts", "User")
 > # Then open a new terminal.
@@ -64,7 +64,7 @@ and each is reported as done or not.
 
 - system payload
 - embedder (everything's bundled — no LM Studio, no Ollama, no internet, no GPU required)
-- per-agent MCP wiring (Claude Code, Gemini CLI, OpenCode, OpenClaw)
+- per-agent MCP wiring (Claude Code, Gemini CLI, Antigravity, OpenCode, Cursor, Cline, OpenClaw; Hermes via its plugin)
 - chatlog Stop + PreCompact hooks
 - final brief `m3 doctor` health check (`--verbose` for full detail)
 
@@ -72,7 +72,7 @@ Restart your agent and you're done. The rest of this doc covers the features.
 
 > **Have a GPU?** The wizard asks once whether to add GPU acceleration on top of the default embedder for ~10-50× faster embeddings (needs CUDA Toolkit + nvcc on PATH, or Vulkan SDK). You can also add it later with `m3 embedder install-gpu`.
 
-> **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but groups them into 9 domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin). Only the 20 essentials load at MCP startup (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The agent pulls in a domain on demand — just say "load the files tools" and it does. Set `M3_TOOLS_LAZY=0` to disable.
+> **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but groups them into 9 domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin). Only 10 tools load at MCP startup (~3,962 tokens, ~2% of a 200K window; the rest load on demand). The agent pulls in a domain on demand — just say "load the files tools" and it does. Set `M3_TOOLS_LAZY=0` to disable.
 
 ---
 
@@ -83,6 +83,9 @@ If you ran `m3 setup` (step 1), every agent it detected on PATH is **already wir
 If you skipped the wizard, or you're adding an agent later, here's the manual recipe per agent:
 
 ### Claude Code (recommended: plugin)
+
+Use the plugin **or** `m3 setup`'s direct registration — not both (both gives
+you two live m3 servers; `m3 doctor --fix --fix-hooks` converges back to one).
 
 ```
 /plugin marketplace add skynetcmd/m3-memory
@@ -96,12 +99,12 @@ If you skipped the wizard, or you're adding an agent later, here's the manual re
 > /plugin install m3@skynetcmd
 > ```
 
-Then `/plugin reload` (or restart Claude Code). The plugin auto-registers the MCP, wires the chatlog Stop + PreCompact hooks, and adds 15 `/m3:*` slash commands plus two curator subagents — confirm with `/m3:health`.
+Then `/reload-plugins` (or restart Claude Code). The plugin auto-registers the MCP, wires the chatlog Stop + PreCompact hooks, and adds 15 `/m3:*` slash commands plus two curator subagents — confirm with `/m3:health`.
 
-If you'd rather wire it by hand:
+If you'd rather wire it by hand (without the plugin):
 
 ```powershell
-claude mcp add --scope user memory m3
+claude mcp add --scope user -- m3_memory m3
 ```
 
 ### Gemini CLI
@@ -187,10 +190,11 @@ m3 doctor   # shows Tier-1 / Tier-2 status and embed roundtrip latency
 
 ### If you can't elevate (no admin rights)
 
-Run the server directly in a background PowerShell job:
+Run the server directly in a background PowerShell job (`m3 embedder fetch-model`
+downloads the model to `%USERPROFILE%\.m3\models\` if it isn't there yet):
 
 ```powershell
-$env:M3_EMBED_GGUF = "$env:USERPROFILE\.m3-memory\_assets\models\bge-m3-Q4_K_M.gguf"
+$env:M3_EMBED_GGUF = "$env:USERPROFILE\.m3\models\bge-m3-Q4_K_M.gguf"
 Start-Process -WindowStyle Hidden -FilePath "m3-embed-server" `
     -RedirectStandardOutput "$env:TEMP\m3-embed.log" `
     -RedirectStandardError  "$env:TEMP\m3-embed.log"
@@ -199,7 +203,7 @@ Start-Process -WindowStyle Hidden -FilePath "m3-embed-server" `
 To start automatically at login without elevation, create a Task Scheduler entry:
 
 ```powershell
-$gguf    = "$env:USERPROFILE\.m3-memory\_assets\models\bge-m3-Q4_K_M.gguf"
+$gguf    = "$env:USERPROFILE\.m3\models\bge-m3-Q4_K_M.gguf"
 $action  = New-ScheduledTaskAction `
                -Execute "powershell.exe" `
                -Argument "-WindowStyle Hidden -Command `"& { `$env:M3_EMBED_GGUF='$gguf'; m3-embed-server }`"" `
@@ -257,20 +261,23 @@ The agent returns the matching paragraphs with their source file and section hea
 
 ## 6. Backfilling old conversations (optional)
 
-If you had conversations before installing m3, ingest them in one shot per format. The cursor (`memory\.chatlog_ingest_cursor.json`) tracks what's already in so re-running is safe.
+If you had conversations before installing m3, ingest them with `chatlog_ingest.py`, which ships inside the m3 package and takes **one transcript per call** (`--transcript-path`). A per-session cursor tracks what's already in, so re-running is safe.
 
 ```powershell
+# The Python that has m3 installed (pipx venv shown; with plain pip use "python")
+$py     = Join-Path (pipx environment --value PIPX_LOCAL_VENVS) "m3-memory\Scripts\python.exe"
+$ingest = & $py -c "import m3_memory, os; print(os.path.join(os.path.dirname(m3_memory.__file__), 'bin', 'chatlog_ingest.py'))"
+
 # Claude Code
-python bin\chatlog_ingest.py --format claude-code `
-    "$env:APPDATA\Claude\projects\<project-hash>\*.jsonl"
+Get-ChildItem "$env:USERPROFILE\.claude\projects\*\*.jsonl" | ForEach-Object {
+    & $py $ingest --format claude-code --transcript-path $_.FullName }
 
 # Gemini CLI
-python bin\chatlog_ingest.py --format gemini-cli `
-    "$env:USERPROFILE\.gemini\tmp\*\logs.json"
+Get-ChildItem "$env:USERPROFILE\.gemini\tmp\*\chats\session-*.json*" | ForEach-Object {
+    & $py $ingest --format gemini-cli --transcript-path $_.FullName }
 
-# OpenCode (uses the Claude Code JSONL shape)
-python bin\chatlog_ingest.py --format claude-code `
-    "$env:APPDATA\opencode\**\*.jsonl"
+# OpenCode has its own format; "auto" finds its store and ingests the most recent session
+& $py $ingest --format opencode --transcript-path auto
 ```
 
 ---
@@ -278,14 +285,14 @@ python bin\chatlog_ingest.py --format claude-code `
 ## You're done
 
 - **New conversations**: auto-captured (Claude / Gemini hooks).
-- **Old conversations**: one `chatlog_ingest.py` call per client.
+- **Old conversations**: one `chatlog_ingest.py` call per transcript (§6).
 - **Directories**: `files_ingest` when you want fresh indexing.
-- **Stale-file watcher**: `python -m files_memory.tools watch --directory C:\Users\you\Documents`.
+- **Stale-file watcher**: `m3 files files_watch_once --directory C:\Users\you\Documents` (one pass; schedule it to repeat). The long-running `python -m files_memory.tools watch` poller needs a source checkout.
 
 ### Windows-specific notes
 
 - **Embedder as a Windows Service** requires an elevated terminal. If you can't elevate, use the Task Scheduler approach in §3 above — no admin rights needed.
-- **The watch daemon** survives reboots the same way. Replace `m3-embed-server` with `python -m files_memory.tools watch --directory $env:USERPROFILE\Documents` in the `Register-ScheduledTask` snippet above.
+- **The stale-file watcher** can be scheduled the same way. Replace `m3-embed-server` with `m3 files files_watch_once --directory $env:USERPROFILE\Documents` in the `Register-ScheduledTask` snippet above, and give the trigger a repetition interval.
 - **PATH after `pip install --user`** — covered in §1. Using `pipx` avoids the issue entirely.
 - **GPU acceleration** — CUDA autodetected if `nvcc` is on PATH; Vulkan also supported. Run `m3 embedder install-gpu` after installing CUDA Toolkit. Vulkan / DirectML builds: [EMBED_DEPLOYMENT.md](EMBED_DEPLOYMENT.md).
 - **PowerShell 7+** recommended: `winget install Microsoft.PowerShell`.

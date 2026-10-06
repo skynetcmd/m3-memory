@@ -14,9 +14,12 @@ own BGE-M3 CPU embedder ships with the repo and runs on port 8082.
 A sovereign deployment is:
 
 1. **m3-Memory core** — the MCP server, CLI, and tools (`pip install m3-memory`).
-2. **Bundled BGE-M3 GGUF** — ships with the repo via Git LFS at
-   `_assets/models/bge-m3-Q4_K_M.gguf` (~438 MB).
-3. **m3-embed-server** — Rust binary from the `oxidation` extra; serves an
+2. **BGE-M3 GGUF** — ships with the repo via Git LFS at
+   `_assets/models/bge-m3-Q4_K_M.gguf` (~438 MB), so only a clone with
+   `git lfs pull` has it; a `pip`/`pipx` install does not. m3's canonical copy
+   lives at `~/.m3/models/bge-m3-Q4_K_M.gguf` (where `m3 embedder fetch-model`
+   writes, and the first place the installer looks).
+3. **m3-embed-server** — Rust binary shipped inside the `m3-core-rs` wheel; serves an
    OpenAI-compatible `/embedding` endpoint on `127.0.0.1:8082`. Runs as a
    systemd / launchd / Windows Service with `concurrency=2`.
 4. **OS service registration** — auto-managed by `m3 embedder install`;
@@ -93,7 +96,13 @@ LFS-tracked model file and any extra wheels you'll need offline.
 
 ## Phase 2 — deployment (on the air-gapped target)
 
-1. **Copy the folder** to its permanent home on the secure machine.
+1. **Copy the folder** to its permanent home on the secure machine, then copy
+   the GGUF to m3's model dir (the pip-installed payload does not include it):
+
+   ```bash
+   mkdir -p ~/.m3/models
+   cp _assets/models/bge-m3-Q4_K_M.gguf ~/.m3/models/
+   ```
 
 2. **Install m3-memory from local wheels:**
 
@@ -118,8 +127,8 @@ LFS-tracked model file and any extra wheels you'll need offline.
    What happens:
    - `m3 install-m3` fetches the system payload from the local cache (or git
      mirror) — see "Air-gapped install-m3" below if you need to skip GitHub.
-   - `m3 embedder install` locates the bundled GGUF at
-     `_assets/models/bge-m3-Q4_K_M.gguf`, registers `m3-embed-server` as an
+   - `m3 embedder install` locates the GGUF (first `~/.m3/models/`, then the
+     installed payload's `_assets/models/`), registers `m3-embed-server` as an
      OS service with `concurrency=2`, and starts it on port 8082.
    - Per-agent MCP wiring runs for any of Claude Code / Cursor / Cline /
      Gemini CLI / OpenCode / Antigravity / OpenClaw detected on your system.
@@ -128,25 +137,28 @@ LFS-tracked model file and any extra wheels you'll need offline.
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, diagnostics, admin). Only the 20 essentials load at MCP startup
-> (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The
+> conversations, diagnostics, admin). Only 10 tools load at MCP startup
+> (~3,962 tokens, ~2% of a 200K window; the rest load on demand). The
 > agent pulls in a domain on demand — just say "load the files tools" and it does.
 > Set `M3_TOOLS_LAZY=0` to disable. Especially relevant in air-gapped settings
 > where every token of context margin counts.
 
 ### Air-gapped install-m3
 
-`m3 install-m3` normally clones the system payload from GitHub. For
-fully-offline installs, set `M3_BRIDGE_PATH` to point at a pre-staged
-payload directory (the contents of the m3-memory repo on disk):
+A wheel/pipx install already carries the full system payload, so
+`m3 install-m3` (and `m3 setup`) detect it and do not fetch from GitHub. To run
+from a pre-staged payload directory instead, point `M3_PATH_BIN` at its `bin/`
+directory (`M3_BRIDGE_PATH` has been removed):
 
 ```bash
-export M3_BRIDGE_PATH=/srv/m3-memory/bin/memory_bridge.py
+export M3_PATH_BIN=/srv/m3-memory/bin
 m3 setup --non-interactive --capture-mode both
 ```
 
-`find_bridge()` resolves `M3_BRIDGE_PATH` first, so this skips the GitHub
-fetch entirely.
+`find_bridge()` resolves `M3_PATH_BIN` first. An `export` lasts only for that
+shell, so keep it set persistently (shell profile, the MCP server
+registration's `env`, and any service environment) so later `m3` runs resolve
+the same payload.
 
 ---
 
@@ -231,9 +243,8 @@ the authoritative boundary, the two tiers, and limitations.
    m3 loads wolfSSL only from trusted absolute paths it controls (`M3_WOLFSSL_LIB`
    > `~/.m3/lib` > system dirs) — never the CWD/`%PATH%` — to resist DLL-hijack.
 
-In FIPS mode, internal communication (e.g. to the embedder on port 8082) is
-restricted to **TLS 1.3** with FIPS-approved ciphersuites, and the secrets vault
-uses **AES-256-GCM**.
+The secrets vault uses **AES-256-GCM**. Traffic to the embedder on port 8082
+is plain HTTP to `127.0.0.1` (loopback only), not TLS.
 
 See the [FIPS Module Boundary](FIPS_MODULE_BOUNDARY.md) and
 [FIPS Compliance Guide](FIPS_COMPLIANCE.md) for deep technical details and

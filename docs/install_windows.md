@@ -23,7 +23,7 @@ Open an **elevated** shell (right-click PowerShell → *Run as administrator*) a
 install the three prerequisites:
 
 ```powershell
-winget install -e --id Python.Python.3.12
+winget install -e --id Python.Python.3.14
 winget install -e --id Git.Git
 winget install -e --id SQLite.SQLite
 ```
@@ -32,7 +32,7 @@ winget install -e --id SQLite.SQLite
 > `winget` lives in a WindowsApps folder that **Git Bash usually can't see**.
 > If you must run it from Git Bash, call it by full path:
 > ```bash
-> "$LOCALAPPDATA/Microsoft/WindowsApps/winget.exe" install -e --id Python.Python.3.12
+> "$LOCALAPPDATA/Microsoft/WindowsApps/winget.exe" install -e --id Python.Python.3.14
 > ```
 > (Phase 2 below works from any shell — PowerShell, cmd, or Git Bash — since
 > `python`/`m3` are ordinary programs.)
@@ -59,9 +59,10 @@ pip install --user m3-memory
 m3 setup
 ```
 
-The wizard also asks for the **primary database backend** — SQLite (default,
-zero-infrastructure) or PostgreSQL. Choosing PostgreSQL (`--db-backend postgres`,
-or `M3_DB_BACKEND=postgres`) requires a reachable server via `M3_PRIMARY_PG_URL`.
+`m3 setup` always keeps the store on **SQLite** (default, zero-infrastructure);
+it never configures PostgreSQL. For a PostgreSQL **primary** store, run
+`m3 install-m3 --db-backend postgres` (or set `M3_DB_BACKEND=postgres`) with a
+reachable server in `M3_PRIMARY_PG_URL`.
 
 **Prefer a graphical setup?** `m3 setup --gui` opens a window with the same
 questions the terminal wizard asks (recommended defaults pre-selected), then
@@ -74,8 +75,8 @@ below. Use `m3 setup --terminal` to force the text wizard.
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, diagnostics, admin). Only the 20 essentials load at MCP startup
-> (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The
+> conversations, diagnostics, admin). Only 10 tools load at MCP startup
+> (~3,962 tokens, ~2% of a 200K window; the rest load on demand). The
 > agent pulls in a domain on demand — just say "load the files tools" and it does.
 > Set `M3_TOOLS_LAZY=0` to disable.
 
@@ -114,18 +115,22 @@ each verdict with a color-coded status dot (green / amber / red).
 
 ## Adding to an MCP client
 
-`m3 setup` wires every agent it detects on PATH. If you skipped the wizard or
-add an agent later, run these by hand:
+`m3 setup` wires every agent it detects (Claude Code, Gemini CLI, Antigravity,
+OpenCode, Cursor, Cline, OpenClaw; Hermes via its plugin). If you skipped the
+wizard or add an agent later, re-run `m3 setup`, or by hand:
 
 ```powershell
-# Claude Code
-claude mcp add --scope user memory m3
+# Claude Code (skip if you use the plugin below — plugin OR this, not both)
+claude mcp add --scope user -- m3_memory m3
 
 # Gemini CLI (auto-wired by m3 setup; re-run if Gemini was installed AFTER m3)
 m3 chatlog init --apply-gemini
 ```
 
 ### Claude Code plugin install
+
+Use the plugin **or** `m3 setup`'s direct registration — not both (both gives
+two live m3 servers; `m3 doctor --fix --fix-hooks` converges back to one).
 
 ```
 /plugin marketplace add skynetcmd/m3-memory
@@ -181,7 +186,7 @@ m3 doctor   # shows Tier-1 / Tier-2 status and embed roundtrip latency
 ### No admin rights? Use Task Scheduler instead
 
 ```powershell
-$gguf     = "$env:USERPROFILE\.m3-memory\_assets\models\bge-m3-Q4_K_M.gguf"
+$gguf     = "$env:USERPROFILE\.m3\models\bge-m3-Q4_K_M.gguf"   # `m3 embedder fetch-model` puts it here
 $action   = New-ScheduledTaskAction `
                 -Execute "powershell.exe" `
                 -Argument "-WindowStyle Hidden -Command `"& { `$env:M3_EMBED_GGUF='$gguf'; m3-embed-server }`"" `
@@ -199,7 +204,7 @@ and survives reboots. To remove: `Unregister-ScheduledTask -TaskName "m3-embed-s
 Or run the server manually for the current session only:
 
 ```powershell
-$env:M3_EMBED_GGUF = "$env:USERPROFILE\.m3-memory\_assets\models\bge-m3-Q4_K_M.gguf"
+$env:M3_EMBED_GGUF = "$env:USERPROFILE\.m3\models\bge-m3-Q4_K_M.gguf"
 Start-Process -WindowStyle Hidden -FilePath "m3-embed-server" `
     -RedirectStandardOutput "$env:TEMP\m3-embed.log" `
     -RedirectStandardError  "$env:TEMP\m3-embed.log"

@@ -6,18 +6,21 @@
 
 For most users: run `m3 setup` once and the wizard auto-detects + wires
 every supported client on your machine (Claude Code, Cursor, Cline,
-Gemini CLI, OpenCode, Antigravity, OpenClaw, Aider). This doc is for users
-who want to wire clients manually or understand what the wizard does.
+Gemini CLI, OpenCode, Antigravity, OpenClaw; Hermes via its plugin). Aider is
+not wired by the wizard — it needs the manual proxy setup in Client 5. This doc
+is for users who want to wire clients manually or understand what the wizard does.
 
 ---
 
 ## Prerequisites (all clients)
 
 1. **Install m3-memory** (`pipx install m3-memory` or `pip install m3-memory`).
-2. **Install the sovereign CPU embedder service** so MCP cold-cascade
-   always has a healthy fallback at `http://127.0.0.1:8082`:
+2. **Install the shared embed server** — the default embedder, at
+   `http://127.0.0.1:8082`. `m3 setup` does both steps below for you; by hand,
+   install the binary first, then register the service:
    ```bash
-   m3 embedder install
+   m3 embedder install-gpu   # installs the m3-embed-server binary (works on CPU too)
+   m3 embedder install       # registers + starts the service
    ```
    On Windows this registers `m3-embed-server` as a Windows Service
    (auto-start). On Linux it installs a systemd unit. On macOS it
@@ -26,13 +29,16 @@ who want to wire clients manually or understand what the wizard does.
    m3 embedder status
    ```
    Expected: `running`.
-3. **(Optional) Configure tier-1 in-process GGUF** for ~10-85× faster
-   embeds on the hot path. Set in your shell or per-client env:
+3. **(Optional) In-process (tier-1) embedding** is opt-in and only worth it
+   for high-volume bursts such as bulk file ingestion; it costs one model copy
+   per process. It needs `M3_EMBED_INPROC=1` (or an `.embed_config.json` that
+   permits it) — a GGUF path alone does **not** enable it:
    ```bash
-   export M3_EMBED_GGUF=/path/to/bge-m3-GGUF-Q4_K_M.gguf
+   export M3_EMBED_INPROC=1
+   export M3_EMBED_GGUF=~/.m3/models/bge-m3-Q4_K_M.gguf   # `m3 embedder fetch-model` puts it here
    ```
-   Without this, all embeds route through tier-2 (the :8082 service),
-   which still works fine — just slower per call.
+   Without this, all embeds go through the shared :8082 server — the
+   recommended default.
 
 Once those two prerequisites are in place, every client below works
 identically — the MCP protocol does the rest.
@@ -55,9 +61,15 @@ identically — the MCP protocol does the rest.
 > /plugin install m3@skynetcmd
 > ```
 
-The plugin's `mcpServers.m3.env` block reads `userConfig.embed_gguf`
-and `userConfig.embed_fallback_url` set during install. Both knobs are
-optional; the embed_fallback_url defaults to `http://127.0.0.1:8082`.
+The plugin's `mcpServers.memory.env` block reads six `userConfig` knobs set
+during install — `endpoint`, `capture_mode`, `embed_fallback_url`,
+`embed_gguf`, `engine_root`, `config_root` (see
+[claude_code_plugin.md](claude_code_plugin.md#configuration)). All are
+optional; `embed_fallback_url` defaults to `http://127.0.0.1:8082`.
+
+Use the plugin **or** `m3 setup`'s direct registration
+(`claude mcp add --scope user -- m3_memory m3`), not both — both gives two live
+m3 servers; `m3 doctor --fix --fix-hooks` converges back to one.
 
 **Verify**: `tools_list_domains` from any Claude Code session lists 9
 domains including `diagnostics`. Calling `memory_doctor` returns
@@ -76,7 +88,7 @@ Manual config — edit `~/.gemini/settings.json`:
 ```json
 {
   "mcpServers": {
-    "m3": {
+    "memory": {
       "command": "m3",
       "env": {
         "M3_EMBED_FALLBACK_URL": "http://127.0.0.1:8082",
@@ -87,7 +99,9 @@ Manual config — edit `~/.gemini/settings.json`:
 }
 ```
 
-Set `M3_EMBED_GGUF` if you have a BGE-M3 GGUF on disk for tier-1.
+Use the server key `memory` — the one `m3 setup` writes — so a later `m3 setup`
+repoints this entry instead of adding a second server. In-process (tier-1)
+embedding is opt-in: it needs `M3_EMBED_INPROC=1`, not just `M3_EMBED_GGUF`.
 
 Restart Gemini CLI. Verify: tool list includes the m3 MCP entries.
 
@@ -107,7 +121,7 @@ This registers the `m3` memory MCP server in `~/.gemini/antigravity-cli/settings
 ```json
 {
   "mcpServers": {
-    "m3": {
+    "memory": {
       "command": "m3",
       "env": {
         "M3_EMBED_FALLBACK_URL": "http://127.0.0.1:8082",
@@ -118,7 +132,9 @@ This registers the `m3` memory MCP server in `~/.gemini/antigravity-cli/settings
 }
 ```
 
-Set `M3_EMBED_GGUF` if you have a BGE-M3 GGUF on disk for tier-1.
+Use the server key `memory` — the one `m3 setup` writes — so a later `m3 setup`
+repoints this entry instead of adding a second server. In-process (tier-1)
+embedding is opt-in: it needs `M3_EMBED_INPROC=1`, not just `M3_EMBED_GGUF`.
 
 Restart the Antigravity CLI or Desktop app.
 
@@ -206,8 +222,8 @@ client: `memory_search`, `memory_write`, `memory_get`, `memory_supersede`,
 `chatlog_search`, `chatlog_status`, `files_search`, `m3_call`,
 `tools_list_domains`, `tools_load_domain`.
 
-That is 3,929 tokens on the wire instead of 29,658 for the full catalog
-— an 86.8% reduction, measured with `python bin/measure_tool_tokens.py`. Nothing
+That is ~3,962 tokens on the wire instead of ~30,701 for the full catalog
+— a ~87% reduction, measured with `python bin/measure_tool_tokens.py`. Nothing
 is lost: `m3_call` invokes any catalog tool by name, and `tools_load_domain`
 pulls a whole domain in live.
 
@@ -273,24 +289,20 @@ m3 like any other MCP server in your agent's session config.
 
 **Python (claude-agent-sdk):**
 ```python
-from claude_agent_sdk import Agent, MCPServerConfig
+import asyncio
+from claude_agent_sdk import ClaudeAgentOptions, query
 
-agent = Agent(
-    mcp_servers=[
-        MCPServerConfig(
-            name="m3",
-            command="mcp-memory",
-            env={
-                "M3_EMBED_FALLBACK_URL": "http://127.0.0.1:8082",
-                "M3_EMBED_GGUF": "",  # optional tier-1 path
-            },
-        ),
-    ],
-)
+options = ClaudeAgentOptions(mcp_servers={"m3_memory": {"command": "m3"}})
+
+async def main():
+    async for message in query(prompt="Search my memory for 'm3 install'", options=options):
+        print(message)
+
+asyncio.run(main())
 ```
 
-**TypeScript** equivalent uses the same spec shape via the SDK's
-`mcpServers` config option.
+**TypeScript** equivalent passes the same `{"m3_memory": {"command": "m3"}}`
+map as the `mcpServers` option to `query()`.
 
 ---
 
@@ -319,7 +331,7 @@ Auto-wired to `~/.cursor/mcp.json` (only when `~/.cursor` exists). Manual config
 ```
 
 > **Cursor's ~40-tool cap.** Cursor limits the active tool surface across all
-> MCP servers. m3 exposes 100+ tools but lazy-loads only the 20 essentials at
+> MCP servers. m3 exposes 100+ tools but lazy-loads only 10 at
 > startup (the rest via `tools_load_domain`), so it stays well under the ceiling.
 
 ### Cline (VS Code extension)
@@ -364,9 +376,9 @@ Once registered, every client should expose these meta-tools:
 | `memory_doctor` (in `diagnostics` domain) | Run health probes — tier-1/tier-2/db/roundtrip with structured recommendations |
 | `memory_search` (essential, always loaded) | Hybrid FTS5 + vector search |
 
-A healthy install: `memory_doctor` returns `{"summary": "healthy"}` (or
-`"degraded"` with explicit recommendations if tier-1 GGUF isn't set —
-that's expected on minimal installs).
+A healthy install: `memory_doctor` returns `{"summary": "healthy"}` — in the
+default shared-embedder mode that only needs the :8082 server up (tier-1 is
+intentionally off). `"degraded"` comes with explicit recommendations.
 
 ---
 
@@ -374,7 +386,7 @@ that's expected on minimal installs).
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `memory_search` hangs > 10s | No embedder reachable | Run `m3 embedder install` then `m3 embedder status` |
+| `memory_search` hangs > 10s | No embedder reachable | Run `m3 embedder install-gpu` (binary), `m3 embedder install`, then `m3 embedder status` |
 | `memory_search` returns wrong vectors | Cascade fell to Ollama (cross-space) | Same — ensure :8082 is up; m3 cascade now prefers it (commit 0dfdf56+) |
 | `tools_load_domain('diagnostics')` returns 0 tools | Pre-cascade-fix server version | `pip install -U m3-memory` then restart the MCP server |
 | Plugin install dialog doesn't show new userConfig knobs | Cached plugin manifest | Re-pull the plugin: `/plugin remove m3@skynetcmd && /plugin install m3@skynetcmd` |

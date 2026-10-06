@@ -23,9 +23,10 @@ API key, and no outbound calls — at home in a **homelab**, on a **corporate or
 government network**, or **fully air-gapped**. Embedding runs on your own hardware
 via a **shared local embed server** — one model in RAM that every m3 process
 reuses, rather than a copy per process — the store is a file you own, and
-installation works with no internet at all.
+it can be installed fully offline from pre-staged wheels (see the [Sovereign Deployment Guide](docs/SOVEREIGN_DEPLOYMENT.md)).
+
 On the metric that isolates the memory layer — **retrieval accuracy, no answer model
-or judge involved** — m3 reaches **99.2% session-hit-rate @ k=10 and 100% @ k=20** on
+or judge involved** — m3 reaches **99.2% session-hit-rate @ k=8 and 100% @ k=20** on
 LongMemEval-S.
 
 ---
@@ -142,7 +143,7 @@ The Quickstart above is the whole product for most people: shared memory, wired 
 <tr><td valign="top">👥</td><td><b>Multi-agent synchronization</b> · <sub><b>included in the base install</b></sub><br>agents coordinate through one store: memory scoped per <code>agent</code> / <code>org</code> / <code>user</code>, direct handoffs into another agent's inbox, shared tasks with a recursive task tree, and opt-in SQL-layer isolation so an agent's private notes stay private. Concurrent readers and writers are safe by design (WAL + retry), so a planner, an implementer and a reviewer can work at the same time. (See <a href="docs/MULTI_AGENT.md">Multi-Agent Orchestration</a>)</td></tr>
 <tr><td valign="top">🖥️</td><td><b>Web dashboard, open to all users — not just developers</b> · <sub><b>included in the base install</b></sub><br>a built-in, backend-agnostic control panel (default <code>http://127.0.0.1:8088</code>): browse memory, read your auto-generated Memory Wiki, explore the interactive knowledge graph, and watch system health / load. Just run <code>m3 dashboard</code>. (See <a href="docs/DASHBOARD.md">Dashboard Guide</a>)</td></tr>
 <tr><td valign="top">📖</td><td><b>Auto-generated wiki + Obsidian export</b> · <sub>core feature — in the base install, nothing extra to enable</sub><br><code>m3 wiki generate</code> compiles your canonical memories (pinned, high-confidence, beliefs, procedures) and indexed files into a browsable, interlinked Markdown vault — one page per topic, real hyperlinks for every relationship, and provenance links down to the source document each fact came from. Renders on GitHub, in a self-contained offline HTML viewer, or as an <b>Obsidian vault</b> (<code>--obsidian</code> for graph view + backlinks). (See <a href="docs/WIKI.md">Wiki Guide</a>)</td></tr>
-<tr><td valign="top">🐘</td><td><b>PostgreSQL</b> · <sub>optional — you do not need a database</sub><br><b>Most people should ignore this row.</b> m3 stores everything in a local SQLite file by default: nothing to install, nothing to run. Point m3 at a PostgreSQL server instead when you want <b>one shared store for several machines</b> — set <code>pip install "m3-memory[postgres]"</code> and <code>M3_DB_BACKEND=postgres</code>. It is a manual step today; <code>m3 setup</code> does not configure it for you. (See <a href="docs/ARCHITECTURE.md">Architecture</a> · <a href="docs/SYNC.md">Sync</a>)</td></tr>
+<tr><td valign="top">🐘</td><td><b>PostgreSQL</b> · <sub>optional — you do not need a database</sub><br><b>Most people should ignore this row.</b> m3 stores everything in a local SQLite file by default: nothing to install, nothing to run. Point m3 at a PostgreSQL server instead when you want <b>one shared store for several machines</b> — install <code>pip install "m3-memory[postgres]"</code>, set <code>M3_PRIMARY_PG_URL</code> to your server, and run <code>m3 install-m3 --db-backend postgres</code>. <code>m3 setup</code> always keeps SQLite; it does not configure PostgreSQL for you. (See <a href="docs/ARCHITECTURE.md">Architecture</a> · <a href="docs/SYNC.md">Sync</a>)</td></tr>
 </table>
 
 <sub>Also a drop-in memory backend for <b><a href="docs/integrations/LANGCHAIN.md">LangChain / LangGraph</a></b>, <b><a href="m3_memory/integrations/crewai/README.md">CrewAI</a></b>, and <b><a href="m3_memory/integrations/pydantic_ai/README.md">PydanticAI</a></b> — see the framework guides.</sub>
@@ -224,8 +225,8 @@ Short version: m3 is the **local-first, MCP-native** option that stays *yours* a
 | **m3 Is Not** | An LLM · A chatbot · A plain vector database · A RAG framework · An IDE |
 | **Core Promise** | Private, offline-capable, locally owned memory shared securely across all your developer tools — with FIPS 140-3-ready crypto and atomic multi-agent writes for regulated and multi-agent environments. |
 | **Deploys In** | Homelabs and self-hosted stacks · corporate and government networks · **air-gapped and classified environments** · regulated industries (FIPS 140-3-ready, GDPR tooling, audit logs). No account, no API key, no outbound calls. See [Sovereign & Air-Gapped Deployments](#sovereign-air-gapped). |
-| **Speed** | A deferred write — which includes validation, bitemporal logic, contradiction checking, hashing, and storing to SQLite with WAL — takes just **~2.16 ms** (p50) / **3.66 ms** (p95). To ensure the caller never waits, m3 intentionally defers the heavy vector embedding to a background cognitive loop. The memory is immediately full-text searchable (hybrid search takes **~45 ms** p50 / **~48 ms** p95), and vector search picks it up as soon as the background pass completes. Warehouse sync upserts 3,000 rows in **25 ms**. Measured on a stock Windows desktop; see [Performance](docs/PERFORMANCE.md) for the hardware, the CPU-only numbers, and the caveats. |
-| **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10, 100% @ k=20** on LongMemEval-S (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. SHR measures the memory layer alone — no answer model, no judge — which is why it, not end-to-end QA, is the like-for-like comparison between memory systems. See [Benchmarks](#-benchmarks). |
+| **Speed** | A write with its embedding computed inline takes **~31 ms** (p50). When no fast embedder is reachable, m3 defers the embedding to the background cognitive loop and the write itself — validation, bitemporal logic, hashing, and storing to SQLite with WAL — takes **~2.16 ms** (p50) / **3.66 ms** (p95); contradiction checking needs the vector, so it runs only on inline-embedded writes. The memory is immediately full-text searchable (hybrid search takes **~45 ms** p50 / **~48 ms** p95), and vector search picks it up as soon as the background pass completes. Warehouse sync upserts 3,000 rows in **25 ms**. Measured on a stock Windows desktop; see [Performance](docs/PERFORMANCE.md) for the hardware, the CPU-only numbers, and the caveats. |
+| **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=8, 100% @ k=20** on LongMemEval-S (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. SHR measures the memory layer alone — no answer model, no judge — which is why it, not end-to-end QA, is the like-for-like comparison between memory systems. See [Benchmarks](#-benchmarks). |
 | **Entity & Relationship Enrichment** | **Yes.** m3 includes LLM-based entity extraction and relationship enrichment (Observer + Reflector), running as background cognitive passes over raw text — automatic once a local or cloud LLM endpoint is configured. Observer emits entities, facts and typed relationships from unstructured text; Reflector resolves contradictions and writes `supersedes` edges. **Entity types and predicates are configurable without code changes** — point `M3_ENTITY_VOCAB_YAML` at your own YAML profile (the default has 42 types and 34 predicates; two alternatives ship). Any OpenAI-compatible endpoint (LM Studio / Ollama / llama.cpp auto-probed locally, or a cloud model). See [Enrichment Guide](docs/M3_ENRICH_GUIDE.md). |
 | **Context Efficiency** | Exposes 100+ tools but occupies just **~2% of a 200K context window** at startup — the 10 registered schemas absorb 95% of real tool calls; lazy domain-gating loads the rest on demand. |
 | **Maturity** | Stable, battle-tested core engine (4,100+ tests) that's safe to build on today; new features and integrations are added actively. **SQLite by default; PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam. (See [features.json](docs/features.json)) |
@@ -237,14 +238,14 @@ Short version: m3 is the **local-first, MCP-native** option that stays *yours* a
 m3 is a **typed, bitemporal, confidence-scored, self-maintaining knowledge base**. Every feature listed below is implemented natively (see [Memory Model Details](docs/MEMORY_MODEL.md)):
 
 *   **Structured Metadata:** Every memory contains a `type`, `source`, `confidence`, `scope`, provenance (`change_agent`), and salience (`importance`, `decay_rate`).
-*   **Verbatim, Non-Destructive Storage:** Memory content is stored exactly as written and **never altered in place** — the raw text is always retrievable byte-for-byte. Corrections don't overwrite: a superseded fact is *closed* (its validity interval ends) and the new fact is linked to it, so both the original wording and its full edit history stay queryable. You get true verbatim recall *and* an audit trail, not one or the other.
+*   **Verbatim, Non-Destructive Storage:** Memory content is stored exactly as written and is **not altered by supersession** — the raw text stays retrievable byte-for-byte. Corrections made with `memory_supersede` don't overwrite (a direct `memory_update` edits in place but records the prior text in `memory_history`): a superseded fact is *closed* (its validity interval ends) and the new fact is linked to it, so both the original wording and its full edit history stay queryable. You get true verbatim recall *and* an audit trail, not one or the other.
 *   **Bitemporal History:** Distinguishes valid-time from transaction-time. Because superseded facts are closed rather than deleted, you can query what the agent believed at any specific point in time.
 *   **Contradiction Management:** Conflicting facts are resolved automatically on write. The stale fact is marked as superseded, and confidence values are updated dynamically via Bayesian confidence posteriors. Supersession fires above a deliberately conservative cosine bar (`CONTRADICTION_THRESHOLD`, default 0.92), so near-restatements of a claim close the old fact while genuinely different-but-related facts are both kept — use `memory_supersede` to close one explicitly. (See [Technical Details](docs/TECHNICAL_DETAILS.md#contradiction-detection).)
 *   **Self-Maintaining Lifecycle:** Implements memory decay, deduplication, automatic consolidation into higher-order beliefs, TTL expiry, and GDPR erasure.
-*   **Procedural Memory:** A first-class `procedure` type (skill / runbook / how-to / checklist) that is **auto-distilled from successful task runs** — the background loop rolls up a completed task and its step/result memories into a reusable, step-by-step procedure, preserved with `distills_from` provenance back to its sources. A "how do I…" query surfaces it via a procedural retrieval boost.
+*   **Procedural Memory:** A first-class `procedure` type (skill / runbook / how-to / checklist) that can be **auto-distilled from successful task runs** (opt-in, `M3_DISTILL_AUTO=1`) — the background loop rolls up a completed task and its step/result memories into a reusable, step-by-step procedure, preserved with `distills_from` provenance back to its sources. A "how do I…" query surfaces it via a procedural retrieval boost.
 *   **Write-Gating & Content Safety:** Filters out low-signal noise via an enrichment queue and content safety guardrails before storage.
 *   **Explainable Retrieval:** Hybrid engine combining vector similarity, BM25 (FTS5), MMR diversity, and reranking. `memory_suggest` returns the exact score breakdown per result. (See [Confidence and Trust Guide](docs/CONFIDENCE_AND_TRUST.md)).
-*   **Proven Accuracy:** On LongMemEval-S, m3 delivers **state-of-the-art retrieval for a local-first substrate — 99.2% session-hit-rate @ k=10 and 100% @ k=20** (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. End-to-end QA accuracy is **92.0%** with no oracle metadata (see [Benchmarking Report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md)).
+*   **Proven Accuracy:** On LongMemEval-S, m3 delivers **state-of-the-art retrieval for a local-first substrate — 99.2% session-hit-rate @ k=8 and 100% @ k=20** (no oracle routing), with a gold session as the **#1 result for 91.8% of questions**. End-to-end QA accuracy is **92.0%** with no oracle metadata (see [Benchmarking Report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md)).
 
 ---
 
@@ -267,8 +268,8 @@ m3 is a **typed, bitemporal, confidence-scored, self-maintaining knowledge base*
 > [HOW-TO-UPGRADE.md](docs/HOW-TO-UPGRADE.md). Your memories are unaffected:
 > the databases live outside the venv under `~/.m3/engine`.
 >
-> We recommend **3.14 or newer** for new installs. Python 3.13 enters
-> security-fix-only maintenance upstream on October 1st (no further bug fixes),
+> We recommend **3.14 or newer** for new installs. Python 3.12 and 3.13 now
+> receive security fixes only upstream (no further bug fixes),
 > so a future m3 release will raise the floor again — announced at least one
 > minor release in advance.
 
@@ -354,7 +355,7 @@ pip install m3-memory[pydantic-ai]   # pydantic-ai-slim>=2,<3
 
 MCP is not the only way in. The `m3` CLI and the MCP server are **two front doors
 to the same database**, so anything an agent can do over MCP you can do from a
-shell — the whole tool catalog, grouped as `memory`, `files`, `chatlog`, `tasks`,
+shell — the whole tool catalog, grouped as `memory`, `files`, `chat`, `tasks`,
 `agent`, `admin`, `conversations`, `diagnostics` and `entity`:
 
 ```bash
@@ -403,13 +404,13 @@ To expose m3 to any Model Context Protocol host, add it to your configuration fi
 
 m3 gives you the full 100+ tool surface while occupying just **2% of a 200K context window** at startup — most MCP servers make you pay for every tool in every prompt. Tools are grouped into **9 domains** (`memory`, `chatlog`, `files`, `entity`, `agent`, `tasks`, `conversations`, `diagnostics`, `admin`) and loaded lazily.
 
-Only 10 schemas register at startup (~3,929 tokens). That set is chosen by measurement rather than judgement: across real-world multi-agent development sessions it absorbed **95% of all observed tool calls**, so gating the rest costs almost nothing in practice. When your agent needs more, it calls `tools_load_domain(domain="...")` to fetch a domain on demand — or invokes any single tool by name through `m3_call`, with no domain load at all.
+Only 10 schemas register at startup (~3,962 tokens). That set is chosen by measurement rather than judgement: across real-world multi-agent development sessions it absorbed **95% of all observed tool calls**, so gating the rest costs almost nothing in practice. When your agent needs more, it calls `tools_load_domain(domain="...")` to fetch a domain on demand — or invokes any single tool by name through `m3_call`, with no domain load at all.
 
 | Gating Mode | Registered Tools | Tokens in Schema | % of 200K Window |
 | :--- | :---: | :---: | :---: |
-| **Lazy (Default)** | **10** | **~3,929** | **2.0%** |
-| Typical Active Session (+`memory` +`admin`) | 56 | ~17,548 | 8.8% |
-| Eager Mode (`M3_TOOLS_LAZY=0`) | 115 | ~29,658 | 14.8% |
+| **Lazy (Default)** | **10** | **~3,962** | **2.0%** |
+| Typical Active Session (+`memory` +`admin`) | 62 | ~19,470 | 9.7% |
+| Eager Mode (`M3_TOOLS_LAZY=0`) | 118 | ~30,701 | 15.4% |
 
 > 🛠️ *Note: If your client does not support dynamic tool registration, set the environment variable `M3_TOOLS_LAZY=0` to register all tools eagerly.*
 
@@ -423,24 +424,25 @@ m3 operates completely offline by default.
 A high-performance BGE-M3 embedder runs locally after installation.
 *   **Default:** one **shared local embed server** on `127.0.0.1:8082`, running the `m3-embed-server` binary that ships inside the `m3-core-rs` wheel. CPU execution using GGUF format (`_assets/models/bge-m3-Q4_K_M.gguf`). Every m3 process reuses that single server — one model in host RAM — and one GPU context when a GPU wheel is installed — instead of each loading its own copy. It is local-only and never leaves the machine.
 *   **Optional (opt-in at `m3 setup`):** additionally embed **in-process** via the `m3-core-rs` native module (llama.cpp linked in-process, zero IPC). On measured real text it is **faster** than the shared server — ~1.9× on short chunks, ~1.75× on medium — so the reason to prefer shared is **memory, not latency**: in-process loads one model copy *per process*, and a typical setup runs several (MCP server, cognitive loop, CLI), while the shared server keeps one model in RAM for all of them. Choose in-process when you have RAM to spare and a short-text workload. ([measurements and caveats](docs/PERFORMANCE.md#embedding-and-the-shared-vs-in-process-question))
-*   **Hardware Acceleration (GPU):** Execute `m3 embedder install-gpu` to compile with CUDA, Vulkan, or Metal.
+*   **Hardware Acceleration (GPU):** Run `m3 embedder install-gpu` to install the CUDA, Vulkan, or Metal build — a prebuilt wheel where one matches your platform, otherwise a source build.
 *   **External Provider Fallback:** Set `M3_EMBED_URL` to point at any OpenAI-compatible `/v1/embeddings` endpoint (Ollama, LM Studio, vLLM, or another machine's m3 embed server), and `M3_EMBED_FALLBACK_URL` for a second endpoint to try if the first is unreachable.
 
 ### Rust-Oxidized Performance Core
-m3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch cosine distance calculations, and FTS compilations by **90× to 800×**. It is installed **by default** (the installer's `--no-native-wheel` is the opt-*out*), not an optional add-on. A pure-Python fallback covers every code path and is **results-equivalent** — exact for FTS compilation and graph traversal, and within float tolerance for vector math, enforced by `tests/test_oxidation_parity.py`, `test_fts_parity.py` and `test_graph_neighbor_parity.py`. So the core changes speed, never answers: if the wheel is absent, or you set `M3_CORE_RS_DISABLE=1`, m3 falls back automatically and returns the same results more slowly. (See [Oxidation Benchmarks](docs/OXIDATION_BENCHMARKS.md)).
+m3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking by **95× to 846×** and packed batch cosine by **97× to 178×** (list-based cosine and other operations gain less — see the per-operation table). It is installed **by default** (the installer's `--no-native-wheel` is the opt-*out*), not an optional add-on. A pure-Python fallback covers every code path and is **results-equivalent** — exact for FTS compilation and graph traversal, and within float tolerance for vector math, enforced by `tests/test_oxidation_parity.py`, `test_fts_parity.py` and `test_graph_neighbor_parity.py`. So the core changes speed, never answers: if the wheel is absent, or you set `M3_CORE_RS_DISABLE=1`, m3 falls back automatically and returns the same results more slowly. (See [Oxidation Benchmarks](docs/OXIDATION_BENCHMARKS.md)).
 
 ### Enterprise Security & Compliance
 *   **FIPS 140-3 Ready:** Standardized encryption pathways allow routing through validated cryptographic modules (e.g., wolfSSL via `M3_FIPS_MODE=1`).
 *   **Air-Gapped Install:** Supports installation without internet access via pre-compiled python wheels. (See [Sovereign Deployment Guide](docs/SOVEREIGN_DEPLOYMENT.md) & [FIPS Boundary Reference](docs/FIPS_MODULE_BOUNDARY.md)).
-*   **Storage Location:** State lives under three roots, so databases and configuration can be relocated and secured independently:
+*   **Storage Location:** State lives under separate roots, so databases, configuration and logs can be relocated and secured independently:
 
     | Root | Default | Holds |
     | :--- | :--- | :--- |
     | `M3_ENGINE_ROOT` | `~/.m3/engine` | Databases + runtime state (`agent_memory.db`, `agent_chatlog.db`, `files_database.db`) |
     | `M3_CONFIG_ROOT` | `~/.m3/config` | Configuration (chatlog config, salt) |
-    | `M3_MEMORY_ROOT` | `~/.m3-memory` | Payload / repo clone |
+    | `M3_LOGS_ROOT` | `~/.m3/logs` | Scheduled-task and service logs |
+    | `M3_MEMORY_ROOT` | `~/.m3-memory` | Payload root, and master override for the other roots (not a repo clone) |
 
-    **All three are overridable.** Set any of them to relocate that root. `M3_MEMORY_ROOT` also acts as a master override — if set and the other two are unset, engine and config derive from it as `<root>/engine` and `<root>/config`. Precedence is `M3_ENGINE_ROOT` / `M3_CONFIG_ROOT` → `M3_MEMORY_ROOT/…` → the `~/.m3/…` default, so a specific root always wins over the master. (See [Architecture](docs/ARCHITECTURE.md).)
+    **All are overridable.** Set any of them to relocate that root. `M3_MEMORY_ROOT` also acts as a master override — if set and the others are unset, engine, config and logs derive from it as `<root>/engine`, `<root>/config` and `<root>/logs`. Precedence is `M3_ENGINE_ROOT` / `M3_CONFIG_ROOT` / `M3_LOGS_ROOT` → `M3_MEMORY_ROOT/…` → the `~/.m3/…` default, so a specific root always wins over the master. (See [Architecture](docs/ARCHITECTURE.md).)
 
 ---
 
@@ -450,7 +452,7 @@ m3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch
 *   **Autonomous Cognitive Loop:** Background worker (`m3_cognitive_loop.py`) that periodically sweeps chat logs to extract facts, reconcile contradictions, and construct an entity relationship graph.
 *   **LLM-Based Entity Extraction & Relationship Enrichment:** m3 includes LLM-based entity extraction and relationship enrichment (Observer + Reflector), running as background cognitive passes over raw text — automatic once a local or cloud LLM endpoint is configured. The **Observer** pass reads unstructured text and emits entities, facts and typed relationships; the **Reflector** pass re-reads what is already stored, resolves contradictions and writes `supersedes` edges. Both run off the hot path, so a write stays fast while the understanding of it deepens afterwards. **The entity vocabulary is yours to define, without code changes:** entity types and predicates come from a YAML profile, so a domain-specific graph is one file plus `M3_ENTITY_VOCAB_YAML` (or `--entity-vocab-yaml`) away — the default profile has 42 types and 34 predicates, and two alternatives ship beside it. Any OpenAI-compatible endpoint works — point it at a local server (LM Studio, Ollama, llama.cpp — auto-probed on `:1234` / `:11434`) to keep every token on your machine, or at a cloud model if you prefer. (See [Enrichment Guide](docs/M3_ENRICH_GUIDE.md))
 *   **Hybrid Vector & Keyword Search:** Seamlessly merges vector space, Full-Text Search (FTS5 BM25), and MMR diversity.
-*   **Hierarchical File Ingestion:** A dedicated 26-tool files domain reads directories, chunks files, extracts facts, and reviews staleness — with ~4× faster incremental re-ingest (unchanged sections reuse cached embeddings).
+*   **Hierarchical File Ingestion:** A dedicated 25-tool files domain reads directories, chunks files, extracts facts, and reviews staleness — with ~4× faster incremental re-ingest (unchanged sections reuse cached embeddings).
 *   **Verbatim Chatlog Capture:** A dedicated 10-tool chatlog domain records conversation turns *before compaction*, so prior Claude/Gemini sessions stay searchable and nothing is lost to context-window truncation.
 *   **Pluggable Storage Backend:** SQLite by default; select **PostgreSQL as a first-class primary store** with `M3_DB_BACKEND=postgres`. Same semantics on either backend — the choice doesn't change behavior.
 *   **Cross-Device Sync:** Optionally sync/federate to a PostgreSQL warehouse tier. Access the same memories on your laptop, desktop, or cloud environments.
@@ -515,7 +517,7 @@ m3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch
 
 ## <a id="why-trust-this"></a>🛡️ Why Trust This
 
-*   **Benchmarked Retrieval:** State-of-the-art for a local-first substrate — 99.2% session-hit-rate @ k=10, 100% @ k=20 on LongMemEval-S — with a published, reproducible methodology and no oracle routing. See [Benchmarks](#-benchmarks).
+*   **Benchmarked Retrieval:** State-of-the-art for a local-first substrate — 99.2% session-hit-rate @ k=8, 100% @ k=20 on LongMemEval-S — with a published, reproducible methodology and no oracle routing. See [Benchmarks](#-benchmarks).
 *   **Robust Coverage:** Over **4,100 tests** guarding that your memories survive upgrades and schema migrations, that capture never silently stops, and that behavior is identical on SQLite and PostgreSQL. Every release runs the **full suite on every lane** — Linux, macOS and Windows × every supported Python version, each lane independent of the others. No subsets, no shortcuts. Warnings are treated as errors: a release does not pass until every warning is addressed, not just every failure.
 *   **Measured, Not Asserted:** Latency for the write, search, sync and embed paths is published with its method, its hardware, and its limits — including what the numbers look like **without a GPU** (~7× slower on embedding). See [Performance](docs/PERFORMANCE.md).
 *   **Audit Reports:** Regular vulnerability reports (Bandit, secrets scans, pip-audit) published directly under [`docs/audits/`](docs/audits/).
@@ -542,16 +544,17 @@ m3 ships a Rust compute core (`m3_core_rs`) that speeds up MMR re-ranking, batch
 > Both are reported below. **SHR is the headline; QA is context.**
 
 ### Retrieval Accuracy — Session Hit-Rate @ k *(the memory-layer metric)*
-Evaluated on the 500-question [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) dataset under default server configurations:
+Evaluated on the 500-question [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) dataset, using m3's production search function:
 
 | Retrieve Depth (k) | Session Hit-Rate (SHR) ⁂ | Success Count | vs. Prior Version |
 | :---: | :---: | :---: | :---: |
 | 1 | **91.8%** | 459 / 500 | First Report † |
 | 5 | **98.2%** | 491 / 500 | +2.0pp |
-| 10 (Default) | **99.2%** | 496 / 500 | +2.4pp |
+| 8 (default) | **99.2%** | 496 / 500 | — |
+| 10 | **99.2%** | 496 / 500 | +2.4pp |
 | 20 | **100.0%** | 500 / 500 | First Report ‡ |
 
-> † **SHR@1** is the strictest cut — a gold session as the single top-ranked result. m3 operates at **k=10** (its default), where a gold session is present for 99.2% of questions; k=1 is reported here for completeness, not as the headline. Cross-system SHR/recall figures are usually quoted at k=5, k=10, k=20, or k=50, so comparing another system's k=10+ number against this k=1 figure is not a like-for-like comparison.
+> † **SHR@1** is the strictest cut — a gold session as the single top-ranked result. At **k=8**, m3's default search depth, a gold session is present for 99.2% of questions — the same as at k=10, which retrieves 25% more rows on LongMemEval-S for no gain; k=1 is reported here for completeness, not as the headline. Cross-system SHR/recall figures are usually quoted at k=5, k=10, k=20, or k=50, so comparing another system's k=10+ number against this k=1 figure is not a like-for-like comparison. Where m3 is set beside other systems, its figure is the k=8 one; k=8 is not reported by others, and SHR can only rise with k.
 
 > ⁂ **Which aggregation.** These are binary per-question `recall_any@k` values — the convention adjacent LongMemEval submissions report. The benchmarking report's per-question-type table aggregates slightly differently and reads marginally higher at shallow depth (98.8% at k=5, 99.4% at k=10); k=20 is 100.0% either way. The table above quotes the more conservative figures.
 
@@ -571,6 +574,8 @@ comparable across systems the way SHR is:
 | temporal-reasoning | 133 | 95.5% |
 | knowledge-update | 78 | 93.6% |
 | **Overall Summary** | **500** | **92.0%** |
+
+> **How the QA figure was produced.** m3 retrieves; it does not answer questions. In deployment the calling agent chooses what to retrieve and writes the answer. The benchmark harness plays that role: it chooses retrieval options per question (session expansion and a precomputed recall surface, both available in m3's engine but off by default) using a question-text router that is part of the harness, and it supplies the answer prompts and model. m3's built-in intent routing is on by default in both. The retrieval figures (SHR) use m3's search alone.
 
 *Methodology and reproducibility details are located in the [LongMemEval-S Benchmarking Report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md).*
 
@@ -603,11 +608,10 @@ Copy and paste these prompts into your terminal client to let your agent set up 
 ```text
 Install m3-memory for persistent memory. Run: pip install m3-memory
 Then run: m3 setup
-That wires the m3 "memory" MCP server into my agents and provisions the
+That wires the m3 memory MCP server into my agents and provisions the
 local BGE-M3 embedder — no external embedding service is needed. If it
-doesn't detect Claude Code, add {"mcpServers":{"memory":{"command":"m3"}}}
-to my ~/.claude/settings.json under "mcpServers". Then use /mcp to verify
-the memory server loaded.
+doesn't detect Claude Code, run: claude mcp add --scope user -- m3_memory m3
+Then use /mcp to verify the memory server loaded.
 ```
 
 #### Gemini CLI Prompt
@@ -678,7 +682,7 @@ See [NOTICE](NOTICE) for the full third-party attribution list.
 
 <br>
 <p align="center"><sub>PyPI downloads are the pepy.tech total. Badges are regenerated on a schedule by <a href="https://github.com/skynetcmd/m3-memory/blob/main/.github/workflows/star-history.yml">star-history.yml</a>.</sub></p>
-<p align="center"><sub><b>Python:</b> m3 core runs on 3.12+ (including 3.14 and 3.15). The optional framework extras follow their own caps — <b>PydanticAI</b> is 3.14-native (plain <code>pip install</code>); <b>CrewAI</b> requires 3.10–3.13 (a 3.14 escape hatch is <a href="https://github.com/skynetcmd/m3-memory/blob/main/m3_memory/integrations/crewai/README.md">documented</a>).</sub></p>
+<p align="center"><sub><b>Python:</b> m3 core runs on 3.12+ (including 3.14 and 3.15). The optional framework extras follow their own caps — <b>PydanticAI</b> is 3.14-native (plain <code>pip install</code>); <b>CrewAI</b> requires 3.12–3.13 with m3 (a 3.14 escape hatch is <a href="https://github.com/skynetcmd/m3-memory/blob/main/m3_memory/integrations/crewai/README.md">documented</a>).</sub></p>
 </br><p></p>
 ---
 

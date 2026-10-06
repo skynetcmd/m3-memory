@@ -51,13 +51,15 @@ We provide example `zshenv.example` and `zshrc.example` files in the `config/` d
 
 ## 🚀 Quick Setup
 
-1.  **Copy the examples**:
+1.  **Merge the examples into your rc files** — back up first; copying over an
+    existing `~/.zshenv` / `~/.zshrc` would discard your settings:
     ```bash
-    cp config/zshenv.example ~/.zshenv
-    cp config/zshrc.example ~/.zshrc
+    cp ~/.zshenv ~/.zshenv.bak 2>/dev/null; cp ~/.zshrc ~/.zshrc.bak 2>/dev/null
+    cat config/zshenv.example >> ~/.zshenv
+    cat config/zshrc.example >> ~/.zshrc
     ```
-2.  **Edit the new files (`~/.zshenv`, `~/.zshrc`)**:
-    *   Set the `M3_MEMORY_ROOT` variable to the absolute path of your `m3-memory` directory.
+2.  **Edit the merged files (`~/.zshenv`, `~/.zshrc`)**:
+    *   Set `M3_CHECKOUT` to your repository clone; only the example aliases use it. Do not set `M3_MEMORY_ROOT` for this — it is the **master state override** and relocates the engine, config and logs roots under it (see [Roots & precedence](#roots--precedence-the-single-source-of-truth)).
     *   Follow the commented-out instructions to store your secrets (API keys, IPs, etc.) in your OS's keychain for the first time.
 3.  **Restart your shell** (`zsh`). The scripts will now automatically and securely load your configuration on every new terminal session.
 
@@ -87,8 +89,10 @@ None are *required* — every root has a working default.
 env → active-database contextvar → `<engine_root>/agent_memory.db` (with a
 populated-DB guard that prefers a legacy populated store over an empty stub).
 
-**⚠️ Split-brain hazard.** The MCP **server** reads its roots from the `env` block
-in the client's `settings.json` (it does **not** source your shell). The chatlog
+**⚠️ Split-brain hazard.** The MCP **server** reads its roots from the `env` of
+its own MCP registration — for Claude Code that is `~/.claude.json`, written by
+`claude mcp add --env …` (not `settings.json`); for other agents, the `env` block
+in their own config file. It does **not** source your shell. The chatlog
 **hooks** inherit the client *process* env. Pin the roots in **both** places
 (server `env` block AND the hook `command` prefixes) or the two can resolve to
 different DBs. The `session_start_capture_check` hook resolves the DB via the
@@ -115,7 +119,7 @@ SQLite DB) and `timeout` arg — both are stripped before the impl runs.
 By default m3 stores everything in a local **SQLite** file — zero infrastructure,
 nothing to configure. PostgreSQL as the **primary** store is opt-in. The installer
 asks which backend to use (default SQLite); you can also pass
-`mcp-memory install-m3 --db-backend postgres` (it reads the DSN from
+`m3 install-m3 --db-backend postgres` (it reads the DSN from
 `M3_PRIMARY_PG_URL`). m3 selects its backend from the **environment**, not the
 config file, so these must be set wherever m3 runs (your MCP server's `env` block,
 your shell, or the process that imports m3 — LangChain/SDK/CLI):
@@ -193,20 +197,21 @@ have their own section.
 
 | Variable | Purpose | Example Keychain Command (macOS) |
 |---|---|---|
-| `AGENT_OS_MASTER_KEY`| **Required.** Master key for the encrypted vault. | `_keychain_set AGENT_OS_MASTER_KEY "your-secure-key"` |
+| `AGENT_OS_MASTER_KEY`| **Required to store or read secrets in the encrypted vault** (e.g. the warehouse `PG_URL`). Master key for the encrypted vault. | `_keychain_set AGENT_OS_MASTER_KEY "your-secure-key"` |
 
 ### Third-party service credentials & endpoints
 
 Keys and endpoints for **external services** m3 can talk to. These follow each
 vendor's own naming convention (they are **not** `M3_*`-namespaced by design — a
 tool that already exports `ANTHROPIC_API_KEY` should just work). All are
-**optional except `LM_API_TOKEN`**; a feature that needs an unset key degrades or
+**optional** (`LM_API_TOKEN` is needed only when your local LLM endpoint enforces
+a key); a feature that needs an unset key degrades or
 is skipped, never a hard failure of the core. Store them in your OS keychain, not
 in shell rc files (see the Zero-Leak principle above).
 
 | Variable | Service / used by | Required? |
 |---|---|---|
-| `LM_API_TOKEN` | Token for your local LLM server (LM Studio, Ollama, llama-server, vLLM) — the primary inference endpoint. | **Required** |
+| `LM_API_TOKEN` | Token for your local LLM server (LM Studio, Ollama, llama-server, vLLM) — the primary inference endpoint. | **Required** when that endpoint enforces a key (LM Studio default); omit for tokenless endpoints (Ollama) |
 | `LM_STUDIO_API_KEY` | Alternate token some LM Studio setups expect; read by `auth_utils` as a fallback for the local LLM token. | Optional |
 | `ANTHROPIC_API_KEY` | Anthropic / Claude models (e.g. via the MCP proxy's model routing). | Optional |
 | `GEMINI_API_KEY` | Google / Gemini models. | Optional |
@@ -602,7 +607,7 @@ SLM-extraction pipeline to build a typed knowledge graph of entities and relatio
 | Variable | Default | Purpose |
 |---|---|---|
 | `M3_ENABLE_ENTITY_GRAPH` | `true` | Master gate. On by default; set to `0`/`false`/`no` to disable entity extraction on writes. |
-| `M3_ENTITY_VOCAB_YAML` | (`config/lists/entity_graph_default.yaml`) | Path to the entity-type + predicate vocabulary profile. Swap or author your own to retune the graph schema for your domain — no code changes. The stock vocabulary defines a 7-type / 34-predicate schema spanning general, human-life, and technical domains. |
+| `M3_ENTITY_VOCAB_YAML` | (`config/lists/entity_graph_default.yaml`) | Path to the entity-type + predicate vocabulary profile. Swap or author your own to retune the graph schema for your domain — no code changes. The stock vocabulary defines a 42-type / 34-predicate schema spanning general, human-life, and technical domains. |
 | `M3_ENTITY_EXTRACT_CONCURRENCY` | `2` | Maximum concurrent SLM extraction tasks. Mirrors fact_enriched concurrency tuning. |
 | `M3_ENTITY_EXTRACT_MAX_ATTEMPTS` | `3` | Queue retry cap before poisoned-item exclusion. Failed items remain in extraction queue with `last_error` for manual inspection. |
 | `M3_ENTITY_RESOLVE_FUZZY_MIN` | `0.85` | Minimum token-Jaccard similarity score for fuzzy-match resolution tier. Entities with canonical names matching above this threshold within the same type are merged. |
@@ -673,7 +678,7 @@ Admission-gate tuning is a config file, not an env var — see the [wiki docs](W
 
 ## Project Oxidation — Rust Core (`m3_core_rs`)
 
-Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)), installed **by default** (a results-equivalent pure-Python fallback covers every path, so it changes speed and never answers). Prebuilt wheels are published per platform and `m3 setup` / `m3 embedder install-gpu` install the matching one automatically. The **GitHub Release is the official channel** — it carries all 7 os/backend packages × cp311–cp314 on every tag, so the resolver cascades **Release → PyPI → source** (see [CUDA_INSTALL.md](CUDA_INSTALL.md)). PyPI is a secondary mirror for the smaller backends only: it cannot host the CUDA wheels (over its 100 MB per-file limit) and can lag behind the Release. You only build from source when no prebuilt wheel matches your platform + Python version ([BUILD_WHEELS.md](BUILD_WHEELS.md)). When the `m3_core_rs` wheel is importable, hot-path operations — SHA-256 hashing, cosine / batch-cosine, MMR reranking, the expansion-displacement guard, chat-log redaction, and pre-retrieval query routing — route through Rust. 
+Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)), installed **by default** (a results-equivalent pure-Python fallback covers every path, so it changes speed and never answers). Prebuilt wheels are published per platform and `m3 setup` / `m3 embedder install-gpu` install the matching one automatically. The **GitHub Release is the official channel** — it carries all 7 os/backend packages for each supported CPython (3.12+, m3's floor) on every tag, so the resolver cascades **Release → PyPI → source** (see [CUDA_INSTALL.md](CUDA_INSTALL.md)). PyPI is a secondary mirror for the smaller backends only: it cannot host the CUDA wheels (over its 100 MB per-file limit) and can lag behind the Release. You only build from source when no prebuilt wheel matches your platform + Python version ([BUILD_WHEELS.md](BUILD_WHEELS.md)). When the `m3_core_rs` wheel is importable, hot-path operations — SHA-256 hashing, cosine / batch-cosine, MMR reranking, the expansion-displacement guard, chat-log redaction, and pre-retrieval query routing — route through Rust. 
 
 **By default, when `m3_core_rs` is importable, all Rust integrations are active out-of-the-box.** Every pathway falls back gracefully and silently to the pure-Python implementation when the wheel is absent. Users can explicitly opt out of any Rust-accelerated hot paths by setting the escape-hatch environment variables described below.
 
@@ -687,7 +692,7 @@ Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)), ins
 | `M3_GOVERNOR_THROTTLED_LIMIT` | `1` | Per-pass item ceiling the cognitive loop uses while `THROTTLED`. Default `1` sends a single item to the LLM, then returns to the top of the loop and re-probes load before the next — the most conservative, interactive-first cadence — instead of charging through a full `--limit-per-pass` (50) batch with no re-check. |
 | `M3_GPU_PROBE_DISABLE` | _(unset)_ | Set `1`/`true` to skip the GPU-utilization probe (e.g. CPU-only hosts). When disabled, GPU load reports `0` and the governor reacts to CPU/RAM only. The probe is **multi-backend** and auto-detects across configs: CUDA via `nvidia-smi` (any OS); Windows AMD/Intel/Vulkan via the `\GPU Engine(*)\Utilization Percentage` perf counter; Apple-Silicon Metal via `ioreg` IOAccelerator; Linux AMD via `/sys/.../gpu_busy_percent`. The first backend that answers is pinned; if none answer (CPU-only) it settles to `0` and trips off after a few misses. |
 | `M3_GPU_PROBE_TTL` | `60.0` | Seconds the GPU-utilization probe result is cached (a probe spawns a short subprocess). |
-| `M3_EMBED_GGUF` | (empty → **auto-detected**) | Path to a bge-m3 GGUF file. When set (and `m3_core_rs` is built with the `embedded` feature), `_embed` / `_embed_many` produce embeddings **in-process via llama.cpp** (tier-1, ~10–85× faster) instead of POSTing to a llama-server. **When unset, tier-1 now auto-detects a bge-m3 GGUF** in the canonical model dirs (see `M3_EMBED_GGUF_AUTODETECT`) rather than silently skipping to HTTP. Guarded: a GGUF whose embedding dimension ≠ `EMBED_DIM` is rejected and HTTP is used. |
+| `M3_EMBED_GGUF` | (empty → **auto-detected**) | Path to a bge-m3 GGUF file. When set (and `m3_core_rs` is built with the `embedded` feature, **and** in-process embedding is permitted via `M3_EMBED_INPROC=1` or `.embed_config.json` — a GGUF alone does not enable it), `_embed` / `_embed_many` produce embeddings **in-process via llama.cpp** (tier-1, ~10–85× faster) instead of POSTing to a llama-server. **When unset, tier-1 now auto-detects a bge-m3 GGUF** in the canonical model dirs (see `M3_EMBED_GGUF_AUTODETECT`) rather than silently skipping to HTTP. Guarded: a GGUF whose embedding dimension ≠ `EMBED_DIM` is rejected and HTTP is used. |
 | `M3_EMBED_GGUF_AUTODETECT` | `1` | When `M3_EMBED_GGUF` is unset, search the canonical model dirs (`~/.lmstudio/models`, `~/Library/Application Support/LM Studio/models`, `~/.cache/lm-studio/models`, `~/.cache/m3/models`, `~/.m3-memory/_assets/embedder`, `~/models`) for a `*bge[-_]m3*.gguf` and use it for tier-1. Set `0` to disable (keeps the pre-auto-detect behavior: no GGUF env ⇒ HTTP). The walk is depth-bounded (~4) and first-match. |
 | `M3_EMBED_GGUF_WALK_BUDGET` | `2.0` | Wall-clock budget (seconds) for the auto-detect filesystem walk. If a pathological models directory can't be searched within this budget, auto-detect gives up and tier-1 falls back to HTTP — cold start is never stalled. |
 | `M3_EMBED_GGUF_MODEL_TAG` | `bge-m3-GGUF-Q4_K_M.gguf` | The `embed_model` tag applied to vectors produced by the in-process path (above). Defaults to the llama.cpp-served bge-m3 tag the embedded backend is parity-verified against (cosine ≈ 0.996 vs stored rows with that tag). This is a distinct content-hash cache namespace from LM Studio's `text-embedding-bge-m3` rows. |

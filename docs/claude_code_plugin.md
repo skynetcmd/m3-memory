@@ -26,8 +26,13 @@ Or directly from the repo without going through the marketplace:
 /plugin install https://github.com/skynetcmd/m3-memory
 ```
 
-After install, restart your Claude Code session (or run `/plugin reload`)
+After install, restart your Claude Code session (or run `/reload-plugins`)
 so the new MCP server, hooks, and commands take effect.
+
+> **Plugin or `m3 setup`, not both.** `m3 setup` registers m3 directly
+> (`claude mcp add --scope user -- m3_memory m3`) and keeps the plugin's server
+> disabled. Running both gives two live m3 servers (`mcp__m3_memory__` and
+> `mcp__plugin_m3_memory__`); `m3 doctor --fix --fix-hooks` converges back to one.
 
 ## Updating m3
 
@@ -142,15 +147,25 @@ hook scripts are idempotent.
 
 ## Configuration
 
-The plugin exposes two `userConfig` knobs that Claude Code prompts for at
+The plugin exposes six `userConfig` knobs that Claude Code prompts for at
 enable time (you can re-edit later):
 
 - **`endpoint`** — pin `LLM_ENDPOINTS_CSV` for the small chat model used
-  by enrichment. The embedder itself is the sovereign in-process BGE-M3
-  installed by `m3 setup` — this knob is only for *generation*. Empty =
-  probe local OpenAI-compatible servers (Ollama `:11434`, etc.).
+  by enrichment. The embedder itself is BGE-M3 on the shared embed server
+  (`127.0.0.1:8082`) installed by `m3 setup` — this knob is only for
+  *generation*. Empty = probe local OpenAI-compatible servers (LM Studio
+  `:1234`, Ollama `:11434`).
 - **`capture_mode`** — chatlog capture policy. `both` / `stop` /
   `precompact` / `none`. Default `both`.
+- **`embed_fallback_url`** — the shared embed server URL
+  (`M3_EMBED_FALLBACK_URL`). Default `http://127.0.0.1:8082`.
+- **`embed_gguf`** — path to a BGE-M3 GGUF (`M3_EMBED_GGUF`). Optional;
+  in-process embedding still needs `M3_EMBED_INPROC=1` (or an
+  `.embed_config.json` that permits it). Default empty.
+- **`engine_root`** / **`config_root`** — advanced overrides for
+  `M3_ENGINE_ROOT` / `M3_CONFIG_ROOT`. Leave empty for the defaults
+  (`~/.m3/engine`, `~/.m3/config`); if set, they must match every other m3
+  process or the server and the chatlog hooks read different databases.
 
 ---
 
@@ -166,10 +181,12 @@ settings — see [docs/claude_ai_connector.md](claude_ai_connector.md).
 ## Uninstall
 
 ```
-/plugin uninstall m3-memory
+/plugin uninstall m3@skynetcmd
 ```
 
 This removes the plugin's hooks, MCP registration, slash commands, and
-subagent. The `m3` CLI and your local memory data at `~/.m3-memory/` are
-not touched — uninstall those separately with
-`pipx uninstall m3-memory && rm -rf ~/.m3-memory`.
+subagents. The `m3` CLI, its payload, and your memory data are not touched.
+To remove the CLI side too: `m3 uninstall` (removes the payload under
+`~/.m3-memory/` and its config file), then `pipx uninstall m3-memory`. Your
+databases live in `~/.m3/engine` (config in `~/.m3/config`, logs in
+`~/.m3/logs`) — delete `~/.m3` only if you really want the memories gone.

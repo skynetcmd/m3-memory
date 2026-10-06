@@ -28,7 +28,12 @@ Check `python --version` (or `python3 --version`). If it is missing or < 3.12:
 - **Windows:** `winget install Python.Python.3.12`
 - **macOS:** `brew install python@3.12 pipx git` then `pipx ensurepath`
 - **Debian/Ubuntu/Fedora:** `sudo apt install -y pipx python3-venv git`
-  (or `sudo dnf install -y pipx python3-virtualenv git`), then `pipx ensurepath`
+  (or `sudo dnf install -y pipx python3-virtualenv git`), then `pipx ensurepath`.
+  Re-check `python3 --version` afterwards: Debian 12 ships 3.11 and Ubuntu 22.04
+  ships 3.10, both below the 3.12 floor. On those, install a 3.12+ interpreter
+  (Ubuntu: `sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install -y python3.12`;
+  Debian: pyenv or `uv python install 3.12`) and in Step 2 use
+  `pipx install --python python3.12 m3-memory`.
 
 `git` and `sqlite3` are optional (git speeds up payload fetch; the Python stdlib
 `sqlite3` module is always present regardless of the CLI).
@@ -162,7 +167,7 @@ dead config paths and de-duplicates MCP registrations), then re-run `m3 doctor`.
 
 In Cline, reload the MCP servers (or restart VS Code). The `m3` server should
 appear connected with its tool catalog available. Only a small essentials set
-(~18 tools) loads at startup to keep context small; the rest of the 100+ tools
+(10 tools, ~3,962 tokens) loads at startup to keep context small; the rest of the 100+ tools
 load on demand per domain — ask "load the files tools" and Cline pulls that
 domain in.
 
@@ -175,7 +180,7 @@ domain in.
 | `error: externally-managed-environment` on `pip install` | Use `pipx install m3-memory` instead (macOS/Linux). |
 | `m3: command not found` after pipx | `pipx ensurepath`, restart shell; or use `python -m m3_memory.cli`. |
 | Embedder not healthy in `m3 doctor` | `m3 embedder install` then re-run doctor. |
-| Cline shows m3 disconnected | Confirm the `command` in Step 4 resolves for the VS Code process; prefer the `python -m m3_memory.cli` form. |
+| Cline shows m3 disconnected | Confirm the `command` and `args` in Step 4 resolve for the VS Code process; prefer the absolute interpreter + bridge path that `m3 setup` writes (re-run it rather than hand-editing). |
 | Stale config paths after an upgrade | `m3 doctor --fix`. |
 
 No API keys, accounts, or network egress are required for core operation. m3 is

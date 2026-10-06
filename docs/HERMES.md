@@ -34,7 +34,7 @@ python -m m3_memory.setup_wizard
    Type **`y`** to automatically copy the m3 provider files into the Hermes plugins tree.
 
 ### Step 2: Configure Environment Variables
-Hermes Agent loads plugins dynamically and needs to find m3's core package in its search path. You must add the path to the m3 repository's `bin/` directory to the `PYTHONPATH` environment variable in Hermes' launch environment.
+Hermes Agent loads plugins dynamically and needs to find m3's core package in its search path. You must add m3's payload `bin/` directory to the `PYTHONPATH` environment variable in Hermes' launch environment. On a pip/pipx install there is no repo checkout: run `m3 doctor` and use the directory of the `resolved bridge` path it prints (e.g. `.../site-packages/m3_memory/bin`); with a source checkout, it is the checkout's `bin/`.
 
 #### On Windows (PowerShell):
 ```powershell

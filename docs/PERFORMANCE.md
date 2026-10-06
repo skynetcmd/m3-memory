@@ -39,7 +39,8 @@ sides of that, below.
 | write, embedding deferred | **2.16 ms** | 3.66 ms |
 
 The whole gap is the embed call. A write that does not embed — validate,
-contradiction-check, hash, store — is about **2 ms**.
+hash, store — is about **2 ms**. (The write-path contradiction check needs the
+vector, so it runs only on inline-embedded writes.)
 
 This is what the zero-lag design buys, and it is an architectural result rather
 than a hardware one: when no fast embedder is reachable, m3 persists the row
@@ -175,8 +176,10 @@ choose shared — the default — otherwise.
 ## The Rust core
 
 Separately from the above, m3 ships a Rust compute core (`m3_core_rs`) that
-accelerates MMR re-ranking, batch cosine, and FTS compilation by **90×–800×**.
-It is installed by default, and the pure-Python fallback is results-equivalent —
+accelerates MMR re-ranking, batch cosine, and FTS compilation. The gain is
+per-operation, not one multiplier: on the packed production paths, MMR re-ranking
+is ~700–850× and batch cosine ~97–178× faster, while FTS query compilation is
+~2.7–3×. It is installed by default, and the pure-Python fallback is results-equivalent —
 it changes speed, never answers. See
 [Oxidation Benchmarks](OXIDATION_BENCHMARKS.md).
 

@@ -126,11 +126,13 @@ source ~/.zshrc
 > **Modern path (recommended):** `m3 setup` (or `m3 install-m3`) handles
 > MCP wiring automatically. Use that unless you need the legacy config files.
 
-**Quick wiring:**
+**Quick wiring:** just run `m3 setup` — it is safe to re-run and wires every
+detected agent. By hand, if you must:
 
 ```bash
-# Claude Code (--scope user writes to the user config, available in all projects)
-claude mcp add --scope user memory m3
+# Claude Code (--scope user writes to the user config, available in all projects;
+# use this or the plugin, not both — `m3 doctor --fix --fix-hooks` converges a double registration)
+claude mcp add --scope user -- m3_memory m3
 
 # Gemini CLI
 m3 chatlog init --apply-gemini

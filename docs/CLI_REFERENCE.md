@@ -1,6 +1,59 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> CLI Reference
 
-This document lists every command-line entry point that touches a SQLite database and how each one selects its target DB.
+## The `m3` command
+
+Everything a pip/pipx install needs is under the `m3` command (`mcp-memory` is
+a backwards-compatible alias). Run `m3 <command> --help` for flags.
+
+**Install, upgrade, health**
+
+| Command | What it does |
+| --- | --- |
+| `m3 setup` | Interactive one-command setup: payload, embedder, agent wiring, chatlog hooks, final `m3 doctor` (`--gui` for a window) |
+| `m3 install-m3` | Fetch the system payload into the M3 root (default `~/.m3-memory/repo`); `--db-backend postgres` for a PostgreSQL primary store |
+| `m3 reinstall` | Wipe and reinstall the payload (alias for `install-m3 --force`) |
+| `m3 upgrade` | Upgrade the package end to end with the right installer (pipx / pip / pip --user), then re-wire and verify |
+| `m3 update` | Re-sync the payload for the installed version (not a package upgrade) |
+| `m3 uninstall` | Remove the payload and its config file (your databases are kept) |
+| `m3 stop` | Stop every running m3 DB writer (cognitive loop, embed server, dashboard, MCP) |
+| `m3 status` | One-line health verdict |
+| `m3 doctor` | Full diagnostics (`--verbose` for detail, `--fix --fix-hooks` to repair wiring) |
+
+**Services and subsystems**
+
+| Command | What it does |
+| --- | --- |
+| `m3 embedder` | Shared embed server: `install-gpu`, `install`, `start`, `stop`, `status`, `uninstall`, `fetch-model`, `shared` / `unshared`, `backfill`, `reembed` |
+| `m3 chatlog` | Chatlog operations: `init`, `status`, `doctor`, `hook-path` |
+| `m3 schedules` | Background scheduled tasks: `verify`, `repair`, `list`, `add`, `remove` |
+| `m3 governor` | Inspect / migrate legacy scheduled tasks to the background governor |
+| `m3 dashboard` | Start the local web dashboard (localhost only) |
+| `m3 serve` | Run the bridge as a streamable-HTTP MCP server (for claude.ai connectors) |
+| `m3 wiki` | Generate a browsable wiki from core memories + files corpus (`generate`, `compile`, `status`) |
+| `m3 fips` | FIPS crypto: `install-wolfssl`, `status` |
+| `m3 enrich-pending` / `m3 extract-pending` | Drain pending enrichment / entity extraction |
+
+**Tool domains** — every MCP catalog tool, callable from the shell as
+`m3 <domain> <tool>` (add `--dry-run` to validate, `--yes` to confirm a
+destructive tool; `m3 <domain> --help` lists the tools):
+
+| Command | Domain |
+| --- | --- |
+| `m3 memory` | Curated long-term memory: write / search / graph / dedup / retention |
+| `m3 files` | Directory ingestion and hybrid search over files |
+| `m3 chat` | Chatlog tools (`chatlog_search`, `chatlog_promote`, …) |
+| `m3 tasks` | Task creation, assignment, tree, results |
+| `m3 agent` | Multi-agent registration, heartbeat, presence |
+| `m3 admin` | Notifications, enrichment, GDPR |
+| `m3 conversations` | Conversation start / append / search / summarize |
+| `m3 diagnostics` | Health probes (`embedder_status`, `memory_doctor`) |
+| `m3 entity` | Knowledge-graph entities |
+
+---
+
+## `bin/` scripts and their target database
+
+The rest of this document lists every command-line entry point that touches a SQLite database and how each one selects its target DB. Run these `bin/*.py` scripts from a source checkout (or the installed payload at `~/.m3-memory/repo/bin`).
 
 ## Universal `--database` flag
 

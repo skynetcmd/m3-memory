@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory — Roadmap
 
-> Current version: **v2026.10.5.0** — actively maintained, with SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20; 92% end-to-end QA, no oracle metadata on LongMemEval-S). Priorities shift based on community feedback; open an issue to vote on a feature.
+> Current version: **v2026.10.5.0** — actively maintained, with SOTA local-first retrieval (99.2% SHR@8, 100% @ k=20; 92% end-to-end QA, no oracle metadata on LongMemEval-S). Priorities shift based on community feedback; open an issue to vote on a feature.
 
 ---
 
@@ -10,8 +10,8 @@
 - [x] **PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam (`bin/memory/backends/`) — SQLite and PostgreSQL ship, with identical semantics across backends.
 - [x] **CrewAI (v1.x) integration** — a native `StorageBackend` (`m3-memory[crewai]`); a CrewAI memory stays searchable by every other m3 agent.
 - [x] **PydanticAI integration** — deps-injected tools + a recall history-processor, plus a formal `M3MemoryToolset` (`m3-memory[pydantic-ai]`); Python 3.14-native.
-- [x] **Procedural memory** — a first-class `procedure` type (skill/runbook/how-to/checklist) auto-distilled from successful task runs, with `distills_from` provenance and a procedural retrieval boost.
-- [x] **Test suite hardening** — 5,422 collected tests (3,757 test functions) across 406 files, run with `filterwarnings=error` (a new warning fails the build).
+- [x] **Procedural memory** — a first-class `procedure` type (skill/runbook/how-to/checklist) distilled from successful task runs (writing is opt-in: `M3_DISTILL_AUTO=1`, else dry-run), with `distills_from` provenance and a procedural retrieval boost.
+- [x] **Test suite hardening** — 4,100+ test functions (5,500+ collected cases) across 430+ files, run with `filterwarnings=error` (a new warning fails the build).
 
 ## ✅ Shipped — 2026-Q2 highlights
 
@@ -36,7 +36,7 @@ Roughly two months of releases (≈25 between `v2026.4.12b` and `v2026.6.8.1`); 
 
 ### Retrieval quality + LongMemEval-S benchmarks (v2026.6.6.0, v2026.6.8.1)
 
-- [x] **99.2% SHR @ k=10** on LongMemEval-S — full sweep **98.2% / 99.2% / 100.0%** @ k=5/10/20 (BGE-M3 hybrid FTS5 + vector + MMR; k=10 is m3's default search depth)
+- [x] **99.2% SHR @ k=8** on LongMemEval-S — full sweep **98.2% / 99.2% / 99.2% / 100.0%** @ k=5/8/10/20 (BGE-M3 hybrid FTS5 + vector + MMR; k=8 is m3's default search depth)
 - [x] ~~89.0% E2E QA~~ (**superseded** — oracle-routed configuration; replaced by the 92.0% no-oracle figure below. Not a current or a recall number.)
 - [x] **92.0% E2E QA — no oracle metadata** on LongMemEval-S (460 / 500, v3 inferred strategy routing, Claude Opus 4.6 answerer, gpt-4o judge) — supersedes the oracle-routed 89.0% headline; see the [LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md) and [xiaowu0162/LongMemEval#49](https://github.com/xiaowu0162/LongMemEval/issues/49)
 - [x] FTS5 sanitizer rewrite — allowlist tokenization fixes search crashes on queries containing hyphens, colons, `field:value` tokens (`gpt-4o`, `claude-code`, `100-200MB`, …)
@@ -101,7 +101,7 @@ Memory as a maintained body of knowledge, not a flat index. All additive and
 ### Sustained engineering
 
 - [x] **100+ MCP tools** (was 66 at v2026.4.12b)
-- [x] **5,422 collected tests across 406 files** (warnings-as-errors)
+- [x] **4,100+ test functions (5,500+ collected cases) across 430+ files** (warnings-as-errors)
 - [x] PyPI Trusted Publishing via OIDC — no token in CI
 - [x] Pre-push tool-catalog drift gate + bench-data leakage scan (`.githooks/pre-push`)
 - [x] CodeQL security gates + periodic Bandit + pip-audit + secrets-scan reports under [`docs/audits/`](./audits/)
@@ -134,7 +134,7 @@ Memory as a maintained body of knowledge, not a flat index. All additive and
 - [x] Core memory system — write, search, update, delete, link
 - [x] Hybrid retrieval — FTS5 + vector similarity + MMR re-ranking
 - [x] Contradiction detection and bitemporal versioning
-- [x] Knowledge graph (9 memory-link relationship types; entity-graph layer with a user-configurable 34-predicate vocabulary via `M3_ENTITY_VOCAB_YAML`)
+- [x] Knowledge graph (memory-link relationship types — 11 today, plus internal `distills_from`; entity-graph layer with a user-configurable 34-predicate vocabulary via `M3_ENTITY_VOCAB_YAML`)
 - [x] Cross-device sync — SQLite ↔ PostgreSQL
 - [x] LLM auto-classification, conversation summarization, memory consolidation
 
@@ -142,10 +142,10 @@ Memory as a maintained body of knowledge, not a flat index. All additive and
 
 ## 🚧 In progress
 
-**Available now — stabilizing.** These subsystems are **shipped and usable today** (`pip install` includes them) but are still being hardened on real workloads before we feature them publicly in the README. Try them and please file issues.
+**Shipped — still hardening.** These subsystems are **shipped and usable today** (`pip install` includes them; the dashboard and cognitive loop are featured in the README) and are still being hardened on real workloads. Try them and please file issues.
 
-- [x] **Web dashboard / observability portal** (`bin/dashboard_server.py`) — local FastAPI + HTMX UI: multi-DB overview, graph explorer, KB browser, conflict & audit log, background maintenance launcher. Run `python bin/dashboard_server.py` (listens on `127.0.0.1:8088`; override via `M3_DASHBOARD_HOST`/`M3_DASHBOARD_PORT`).
-- [x] **Autonomous cognitive loop** (`bin/m3_cognitive_loop.py`) — background daemon running four enrichment stages: entity extraction, observation extraction, reflection (contradiction resolution), temporal resolution.
+- [x] **Web dashboard / observability portal** (`bin/dashboard_server.py`) — local FastAPI + HTMX UI: multi-DB overview, graph explorer, KB browser, conflict & audit log, background maintenance launcher. Run `m3 dashboard` (listens on `127.0.0.1:8088`; override via `M3_DASHBOARD_HOST`/`M3_DASHBOARD_PORT`).
+- [x] **Autonomous cognitive loop** (`bin/m3_cognitive_loop.py`) — background daemon running eleven independently skippable passes — including entity extraction, observation extraction with reflection (contradiction resolution), classification, embedding backfill, belief consolidation, procedural distillation, sync, and maintenance (see [ARCHITECTURE.md](ARCHITECTURE.md#the-passes)).
 - [x] **Observer & Reflector SLM stages** (`bin/run_observer.py`, `bin/run_reflector.py`) — LLM-based semantic contradiction detection beyond embeddings.
 
 - [ ] **LoCoMo audit** — harness scaffolded under `benchmarks/locomo/`; full run pending
@@ -157,6 +157,7 @@ Memory as a maintained body of knowledge, not a flat index. All additive and
 
 ## 📦 Planned — Distribution & Deployment
 
+- [ ] **Configuration moves from environment variables to config files** — settings will live in files under the config root, as `.llm_config.json` and `.chatlog_config.json` already do, so background services (launchd, systemd, Task Scheduler) read the same values as your shell. Environment variables will be deprecated first and then removed, with a migration command and at least one release's notice — the same policy as the Python floor.
 - [ ] **pgvector / HNSW ANN on the PostgreSQL primary backend** — PostgreSQL can already be m3's primary live store (`M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`), but vector search there is still **brute-force Rust cosine**, the same as on SQLite. Index-accelerated approximate nearest-neighbor via pgvector/HNSW is not yet implemented — so PG-primary today is about a shared/server store, not faster vector search.
 - [ ] **Docker image** — `docker run -v ~/.m3-memory:/data ghcr.io/skynetcmd/m3-memory:latest`
 - [ ] **Auto MCP Registry** — zero-config discovery in Claude Code and other MCP clients via published `mcp-server.json`
@@ -181,7 +182,7 @@ Memory as a maintained body of knowledge, not a flat index. All additive and
 - [ ] **Shared memory namespaces** — optional scoped memory pools across multiple local agents
 - [ ] **Agent identity model** — per-agent memory isolation with explicit cross-agent read grants (today: per-`agent_id` scoping at the SQL layer; the cross-agent grant primitive is still implicit)
 - [ ] **Remote P2P sync** — encrypted memory replication over WireGuard / Tailscale without a central server
-- [ ] **Memory access audit log** — who read/wrote what and when (GDPR Article 30 record)
+- [ ] **Memory read-access audit log** — who *read* what and when (GDPR Article 30 record). Mutations are already recorded (`memory_history` and the hash-chained audit trail in `bin/audit_trail.py`); reads today only update `access_count` / `last_accessed_at`.
 
 ---
 

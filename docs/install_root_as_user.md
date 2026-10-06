@@ -29,8 +29,10 @@ Follow the wizard. When it finishes, verify:
 m3 doctor
 ```
 
-All state now lives under `/home/bob/.m3-memory/` and
-`/home/bob/.local/share/pipx/venvs/m3-memory/`.
+State now lives under bob's decoupled roots — databases in
+`/home/bob/.m3/engine/`, config in `/home/bob/.m3/config/`, logs in
+`/home/bob/.m3/logs/` — with the payload in `/home/bob/.m3-memory/` and the
+package in `/home/bob/.local/share/pipx/venvs/m3-memory/`.
 
 ---
 
@@ -45,7 +47,9 @@ loginctl enable-linger bob
 
 This keeps bob's systemd user session (and the `m3-embed-server` service)
 running after bob logs out. Without it, the embed server stops when bob's
-last session exits; Tier-1 in-process GGUF embedding still works regardless.
+last session exits — and since that shared server is the default embedder
+(in-process embedding is opt-in via `M3_EMBED_INPROC=1`), embeds degrade
+until bob logs in again.
 
 ---
 
@@ -57,16 +61,17 @@ access to bob's database files:
 ```bash
 # Option A — add root to bob's group (cleanest):
 usermod -aG bob root
-chmod -R g+rwX /home/bob/.m3-memory
-chown -R bob:bob /home/bob/.m3-memory   # ensure bob is still the owner
+chmod -R g+rwX /home/bob/.m3
+chown -R bob:bob /home/bob/.m3   # ensure bob is still the owner
 # Then set the group sticky bit so new files inherit the group:
-find /home/bob/.m3-memory -type d -exec chmod g+s {} \;
+find /home/bob/.m3 -type d -exec chmod g+s {} \;
 
 # Option B — world-readable/writable (simpler, less secure):
-chmod o+rx /home/bob/.m3-memory
-chmod o+rw /home/bob/.m3-memory/engine/agent_memory.db
-chmod o+rw /home/bob/.m3-memory/engine/agent_memory.db-wal
-chmod o+rw /home/bob/.m3-memory/engine/agent_memory.db-shm
+chmod o+rx /home/bob/.m3 /home/bob/.m3/engine
+chmod o+rw /home/bob/.m3/engine/agent_memory.db
+chmod o+rw /home/bob/.m3/engine/agent_memory.db-wal
+chmod o+rw /home/bob/.m3/engine/agent_memory.db-shm
+# …and the same for agent_chatlog.db* if bob's chatlog uses a separate store
 ```
 
 Option A is preferred on shared machines. Option B is fine on a single-user
@@ -76,31 +81,18 @@ dev box.
 
 ## Step 4 — Wire root's Claude to bob's m3 install
 
-As root, add the MCP server to `/root/.claude/settings.json`. The key is
-setting `HOME` so m3 resolves all paths relative to bob's home, not `/root`:
-
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "/home/bob/.local/bin/m3",
-      "env": {
-        "HOME": "/home/bob",
-        "M3_MEMORY_ROOT": "/home/bob/.m3-memory"
-      }
-    }
-  }
-}
-```
-
-Or use the CLI (as root):
+As root, register the MCP server with `claude mcp add` (Claude Code does not
+read MCP servers from `~/.claude/settings.json` — only `~/.claude.json`,
+`.mcp.json` and plugins). The key is setting `HOME` and pinning bob's roots so
+m3 resolves every path to bob's store, not `/root`:
 
 ```bash
-claude mcp add memory /home/bob/.local/bin/m3
+claude mcp add --scope user \
+  --env HOME=/home/bob \
+  --env M3_ENGINE_ROOT=/home/bob/.m3/engine \
+  --env M3_CONFIG_ROOT=/home/bob/.m3/config \
+  -- m3_memory /home/bob/.local/bin/m3
 ```
-
-Then manually add the `env` block to `/root/.claude/settings.json` — the
-`claude mcp add` command doesn't accept env overrides on the command line.
 
 Restart Claude Code as root. Confirm the MCP is connected:
 
@@ -124,34 +116,13 @@ print(json.dumps(s.get('hooks', {}), indent=2))
 "
 ```
 
-Add those hooks to `/root/.claude/settings.json`, replacing any relative
-paths with absolute paths pointing at bob's install:
-
-```json
-{
-  "hooks": {
-    "Stop": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "/home/bob/.local/bin/m3 chatlog write --agent claude-code"
-      }]
-    }],
-    "PreCompact": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "/home/bob/.local/bin/m3 chatlog write --agent claude-code --precompact"
-      }]
-    }]
-  }
-}
-```
-
-> **Verify the exact hook command** from bob's settings — the above is a
-> template; the actual flags may differ depending on your m3 version and
-> capture mode. Run `m3 chatlog init --dry-run` as bob to see what the
-> wizard would write.
+Copy those `Stop` and `PreCompact` entries into `/root/.claude/settings.json`
+**verbatim** — each is an absolute `<pipx venv python> …/m3_memory/bin/hooks/chatlog/claude_code_precompact.py`
+command pointing at bob's install. The hook inherits root's *process* env, not
+the MCP server's `env`, so make sure each command is prefixed with the same
+pins as Step 4 (`HOME=/home/bob M3_ENGINE_ROOT=/home/bob/.m3/engine
+M3_CONFIG_ROOT=/home/bob/.m3/config …`); otherwise the hook writes turns to a
+different store than the server reads.
 
 ---
 
@@ -185,7 +156,7 @@ Root's Claude picks up the upgrade automatically on the next session start
 | `Permission denied` on DB files | Missing write permission | Re-run Step 3 |
 | Memory writes succeed but chatlog missing | Hooks not wired for root | Re-do Step 5 |
 | Embed server not reachable | Bob not logged in + no linger | `loginctl enable-linger bob` (Step 2) |
-| Wrong memory store (empty) | `HOME` not overridden | Add `"HOME": "/home/bob"` to MCP env (Step 4) |
+| Wrong memory store (empty) | `HOME` / roots not overridden | Re-register with `--env HOME=/home/bob` + the `M3_ENGINE_ROOT` / `M3_CONFIG_ROOT` pins (Step 4) |
 
 ---
 

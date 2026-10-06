@@ -169,16 +169,19 @@ failed. Check:
 store, usually because the job sets `M3_DATABASE`. Run `m3 setup` once (it pins
 the chat log's own path), or set `M3_CHATLOG_DB_PATH`.
 
-**"Another sync is already in progress"** → A previous sync hung. Look in
-`~/.m3/logs/sync_all.log` for orphaned PIDs. The lock file is at
-`memory/.pg_sync.lock`; remove it manually if stale.
+**"pg_sync SKIPPED … (EX_TEMPFAIL)"** → the run could not take the sync lock
+and replicated nothing; the next scheduled run retries. The lock is a row in the
+`sync_locks` table (not a file) and a stale one is reclaimed automatically. The
+log's `observed` line says whether another sync held it or the store was busy;
+run `python bin/pg_sync.py --db <path>` by hand for the full reason.
 
 **"Schema mismatch / missing column"** → You haven't applied the latest
 warehouse migration. See setup.
 
 **Hourly task stops running on Windows** → Task may auto-disable after
-repeated failures. Check `schtasks /Query /FO LIST /V | grep -i m3-memory`
-for `Status: Disabled`. Re-enable with `schtasks /Change /TN "<name>" /ENABLE`.
+repeated failures. Check `schtasks /Query /TN AgentOS_HourlySync /V /FO LIST`
+for `Status: Disabled`. Re-enable with `schtasks /Change /TN AgentOS_HourlySync /ENABLE`,
+or run `m3 schedules repair`.
 
 ---
 
@@ -187,7 +190,13 @@ for `Status: Disabled`. Re-enable with `schtasks /Change /TN "<name>" /ENABLE`.
 Setting up a second machine to sync against the same warehouse:
 
 1. Install m3 on machine B (`pipx install m3-memory && m3 setup`).
-2. Store the same warehouse DSN in B's vault as `PG_URL` (see Setup).
+2. Store the same warehouse DSN in B's vault as `PG_URL` (see Setup). Vault
+   rows are encrypted with a key derived from `AGENT_OS_MASTER_KEY` plus a
+   per-device salt, and sync replicates them by name — so B can decrypt a
+   replicated `PG_URL` only if it shares A's master key and salt
+   (`.agent_os_salt` in the config root, or `M3_AGENT_OS_SALT_HEX`). If it
+   doesn't, give B's scheduled job the DSN via `M3_CDW_PG_URL` in the
+   environment that job runs under instead.
 3. First sync pulls everything from the warehouse — let it finish.
 4. From then on, edits on either machine appear on the other after sync.
 
@@ -283,14 +292,16 @@ chase that independently of whether the MCP tools work.
 ## Advanced: M3_SYNC_DBS
 
 If you want to override the default DB list (e.g., to sync a custom
-named DB, or to skip auto-detection of bench DBs even when present):
+named DB). The override **replaces** the default list rather than adding to it:
 
 ```bash
-# Sync only agent_memory.db (no auto-detect)
-M3_SYNC_DBS=memory/agent_memory.db python bin/sync_all.py
+# Sync only agent_memory.db
+M3_SYNC_DBS=$HOME/.m3/engine/agent_memory.db python bin/sync_all.py
 
 # Sync a custom set
-M3_SYNC_DBS=memory/agent_memory.db:custom/extra.db python bin/sync_all.py
+M3_SYNC_DBS=$HOME/.m3/engine/agent_memory.db,/data/custom/extra.db python bin/sync_all.py
 ```
 
-Paths can be colon- or comma-separated, absolute or relative to the repo root.
+Separate paths with commas or the OS path separator (`:` on POSIX, `;` on Windows). Use absolute paths (your engine root,
+`~/.m3/engine` by default): a relative path resolves against the installed
+payload, not your engine root.

@@ -127,7 +127,7 @@ numbers, not a shrug — the core of trust and debuggability.
 ## 7. Measured, not asserted
 
 Recall quality is benchmarked, not claimed: **LongMemEval-S — 92.0% end-to-end QA,
-99.2% SHR@k=10**, with per-category breakdowns and methodology.
+99.2% SHR@k=8**, with per-category breakdowns and methodology.
 *See:* [benchmarks/longmemeval/LME-S_Benchmarking_Report.md](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
 
 ---

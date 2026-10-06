@@ -2,7 +2,7 @@
 
 If you've ever felt like your AI agent is a "stranger" every time you start a new session—forgetting your architectural preferences, your naming conventions, or that specific bug you fixed yesterday—**you're in the right place.**
 
-m3 Memory is designed to be your agent's "long-term brain." It’s local, it’s private, and it’s built to grow with you — and it leads on the numbers: **99.2% retrieval @ k=10 and 92% end-to-end QA** on the LongMemEval-S long-context benchmark, with an embedder that runs entirely on your CPU, offline.
+m3 Memory is designed to be your agent's "long-term brain." It’s local, it’s private, and it’s built to grow with you — and it leads on the numbers: **99.2% retrieval @ k=8 and 92% end-to-end QA** on the LongMemEval-S long-context benchmark, with an embedder that runs entirely on your CPU, offline.
 
 ---
 
@@ -42,6 +42,8 @@ m3 setup
 > ```
 
 That gets you 15 `/m3:*` slash commands (`/m3:health`, `/m3:search`, `/m3:save`, …) plus auto-wired hooks. See [the plugin reference](./claude_code_plugin.md).
+Use the plugin **or** `m3 setup`'s registration, not both — both gives two live
+m3 servers (`m3 doctor --fix --fix-hooks` converges back to one).
 
 **Google Antigravity users — install as a plugin directly:**
 
@@ -55,8 +57,8 @@ That installs all 15 `/m3:*` slash commands as native agent Skills and auto-wire
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, diagnostics, admin). Only the 20 essentials load at MCP startup
-> (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The
+> conversations, diagnostics, admin). Only 10 tools load at MCP startup
+> (~3,962 tokens, ~2% of a 200K window; the rest load on demand). The
 > agent pulls in a domain on demand — just say "load the files tools" and it does.
 
 ### 2. The "Cat Test" (Our Favorite Ritual)

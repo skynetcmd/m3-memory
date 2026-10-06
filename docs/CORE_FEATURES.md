@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
-> 100+ MCP tools, lazy-loaded to just ~3.1% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20 on LongMemEval-S). 5,422 collected tests (3,757 test functions) across 406 files. Pluggable storage backend (SQLite default / PostgreSQL primary). Framework adapters for LangChain, CrewAI, and PydanticAI. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Multi-agent orchestration. Zero cloud dependency.
+> 100+ MCP tools, lazy-loaded to just ~2% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@8, 100% @ k=20 on LongMemEval-S). 4,100+ test functions (5,500+ collected cases) across 430+ files. Pluggable storage backend (SQLite default / PostgreSQL primary). Framework adapters for LangChain, CrewAI, and PydanticAI. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Multi-agent orchestration. Zero cloud dependency.
 
 For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
@@ -14,7 +14,7 @@ For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.
 
 m3 Memory combines persistent storage, hybrid search, contradiction detection, knowledge graph, and cross-device sync in a single local-first package. It runs entirely on your hardware — no cloud dependency, no API costs.
 
-**How this plays out in practice:** You tell your agent "Our API runs on port 8080." A week later, you correct it: "We moved the API to port 9000." The next time you ask "What port is the API on?" — the agent responds: "Port 9000. Updated from 8080 — change recorded March 12th." The contradiction was detected and resolved automatically. The full history is preserved. You did nothing.
+**How this plays out in practice:** You tell your agent "Our API runs on port 8080." A week later, you correct it: "We moved the API to port 9000." The agent records the new fact with `memory_supersede`, which closes the old fact and links the two. The next time you ask "What port is the API on?" — the agent responds: "Port 9000. Updated from 8080 — change recorded March 12th." The full history is preserved, and a write that near-restates an existing fact is closed automatically (see Contradiction Detection below).
 
 ---
 
@@ -26,7 +26,7 @@ Memory is only useful if you can find what you need. m3 uses a **three-stage hyb
 
 - **Stage 1 — Keyword (FTS5):** BM25-ranked full-text search with injection-safe query sanitization
 - **Stage 2 — Semantic (Vector):** Cosine similarity against 1024-dim embeddings via numpy batch operations
-- **Stage 3 — Diversity (MMR):** Maximal Marginal Relevance re-ranking keeps the top-k diverse so the right answer surfaces early and near-duplicates don't crowd it out — the mechanism behind m3's **99.2% session-hit-rate at k=10** (correct memory in the top 10, not the top 50). Accurate retrieval at low top-K means less noise fed to the model and the answer found on the first search, not the fifth.
+- **Stage 3 — Diversity (MMR):** Maximal Marginal Relevance re-ranking keeps the top-k diverse so the right answer surfaces early and near-duplicates don't crowd it out — the mechanism behind m3's **99.2% session-hit-rate at k=8** — `memory_search`'s default depth: the correct memory in the top 8, not the top 50 (on LongMemEval-S, k=10 gives the same 99.2% while retrieving 25% more rows). Accurate retrieval at low top-K means less noise fed to the model and the answer found on the first search, not the fifth.
 
 **Explainable results.** Every search can return a full score breakdown (vector component, BM25 weight, MMR penalty) so you or your agent can understand *why* a memory was retrieved.
 
@@ -36,11 +36,11 @@ m3's **bitemporal model** tracks two independent time axes — when a fact was *
 
 ### ⚠️ Contradiction Detection
 
-Write a fact that conflicts with an existing one? m3 detects it automatically. The old memory is soft-deleted, a `supersedes` relationship is recorded, and the full history is preserved in the audit trail. No manual cleanup. No stale data.
+Write a near-restatement of an existing fact with different content (same type, cosine above the conservative 0.92 bar)? m3 detects it automatically. The old memory is soft-deleted, a `supersedes` relationship is recorded, and the full history is preserved in the audit trail. A changed fact phrased differently (e.g. a new port number in a new sentence) usually scores below that bar, so close the old fact explicitly with `memory_supersede`.
 
 ### 🕸️ Knowledge Graph
 
-Memories aren't isolated — they form a web. m3 automatically links related memories on write (cosine >0.7) and supports 11 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `precedes`, `follows`, `message`, `handoff`. Traverse the graph up to 3 hops with a single tool call. Entity extraction feeds the same graph, and its vocabulary is **configurable without code changes**: entity types and predicates come from a YAML profile selected with `M3_ENTITY_VOCAB_YAML` (default `config/lists/entity_graph_default.yaml`, 42 types and 34 predicates).
+Memories aren't isolated — they form a web. m3 automatically links related memories on write (cosine >0.7) and supports 11 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `precedes`, `follows`, `message`, `handoff` (plus internal `distills_from` edges written by procedure distillation). Traverse the graph up to 3 hops with a single tool call. Entity extraction feeds the same graph, and its vocabulary is **configurable without code changes**: entity types and predicates come from a YAML profile selected with `M3_ENTITY_VOCAB_YAML` (default `config/lists/entity_graph_default.yaml`, 42 types and 34 predicates).
 
 ### 📖 Auto-Generated Wiki
 
@@ -95,7 +95,7 @@ m3 uses your local LLM for features that benefit from language understanding. An
 - **Conversation summarization** — compress long conversation threads into 3-5 key points
 - **Multi-layered consolidation** — merge groups of related memories into comprehensive summaries
 
-All LLM features use the local model — zero API costs, zero data exfiltration.
+All LLM features use your local model by default — zero API costs, and no data goes to a third party. Cloud endpoints are opt-in.
 
 **Model selection is automatic.** `bin/llm_failover.py:get_best_llm()` discovers loaded chat models across every endpoint in `LLM_ENDPOINTS_CSV`, filters out embedding-only models (anything matching `embed`, `nomic`, `jina`, `bge`, `e5`, `minilm`), and picks the largest available by parameter count. If you want auto-classification and summarization to run cheaply — without loading a heavy generation model you don't otherwise need — load a small instruct model (0.5B–1B, e.g. `qwen2.5:0.5b`, `llama3.2:1b`, or any GGUF equivalent) as your only chat model; these run in hundreds of milliseconds on CPU and are sufficient for classification and short summaries. See [QUICKSTART](QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment) for concrete recipes per runtime.
 
@@ -161,7 +161,7 @@ Hourly automated sync.
 
 ## 🧪 Tested and Measured
 
-### 2,501 Tests (warnings-as-errors)
+### 4,100+ Tests (warnings-as-errors)
 
 Every feature is tested — not just the happy path (the suite runs with
 `filterwarnings=error`, so a new warning fails the build):
@@ -184,7 +184,7 @@ Every feature is tested — not just the happy path (the suite runs with
 
 Headline benchmark on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval)
 (500-question long-horizon conversational memory suite):
-**99.2% retrieval session-hit-rate @ k=10** (496/500; 100% @ k=20) with the v3
+**99.2% retrieval session-hit-rate @ k=8** (496/500; 100% @ k=20) with the v3
 core engine — the retrieval-only metric memory systems publish as their headline.
 Under the harder no-oracle-metadata condition (no ground-truth session hints),
 end-to-end QA accuracy is **92.0%** (460/500) — and with retrieval SHR at 100% @ k=20,
@@ -202,7 +202,7 @@ quality claim. Skips gracefully when the local LLM server is offline.
 
 ## 🧰 100+ MCP Tools at a Glance
 
-The full catalog spans 9 domains, but it costs near-zero context: **lazy tool-loading** registers only the 20 essential tools at startup (~6,151 tokens, ~3.1% of a 200K window; full catalog loads on demand) and pulls the rest in on demand via `tools_load_domain`. Most MCP servers load their entire surface up front — m3 doesn't.
+The full catalog spans 9 domains, but it costs near-zero context: **lazy tool-loading** registers only 10 tools at startup (~3,962 tokens, ~2% of a 200K window) and pulls the rest in on demand via `tools_load_domain`. Most MCP servers load their entire surface up front — m3 doesn't.
 
 | Category | Tools |
 |----------|-------|
@@ -215,8 +215,6 @@ The full catalog spans 9 domains, but it costs near-zero context: **lazy tool-lo
 | **Multi-Agent Coordination** | `memory_handoff`, `memory_inbox`, `memory_inbox_ack`, `memory_refresh_queue` |
 | **Chat Log System** | `chatlog_write`, `chatlog_write_bulk`, `chatlog_search`, `chatlog_promote`, `chatlog_list_conversations`, `chatlog_cost_report`, `chatlog_set_redaction`, `chatlog_status`, `chatlog_rescrub` |
 | **Data Governance** | `gdpr_export`, `gdpr_forget`, `memory_export`, `memory_import` |
-| **Operational Protocol** | `log_activity`, `query_decisions`, `update_focus`, `retire_focus`, `check_thermal_load` |
-| **Debug Agent** | `debug_analyze`, `debug_bisect`, `debug_trace`, `debug_correlate`, `debug_history`, `debug_report` |
 | **Infrastructure** | `memory_cost_report`, `memory_maintenance`, `memory_dedup`, `memory_consolidate`, `memory_set_retention` |
 
 ---

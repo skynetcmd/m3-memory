@@ -7,7 +7,7 @@ The most-used MCP tools exposed by the memory bridge (`bin/memory_bridge.py`) an
 ## Memory Operations
 
 ### `memory_write`
-Creates a MemoryItem and optionally embeds it for semantic search. Contradiction detection is automatic — if new content conflicts with an existing memory of the same type/title, the old one is superseded. Use type='auto' to let the LLM decide the best category.
+Creates a MemoryItem and optionally embeds it for semantic search. Contradiction detection is automatic — if new content conflicts with an existing same-type memory from the same agent (cosine > `M3_CONTRADICTION_THRESHOLD`, default 0.92), the old one is superseded. The title gate defaults to `loose` (`M3_CONTRADICTION_TITLE_GATE`), so titles need not match; `strict` restores the legacy title-substring requirement. Use type='auto' to let the LLM decide the best category.
 - **Args**: `type` (str, required), `content` (str, required), `title` (str), `importance` (float, 0.0–1.0), `agent_id` (str), `user_id` (str), `scope` (str), `valid_from` (ISO 8601), `valid_to` (ISO 8601), `embed` (bool, default true), `metadata` (JSON string), `auto_classify` (bool)
 
 ### `memory_search`
@@ -209,58 +209,6 @@ One-call health summary of the chat log subsystem.
 ### `chatlog_rescrub`
 Re-apply redaction to existing chat_log rows.
 - **Args**: `conversation_id` (str), `since` (ISO 8601), `until` (ISO 8601), `limit` (int)
-
----
-
-## Operational Protocol (Proxy-Only)
-
-### `log_activity`
-Archive activity to the agent log (Protocols #1-#3).
-- **Args**: `category` (str: thought|hardware|decision), `detail_a` (str, required), `detail_b` (str), `detail_c` (str)
-
-### `query_decisions`
-Protocol #4 - MUST call before starting any new task. Search project_decisions table.
-- **Args**: `keyword` (str, required), `limit` (int, default 10)
-
-### `update_focus`
-Protocol #5 - Call every 3 turns with a <=10-word trajectory summary.
-- **Args**: `summary` (str, required)
-
-### `retire_focus`
-Protocol #5 - Clear dashboard focus when a task completes.
-- **Args**: None
-
-### `check_thermal_load`
-Protocol #2 - Check m3 Max thermal/RAM pressure. Returns Nominal|Fair|Serious|Critical.
-- **Args**: None
-
----
-
-## Debug Agent (Proxy-Only)
-
-### `debug_analyze`
-Root cause analysis with memory-augmented reasoning.
-- **Args**: `error_message` (str, required), `context` (str), `file_path` (str)
-
-### `debug_bisect`
-Automated git bisect with LLM analysis of the offending commit.
-- **Args**: `test_command` (str, required), `good_commit` (str, required), `bad_commit` (str)
-
-### `debug_trace`
-Execution flow analysis - reads source, finds callers, identifies failure points.
-- **Args**: `file_path` (str, required), `function_name` (str, required), `error_type` (str)
-
-### `debug_correlate`
-Cross-reference logs, git commits, and decisions to build a causal timeline.
-- **Args**: `log_file` (str, required), `time_range` (str), `pattern` (str)
-
-### `debug_history`
-Search past debugging sessions and patterns. No LLM required.
-- **Args**: `keyword` (str, required), `limit` (int)
-
-### `debug_report`
-Generate and persist a structured debugging report to memory.
-- **Args**: `title` (str, required), `issue_id` (str), `findings` (str)
 
 ---
 

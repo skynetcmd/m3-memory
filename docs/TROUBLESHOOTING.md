@@ -50,7 +50,7 @@
 
 ### Semantic search returning poor results
 - **Solution**: Run `memory_maintenance` to decay importance of stale items.
-- **Solution**: Verify the correct embedding model is loaded (e.g., `nomic-embed-text` for Ollama, or check your LM Studio model list).
+- **Solution**: Check `m3 embedder status` — m3's embedding model is BGE-M3 (1024-dim). Don't point m3 at a different embedding model: vectors from mixed models aren't comparable, so mixing them breaks search.
 - **Solution**: Ensure all devices use the same embedding model and dimension (`EMBED_DIM`, default 1024). Mismatched dimensions break cosine similarity.
 
 ## FIPS Crypto Issues
@@ -108,13 +108,13 @@ See [FIPS_MODULE_BOUNDARY.md](FIPS_MODULE_BOUNDARY.md) for the full model.
 - **Equivalent manual fix**: in an **Administrator** terminal, run the
   installer directly:
   ```powershell
-  python bin/install_schedules.py --repair
+  m3 schedules repair
   ```
 - **Note**: the older `-Hidden` / `Set-ScheduledTask ... Hidden` trick does
   **not** fix this — it only hides the task's entry in the Task Scheduler UI,
   not the console window. Use the fix above instead.
 - **macOS / Linux**: not affected — cron jobs never draw a window. Just run
-  `python3 bin/install_schedules.py --add all` normally.
+  `m3 schedules add all` normally.
 
 ---
 
@@ -160,6 +160,9 @@ references, and why we deliberately did not switch the default transport.
 ### Memory server doesn't appear in agent
 - Verify the JSON in your agent's config file is valid.
 - Make sure the key is `"mcpServers"` (case-sensitive).
+- **Claude Code** ignores `mcpServers` in `~/.claude/settings.json`; check
+  `claude mcp list` for `m3_memory` (or the plugin), and re-run `m3 setup` or
+  `claude mcp add --scope user -- m3_memory m3` if it's missing.
 - Restart the agent completely (not just a new session).
 
 ### Agent can't find previous memories
@@ -167,8 +170,10 @@ references, and why we deliberately did not switch the default transport.
   default. Resolution is `M3_ENGINE_ROOT` > `M3_MEMORY_ROOT/engine` >
   `~/.m3/engine`. Ask m3 rather than guessing: `m3 chatlog status --json`
   reports the resolved backend and roots.
-- ⚠ `~/.m3-memory/` is the **retired** unified root. If it still exists it
-  holds only backups and stale config — a DB found there is not your live
-  store. `bin/homecoming.py` migrates a legacy layout to the split roots.
+- ⚠ `~/.m3-memory/` is the **payload** root (the `M3_MEMORY_ROOT` default):
+  `m3 install-m3` fetches the payload into `~/.m3-memory/repo` and keeps its
+  `config.json` there. It holds no live database — a DB found there is a
+  leftover from the old unified layout, not your live store.
+  `bin/homecoming.py` migrates a legacy layout to the split roots.
 - The bridge resolves the DB from those roots regardless of the directory
   `m3` was launched from.

@@ -82,7 +82,7 @@ The real tools:
         ┌────────────────────────────────────┼────────────────────────────────────┐
         ▼                                     ▼                                     ▼
 [ SQLite FTS5 ]                     [ BGE-M3 vector ]                     [ Bitemporal ledger ]
- (lexical match)                (semantic; shared llama-server              (valid_from/valid_to +
+ (lexical match)                (semantic; m3-embed-server binary         (valid_from/valid_to +
                                  on :8082; in-process opt-in)             created_at = txn time)
         └──────────────────── fused + MMR-diversified in memory_search ─────────────┘
 ```
@@ -91,8 +91,8 @@ The real tools:
 
 | Symptom | Likely cause | Corrective action |
 |---|---|---|
-| Embedding/search returns errors or empty vectors | Local embedder not reachable | Run `embedder_status`; the shared embed server — the DEFAULT topology, not a fallback — listens on `8082` (override via `M3_EMBED_F…` env). Ensure the embed server is running. |
-| Embedder can't find the model | `M3_EMBED_GGUF` not set / wrong path | Point `M3_EMBED_GGUF` at a local BGE-M3 GGUF file (e.g. `bge-m3-GGUF-Q4_K_M.gguf`). **m3 does not fetch weights via Git LFS** — weights are a local file you provide. |
+| Embedding/search returns errors or empty vectors | Local embedder not reachable | Run `embedder_status`; the shared embed server — the DEFAULT topology, not a fallback — listens on `8082` (override via `M3_EMBED_FALLBACK_URL` env). Ensure the embed server is running. |
+| Embedder can't find the model | Bundled GGUF missing / `M3_EMBED_GGUF` override points at a wrong path | Setup provisions the bundled `bge-m3-Q4_K_M.gguf` into `~/.m3/models`; run `m3 embedder fetch-model` to (re)download it there. `M3_EMBED_GGUF` is only an override — unset it or point it at a valid BGE-M3 GGUF file. |
 | `unknown_tool` | Called an invented tool name | Use a name from §2 / the catalog; e.g. `memory_write`, not `m3_remember`. |
 
 ---

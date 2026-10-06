@@ -11,12 +11,14 @@ That's all you need. The script:
 2. `brew install pipx git sqlite` — only what isn't already there.
 3. `pipx install m3-memory`.
 4. `m3 setup` — one-command wizard: fetches the system payload, installs the
-   sovereign CPU embedder, wires every agent it finds on PATH (Claude / Gemini /
-   OpenCode / OpenClaw), installs chatlog hooks, runs `m3 doctor`.
+   sovereign CPU embedder, wires every agent it finds (Claude Code / Gemini CLI /
+   Antigravity / OpenCode / Cursor / Cline / OpenClaw; Hermes via its plugin),
+   installs chatlog hooks, runs `m3 doctor`.
 
-The wizard also asks for the **primary database backend** — SQLite (default,
-zero-infrastructure) or PostgreSQL. Choosing PostgreSQL (`--db-backend postgres`,
-or `M3_DB_BACKEND=postgres`) requires a reachable server via `M3_PRIMARY_PG_URL`.
+`m3 setup` always keeps the store on **SQLite** (default, zero-infrastructure);
+it never configures PostgreSQL. For a PostgreSQL **primary** store, run
+`m3 install-m3 --db-backend postgres` (or set `M3_DB_BACKEND=postgres`) with a
+reachable server in `M3_PRIMARY_PG_URL`.
 
 **Cautious version** (audit before running):
 
@@ -49,8 +51,8 @@ m3 setup                               # one-command wizard
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, diagnostics, admin). Only the 20 essentials load at MCP startup
-> (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The
+> conversations, diagnostics, admin). Only 10 tools load at MCP startup
+> (~3,962 tokens, ~2% of a 200K window; the rest load on demand). The
 > agent pulls in a domain on demand — just say "load the files tools" and it does.
 > Set `M3_TOOLS_LAZY=0` to disable.
 
@@ -106,17 +108,20 @@ red). The layout matches the Windows screenshots in
 ## Adding to an MCP client
 
 `m3 setup` wires every agent it detects on PATH. If you skipped the wizard or
-add an agent later, run these by hand:
+add an agent later, re-run `m3 setup`, or by hand:
 
 ```bash
-# Claude Code
-claude mcp add --scope user memory m3
+# Claude Code (skip if you use the plugin below — plugin OR this, not both)
+claude mcp add --scope user -- m3_memory m3
 
 # Gemini CLI (auto-wired by m3 setup; re-run if Gemini was installed AFTER m3)
 m3 chatlog init --apply-gemini
 ```
 
 ### Claude Code plugin install
+
+Use the plugin **or** `m3 setup`'s direct registration — not both (both gives
+two live m3 servers; `m3 doctor --fix --fix-hooks` converges back to one).
 
 ```
 /plugin marketplace add skynetcmd/m3-memory
@@ -159,7 +164,7 @@ No Rust toolchain needed — installs a prebuilt PyPI wheel.
 ### Register as a launchd user agent (no sudo required)
 
 ```bash
-m3 embedder install   # writes ~/Library/LaunchAgents/ai.m3.embed-server.plist
+m3 embedder install   # writes ~/Library/LaunchAgents/com.skynetcmd.m3-embed-server.plist
 ```
 
 Starts at login automatically. Verify:
@@ -179,7 +184,8 @@ M3_EMBED_GGUF=~/.m3/models/bge-m3-Q4_K_M.gguf \
 
 Or create the launchd plist manually — see
 [QUICKSTART_MACOS.md § Embedder](QUICKSTART_MACOS.md#3-embedder-the-shared-embed-server--install-this)
-for the ready-to-use XML template.
+for the ready-to-use XML template. Keep the label `com.skynetcmd.m3-embed-server`;
+a second, differently named plist would start a second server fighting for `:8082`.
 
 ---
 
@@ -208,7 +214,8 @@ for the ready-to-use XML template.
 
 - **`m3 embedder install` says GGUF is an LFS pointer** — the bundled bge-m3
   model file is tracked via Git LFS. If you cloned m3-memory directly without
-  LFS, run `git lfs install && git lfs pull` inside the checkout.
+  LFS, run `git lfs install && git lfs pull` inside the checkout, or
+  `m3 embedder fetch-model` to download it to `~/.m3/models/bge-m3-Q4_K_M.gguf`.
   (`pipx`/`pip` users don't hit this — the wizard handles it.)
 
 - **Apple Silicon: `ggml_vulkan: No devices found`** — harmless warning from

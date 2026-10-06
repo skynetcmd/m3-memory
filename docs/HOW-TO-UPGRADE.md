@@ -129,7 +129,7 @@ python3 bin/migrate_memory.py backup --yes
 
 The backup uses SQLite's online-backup API (consistent snapshot even under concurrent writes) and lands in the backup directory saved in settings. Pass `--out /path/to/dir` to override. (This path is for the default SQLite store; if you run a **PostgreSQL primary backend** there is no local `.db` file — take your pre-upgrade snapshot with `pg_dump` instead.)
 
-You'll also see `.bak` files in `memory/` from the tooling's safety net — e.g., `agent_memory.db.pre-up-<timestamp>.bak`. Those are created automatically by `up`/`down`/`restore`; keep them until you've verified the upgrade.
+You'll also see automatic snapshots under `<engine_root>/backups/` (default `~/.m3/engine/backups/`) from the tooling's safety net — e.g., `main/agent_memory.v050.pre-up.<timestamp>.db`. Those are created automatically by `up`/`down`/`restore`; keep them until you've verified the upgrade.
 
 ---
 
@@ -196,7 +196,7 @@ Expect `No known vulnerabilities found` in both. If not, follow 3c.
 
 ## 4. Apply database migrations
 
-Migrations live in `memory/migrations/` as numbered `NNN_name.up.sql` / `NNN_name.down.sql` pairs (currently 001–018). `migrate_memory.py` tracks applied versions in the DB itself.
+Migrations live in `memory/migrations/` as numbered `NNN_name.up.sql` / `NNN_name.down.sql` pairs. `migrate_memory.py` tracks applied versions in the DB itself.
 
 ```bash
 # Show current version and what's pending
@@ -215,14 +215,14 @@ python3 bin/migrate_memory.py up --to 17 --yes
 python3 bin/migrate_memory.py up --dry-run
 ```
 
-> **Note:** When the MCP server starts, it runs `up --yes` automatically. If a migration silently isn't getting applied, check for a pre-existing backup collision in `memory/` or a lock from a stale process.
+> **Note:** When the MCP server starts, it runs `up --yes` automatically. If a migration silently isn't getting applied, check for a pre-existing backup collision in `<engine_root>/backups/` or a lock from a stale process.
 
 ### If the migration fails mid-run
 
-The script integrity-checks the restored DB and aborts loudly if it's not `ok`. You'll see a `pre-up-*.bak` alongside `agent_memory.db`. Restore with:
+The script integrity-checks the restored DB and aborts loudly if it's not `ok`. You'll find a `*.pre-up.<timestamp>.db` snapshot under `<engine_root>/backups/main/`. Restore with:
 
 ```bash
-python3 bin/migrate_memory.py restore memory/agent_memory.db.pre-up-<timestamp>.bak --yes
+python3 bin/migrate_memory.py restore ~/.m3/engine/backups/main/agent_memory.v<NNN>.pre-up.<timestamp>.db --yes
 ```
 
 ---
@@ -236,8 +236,8 @@ python3 bin/memory_doctor.py
 # Full test suite (fast; integration tests are skipped unless configured)
 pytest -q
 
-# Confirm MCP server starts and advertises the expected tool catalog
-python3 bin/mcp_tool_catalog.py --check
+# Confirm the tool catalog and its generated docs agree
+python bin/check_tool_catalog_drift.py
 ```
 
 If you use Postgres sync, also run:
@@ -295,7 +295,7 @@ Get-WindowsUpdate -Install -AcceptAll
 winget upgrade --all --include-unknown
 
 # Python / Git via winget
-winget upgrade --id Python.Python.3.13   # or whichever 3.12+ you already run; 3.12 is the floor
+winget upgrade --id Python.Python.3.14   # or whichever 3.12+ you already run; 3.12 is the floor
 winget upgrade Git.Git
 ```
 
@@ -319,7 +319,7 @@ pip install -r requirements.txt
 - **Ollama** — `curl -fsSL https://ollama.com/install.sh | sh` (Linux/macOS) or re-run the installer on Windows.
 - **llama.cpp / vLLM** — `git pull && pip install -e .` inside their checkout.
 
-After upgrading the model runtime, restart `bin/embed_server.py` so it picks up new CUDA/Metal support.
+After upgrading the model runtime, restart the embed server (`m3 embedder stop`, then `m3 embedder start`) so it picks up new CUDA/Metal support.
 
 ### Postgres data warehouse (optional)
 
@@ -344,7 +344,7 @@ If the upgrade left things in a worse state:
 ```bash
 python3 bin/migrate_memory.py down --to <previous_version> --yes
 # or restore from the pre-upgrade backup
-python3 bin/migrate_memory.py restore memory/agent_memory.db.pre-up-<timestamp>.bak --yes
+python3 bin/migrate_memory.py restore ~/.m3/engine/backups/main/agent_memory.v<NNN>.pre-up.<timestamp>.db --yes
 ```
 
 ### Roll back the code
@@ -372,8 +372,8 @@ pip install -r requirements.txt
 
 - **`pip install --upgrade` with no args** → that's a pip usage error. Pass package names or `-r requirements.txt`.
 - **`Defaulting to user installation because normal site-packages is not writeable`** → you're running system pip, not the venv's pip. Activate the venv first.
-- **`migrate_memory.py` hangs** → another process holds the SQLite lock. Find it with `lsof memory/agent_memory.db` (Linux/macOS) or Resource Monitor (Windows); stop it, then retry.
-- **MCP server won't start after upgrade** → check `memory/logs/` for the last traceback, and confirm `python3 bin/migrate_memory.py status` shows no pending migrations.
+- **`migrate_memory.py` hangs** → another process holds the SQLite lock. Find it with `lsof ~/.m3/engine/agent_memory.db` (Linux/macOS) or Resource Monitor (Windows); stop it, then retry.
+- **MCP server won't start after upgrade** → check `~/.m3/logs/` for the last traceback, and confirm `python3 bin/migrate_memory.py status` shows no pending migrations.
 - **Pytest failures on first run after upgrade** → run `pytest --lf -vv` to re-run only the failing tests with full output; most often an env var (`M3_*`) or local LLM endpoint regressed.
 
 More recipes in [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md).

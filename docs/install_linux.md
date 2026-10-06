@@ -13,13 +13,14 @@ The script:
    `curl`, plus `python3-venv` on Debian-family.
 3. `pipx install m3-memory`.
 4. `m3 setup` — one-command wizard: fetches the system payload, installs the
-   sovereign CPU embedder, wires every agent it finds on PATH (Claude / Gemini /
-   OpenCode / OpenClaw), installs chatlog hooks, runs a brief `m3 doctor`
-   health check.
+   sovereign CPU embedder, wires every agent it finds (Claude Code / Gemini CLI /
+   Antigravity / OpenCode / Cursor / Cline / OpenClaw; Hermes via its plugin),
+   installs chatlog hooks, runs a brief `m3 doctor` health check.
 
-The wizard also asks for the **primary database backend** — SQLite (default,
-zero-infrastructure) or PostgreSQL. Choosing PostgreSQL (`--db-backend postgres`,
-or `M3_DB_BACKEND=postgres`) requires a reachable server via `M3_PRIMARY_PG_URL`.
+`m3 setup` always keeps the store on **SQLite** (default, zero-infrastructure);
+it never configures PostgreSQL. For a PostgreSQL **primary** store, run
+`m3 install-m3 --db-backend postgres` (or set `M3_DB_BACKEND=postgres`) with a
+reachable server in `M3_PRIMARY_PG_URL`.
 
 Refuses to run as root. Sudo is invoked individually for the package install
 step so you see what's being elevated.
@@ -137,8 +138,8 @@ m3 setup
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, diagnostics, admin). Only the 20 essentials load at MCP startup
-> (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The
+> conversations, diagnostics, admin). Only 10 tools load at MCP startup
+> (~3,962 tokens, ~2% of a 200K window; the rest load on demand). The
 > agent pulls in a domain on demand — just say "load the files tools" and it does.
 > Set `M3_TOOLS_LAZY=0` to disable.
 
@@ -147,11 +148,12 @@ m3 setup
 ## Adding to an MCP client
 
 `m3 setup` wires every agent it detects on PATH. If you skipped the wizard or
-add an agent later, run these by hand:
+add an agent later, re-run `m3 setup`, or by hand:
 
 ```bash
-# Claude Code
-claude mcp add --scope user memory m3
+# Claude Code (or the Claude Code plugin — plugin OR this, not both;
+# `m3 doctor --fix --fix-hooks` converges a double registration back to one)
+claude mcp add --scope user -- m3_memory m3
 
 # Gemini CLI (auto-wired by m3 setup; re-run if Gemini was installed AFTER m3)
 m3 chatlog init --apply-gemini
@@ -196,7 +198,8 @@ m3 chatlog init --apply-gemini
   ```
   @reboot M3_EMBED_GGUF=~/.m3/models/bge-m3-Q4_K_M.gguf m3-embed-server >> ~/.m3/engine/embed-server.log 2>&1 &
   ```
-  Tier-1 in-process GGUF embedding is active regardless — Tier-2 is optional.
+  This shared server (Tier-2) is the default embedder, so keep it running;
+  in-process (Tier-1) embedding is opt-in only (`M3_EMBED_INPROC=1`).
 
 - **Hooks can't find Python on a pipx install** — fixed in v2026.4.24.7+;
   the hook scripts probe both `~/.local/share/pipx/venvs/m3-memory` (pipx ≥1.4
@@ -209,9 +212,8 @@ m3 chatlog init --apply-gemini
 
 - **`m3 embedder install` says GGUF is an LFS pointer** — the bundled
   bge-m3 model file is tracked via Git LFS. If you cloned without LFS,
-  run `git lfs install && git lfs pull` inside the m3-memory checkout.
-  (`pipx`/`pip` users don't hit this — the wizard fetches into
-  `~/.m3-memory/repo/_assets/models/` automatically.)
+  run `git lfs install && git lfs pull` inside the m3-memory checkout, or
+  `m3 embedder fetch-model` to download it to `~/.m3/models/bge-m3-Q4_K_M.gguf`.
 
 ---
 

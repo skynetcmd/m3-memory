@@ -6,7 +6,7 @@
 
 Several tools address agentic memory. This document explains where m3 Memory fits relative to each, and when a different tool is the better choice.
 
-> 📊 **Retrieval accuracy (the metric that isolates the memory layer).** m3's **v3 core engine** reaches **99.2% retrieval session-hit-rate @ k=10 (496/500) and 100% @ k=20** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) — raw turns, hybrid FTS5 + BGE-M3 vector + MMR, no knowledge graph, no oracle metadata. SHR (session hit-rate) **is** retrieval accuracy: it measures whether the correct evidence session is surfaced, with no answer model involved — the like-for-like, retrieval-only metric memory systems publish as their headline. Separately, the same v3 config scores **92.0% end-to-end QA accuracy** (460/500, no oracle metadata) — a different, answer-model-dependent metric. Receipts, per-category breakdown, and full methodology: the [LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
+> 📊 **Retrieval accuracy (the metric that isolates the memory layer).** m3's **v3 core engine** reaches **99.2% retrieval session-hit-rate @ k=8 (496/500) and 100% @ k=20** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) — raw turns, hybrid FTS5 + BGE-M3 vector + MMR, no knowledge graph, no oracle metadata. SHR (session hit-rate) **is** retrieval accuracy: it measures whether the correct evidence session is surfaced, with no answer model involved — the like-for-like, retrieval-only metric memory systems publish as their headline. Separately, the same v3 config scores **92.0% end-to-end QA accuracy** (460/500, no oracle metadata) — a different, answer-model-dependent metric. Receipts, per-category breakdown, and full methodology: the [LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
 
 ### m3 vs Other Memory Systems
 
@@ -77,7 +77,16 @@ If "the LLM should decide what's worth remembering" matches your worldview, a ti
 > from a configuration developed against the same 500 questions. The distinctions
 > drawn below concern the setting, the judge, and what the prompts contain.
 >
-> ᵃ **m3** — 92.0% QA (no oracle; SHR=100% @ k=20), unmodified upstream LongMemEval judge.
+> **How m3's QA figure was produced.** m3 retrieves; it does not answer questions.
+> In deployment the calling agent chooses what to retrieve and writes the answer.
+> The benchmark harness plays that role: it chooses retrieval options per question
+> (session expansion and a precomputed recall surface, both available in m3's
+> engine but off by default) using a question-text router that is part of the
+> harness, and it supplies the answer prompts and model. m3's built-in intent
+> routing is on by default in both. The retrieval figures (SHR) use m3's search
+> alone.
+>
+> ᵃ **m3** — 92.0% QA (no oracle; SHR=100% @ k=20), unmodified upstream LongMemEval judge. Retrieval: m3's figure is at **k=8**, its default search depth. Other systems report k=10 and above; k=8 isn't reported. On LongMemEval-S, k=10 gives m3 the same 99.2% while retrieving 25% more rows.
 > ᵇ **Mem0** — ~94% self-reported (94.4% [research page](https://mem0.ai/research), 94.8% [repo](https://github.com/mem0ai/mem0)); independent/older evaluations put earlier Mem0 at ~67% ([arXiv 2504.19413](https://arxiv.org/abs/2504.19413)). Judge is **modified and more lenient** (single unified prompt: "judge by MEANING, not exact words", explicit pro-yes bias, superset answers accepted), so it is **not** comparable to strict-judge numbers. Answer model undisclosed as of 2026-06-22.
 > ᶜ **agentmemory** — 96.2% QA (481/500), Claude Opus 4.6 answerer, GPT-4o judge; the judge is upstream (5/6 templates byte-identical, the temporal template *adds* a `Reference Date:` line). The setting is not: its runner loads the **oracle split** (evidence sessions only), reads each question's `question_type` label to steer prompts and ingestion, and its answer prompts contain LongMemEval test questions and their answers — see the [caution](#vs-agentmemory). Not comparable to standard S-setting numbers. Source: [github.com/JordanMcCann/agentmemory](https://github.com/JordanMcCann/agentmemory). *Judge verified 2026-06-22; setting verified 2026-10-05.*
 > ᵈ **Chronos** — 95.6% QA (self-reported, arXiv preprint [2603.16862](https://arxiv.org/abs/2603.16862), not peer-reviewed). The paper says it implements "LongMemEval's LLM judge" but shows no prompt text, names no judge model, and releases no code (it even flags "LLM-as-judge variability"). *Figure verified; judge unconfirmed 2026-06-23.*
@@ -105,7 +114,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. m3-Memor
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | Vector search + knowledge-graph traversal |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ⚖️ Time-aware retrieval ranks the right dated instance; no bitemporal as-of query model |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | Basic deduplication; no strong conflict resolution |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | ⚖️ ~94% self-reported, but graded with a **self-authored, more lenient judge** — not comparable to strict-judge numbersᵇ |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | ⚖️ ~94% self-reported, but graded with a **self-authored, more lenient judge** — not comparable to strict-judge numbersᵇ |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — a strong point |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Native LangChain/CrewAI libraries; no native MCP (needs a custom wrapper) |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Manual; no dedicated GDPR tooling. No FIPS posture |
@@ -149,7 +158,7 @@ m3-Memory is a **dedicated, lightweight memory layer** — a drop-in backend for
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | Tiered recall with embeddings (core / recall / archival blocks) |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ❌ No bitemporal / as-of queries |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Agent-driven — the agent decides to update its own memory blocks |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | Not published |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | Not published |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | ❌ Tiered memory blocks rather than an entity graph |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | Custom SDKs / REST API; can call external MCP tools |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Not built-in. No FIPS posture |
@@ -194,7 +203,7 @@ Zep focuses on temporal knowledge graphs for enterprise multi-agent systems. It 
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | 🏆 Vector + temporal knowledge-graph traversal |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | 🏆 Bitemporal at fact/edge grain in a temporal KG — finer grain than m3's item-grain |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Graph-level fact invalidation over time |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | Not published |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | Not published |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — the core abstraction |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Official Python/TypeScript/Go SDKs **and** a first-party [MCP server](https://github.com/getzep/zep) |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | 🏆 Partial GDPR support. No FIPS posture |
@@ -231,7 +240,7 @@ m3 is memory-first rather than graph-first: the primary store is a bitemporal SQ
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | 🏆 Graph traversal + semantic + BM25 |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | 🏆 Bi-temporal edge validity (fact/edge grain) |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Edge invalidation as facts change |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | Not published |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | Not published |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — it *is* the product |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Via a separate MCP server |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Not a documented focus. No FIPS posture |
@@ -260,7 +269,7 @@ Yes — they operate at different altitudes. You can let m3 own memory/retrieval
 
 A-MEM is a **research-oriented agentic memory** design: memories are "notes" that the system links into an evolving network (inspired by Zettelkasten), with the LLM generating structured attributes and dynamically updating links as new memories arrive. It's a compelling model for emergent, self-organizing memory and is primarily a research codebase rather than a production deployment target.
 
-m3 is production-and-operations oriented: typed memories, bitemporal supersession, explicit GDPR/FIPS posture, an operational MCP tool surface, and a benchmarked retrieval stack. The *supersede operation* itself is deterministic and auditable (soft-delete + `supersedes` edge, not an LLM re-linking pass); automatic *detection* of which prior memory to supersede is a cosine+title heuristic (or you target it explicitly with `memory_supersede`).
+m3 is production-and-operations oriented: typed memories, bitemporal supersession, explicit GDPR/FIPS posture, an operational MCP tool surface, and a benchmarked retrieval stack. The *supersede operation* itself is deterministic and auditable (soft-delete + `supersedes` edge, not an LLM re-linking pass); automatic *detection* of which prior memory to supersede is a cosine heuristic — same type, same agent, cosine > 0.92, differing content; a title match is required only under the opt-in `strict` title gate (or you target it explicitly with `memory_supersede`).
 
 | Feature | m3-Memory | A-MEM |
 |---|---|---|
@@ -271,7 +280,7 @@ m3 is production-and-operations oriented: typed memories, bitemporal supersessio
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | Embedding-based over the note network |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ❌ No bitemporal / as-of queries |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 LLM-driven link and attribute updates (Zettelkasten-style evolution) |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | Not published |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | Not published |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — an evolving link network is the core idea |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | Library / research code |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Not a focus. No FIPS posture |
@@ -339,7 +348,7 @@ m3's differences are breadth. Both ship a native MCP server and both scale to Po
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | 🏆 6-signal hybrid — a broader signal mix than m3's 3 pillars |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ⚖️ Temporal signature is integrity-oriented, not an as-of query model |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | Merkle-tree integrity + consolidation pipeline; no documented supersession model |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | ⚠️ No standard S-setting figure published — its 96.2% is on the **oracle split** (evidence sessions only), with label-steered prompts that contain test answers; not comparableᶜ |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | ⚠️ No standard S-setting figure published — its 96.2% is on the **oracle split** (evidence sessions only), with label-steered prompts that contain test answers; not comparableᶜ |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — auto entity extraction + graph spreading activation in retrieval |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Native MCP server (`agentmemory mcp`); no framework adapters documented |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Local-only (no dedicated GDPR tooling). No FIPS posture |
@@ -377,7 +386,7 @@ m3 differs on deployment simplicity and openness: zero-infrastructure local SQLi
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | ⚖️ Dual-index design |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | 🏆 ISO-temporal event log — strong for calendar-grained reasoning |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | Event-log / ISO-temporal audit trail |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | ⚖️ **95.6%** self-reported, but the **judge is unpublished** — not independently verifiableᵈ |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | ⚖️ **95.6%** self-reported, but the **judge is unpublished** — not independently verifiableᵈ |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | Not a documented feature |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🛠️ Not documented |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | On-prem posture; no dedicated GDPR tooling. No FIPS posture |
@@ -415,7 +424,7 @@ m3's edges: native MCP with a 100+-tool surface (Hindsight integrates via per-fr
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | 🏆 4-stream neural retrieval — richer, but heavier rerank cost |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ⚖️ Traceable, but not an as-of query model |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | Not a documented focus |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | **91.4%** — below m3's 92.0%, but the **judge is unpublished**, so not strictly comparableᵉ |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | **91.4%** — below m3's 92.0%, but the **judge is unpublished**, so not strictly comparableᵉ |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — graph is one of its recall strategies |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Broad — LangGraph/CrewAI/AutoGen + 40+ connectors (adapter-based, no native MCP) |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Local-only. No FIPS posture |
@@ -453,7 +462,7 @@ m3 differs mainly on reach and temporal depth. Mastra OM is memory *for the Mast
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | Observation-log retrieval over reflector-compressed history |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ⚖️ 3-date anchor, not full bitemporal |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Background reflector agents reconcile the observation log |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | 🏆 **94.9%** — exact upstream judge, directly comparable to m3's 92.0%ᶠ |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | 🏆 **94.9%** — exact upstream judge, directly comparable to m3's 92.0%ᶠ |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | Not a documented feature |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🛠️ Mastra-framework-native only |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | ⚖️ Hybrid posture. No FIPS posture |
@@ -491,7 +500,7 @@ m3's differences: a verifiable standard-setting benchmark (Memento's number is f
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | Compositional retrieval |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | 🏆 Bitemporal KG with Merkle-audit — a genuine peer on temporal modelling |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Contradiction detection with entity resolution over a Merkle-audited bitemporal graph |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | **90.8%** — but in the easier **oracle / evidence-only setting** and graded by a **loosened judge**; the standard S-setting is unpublishedᵍ |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | **90.8%** — but in the easier **oracle / evidence-only setting** and graded by a **loosened judge**; the standard S-setting is unpublishedᵍ |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — a bitemporal KG is the core abstraction |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Native MCP server + provider packages for Anthropic, OpenAI, and Gemini |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Local-only. No FIPS posture |
@@ -529,7 +538,7 @@ MemPalace advertises a spatial "memory-palace" (loci-hierarchy) architecture wit
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | ChromaDB embeddings + verbatim storage |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ❌ Verbatim only — no temporal model |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | ❌ Verbatim only; 🛠️ multi-agent writes can fail silently |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | ⚠️ No QA figure published — its headline 96.6% is **R@5 recall, a different metric**, and independently attributed to ChromaDB rather than the architectureʰ |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | ⚠️ No QA figure published — its headline 96.6% is **R@5 recall, a different metric**, and independently attributed to ChromaDB rather than the architectureʰ |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | Loci hierarchy rather than an entity graph |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | Not documented |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Not documented. No FIPS posture |
@@ -560,7 +569,7 @@ m3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | Depends on the configured backend store |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ❌ No bitemporal / as-of queries |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | 🏆 Manual / LLM-driven via procedural memory |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | Not published |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@8 / 100%@20) | Not published |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | ❌ A store abstraction, not a graph |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Native to LangChain/LangGraph; no MCP. m3 implements its `BaseStore`, so LangMem runs on m3 unchanged |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Custom implementation required. No FIPS posture |
@@ -626,7 +635,7 @@ for how we hold every entry (including m3's own) to source-of-truth.
 | Breadth of per-framework connectors (LangGraph / CrewAI / AutoGen + 40 more) | [**Hindsight**](#vs-hindsight) |
 | Memory for agents already built on the Mastra framework | [**Mastra OM**](#vs-mastra-om) |
 | Merkle-audited bitemporal knowledge graph, native MCP, no framework adapters needed | [**Memento**](#vs-memento) |
-| Retrieval accuracy on the like-for-like metric (99.2% SHR@10, 100% @ k=20) | **m3-Memory** |
+| Retrieval accuracy on the like-for-like metric (99.2% SHR@8, 100% @ k=20) | **m3-Memory** |
 
 ---
 

@@ -598,7 +598,9 @@ Use this to diagnose distribution between paths:
   embedder is raising mid-call (look in stderr).
 - Lots of `http-primary` -> both in-process AND fallback failed; check
   service status and `m3_core_rs.embed_backend_label()`.
-- All `http-primary` from the start -> `M3_EMBED_GGUF` is probably unset.
+- All `http-primary` from the start -> in-process was never enabled (needs
+  `M3_EMBED_INPROC=1` or a permitting `.embed_config.json`, plus a GGUF) and
+  the fallback server is unreachable.
 
 Both helpers are thread-safe. `_embed` bumps by 1; `_embed_many` attributes
 one bump per text along the path that served it.
@@ -614,7 +616,7 @@ defaults:
 
 | Variable                    | Role                                                               |
 |-----------------------------|--------------------------------------------------------------------|
-| `M3_EMBED_GGUF`             | Path to bge-m3 GGUF. Setting this enables the in-process path.     |
+| `M3_EMBED_GGUF`             | Path to bge-m3 GGUF for the in-process path (which also needs `M3_EMBED_INPROC=1` or `.embed_config.json`). |
 | `M3_EMBED_GGUF_MODEL_TAG`   | `embed_model` cache-namespace tag for in-process + fallback rows.  |
 | `M3_EMBED_URL`              | Legacy primary HTTP endpoint (LM Studio, llama-server).            |
 | `M3_EMBED_FALLBACK_URL`     | CPU HTTP fallback endpoint (default `http://127.0.0.1:8082`).      |
@@ -674,8 +676,11 @@ Get-Process -Id <pid>
 ```
 
 Either kill the offender, or change `M3_EMBED_SERVER_PORT` in
-`%PROGRAMDATA%\m3-embed-server\config.toml` and restart the service. Also
-update `M3_EMBED_FALLBACK_URL` in your m3-memory shell env to match.
+`%PROGRAMDATA%\m3-embed-server\config.toml` and restart the service. Then
+point m3 at the new port with `m3 embedder shared --port <port>` (writes
+`.embed_config.json`) and update `M3_EMBED_FALLBACK_URL` wherever it is set in
+the MCP server registration's `env` — background services don't read your
+shell env.
 
 ### Fallback chain not behaving as expected
 

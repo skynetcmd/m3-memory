@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory — Quick Start
 
-Get persistent memory running with your MCP agent in under five minutes. Under the hood you're getting a benchmark-leading hybrid retriever (FTS5 + BGE-M3 vector + MMR) — **99.2% retrieval @ k=10 on LongMemEval-S**, SOTA-class recall running entirely on your CPU.
+Get persistent memory running with your MCP agent in under five minutes. Under the hood you're getting a benchmark-leading hybrid retriever (FTS5 + BGE-M3 vector + MMR) — **99.2% retrieval @ k=8 on LongMemEval-S**, SOTA-class recall running entirely on your CPU.
 
 This is the generic quick start. For OS-specific walkthroughs see
 [QUICKSTART_LINUX.md](./QUICKSTART_LINUX.md),
@@ -42,6 +42,9 @@ as root; sudo only for OS package install.
 
 15 `/m3:*` slash commands (`/m3:health`, `/m3:search`, `/m3:save`, `/m3:status`, …), the `m3:curate-memory` and `m3:curate-chatlog` subagents, and auto-wired Stop + PreCompact chatlog hooks. See [claude_code_plugin.md](./claude_code_plugin.md) for the full reference.
 
+> Register m3 with Claude Code via the plugin **or** `m3 setup`, not both —
+> both gives two live m3 servers. `m3 doctor --fix --fix-hooks` converges back to one.
+
 ### Google Antigravity users — install as a plugin
 
 ```bash
@@ -54,7 +57,7 @@ agy plugin install https://github.com/skynetcmd/m3-memory
 
 ```powershell
 # Prerequisites (elevated PowerShell once):
-winget install -e --id Python.Python.3.12
+winget install -e --id Python.Python.3.14
 winget install -e --id Git.Git
 winget install -e --id SQLite.SQLite
 
@@ -67,7 +70,7 @@ m3 setup
 ```
 
 > **`m3` not found after install?** pip puts `m3.exe` in
-> `%APPDATA%\Python\Python312\Scripts\` — add that to your user PATH, or
+> `%APPDATA%\Python\Python314\Scripts\` — add that to your user PATH, or
 > use pipx which handles PATH automatically. Full details:
 > [install_windows.md § Common gotchas](./install_windows.md#common-gotchas).
 
@@ -122,8 +125,8 @@ to list a domain's tools.
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, diagnostics, admin). Only the 20 essentials load at MCP startup
-> (~6,151 tokens, ~3.1% of a 200K window; the full catalog loads on demand). The
+> conversations, diagnostics, admin). Only 10 tools load at MCP startup
+> (~3,962 tokens, ~2% of a 200K window; the rest load on demand). The
 > agent pulls in a domain on demand — just say "load the files tools" and it does.
 > Set `M3_TOOLS_LAZY=0` to disable.
 
@@ -148,10 +151,11 @@ without further action — the CLI auto-detects a sibling
 
 ## 2️⃣ The embedder is already set up
 
-`m3 setup` installed the sovereign CPU embedder (BGE-M3, running
-**in-process** via the m3-core-rs `oxidation` extra — llama.cpp linked
-directly, zero IPC, so there's no separate service to run or monitor;
-a local HTTP embed server exists only as an automatic fallback). No
+`m3 setup` installed the sovereign CPU embedder: BGE-M3 served by the
+**shared embed server** (`m3-embed-server`, from the m3-core-rs wheel) on
+`127.0.0.1:8082`, registered as a service so every m3 process shares one
+model in RAM. In-process embedding is opt-in (`M3_EMBED_INPROC=1`) — see
+[EMBED_DEPLOYMENT.md](EMBED_DEPLOYMENT.md). No
 LM Studio, no Ollama, no GPU, no internet required for embedding to work.
 
 For ~10–50× faster embeddings, the wizard offers an opt-in GPU build
@@ -194,20 +198,17 @@ embedding-based memory, skip this — those features simply become no-ops.
 `m3 setup` wires every agent it detects on PATH. If you skipped the
 wizard or add an agent later, here's the manual recipe per agent.
 
-**Claude Code** — the [plugin route](./claude_code_plugin.md) is recommended. Manual:
+**Claude Code** — the [plugin route](./claude_code_plugin.md) is recommended.
+Use the plugin **or** `m3 setup`'s registration, not both (both gives two live
+servers; `m3 doctor --fix --fix-hooks` converges back to one). Manual:
 
 ```bash
-claude mcp add --scope user memory m3
+claude mcp add --scope user -- m3_memory m3
 ```
 
-Or edit `~/.claude/settings.json`:
-```json
-{
-  "mcpServers": {
-    "memory": { "command": "m3" }
-  }
-}
-```
+Don't put an `mcpServers` block in `~/.claude/settings.json` — Claude Code
+doesn't read MCP servers from that file (only `~/.claude.json` via
+`claude mcp add`, `.mcp.json`, and plugins).
 
 **Gemini CLI** (`~/.gemini/settings.json`):
 ```json
@@ -436,7 +437,7 @@ If the memory you wrote comes back, everything is working.
 | "Embedding failed" or "Connection refused" | Sovereign CPU embedder not running | `m3 embedder status`; if not running: `m3 embedder install-gpu` (installs binary), then `m3 embedder install` (registers service), or just `m3 embedder start` if already installed |
 | "m3: command not found" | Package not on PATH | `pip install m3-memory` and check `which m3` (`mcp-memory` is the backwards-compatible alias) |
 | Memory tools don't appear in agent | Config not loaded | Check JSON syntax, ensure `"mcpServers"` key, restart agent fully |
-| Search returns nothing in new session | Different working directory | Run from same directory, or set `M3_MEMORY_ROOT` env var |
+| Search returns nothing in new session | Server and hooks reading different engine roots | Run `m3 doctor`; keep `M3_ENGINE_ROOT` / `M3_CONFIG_ROOT` the same everywhere (default `~/.m3/engine`, `~/.m3/config`) |
 
 ---
 

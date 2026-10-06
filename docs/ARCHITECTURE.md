@@ -240,8 +240,10 @@ similarity. Gated by `M3_QUERY_TYPE_ROUTING`, **on by default**.
 
 **The cross-encoder reranker** is opt-in (`rerank=True`). It scores each
 query/result *pair* with a distilled ms-marco model rather than comparing
-pre-computed vectors, which is more accurate and far more expensive
-(~50 ms/pair on GPU, ~200 ms on CPU). The model is lazy-loaded — importing the
+pre-computed vectors, which is more accurate and more expensive: on the
+[PERFORMANCE.md](PERFORMANCE.md#search) reference machine it adds ~3.7 ms p50 to a
+k=10 search, and the cost grows with the number of pairs scored and on CPU-only
+hosts. The model is lazy-loaded — importing the
 search module does **not** import `sentence_transformers`, so callers that never
 rerank pay nothing at cold start.
 
@@ -261,7 +263,7 @@ Both expansions reuse the standard embedding path for scoring, so they integrate
 
 ### Entity-Relation Graph (on by default, gate `M3_ENABLE_ENTITY_GRAPH`)
 
-A post-write stage extracts typed entities and relationships from stored memory items using a configured small language model (SLM). It is **on by default** (`M3_ENABLE_ENTITY_GRAPH=1`) but only does work when an extraction SLM endpoint is reachable; with none configured the queue no-ops. Set `M3_ENABLE_ENTITY_GRAPH=0` to disable. Each entity becomes a row in a separate `entities` table, with mention links in `memory_item_entities` and typed relationships in `entity_relationships`. The extraction is **semaphore-gated** (default concurrency: 2), **non-blocking** (queue-on-miss), and **resolution-on-write** (3-tier cascade: exact → token-Jaccard fuzzy → embedding cosine; no LLM tiebreaker).
+A post-write stage extracts typed entities and relationships from stored memory items using a configured small language model (SLM). It is **on by default** (`M3_ENABLE_ENTITY_GRAPH=1`) but only does work when an extraction SLM endpoint is reachable; with none configured the queue no-ops. Set `M3_ENABLE_ENTITY_GRAPH=0` to disable. (This SLM path is the cognitive loop's `entities` pass. The separate pluggable extractor used for opt-in write-through extraction and queue drains is selected by `M3_EXTRACTION_TYPE` — default `rule_based`, with LLM and custom-script backends also shipped.) Each entity becomes a row in a separate `entities` table, with mention links in `memory_item_entities` and typed relationships in `entity_relationships`. The extraction is **semaphore-gated** (default concurrency: 2), **non-blocking** (queue-on-miss), and **resolution-on-write** (3-tier cascade: exact → token-Jaccard fuzzy → embedding cosine; no LLM tiebreaker).
 
 Entity types and predicates are defined by a **swappable vocabulary profile**, so the graph schema is user-configurable without code changes: set `M3_ENTITY_VOCAB_YAML` (or `--entity-vocab-yaml`) to point at your own YAML profile — the stock default lives at `config/lists/entity_graph_default.yaml`. The default vocabulary has 42 entity types — people and organizations (`person`, `organization`, `place`), time (`date`, `datetime`, `event`), infrastructure (`host`, `ip_address`, `port`, `service`, `container`, …), code (`function`, `module`, `file_path`, `env_var`, …) and m3's own records (`memory_id`, `memory_type`, `task_id`, …) — and a 34-predicate set spanning general (`mentions`, `same_as`, `supersedes`, …), human-life (`works_at`, `located_in`, `family_of`, `owns`, …), and technical (`runs_on`, `defined_in`, `measured_on`, …) domains. Two alternative profiles ship beside it: `entity_graph_m3.yaml` (33 types, 21 predicates) and `entity_graph_v2.yaml` (11 types, 16 predicates). A custom profile can define a domain-specific type/predicate set by editing the YAML; the chosen vocabulary is validated at extraction time.
 
@@ -384,8 +386,8 @@ Eleven passes, each independently skippable (`--skip-<name>`):
 | `classify` | Resolve `type="auto"` writes into a concrete memory type |
 | `embed` | Generate embeddings for rows written without one |
 | `files_extract` | Drain queued fact-extraction for ingested files |
-| `consolidate` | Merge groups of old same-type memories into summaries |
-| `distill` | Compress long threads into key points |
+| `consolidate` | Belief-consolidation pass — roll up groups of stale episodic memories (default `observation`) into `belief` memories linked to their sources; writes only with `M3_CONSOLIDATION_AUTO=1` (else dry-run) |
+| `distill` | Procedural-distillation pass — roll up completed task runs into reusable `procedure` memories; writes only with `M3_DISTILL_AUTO=1` (else dry-run) |
 | `prune` | Decay and prune abandoned chat-log conversations |
 | `sync` | Push/pull against the PostgreSQL warehouse (≥ 1h apart) |
 | `maintenance` | Housekeeping — indexes, integrity, retention (≥ 1h apart) |
@@ -512,7 +514,7 @@ m3 uses a local LLM for features that benefit from language understanding. Any s
 - **Conversation summarization** — compress long threads into key points
 - **Memory consolidation** — merge groups of old memories into summaries, reducing noise while preserving knowledge
 
-All LLM features run locally. No external API calls.
+All LLM features run locally by default. Cloud endpoints are opt-in.
 
 ---
 
