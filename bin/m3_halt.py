@@ -1115,6 +1115,10 @@ def _proc_create_time(pid: int) -> "float | None":
         return None
 
 
+# Public name for callers outside this module (the loop watchdog).
+proc_create_time = _proc_create_time
+
+
 def _lock_path(role: str, engine_root: Optional[str] = None) -> Path:
     return _internal_dir(engine_root) / f"{_safe_role(role)}{_LOCK_SUFFIX}"
 

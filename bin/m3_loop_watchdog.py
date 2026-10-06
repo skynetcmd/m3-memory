@@ -169,6 +169,22 @@ def loop_process_is_registered() -> bool | None:
         return None
 
 
+def newest_loop_age() -> float | None:
+    """Seconds since the newest cognitive-loop process started, or None if no
+    loop process is found or its start time cannot be read.
+
+    Uses the full discovery (registry and command-line scan), so a loop that
+    launched a moment ago and has not registered yet still counts."""
+    try:
+        import m3_halt
+        procs = [p for p in m3_halt.list_all_db_writers(engine_root=str(ENGINE_ROOT))
+                 if m3_halt.base_role(getattr(p, "role", "")) == _HALT_ROLE]
+        started = [t for t in (m3_halt.proc_create_time(p.pid) for p in procs) if t]
+        return time.time() - max(started) if started else None
+    except Exception:  # noqa: BLE001 — unknown, not evidence either way
+        return None
+
+
 def heartbeat_age() -> tuple[float | None, int]:
     """(age_seconds, interval_s). age is None when the file is absent or
     unreadable — explicitly 'unknown', never 'stale'."""
@@ -305,6 +321,15 @@ def main() -> int:
         return 0
 
     if age > stale_after:
+        # A heartbeat older than the running loop says nothing about THAT loop:
+        # one started since (by setup, an upgrade or launchd) has not had a
+        # cycle to write one yet. Terminating it then only made launchd
+        # throttle its relaunch by 60 s, mid-upgrade.
+        started = newest_loop_age()
+        if started is not None and started < stale_after:
+            log(f"heartbeat is {age:.0f}s old, but the loop started {started:.0f}s "
+                f"ago — giving it until {stale_after:.0f}s to cycle")
+            return 0
         return restart(f"heartbeat is {age:.0f}s old (> {stale_after:.0f}s = "
                        f"{_MISSED_CYCLES} x {interval}s interval) — process may "
                        f"be alive but is not completing cycles")

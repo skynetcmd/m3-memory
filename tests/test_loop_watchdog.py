@@ -281,3 +281,20 @@ def test_watchdog_stands_down_when_halt_state_is_unreadable(tmp_path, monkeypatc
     monkeypatch.setattr(wd, "LOG", tmp_path / "wd.log", raising=False)
     monkeypatch.setitem(sys.modules, "m3_halt", None)  # import raises
     assert wd.halt_active() is True
+
+
+@pytest.mark.parametrize("loop_age,expect_restart", [(20.0, False), (5000.0, True), (None, True)])
+def test_a_stale_heartbeat_does_not_kill_a_loop_that_just_started(monkeypatch, loop_age, expect_restart):
+    """The heartbeat file outlives the process that wrote it. A loop started
+    since (by setup or an upgrade) has not cycled yet; terminating it made
+    launchd throttle the relaunch by 60 s in the middle of an upgrade."""
+    import m3_loop_watchdog as wd
+    monkeypatch.setattr(wd, "halt_active", lambda: False)
+    monkeypatch.setattr(wd, "_tick_embed_watchdog", lambda: None)
+    monkeypatch.setattr(wd, "heartbeat_age", lambda: (2505.0, 300))
+    monkeypatch.setattr(wd, "newest_loop_age", lambda: loop_age)
+    restarts = []
+    monkeypatch.setattr(wd, "restart", lambda reason: restarts.append(reason) or 0)
+    monkeypatch.setattr(wd, "log", lambda msg: None)
+    assert wd.main() == 0
+    assert bool(restarts) is expect_restart
