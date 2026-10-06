@@ -2684,8 +2684,12 @@ def main():
             sys.path.insert(0, str(script_dir))
             from m3_sdk import kill_stale_daemons
             # Only daemons older than this payload run old code; ones started
-            # since (e.g. by the setup run that invoked us) are left alone.
-            reaped = kill_stale_daemons(started_before=os.path.getmtime(__file__))
+            # since (e.g. by the setup run that invoked us) are left alone. The
+            # Rust embed server does not run payload code at all (see
+            # keeps_rust_embed_server); its supervisor would only restart it.
+            reaped = kill_stale_daemons(
+                started_before=os.path.getmtime(__file__),
+                exclude_roles=["embed-server"] if keeps_rust_embed_server() else None)
             killed = [r for r in reaped if r["killed"]]
             stuck = [r for r in reaped if not r["killed"]]
             if killed:

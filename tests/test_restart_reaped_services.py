@@ -118,6 +118,7 @@ def test_unix_install_restarts_what_the_reap_stopped(monkeypatch):
 
     monkeypatch.setattr(m3_sdk, "kill_stale_daemons", lambda **k: [
         {"role": "embed-server", "pid": 1, "killed": True}])
+    monkeypatch.setattr(isch, "keeps_rust_embed_server", lambda: False)   # Python server
     monkeypatch.setattr(isch, "_reaped_roles", set())
     monkeypatch.setattr(isch, "_os_name", lambda: "Linux")
     monkeypatch.setattr(isch, "_platform_key", lambda: "linux")
@@ -244,3 +245,27 @@ def test_waiter_never_watches_nothing():
     ids = [a for a in args if a != "--agent-id"]
     assert ids, "resolved an empty inbox list"
     assert args[0] == "--agent-id"
+
+
+def test_the_install_reap_leaves_a_registered_rust_embed_server(monkeypatch):
+    """The Rust server runs no payload code; reaping it only made its supervisor
+    restart it in the middle of every macOS/Linux upgrade."""
+    import m3_sdk
+
+    seen = {}
+
+    def fake_kill(**k):
+        seen.update(k)
+        return []
+
+    monkeypatch.setattr(m3_sdk, "kill_stale_daemons", fake_kill)
+    monkeypatch.setattr(isch, "keeps_rust_embed_server", lambda: True)
+    monkeypatch.setattr(isch, "_reaped_roles", set())
+    monkeypatch.setattr(isch, "_os_name", lambda: "Linux")
+    monkeypatch.setattr(isch, "_platform_key", lambda: "linux")
+    monkeypatch.setattr(isch, "install_unix_dashboard", lambda *a, **k: None)
+    monkeypatch.setattr(isch, "_run", lambda cmd, **k: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+    monkeypatch.setattr(isch, "_confirm_service_live", lambda *a, **k: True)
+    monkeypatch.setattr(sys, "argv", ["install_schedules.py", "--add", "dashboard"])
+    isch.main()
+    assert seen.get("exclude_roles") == ["embed-server"]
