@@ -2,7 +2,7 @@
 
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3 Memory — Comparison Guide
 
-> Last updated: July 2026. Corrections welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
+> Last updated: October 2026. Corrections welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
 
 Several tools address agentic memory. This document explains where m3 Memory fits relative to each, and when a different tool is the better choice.
 
@@ -68,14 +68,18 @@ If "the LLM should decide what's worth remembering" matches your worldview, a ti
 > **Legend:** 🏆 = the system has this capability and does it well · 👑 = best-in-class here — either a rare stand-out few offer (e.g. FIPS-ready crypto, bundled in-process embedder) or a shared capability m3 does better (e.g. deterministic contradiction supersession, native MCP, drop-in LangChain) · ⚖️ = has the capability but with a caveat that makes it hard to compare (e.g. a benchmark graded by a self-authored or unpublished judge) · 🛠️ = has it, but with a notable limitation or setup burden (needs infra, undocumented, immature) · ❌ = does not have it. Where a competitor also has a feature it earns 🏆; m3's 👑 marks where it leads. A benchmark score earns 🏆 only when it is a real, comparable number (standard setting, published/strict judge) — a figure from a loosened or unpublished judge gets ⚖️, not 🏆, no matter how high. (Temporal/bitemporal is a genuine tie with graph-native systems like Zep/Graphiti — both earn 🏆; m3's edge there is doing it local-first with no graph DB to run.) Applies to every table below.
 
 > **📎 Benchmark sourcing.** A LongMemEval-S QA score is comparable only when
-> graded by the same judge, so each figure below carries its provenance. m3,
-> agentmemory, and Mastra OM grade with the **unmodified upstream judge** and are
-> mutually comparable; the others are not. Full analysis:
+> graded by the same judge **in the same setting**, so each figure below carries
+> its provenance. m3 and Mastra OM grade standard LongMemEval-S with the
+> **unmodified upstream judge** and are mutually comparable; the others are not
+> (agentmemory uses the same judge but a different setting — see ᶜ). Full analysis:
 > [Sovereign Memory Systems benchmark reference](M3_Comparison_Table.md).
+> LongMemEval-S has no held-out development split, so every QA figure here comes
+> from a configuration developed against the same 500 questions. The distinctions
+> drawn below concern the setting, the judge, and what the prompts contain.
 >
 > ᵃ **m3** — 92.0% QA (no oracle; SHR=100% @ k=20), unmodified upstream LongMemEval judge.
 > ᵇ **Mem0** — ~94% self-reported (94.4% [research page](https://mem0.ai/research), 94.8% [repo](https://github.com/mem0ai/mem0)); independent/older evaluations put earlier Mem0 at ~67% ([arXiv 2504.19413](https://arxiv.org/abs/2504.19413)). Judge is **modified and more lenient** (single unified prompt: "judge by MEANING, not exact words", explicit pro-yes bias, superset answers accepted), so it is **not** comparable to strict-judge numbers. Answer model undisclosed as of 2026-06-22.
-> ᶜ **agentmemory** — 96.2% QA (481/500), Claude Opus 4.6 answerer, GPT-4o judge; judge is upstream Wu exact (5/6 templates byte-identical, temporal template only *adds* a stricter `Reference Date:` line). The 96.2% is driven by answerer-side prompt tuning, not a loosened judge. Both numbers are answer-model-dependent. Source: [github.com/JordanMcCann/agentmemory](https://github.com/JordanMcCann/agentmemory). *Verified 2026-06-22.*
+> ᶜ **agentmemory** — 96.2% QA (481/500), Claude Opus 4.6 answerer, GPT-4o judge; the judge is upstream (5/6 templates byte-identical, the temporal template *adds* a `Reference Date:` line). The setting is not: its runner loads the **oracle split** (evidence sessions only), reads each question's `question_type` label to steer prompts and ingestion, and its answer prompts contain LongMemEval test questions and their answers — see the [caution](#vs-agentmemory). Not comparable to standard S-setting numbers. Source: [github.com/JordanMcCann/agentmemory](https://github.com/JordanMcCann/agentmemory). *Judge verified 2026-06-22; setting verified 2026-10-05.*
 > ᵈ **Chronos** — 95.6% QA (self-reported, arXiv preprint [2603.16862](https://arxiv.org/abs/2603.16862), not peer-reviewed). The paper says it implements "LongMemEval's LLM judge" but shows no prompt text, names no judge model, and releases no code (it even flags "LLM-as-judge variability"). *Figure verified; judge unconfirmed 2026-06-23.*
 > ᵉ **Hindsight** — 91.4% QA, Gemini 3 Pro backbone. The public [hindsight-benchmarks](https://github.com/vectorize-io/hindsight-benchmarks) repo ships LongMemEval *results* but no LongMemEval judge code (the only judge it ships is a lenient LoCoMo one). *Figure verified; judge unconfirmed 2026-06-23.*
 > ᶠ **Mastra OM** — 94.9% QA (94.87%), gpt-5-mini answerer, GPT-4o judge; eval code carries "copied EXACTLY from the official LongMemEval benchmark … Do not modify these prompts" — the six templates match verbatim. Source: [mastra.ai/research/observational-memory](https://mastra.ai/research/observational-memory). *Verified 2026-06-22.*
@@ -288,11 +292,43 @@ m3 is production-and-operations oriented: typed memories, bitemporal supersessio
 
 <a id="vs-agentmemory"></a>
 
-## ⚔️ m3-Memory vs agentmemory
+## ⚔️ m3-Memory vs agentmemory ⚠️
 
-agentmemory (Jordan McCann, [github.com/JordanMcCann/agentmemory](https://github.com/JordanMcCann/agentmemory)) is a local-first, sovereign memory system that currently sits **#1 on the published LongMemEval-S leaderboard** (96.2% QA, graded with the exact upstream judge). Like m3 it's Native Python over local SQLite with a Merkle-tree integrity model and deterministic extraction — a genuine peer on sovereignty, and the strongest published retrieval number in the cohort.
+> **⚠️ Caution — its benchmark figure is not comparable.** agentmemory reports
+> 96.2% on LongMemEval. Its benchmark runner, at the commit it published that
+> result with ([`3aa3b83`](https://github.com/JordanMcCann/agentmemory/tree/3aa3b8389896f81dd813fdf9176ef3ca122d809e)),
+> shows three things we verified against LongMemEval's public data on 2026-10-05:
+>
+> - **It runs on the oracle split, not LongMemEval-S.** The runner loads
+>   `longmemeval_oracle.json` ([L713](https://github.com/JordanMcCann/agentmemory/blob/3aa3b8389896f81dd813fdf9176ef3ca122d809e/run_longmemeval_full.py#L713)),
+>   which LongMemEval defines as *"oracle retrieval. Only the evidence sessions are
+>   included in the history"* ([LongMemEval README](https://github.com/xiaowu0162/LongMemEval)).
+>   Each question arrives with only the sessions that contain its answer, so the
+>   score measures answering from supplied evidence, not finding it.
+> - **The benchmark's answer-type label steers the pipeline.** The runner reads each
+>   case's `question_type` from the dataset ([L1708](https://github.com/JordanMcCann/agentmemory/blob/3aa3b8389896f81dd813fdf9176ef3ca122d809e/run_longmemeval_full.py#L1708))
+>   and uses it to choose the answer prompt, the context budget and the ingestion
+>   path. A deployed system is never told a question's type.
+> - **The answer prompts contain LongMemEval test items and their answers.**
+>   [L1015](https://github.com/JordanMcCann/agentmemory/blob/3aa3b8389896f81dd813fdf9176ef3ca122d809e/run_longmemeval_full.py#L1015)
+>   quotes test question `71017277` verbatim with the answer "from my aunt" (gold:
+>   *my aunt*);
+>   [L1250](https://github.com/JordanMcCann/agentmemory/blob/3aa3b8389896f81dd813fdf9176ef3ca122d809e/run_longmemeval_full.py#L1250)
+>   quotes `37f165cf` verbatim with "856 pages" (gold: *856*);
+>   [L1011](https://github.com/JordanMcCann/agentmemory/blob/3aa3b8389896f81dd813fdf9176ef3ca122d809e/run_longmemeval_full.py#L1011),
+>   [L1322](https://github.com/JordanMcCann/agentmemory/blob/3aa3b8389896f81dd813fdf9176ef3ca122d809e/run_longmemeval_full.py#L1322) and
+>   [L1341](https://github.com/JordanMcCann/agentmemory/blob/3aa3b8389896f81dd813fdf9176ef3ca122d809e/run_longmemeval_full.py#L1341)
+>   state the gold answer or grading rubric of `gpt4_59149c78`, `1c0ddc50` and
+>   `caf03d32`.
+>
+> Its judge is the upstream one (five templates byte-identical; the temporal
+> template adds a reference date). The concern is the setting and the prompts, not
+> the grading. This entry compares the software on its features; the 96.2% should
+> not be read against LongMemEval-S results, including m3's.
 
-m3's differences are breadth over a single-benchmark peak. Both ship a native MCP server and both scale to PostgreSQL; m3 adds framework adapters (LangChain/CrewAI/PydanticAI), bitemporal *valid-time* as-of queries (agentmemory's temporal signature is integrity-oriented rather than an as-of query model), first-class GDPR tooling, and the auto-generated wiki. On raw retrieval m3 leads on the like-for-like SHR metric (99.2%@10 / 100%@20); on published QA headline agentmemory's 96.2% edges m3's 92.0% — though both are answer-model-dependent and graded by the same strict judge, so it's the closest thing to an apples-to-apples QA number in the table.
+agentmemory (Jordan McCann, [github.com/JordanMcCann/agentmemory](https://github.com/JordanMcCann/agentmemory)) is a local-first, sovereign memory system: native Python over local SQLite with a Merkle-tree integrity model and deterministic extraction — a genuine peer on sovereignty.
+
+m3's differences are breadth. Both ship a native MCP server and both scale to PostgreSQL; m3 adds framework adapters (LangChain/CrewAI/PydanticAI), bitemporal *valid-time* as-of queries (agentmemory's temporal signature is integrity-oriented rather than an as-of query model), first-class GDPR tooling, and the auto-generated wiki. agentmemory's retrieval mixes six signals to m3's three pillars. It publishes no retrieval figure on standard LongMemEval-S, and its QA figure comes from the oracle setting (see caution), so there is no like-for-like benchmark comparison between the two.
 
 | Feature | m3-Memory | agentmemory |
 |---|---|---|
@@ -303,7 +339,7 @@ m3's differences are breadth over a single-benchmark peak. Both ship a native MC
 | **Search / retrieval** | 🏆 3-pillar hybrid: FTS5 (BM25) + vector cosine + MMR diversity re-rank | 🏆 6-signal hybrid — a broader signal mix than m3's 3 pillars |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain — local-first, no graph DB to run | ⚖️ Temporal signature is integrity-oriented, not an as-of query model |
 | **Contradiction handling** | 👑 Heuristic auto-detect on write **plus** deterministic explicit `memory_supersede` — soft-delete, `supersedes` edge, history preserved | Merkle-tree integrity + consolidation pipeline; no documented supersession model |
-| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | 🏆 **96.2%** — #1 published, same strict upstream judge as m3ᶜ |
+| **Published LongMemEval-S (QA)** | **92.0%** — standard S-setting, no oracle, unmodified upstream judgeᵃ (retrieval SHR 99.2%@10 / 100%@20) | ⚠️ No standard S-setting figure published — its 96.2% is on the **oracle split** (evidence sessions only), with label-steered prompts that contain test answers; not comparableᶜ |
 | **Knowledge graph** | 🏆 Automatic entity extraction (cognitive loop) + 11 relationship types; query-time entity-graph expansion feeds retrieval scoring (BFS to 3 hops), off-switchable | 🏆 Yes — auto entity extraction + graph spreading activation in retrieval |
 | **Agent integration** | 👑 Native MCP (100+ tools) + LangChain/LangGraph, CrewAI, PydanticAI adapters | 🏆 Native MCP server (`agentmemory mcp`); no framework adapters documented |
 | **Compliance tooling** | 👑 `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as MCP tools; FIPS 140-3 deployment-ready crypto boundaryᵛ | Local-only (no dedicated GDPR tooling). No FIPS posture |
@@ -317,7 +353,7 @@ m3's differences are breadth over a single-benchmark peak. Both ship a native MC
 - You want to scale to PostgreSQL, or project memory to a portable wiki.
 
 ### When to choose agentmemory over m3-Memory
-- The single published LongMemEval-S QA peak is your deciding factor.
+- You want Merkle-tree integrity auditing of the memory store.
 - You don't need framework adapters, as-of temporal queries, or GDPR tooling — and its 6-signal hybrid retrieval appeals.
 
 <sub>[↑ Back to top](#top)</sub>
@@ -585,7 +621,7 @@ for how we hold every entry (including m3's own) to source-of-truth.
 | Bitemporal memory + temporal queries, local-first, no graph DB to run | **m3-Memory** |
 | Short-term + long-term memory unified, separate, or searched together by config | **m3-Memory** |
 | Researching self-organizing / emergent memory structures | [**A-MEM**](#vs-a-mem) |
-| The single highest published LongMemEval-S QA score, sovereign, MCP not required | [**agentmemory**](#vs-agentmemory) |
+| Merkle-audited local memory with 6-signal hybrid retrieval, native MCP | [**agentmemory**](#vs-agentmemory) |
 | Calendar-grained / ISO-temporal event reasoning, on-prem service stack acceptable | [**Chronos**](#vs-chronos) |
 | Breadth of per-framework connectors (LangGraph / CrewAI / AutoGen + 40 more) | [**Hindsight**](#vs-hindsight) |
 | Memory for agents already built on the Mastra framework | [**Mastra OM**](#vs-mastra-om) |
