@@ -244,8 +244,8 @@ async def test_doctor_cold_cascade_slo(monkeypatch):
     assert len(spans) == 4, spans
     # Parallel lands near the slowest probe, sequential near the sum: require the
     # wall to sit in the lower half of that gap (0.25s floor for scheduling
-    # noise). A fixed fraction of the sum failed parallel runs whenever one
-    # probe dominated (3.35s wall, 3.35s slowest, 3.87s sum on claude-dev).
+    # noise). A fixed fraction of the sum fails a parallel run whenever one
+    # probe dominates.
     gap = total - slowest
     assert elapsed < slowest + 1.0 and elapsed < slowest + max(0.5 * gap, 0.25), (
         f"COLD cascade took {elapsed:.1f}s with probes {spans} "
@@ -406,3 +406,36 @@ async def test_doctor_fix_mode():
     # At least some action should succeed or be skipped.
     assert out_active["summary"] in {"ok", "nothing_to_do", "partial", "failed"}
 
+
+
+@pytest.mark.skipif(__import__("sqlite3").sqlite_version_info < (3, 44, 0),
+                    reason="content comparison needs SQLite 3.44+")
+def test_fts_check_spots_an_index_out_of_step_with_its_content(tmp_path):
+    """doctor --fix rebuilds the FTS5 index only when it no longer matches the
+    content; the check must catch a desync that the plain integrity-check misses."""
+    import sqlite3
+
+    import memory.doctor as d
+    db = tmp_path / "m.db"
+    c = sqlite3.connect(db)
+    c.executescript("""
+        CREATE TABLE memory_items (title TEXT, content TEXT);
+        CREATE VIRTUAL TABLE memory_items_fts USING fts5(
+            title, content, content=memory_items, content_rowid=rowid);
+        INSERT INTO memory_items VALUES ('a', 'alpha'), ('b', 'beta');
+        INSERT INTO memory_items_fts(memory_items_fts) VALUES('rebuild');
+    """)
+    c.commit()
+    assert d._fts5_index_matches_content(str(db)) is True
+    c.execute("UPDATE memory_items SET content = 'changed' WHERE title = 'a'")  # no trigger
+    c.commit()
+    c.close()
+    assert d._fts5_index_matches_content(str(db)) is False
+
+
+def test_fts_check_answers_rebuild_on_old_sqlite(monkeypatch, tmp_path):
+    import sqlite3
+
+    import memory.doctor as d
+    monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 37, 2))
+    assert d._fts5_index_matches_content(str(tmp_path / "none.db")) is False

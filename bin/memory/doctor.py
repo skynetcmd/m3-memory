@@ -418,6 +418,32 @@ def _embed_backfill_script() -> str:
     )
 
 
+def _fts5_index_matches_content(db_path: str) -> bool:
+    """True when FTS5 confirms memory_items_fts matches memory_items.
+
+    A read-only check, several times cheaper than a rebuild and without the
+    write. Only `integrity-check` with rank=1 compares an external-content index
+    against its content table, and only from SQLite 3.44; older SQLite would
+    report a stale index as consistent, so it answers False (rebuild).
+    """
+    import sqlite3 as _sq
+    if _sq.sqlite_version_info < (3, 44, 0):
+        return False
+    try:
+        # Not mode=ro: the check is issued as an INSERT, which a read-only
+        # connection refuses. It writes nothing; roll back regardless.
+        conn = _sq.connect(db_path, timeout=5.0)
+        try:
+            conn.execute(
+                "INSERT INTO memory_items_fts(memory_items_fts, rank) VALUES('integrity-check', 1)")
+            return True
+        finally:
+            conn.rollback()
+            conn.close()
+    except Exception:  # noqa: BLE001 — corrupt, stale, or unreadable: rebuild
+        return False
+
+
 async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
     """Run the doctor in repair mode — attempt to auto-fix detected issues.
 
@@ -556,7 +582,9 @@ async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
     except Exception:
         fts_exists = False
 
-    if fts_exists:
+    if fts_exists and not dry_run and _fts5_index_matches_content(str(db_path)):
+        _record("rebuild_fts5", "skipped", "FTS5 index matches its content; no rebuild needed")
+    elif fts_exists:
         if dry_run:
             _record("rebuild_fts5", "skipped", "dry_run=True; would run INSERT INTO memory_items_fts(memory_items_fts) VALUES('rebuild')")
         else:
@@ -700,7 +728,22 @@ async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
                 # Trigger a re-init of the cohesion table by opening a connection
                 ctx = M3Context.for_db(str(db_path))
                 _ = ctx.get_sqlite_conn()
-                _record("rebuild_cohesion", "ok", "m3_system_cohesion table rebuilt via M3Context init")
+                # M3Context creates the table only when an encryption salt is
+                # configured (it records the salt's hash). Report the outcome
+                # observed, not the attempt: without a salt there is nothing to
+                # record.
+                conn = _sq.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+                try:
+                    created = conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='m3_system_cohesion'"
+                    ).fetchone() is not None
+                finally:
+                    conn.close()
+                if created:
+                    _record("rebuild_cohesion", "ok", "m3_system_cohesion table rebuilt via M3Context init")
+                else:
+                    _record("rebuild_cohesion", "skipped",
+                            "no encryption salt configured; no cohesion record to keep")
             except Exception as e:
                 _record("rebuild_cohesion", "error", str(e))
     else:
