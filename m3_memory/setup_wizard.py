@@ -1324,7 +1324,7 @@ def _restart_stale_embed_server() -> None:
         return
     pids = ", ".join(str(s["pid"]) for s in stale)
     if _on_windows():
-        cli = [sys.executable, "-m", "m3_memory.cli", "embedder"]
+        cli = _m3_cli("embedder")
         if (_queue_elevated(f"stop the embed service still running the previous core (pid {pids})",
                             [*cli, "stop"])
                 and _queue_elevated("start the embed service on the new core", [*cli, "start"])):
@@ -2090,8 +2090,8 @@ def _step_install_m3(plan: SetupPlan) -> bool:
     except Exception as e:  # noqa: BLE001 — probe is best-effort; don't block install on it
         _warn(f"could not verify subprocess package resolution: {e} (continuing)")
 
-    cmd = [sys.executable, "-m", "m3_memory.cli", "install-m3",
-           "--non-interactive", "--force", "--capture-mode", plan.capture_mode]
+    cmd = _m3_cli("install-m3",
+           "--non-interactive", "--force", "--capture-mode", plan.capture_mode)
     if plan.endpoint:
         cmd += ["--endpoint", plan.endpoint]
     if plan.cognitive_loop:
@@ -2121,8 +2121,8 @@ def _step_cpu_sovereign_embedder() -> bool:
     # Lazy import: setup_wizard is imported during install, and embedder_admin
     # pulls in the payload-root helpers (§2 cycle-breaking via lazy imports).
     from m3_memory.embedder_admin import EXIT_REGISTERED_NOT_RUNNING
-    cmd = [sys.executable, "-m", "m3_memory.cli", "embedder", "install",
-           "--concurrency", "2"]
+    cmd = _m3_cli("embedder", "install",
+           "--concurrency", "2")
     try:
         _run(cmd)  # reports "running on port 8082" itself
         return True
@@ -2259,7 +2259,7 @@ def _step_rust_core(plan: "SetupPlan") -> bool:
 
     _say(f"Step 2/5: installing native core m3-core-rs {M3_CORE_RS_VERSION} "
          "(shared by every embedder tier)")
-    cmd = [sys.executable, "-m", "m3_memory.cli", "embedder", "install-gpu"]
+    cmd = _m3_cli("embedder", "install-gpu")
     if not plan.allow_native_source_build:
         cmd.append("--no-source-fallback")
     try:
@@ -2301,7 +2301,7 @@ def _step_gpu_embedder(plan: "SetupPlan") -> bool:
     Always non-fatal — m3 works either way.
     """
     _say("Step 3/5: installing Project Oxidation native in-process embedder")
-    cmd = [sys.executable, "-m", "m3_memory.cli", "embedder", "install-gpu"]
+    cmd = _m3_cli("embedder", "install-gpu")
     if not plan.allow_native_source_build:
         cmd.append("--no-source-fallback")
     try:
@@ -2548,7 +2548,7 @@ def _step_install_wolfssl(plan: "SetupPlan") -> bool:
         return True
 
     _say("FIPS: building + installing open-source wolfSSL (from official source)")
-    cmd = [sys.executable, "-m", "m3_memory.cli", "fips", "install-wolfssl"]
+    cmd = _m3_cli("fips", "install-wolfssl")
     try:
         _run(cmd)
         _ok("wolfSSL installed to ~/.m3/lib — FIPS mode can use it")
@@ -3700,7 +3700,7 @@ def _step_doctor(plan=None) -> bool:
     being handed a green summary over a red system.
     """
     _say("Step 5/5: verifying the install (m3 doctor)")
-    argv = [sys.executable, "-m", "m3_memory.cli", "doctor"]
+    argv = _m3_cli("doctor")
     # Do NOT grade a subsystem the user just declined. `--no-shared-embedder`
     # makes setup print "SKIPPED (not installed). This is fine", and then an
     # unfiltered doctor failed the whole run on `shared-embedder: 3 issue(s)`
@@ -3814,6 +3814,22 @@ def _should_use_gui(args: argparse.Namespace) -> bool:
     if _existing_install():
         return False  # an existing install gets the one keep-settings question
     return _ask_yes_no("  Configure with the graphical setup window?", default=False)
+
+
+def _m3_cli(*args: str) -> "list[str]":
+    """argv that runs m3's CLI in a child process on the SAME package as this one.
+
+    `python -m` puts the working directory first on sys.path, so setup run from
+    inside a repository checkout would import the checkout's m3_memory in every
+    child and wire agents to it. -P removes the working directory; this
+    package's own root goes on PYTHONPATH instead, so an installed setup stays
+    on the install and a setup run from a checkout stays on that checkout.
+    """
+    root = str(Path(__file__).resolve().parent.parent)
+    current = os.environ.get("PYTHONPATH", "")
+    if root not in current.split(os.pathsep):
+        os.environ["PYTHONPATH"] = root + (os.pathsep + current if current else "")
+    return [sys.executable, "-P", "-m", "m3_memory.cli", *args]
 
 
 def run_setup(args: argparse.Namespace) -> int:

@@ -1571,3 +1571,23 @@ def test_pycache_is_offered_on_an_editable_checkout(monkeypatch, tmp_path):
     monkeypatch.setattr(setup_wizard, "__file__", str(pkg / "setup_wizard.py"))
     _root, editable, dirs = setup_wizard._pycache_scope(_setup_args())
     assert editable is True and dirs == [pkg / "__pycache__"]
+
+
+def test_setup_children_import_the_same_m3_package(monkeypatch, tmp_path):
+    """Setup's `python -m m3_memory.cli` children must not pick up a checkout in
+    the working directory: -P drops the cwd, and this package's root is passed
+    on PYTHONPATH so the child imports exactly what the parent imported."""
+    import os
+    import sys
+    from pathlib import Path
+
+    from m3_memory import setup_wizard as sw
+
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    argv = sw._m3_cli("doctor")
+    assert argv[:4] == [sys.executable, "-P", "-m", "m3_memory.cli"]
+    assert argv[4:] == ["doctor"]
+    root = str(Path(sw.__file__).resolve().parent.parent)
+    assert os.environ["PYTHONPATH"].split(os.pathsep)[0] == root
+    sw._m3_cli("doctor")  # idempotent: the root is not added twice
+    assert os.environ["PYTHONPATH"].split(os.pathsep).count(root) == 1
