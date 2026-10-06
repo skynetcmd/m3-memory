@@ -439,6 +439,20 @@ def _service_cmd(binary: Path, gguf: Path, sub: str, *extra: str) -> int:
     return subprocess.run([str(binary), sub, *extra], env=env, check=False).returncode
 
 
+def _service_cmd_quiet(binary: Path, gguf: Path, sub: str, *extra: str) -> int:
+    """_service_cmd, printing the binary's output only when it fails."""
+    _ensure_executable(binary)
+    env = os.environ.copy()
+    env.setdefault("M3_EMBED_GGUF", str(gguf))
+    env.setdefault("M3_EMBED_SERVER_PORT", "8082")
+    proc = subprocess.run([str(binary), sub, *extra], env=env, check=False,
+                          capture_output=True, text=True, errors="replace")
+    if proc.returncode != 0:
+        sys.stdout.write(proc.stdout or "")
+        sys.stderr.write(proc.stderr or "")
+    return proc.returncode
+
+
 def _embed_server_port() -> int:
     """The configured tier-2 embed-server port (M3_EMBED_SERVER_PORT, def 8082)."""
     try:
@@ -944,12 +958,16 @@ def cmd_install(args: argparse.Namespace) -> int:
     size_mb = _gguf_size_bytes(gguf) // (1024 * 1024)
     print(f"[=] using bundled GGUF: {gguf} ({size_mb} MB)")
 
-    # Registered, running and on the current binary: nothing to install. Running
-    # `install` and `start` anyway printed "nothing to do" twice around a
-    # port-in-use notice about this same service.
-    if (_service_reports_installed(binary, gguf) and _service_reports_running(binary, gguf)
+    # Registered, running and on the current binary: nothing to install or
+    # start, and a port-in-use notice would be about this same service.
+    registered = _service_reports_installed(binary, gguf)
+    if (registered and _service_reports_running(binary, gguf)
             and not _service_binary_is_stale(binary)):
         return _verify_started_or_explain(binary, gguf)
+    # Re-registering a known service refreshes its definition (binary and model
+    # paths) and is routine on every macOS/Linux upgrade; its output (unit path,
+    # log location, the linger note) matters on the first install or a failure.
+    run_svc = _service_cmd_quiet if registered else _service_cmd
 
     _warn_if_port_busy("install")
     # getattr default: cmd_start delegates here to auto-install, and the `start`
@@ -959,7 +977,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     extra: list[str] = []
     if concurrency:
         extra += ["--concurrency", str(concurrency)]
-    rc = _service_cmd(binary, gguf, "install", *extra)
+    rc = run_svc(binary, gguf, "install", *extra)
     if rc != 0:
         # An already-registered service is NOT a failure. Older embed-server
         # builds error out of `install` with an opaque winapi/IO message when
@@ -1002,7 +1020,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         return rc
 
     print("[~] starting m3-embed-server")
-    start_rc = _service_cmd(binary, gguf, "start")
+    start_rc = run_svc(binary, gguf, "start")
     # Do not trust the exit code in EITHER direction; ask `status`.
     #   nonzero  — may mean "already running": builds <= 3.7.28 flatten
     #              ERROR_SERVICE_ALREADY_RUNNING into an opaque "IO error in

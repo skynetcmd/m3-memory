@@ -131,3 +131,9 @@ def test_cmd_start_works_regardless_of_busy(monkeypatch, tmp_path, busy):
     # trusting `start`'s exit code.
     monkeypatch.setattr(ea, "_service_reports_running", lambda *a, **k: True)
     assert ea.cmd_start(_ns()) == 0
+
+
+@pytest.fixture(autouse=True)
+def _quiet_service_cmd_follows_the_fake(monkeypatch):
+    """Route the quiet variant through whatever _service_cmd a test fakes."""
+    monkeypatch.setattr(ea, "_service_cmd_quiet", lambda *a, **k: ea._service_cmd(*a, **k))

@@ -91,3 +91,23 @@ def test_install_on_a_stale_running_service_still_restarts_it(monkeypatch):
     monkeypatch.setattr(ea, "_service_cmd", lambda b, g, action, *e: calls.append(action) or (1 if action == "install" else 0))
     assert ea.cmd_install(argparse.Namespace(concurrency=2)) == 0
     assert calls == ["install", "stop", "start"]
+
+
+@pytest.fixture(autouse=True)
+def _quiet_service_cmd_follows_the_fake(monkeypatch):
+    """Route the quiet variant through whatever _service_cmd a test fakes."""
+    monkeypatch.setattr(ea, "_service_cmd_quiet", lambda *a, **k: ea._service_cmd(*a, **k))
+
+
+@pytest.mark.parametrize("registered", [True, False])
+def test_reregistering_a_known_service_is_quiet_first_install_is_not(monkeypatch, registered):
+    used = []
+    _patch_common(monkeypatch, [])
+    monkeypatch.setattr(ea, "_service_reports_installed", lambda b, g: registered)
+    monkeypatch.setattr(ea, "_service_reports_running", lambda *a, **k: False)
+    monkeypatch.setattr(ea, "_verify_started_or_explain", lambda *a, **k: 0)
+    monkeypatch.setattr(ea, "_service_cmd", lambda b, g, s, *e: used.append(("loud", s)) or 0)
+    monkeypatch.setattr(ea, "_service_cmd_quiet", lambda b, g, s, *e: used.append(("quiet", s)) or 0)
+    assert ea.cmd_install(argparse.Namespace(concurrency=2)) == 0
+    mode = "quiet" if registered else "loud"
+    assert used == [(mode, "install"), (mode, "start")]
