@@ -465,7 +465,8 @@ def hand_off_to_new_window(owner_python: str, argv: list[str], pids: list[int]) 
     return log
 
 
-def explain_locked(locked: list[pathlib.Path], owner_python: str) -> None:
+def explain_locked(locked: list[pathlib.Path], owner_python: str,
+                   user_flags: "list[str] | None" = None) -> None:
     print("\nCannot upgrade now: Windows keeps these m3 programs locked while they")
     print("run, and replacing them would remove m3 and then fail:")
     for p in locked:
@@ -478,6 +479,10 @@ def explain_locked(locked: list[pathlib.Path], owner_python: str) -> None:
     if any("own launcher" in h for h in holders) or not holders:
         print("  - run the upgrade through Python, which holds none of them:")
         unattended = "" if interactive_console() else " --yes"
+        # Carry the user's own flags (--from-pypi, --stop-agents) so the printed
+        # command does what the refused one was asked to do.
+        for flag in (user_flags or []):
+            unattended += f" {flag}"
         print(f'      "{owner_python}" "{pathlib.Path(__file__).resolve()}"{unattended}')
     if any("own launcher" not in h for h in holders) or not holders:
         print("  - close the agent sessions using m3 (or end the processes above),")
@@ -553,6 +558,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--stop-pids", dest="stop_pids", default="", help=argparse.SUPPRESS)
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = ap.parse_args(raw_argv)
+    user_flags = [f for f in ("--from-pypi", "--stop-agents") if f in raw_argv]
     if args.log:
         sys.stdout = _Tee(sys.stdout, args.log)  # type: ignore[assignment]
     # Line-buffer our own output: the steps run child processes that write to the
@@ -643,7 +649,7 @@ def main(argv: list[str] | None = None) -> int:
     if locked:
         own, others = launcher_holders(locked)
         if not own and not others:
-            explain_locked(locked, owner_python)  # holders unknown: never guess
+            explain_locked(locked, owner_python, user_flags)  # holders unknown: never guess
             return 2
         if others:
             # Agent sessions (an MCP server, a hook) run from m3.exe. Stop them
@@ -651,7 +657,7 @@ def main(argv: list[str] | None = None) -> int:
             # which lists them. Never in a hand-off window (consent was given
             # for the pids it received; anything newer is left alone).
             if args.wait_for_pid or not (args.stop_agents or (console and not args.yes)):
-                explain_locked(locked, owner_python)
+                explain_locked(locked, owner_python, user_flags)
                 return 2
             agent_pids = others
         if own:
@@ -660,7 +666,7 @@ def main(argv: list[str] | None = None) -> int:
             # an unattended caller would read this command's exit 0 as
             # "upgraded" while the upgrade has not started.
             if args.wait_for_pid or not console:
-                explain_locked(locked, owner_python)
+                explain_locked(locked, owner_python, user_flags)
                 return 2
             hand_off_pids = own
             print("\nWindows will not let pip replace m3.exe while this command runs "
@@ -722,7 +728,7 @@ def main(argv: list[str] | None = None) -> int:
     # above, and step 1 stops DB writers, not those.
     locked = [] if dry else locked_launchers(scripts_dir, launchers)
     if locked:
-        explain_locked(locked, owner_python)
+        explain_locked(locked, owner_python, user_flags)
         if not args.skip_stop:
             print("Step 1 stopped m3's services; `m3 setup` starts them again.")
         return 2

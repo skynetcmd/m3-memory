@@ -557,3 +557,13 @@ def test_the_hand_off_window_refuses_an_agent_it_was_not_told_about(tmp_path, mo
     monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
     assert m3u.main(["--yes", "--wait-for-pid", "4242", "--stop-pids", "5555"]) == 2
     assert "Cannot upgrade now" in capsys.readouterr().out
+
+
+def test_the_printed_command_keeps_the_users_flags(tmp_path, monkeypatch, capsys):
+    """An unattended `--yes --stop-agents` refused at its own launcher must print a
+    command that still stops the agents, or running it refuses again."""
+    _held_pip_install(tmp_path, monkeypatch, own=[4242], others=[5555])
+    monkeypatch.setattr(m3u, "interactive_console", lambda: False)
+    monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
+    assert m3u.main(["--yes", "--stop-agents"]) == 2
+    assert 'm3_upgrade.py" --yes --stop-agents' in capsys.readouterr().out
