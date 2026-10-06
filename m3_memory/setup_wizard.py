@@ -952,7 +952,7 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
         _say(f"  note: {noted} running but holds no DB — not a quiesce blocker")
 
     if not live:
-        _ok("  no autonomous m3 DB-writers running (nothing to quiesce)")
+        _ok_unchanged("  no autonomous m3 DB-writers running (nothing to quiesce)")
         return True
 
     roles = ", ".join(f"{p.role}(pid {p.pid})" for p in live)
@@ -1615,7 +1615,7 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
     except Exception as e:
         _warn(f"  could not verify package resolution: {type(e).__name__}: {e}")
     else:
-        _ok(f"  package resolution: {installed_path}")
+        _ok_unchanged(f"  package resolution: {installed_path}")
 
     # ── Probe 1b: stale LAUNCHER shadowing (different from probe 1) ──────
     # Probe 1 catches a stale `m3_memory/` PACKAGE on sys.path. This catches a
@@ -1656,7 +1656,7 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
                   "pip --user copy; `pipx ensurepath` puts the pipx bin dir first. "
                   "Then re-run `m3 doctor` to confirm.")
         else:
-            _ok("  launchers on PATH: one install")
+            _ok_unchanged("  launchers on PATH: one install")
 
     # ── Probe 2: running mcp-memory.exe will lock the venv binary ──────
     # On Windows, pip install -e cannot overwrite mcp-memory.exe if a
@@ -1683,12 +1683,12 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
                 else:
                     _warn("  install may fail with 'file in use' until you stop the agent")
         else:
-            _ok("  no running mcp-memory.exe locks")
+            _ok_unchanged("  no running mcp-memory.exe locks")
     else:
         # Unix: rename-into-place during pip install means a running binary
         # doesn't block reinstall the way Windows file-locking does. Probe
         # is best-effort informational only.
-        _ok("  Unix: running mcp-memory does not block reinstall (rename-in-place)")
+        _ok_unchanged("  Unix: running mcp-memory does not block reinstall (rename-in-place)")
 
     # ── Probe 2.5: cooperatively quiesce autonomous DB-writers (all OSes) ──
     # The mcp-memory.exe probe above guards the Windows *file-lock*. This guards
@@ -1734,7 +1734,7 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
     discovered = _discover_bge_m3_gguf()
     if discovered and _shared_gguf_is(discovered):
         plan.embed_gguf = discovered
-        _ok(f"  shared embedder already uses {discovered}")
+        _ok_unchanged(f"  shared embedder already uses {discovered}")
     elif discovered:
         _say(f"  discovered BGE-M3 GGUF: {discovered}")
         _say("  wiring it into the SHARED embedder config so the single :8082 "
@@ -1826,7 +1826,7 @@ def _probe_llm_endpoints(plan: "SetupPlan", args: argparse.Namespace) -> None:
         return
 
     for label, url, var, val in reachable:
-        _ok(f"  detected {label} reachable at {url}")
+        _ok_unchanged(f"  detected {label} reachable at {url}")
         # LM Studio is on by default — only persist the explicit enable for the
         # non-default ones, and an explicit disable for LM Studio if it's absent.
         if var == "M3_ENABLE_LMSTUDIO_FAILOVER":
@@ -2025,7 +2025,7 @@ def _reregister_cognitive_loop() -> None:
     from m3_memory.installer import _register_cognitive_loop_task
 
     if _register_cognitive_loop_task():
-        _ok("  cognitive loop service re-registered from this payload")
+        _ok_unchanged("  cognitive loop service re-registered from this payload")
     else:
         _warn("  cognitive loop service NOT re-registered; it may still run the "
               "previous payload's paths. Fix: m3 schedules add cognitive-loop")
@@ -2046,8 +2046,8 @@ def _step_install_m3(plan: SetupPlan) -> bool:
     # If find_bridge() already resolves (packaged payload or dev checkout),
     # skip the fetch. The payload is already present.
     if find_bridge() is not None:
-        _say("  payload already present (packaged or via sibling); skipping fetch")
-        _ok("payload available")
+        _say_unchanged("  payload already present (packaged or via sibling); skipping fetch")
+        _ok_unchanged("payload available")
         # install-m3 is what registers the loop, so skipping it would leave an
         # upgraded host's unit pointing at the previous payload's paths. On
         # Windows registering a boot task needs elevation; `m3 schedules repair`
@@ -2248,7 +2248,7 @@ def _step_rust_core(plan: "SetupPlan") -> bool:
     try:
         if is_rust_core_current():
             cur = active_embedder_tier()
-            _ok(f"native core current: m3_core_rs {cur.get('version')} "
+            _ok_unchanged(f"native core current: m3_core_rs {cur.get('version')} "
                 f"({cur.get('backend') or 'cpu'})")
             return True
     except Exception:  # noqa: BLE001 — fall through and (re)install
@@ -2337,14 +2337,17 @@ def _step_shared_embedder(plan: "SetupPlan", *, non_interactive: bool = False) -
     so every m3 process defers to ONE shared embedder server (GPU-accelerated
     where available, CPU-only otherwise), AND register the self-healing
     embed-server task so that server is always up. Non-fatal at each step."""
-    print()
-    print("[~] Enabling shared embedder (one shared server for all m3 processes)")
+    quiet = _called_by_upgrade()   # only changes and problems under the upgrade
+    if not quiet:
+        print()
+        print("[~] Enabling shared embedder (one shared server for all m3 processes)")
     try:
         from m3_memory.embedder_admin import seed_shared_config
         # seed_shared_config writes .embed_config.json idempotently — the single
         # source of truth shared with the installer/doctor, so all stay in lockstep.
         _path, _wrote = seed_shared_config(port=8082)
-        print(f"    [OK] shared-mode config {'written' if _wrote else 'already set'}: {_path}")
+        if _wrote or not quiet:
+            print(f"    [OK] shared-mode config {'written' if _wrote else 'already set'}: {_path}")
     except Exception as e:  # noqa: BLE001 — non-fatal; user can run `m3 embedder shared` later
         print(f"    [!] could not write shared-mode config ({e}); run `m3 embedder shared` later.")
         return True
@@ -2380,8 +2383,9 @@ def _register_embed_server_task(*, non_interactive: bool = False) -> None:
             # step above registered it (it may have been skipped).
             gguf = embedder_admin._find_bundled_gguf() or Path("")
             if embedder_admin._service_reports_installed(binary, gguf):
-                print("    Keep-alive: the Rust m3-embed-server OS service keeps "
-                      ":8082 up — no scheduled task needed.")
+                if not _called_by_upgrade():
+                    print("    Keep-alive: the Rust m3-embed-server OS service keeps "
+                          ":8082 up — no scheduled task needed.")
             else:
                 print("    [!] the Rust m3-embed-server is present but NOT registered "
                       "as a service, so nothing keeps :8082 up. Register it with:")
@@ -2613,7 +2617,7 @@ def _wire_claude(capture_mode: str) -> bool:
         # Already registered with these roots and no legacy entry: re-adding
         # would only rewrite ~/.claude.json. Still pin the plugin disable.
         _disable_claude_plugin_server()
-        _ok("  Claude Code: m3 memory server already registered (mcp__m3_memory__)")
+        _ok_unchanged("  Claude Code: m3 memory server already registered (mcp__m3_memory__)")
         return True
 
     _say("  · registering m3 memory server in Claude Code (mcp__m3_memory__, user scope)")
@@ -2841,11 +2845,11 @@ def _wire_opencode() -> bool:
         mcp = existing.setdefault("mcp", {})
         cur = mcp.get("memory")
         if cur == canonical:
-            _say(f"  · OpenCode already wired ({cfg_path})")
+            _say_unchanged(f"  · OpenCode already wired ({cfg_path})")
             healed_any = True
             continue
         if cur is not None and not _opencode_entry_is_stale(cur):
-            _say(f"  · OpenCode already wired ({cfg_path})")
+            _say_unchanged(f"  · OpenCode already wired ({cfg_path})")
             healed_any = True
             continue
         # Missing or stale -> (re)write the canonical entry, backing up a rewrite.
@@ -3162,7 +3166,7 @@ def _wire_openclaw() -> bool:
     if _openclaw_entry_current(spec):
         # Writing an identical entry only bumps OpenClaw's lastTouchedAt and
         # replaces its single .bak with a copy of the same config.
-        _ok(f"  OpenClaw: m3 memory server already registered (mcp__{_OPENCLAW_SERVER_NAME}__)")
+        _ok_unchanged(f"  OpenClaw: m3 memory server already registered (mcp__{_OPENCLAW_SERVER_NAME}__)")
         return True
 
     _say(f"  · registering m3 memory server in OpenClaw (mcp__{_OPENCLAW_SERVER_NAME}__, "
@@ -3244,7 +3248,7 @@ def _wire_hermes(*, non_interactive: bool = False) -> bool:
     if existed:
         # Already up to date -> leave it, exactly like OpenCode's "already wired".
         if _hermes_plugin_is_current(src, dst):
-            _say(f"  · Hermes: m3 plugin already current ({dst})")
+            _say_unchanged(f"  · Hermes: m3 plugin already current ({dst})")
             return True
         # Present but stale -> back up the old plugin before overwriting so a bad
         # upgrade is recoverable (mirrors OpenCode's .m3bak on rewrite).
@@ -3300,7 +3304,8 @@ def _step_install_dashboard(plan: "SetupPlan") -> bool:
             have = False
             break
     if have:
-        print("  Web dashboard deps already present — `m3 dashboard` is ready.")
+        if not _called_by_upgrade():
+            print("  Web dashboard deps already present — `m3 dashboard` is ready.")
         # Register the boot task here too: the second `if have:` block below was
         # unreachable dead code, so on a fresh install where fastapi/uvicorn are
         # already present the dashboard auto-start task was never registered.
@@ -3419,7 +3424,7 @@ def _step_governor_migration(plan: SetupPlan, *, non_interactive: bool = False,
     eligible = detected.get("eligible", [])
     result["not_migratable"] = gm.not_migratable_lines()
     if not eligible:
-        _say("Governor migration: no governor-eligible scheduled tasks found — nothing to replace.")
+        _say_unchanged("Governor migration: no governor-eligible scheduled tasks found — nothing to replace.")
         return result
 
     _say(f"Governor migration: removing {len(eligible)} legacy scheduled task(s) so the governor can take over...")
@@ -3704,7 +3709,7 @@ def _step_verify_daemons(plan=None) -> bool:
     # THIS run registered, so an upgrade that re-registers nothing restarts
     # nothing.
     if missing:
-        _say("  restarting stopped services...")
+        _say_unchanged("  restarting stopped services...")
         started = [r for r in missing if _start_service_for_role(r)]
         for role in started:
             # Report the ACTION, not an outcome. `_start_service_for_role`
@@ -3719,7 +3724,7 @@ def _step_verify_daemons(plan=None) -> bool:
             # back to back (measured 2026-09-30, claude-dev). The verified
             # verdict is printed below from the re-read registry; this is only
             # the attempt.
-            _say(f"  {role}: start issued (verifying below)")
+            _say_unchanged(f"  {role}: start issued (verifying below)")
         # Starting a service only LAUNCHES it. The registry entry is written by
         # the child, from inside its own process, once the interpreter has
         # booted — so re-reading the registry immediately reports a service that
@@ -4071,6 +4076,19 @@ def _called_by_upgrade() -> bool:
     unknown flag but ignores an unknown variable.
     """
     return os.environ.get(UPGRADE_CALLER_ENV) == "upgrade"
+
+
+def _ok_unchanged(msg: str) -> None:
+    """An [OK] that only confirms something was already as it should be.
+    Under `m3 upgrade` only changes and problems are shown."""
+    if not _called_by_upgrade():
+        _ok(msg)
+
+
+def _say_unchanged(msg: str) -> None:
+    """_say for the same kind of line; see _ok_unchanged."""
+    if not _called_by_upgrade():
+        _say(msg)
 
 
 def _step(n: int, text: str) -> None:

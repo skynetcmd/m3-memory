@@ -1711,3 +1711,20 @@ def test_dashboard_registration_shows_detail_only_when_it_matters(monkeypatch, c
     out = capsys.readouterr().out
     assert (stdout.strip() in out) is shown
     assert ("dashboard starts on boot" in out) is (rc == 0)
+
+
+@pytest.mark.parametrize("from_upgrade", [True, False])
+def test_unchanged_state_lines_show_only_when_setup_runs_directly(monkeypatch, capsys, from_upgrade):
+    """Under `m3 upgrade`, setup shows changes and problems only; run directly
+    it still confirms each check."""
+    if from_upgrade:
+        monkeypatch.setenv(setup_wizard.UPGRADE_CALLER_ENV, "upgrade")
+    else:
+        monkeypatch.delenv(setup_wizard.UPGRADE_CALLER_ENV, raising=False)
+    setup_wizard._ok_unchanged("  launchers on PATH: one install")
+    setup_wizard._say_unchanged("  payload already present")
+    setup_wizard._warn("  a real problem")
+    out = capsys.readouterr().out
+    assert ("launchers on PATH" in out) is not from_upgrade
+    assert ("payload already present" in out) is not from_upgrade
+    assert "a real problem" in out
