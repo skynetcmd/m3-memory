@@ -29,10 +29,12 @@ Follow the wizard. When it finishes, verify:
 m3 doctor
 ```
 
+Below, `<bob_home>` is bob's home directory; find it with `getent passwd bob | cut -d: -f6`.
+
 State now lives under bob's decoupled roots — databases in
-`/home/bob/.m3/engine/`, config in `/home/bob/.m3/config/`, logs in
-`/home/bob/.m3/logs/` — with the payload in `/home/bob/.m3-memory/` and the
-package in `/home/bob/.local/share/pipx/venvs/m3-memory/`.
+`<bob_home>/.m3/engine/`, config in `<bob_home>/.m3/config/`, logs in
+`<bob_home>/.m3/logs/` — with the payload in `<bob_home>/.m3-memory/` and the
+package in `<bob_home>/.local/share/pipx/venvs/m3-memory/`.
 
 ---
 
@@ -61,16 +63,16 @@ access to bob's database files:
 ```bash
 # Option A — add root to bob's group (cleanest):
 usermod -aG bob root
-chmod -R g+rwX /home/bob/.m3
-chown -R bob:bob /home/bob/.m3   # ensure bob is still the owner
+chmod -R g+rwX <bob_home>/.m3
+chown -R bob:bob <bob_home>/.m3   # ensure bob is still the owner
 # Then set the group sticky bit so new files inherit the group:
-find /home/bob/.m3 -type d -exec chmod g+s {} \;
+find <bob_home>/.m3 -type d -exec chmod g+s {} \;
 
 # Option B — world-readable/writable (simpler, less secure):
-chmod o+rx /home/bob/.m3 /home/bob/.m3/engine
-chmod o+rw /home/bob/.m3/engine/agent_memory.db
-chmod o+rw /home/bob/.m3/engine/agent_memory.db-wal
-chmod o+rw /home/bob/.m3/engine/agent_memory.db-shm
+chmod o+rx <bob_home>/.m3 <bob_home>/.m3/engine
+chmod o+rw <bob_home>/.m3/engine/agent_memory.db
+chmod o+rw <bob_home>/.m3/engine/agent_memory.db-wal
+chmod o+rw <bob_home>/.m3/engine/agent_memory.db-shm
 # …and the same for agent_chatlog.db* if bob's chatlog uses a separate store
 ```
 
@@ -88,10 +90,10 @@ m3 resolves every path to bob's store, not `/root`:
 
 ```bash
 claude mcp add --scope user \
-  --env HOME=/home/bob \
-  --env M3_ENGINE_ROOT=/home/bob/.m3/engine \
-  --env M3_CONFIG_ROOT=/home/bob/.m3/config \
-  -- m3_memory /home/bob/.local/bin/m3
+  --env HOME=<bob_home> \
+  --env M3_ENGINE_ROOT=<bob_home>/.m3/engine \
+  --env M3_CONFIG_ROOT=<bob_home>/.m3/config \
+  -- m3_memory <bob_home>/.local/bin/m3
 ```
 
 Restart Claude Code as root. Confirm the MCP is connected:
@@ -109,7 +111,7 @@ into bob's chatlog store, copy the hook entries from bob's settings:
 
 ```bash
 # Read bob's hook config:
-cat /home/bob/.claude/settings.json | python3 -c "
+cat <bob_home>/.claude/settings.json | python3 -c "
 import json, sys
 s = json.load(sys.stdin)
 print(json.dumps(s.get('hooks', {}), indent=2))
@@ -120,8 +122,8 @@ Copy those `Stop` and `PreCompact` entries into `/root/.claude/settings.json`
 **verbatim** — each is an absolute `<pipx venv python> …/m3_memory/bin/hooks/chatlog/claude_code_precompact.py`
 command pointing at bob's install. The hook inherits root's *process* env, not
 the MCP server's `env`, so make sure each command is prefixed with the same
-pins as Step 4 (`HOME=/home/bob M3_ENGINE_ROOT=/home/bob/.m3/engine
-M3_CONFIG_ROOT=/home/bob/.m3/config …`); otherwise the hook writes turns to a
+pins as Step 4 (`HOME=<bob_home> M3_ENGINE_ROOT=<bob_home>/.m3/engine
+M3_CONFIG_ROOT=<bob_home>/.m3/config …`); otherwise the hook writes turns to a
 different store than the server reads.
 
 ---
@@ -152,11 +154,11 @@ Root's Claude picks up the upgrade automatically on the next session start
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `m3: command not found` when root's Claude starts | Absolute path not set | Use `/home/bob/.local/bin/m3`, not just `m3` |
+| `m3: command not found` when root's Claude starts | Absolute path not set | Use `<bob_home>/.local/bin/m3`, not just `m3` |
 | `Permission denied` on DB files | Missing write permission | Re-run Step 3 |
 | Memory writes succeed but chatlog missing | Hooks not wired for root | Re-do Step 5 |
 | Embed server not reachable | Bob not logged in + no linger | `loginctl enable-linger bob` (Step 2) |
-| Wrong memory store (empty) | `HOME` / roots not overridden | Re-register with `--env HOME=/home/bob` + the `M3_ENGINE_ROOT` / `M3_CONFIG_ROOT` pins (Step 4) |
+| Wrong memory store (empty) | `HOME` / roots not overridden | Re-register with `--env HOME=<bob_home>` + the `M3_ENGINE_ROOT` / `M3_CONFIG_ROOT` pins (Step 4) |
 
 ---
 
