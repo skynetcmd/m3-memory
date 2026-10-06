@@ -39,6 +39,7 @@ m3 upgrade --dry-run
 | `--dry-run` | print the detected method and the exact plan; change nothing |
 | `-y`, `--yes` | do not prompt (scripted / unattended upgrades) |
 | `--skip-stop` | skip step 1 — only if you have already stopped the writers |
+| `--stop-agents` | Windows: stop m3 in agent sessions that hold its launcher (they reconnect afterwards). A console run asks instead; use this for unattended runs |
 | `--from-pypi` | pipx installs only: reinstall from PyPI. Use it when m3 was installed from a local wheel or path — `m3 upgrade` otherwise upgrades from that source — or when that source no longer exists |
 
 When nothing newer is available, `m3 upgrade` says so: it ends with *"m3 X was already installed; nothing was upgraded"* instead of reporting an upgrade.
@@ -68,9 +69,11 @@ installs:
     the command to run instead — run the upgrade helper through the venv's
     Python, `"<venv>\Scripts\python.exe" "<venv>\Lib\site-packages\m3_memory\bin\m3_upgrade.py" --yes`,
     which waits for the upgrade and returns its result;
-  - held by an agent: it stops, names the process, and asks you to close that
-    agent session (or end the named process), run `m3 upgrade`, then reconnect
-    the agent (Claude Code: `/mcp`).
+  - held by an agent session (its m3 server runs from `m3.exe`): at a console,
+    the plan lists those sessions and, if you answer yes, stops m3 in them
+    before upgrading; reconnect each agent afterwards (Claude Code: `/mcp`).
+    Unattended runs stop them only with `--stop-agents`; without it they name
+    the processes and stop.
 
   If an upgrade fails anyway, it reports whether m3 is still installed and, if
   not, prints the one command that restores it.
