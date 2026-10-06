@@ -186,6 +186,19 @@ def test_missing_cli_warns_and_runs_nothing(wired, capsys):
     assert "npm install -g openclaw" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("leftover", [True, False])
+def test_missing_cli_names_the_folder_setup_detects(wired, capsys, monkeypatch,
+                                                    tmp_path, leftover):
+    """Setup detects OpenClaw from ~/.openclaw; a user who uninstalled it is told
+    which folder keeps the warning coming back."""
+    if leftover:
+        (tmp_path / ".openclaw").mkdir()
+    monkeypatch.setattr(sw.Path, "home", classmethod(lambda cls: tmp_path))
+    wired(exe=None)
+    sw._wire_openclaw()
+    assert ("delete ~/.openclaw" in capsys.readouterr().out) is leftover
+
+
 def test_failure_echoes_the_exact_argv(wired, capsys):
     """The split-brain guard: never hand the user a SIMPLIFIED command.
 

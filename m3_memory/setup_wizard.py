@@ -3050,8 +3050,11 @@ def _wire_openclaw() -> bool:
     # measured 2026-09-18.)
     exe = shutil.which("openclaw")
     if not exe:
+        leftover = (Path.home() / ".openclaw").is_dir()
         _warn("OpenClaw CLI not on PATH; skipping MCP registration. Install it "
-              "(`npm install -g openclaw`) and re-run `m3 setup`.")
+              "(`npm install -g openclaw`) and re-run `m3 setup`"
+              + (", or delete ~/.openclaw if you no longer use OpenClaw "
+                 "(setup detects it from that folder)." if leftover else "."))
         return False
 
     supported, version = _openclaw_version(exe)
