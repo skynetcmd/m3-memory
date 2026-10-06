@@ -537,6 +537,29 @@ def run(cmd: list[str], *, dry: bool, timeout: int = 900) -> int:
         return 124
 
 
+def summary_lines(*, old: str | None, new: str | None, unchanged: bool,
+                  agents_stopped: int, failed_step: str, rc: int, log: str) -> list[str]:
+    """The end-of-run summary: the lines a user needs after the step output
+    has scrolled away."""
+    if unchanged:
+        version = f"m3 {old}: already installed, nothing was upgraded"
+    else:
+        version = f"m3 {old or '?'} -> {new or '?'}"
+    lines = ["", "Upgrade incomplete." if failed_step else "Done.",
+             f"  version : {version}"]
+    if agents_stopped:
+        lines.append(f"  agents  : m3 was stopped in {agents_stopped} agent session(s); "
+                     "reconnect them (Claude Code: /mcp)")
+    if failed_step:
+        lines.append(f"  health  : {failed_step} reported problems (exit {rc}); "
+                     "see its output above")
+    else:
+        lines.append("  health  : m3 doctor passed")
+    if log:
+        lines.append(f"  log     : {log}")
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Upgrade m3-memory using the right command for this install."
@@ -783,7 +806,8 @@ def main(argv: list[str] | None = None) -> int:
     # "nothing running" is a fine state.
     if not args.skip_stop:
         print("\n[3/5] stopping any daemon that survived on OLD code ...")
-        run([m3, "stop"], dry=dry, timeout=180)
+        # --quiet: step 1 already reported anything left running.
+        run([m3, "stop", "--quiet"], dry=dry, timeout=180)
 
     # --force-quiesce: step 1's `m3 stop` is best-effort and non-fatal, so a
     # writer that did not exit would leave `setup --non-interactive` waiting on
@@ -804,12 +828,22 @@ def main(argv: list[str] | None = None) -> int:
         print("  note: could not determine whether the cognitive loop is "
               "installed; leaving that choice untouched. If it was running, "
               "`m3 doctor --fix` or `m3 schedules repair` will bring it back.")
+    stopped_agents = 0 if dry else len(handed_stop) + len(agent_pids)
+
+    def _summary(failed_step: str = "", rc: int = 0) -> None:
+        if not dry:
+            print("\n".join(summary_lines(
+                old=old_version, new=new_version, unchanged=unchanged,
+                agents_stopped=stopped_agents, failed_step=failed_step, rc=rc,
+                log=args.log)))
+
     rc = run(setup_cmd, dry=dry)
     if rc != 0:
         print(
             f"\n`m3 setup` failed (exit {rc}). The package IS upgraded; re-run\n"
             "`m3 setup` by hand to finish wiring it up."
         )
+        _summary("m3 setup", rc)
         return rc
 
     # --fix --fix-hooks, not a bare `doctor`. An upgrade is the one moment when
@@ -830,14 +864,12 @@ def main(argv: list[str] | None = None) -> int:
             "upgrade completed and repairs were attempted; read the doctor output\n"
             "above before relying on this install."
         )
+        _summary("m3 doctor", rc)
         return rc
 
     if dry:
         print("\nDry run complete; nothing was changed.")
-    elif unchanged:
-        print(f"\nDone. m3 {old_version} was already installed; nothing was upgraded.")
-    else:
-        print(f"\nDone. m3 {old_version or '?'} -> {new_version or '?'}.")
+    _summary()
     return 0
 
 

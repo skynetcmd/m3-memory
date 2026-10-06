@@ -210,7 +210,7 @@ def test_daemons_are_stopped_AFTER_the_package_is_replaced():
     would be useless.
     """
     src = (_BIN / "m3_upgrade.py").read_text(encoding="utf-8")
-    assert src.count('run([m3, "stop"]') >= 2, (
+    assert src.count('run([m3, "stop"') >= 2, (
         "only one `m3 stop` remains; a daemon that survived it now runs OLD code "
         "and the setup step will not restart it because it looks healthy"
     )
@@ -567,3 +567,34 @@ def test_the_printed_command_keeps_the_users_flags(tmp_path, monkeypatch, capsys
     monkeypatch.setattr(m3u, "run", lambda *a, **k: pytest.fail("nothing may run"))
     assert m3u.main(["--yes", "--stop-agents"]) == 2
     assert 'm3_upgrade.py" --yes --stop-agents' in capsys.readouterr().out
+
+
+def test_the_summary_names_the_agents_to_reconnect(tmp_path, monkeypatch, capsys):
+    """The step output scrolls away; the last lines say what changed and what
+    the user still has to do."""
+    _held_pip_install(tmp_path, monkeypatch, own=[], others=[5555])
+    monkeypatch.setattr(m3u, "interactive_console", lambda: False)
+
+    def _stop(pids):
+        monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "stop_holders", _stop)
+    monkeypatch.setattr(m3u, "run", lambda cmd, **k: 0)
+    assert m3u.main(["--yes", "--stop-agents"]) == 0
+    tail = capsys.readouterr().out.split("\nDone.\n", 1)[1]
+    assert "version : m3 " in tail
+    assert "1 agent session(s); reconnect them" in tail
+    assert "health  : m3 doctor passed" in tail
+
+
+def test_a_failed_doctor_ends_in_an_incomplete_summary(tmp_path, monkeypatch, capsys):
+    scripts, pkg = _pip_install(tmp_path, version="2026.10.5.0")
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    monkeypatch.setattr(m3u, "run", lambda cmd, **k: 3 if "doctor" in cmd else 0)
+    assert m3u.main(["--yes"]) == 3
+    out = capsys.readouterr().out
+    assert "Upgrade incomplete." in out
+    assert "health  : m3 doctor reported problems (exit 3)" in out
+    assert "\nDone.\n" not in out
