@@ -664,7 +664,8 @@ def main(argv: list[str] | None = None) -> int:
     new_version = None if dry else installed_version(find_m3_package(m3) or pkg)
     unchanged = (not dry and old_version is not None and new_version == old_version)
     if unchanged:
-        where = spec if (spec and not args.from_pypi) else "the package index"
+        local_source = bool(spec) and not source_is_pypi(spec) and not args.from_pypi
+        where = spec if local_source else "the package index"
         print(f"\n  [!] m3 is still {old_version}: {where} has no newer version.")
         if spec and not source_is_pypi(spec) and not args.from_pypi:
             print("      This install tracks that source, not PyPI. To move to the "
