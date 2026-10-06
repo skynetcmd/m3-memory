@@ -98,11 +98,12 @@ import time
 import uuid
 from typing import Any, AsyncIterator, List, Optional, Union
 
+from m3_sdk import destructive_tools_allowed, getenv_compat
+
 # Force Python UTF-8 mode before any output. This proxy is launched directly
 # (`python bin/mcp_proxy.py` — the OpenClaw path), bypassing the m3 CLI, so it
 # can't rely on the CLI's UTF-8 re-exec. Re-execs once; no-op if already UTF-8.
 from m3_sdk import ensure_utf8 as _ensure_utf8
-from m3_sdk import getenv_compat
 
 _ensure_utf8()
 
@@ -144,7 +145,7 @@ CONNECT_TIMEOUT = 5.0
 # env var resolved to two different values depending on entry point (§3: one
 # default per var). Reconciled to the documented canonical value.
 READ_TIMEOUT = float(getenv_compat("M3_LM_READ_TIMEOUT", "LM_READ_TIMEOUT", "4800.0"))
-ALLOW_DESTRUCTIVE = getenv_compat("M3_MCP_PROXY_ALLOW_DESTRUCTIVE", "MCP_PROXY_ALLOW_DESTRUCTIVE", "").lower() in ("1", "true", "yes")
+ALLOW_DESTRUCTIVE = destructive_tools_allowed()
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKSPACE = BASE_DIR

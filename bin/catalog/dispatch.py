@@ -15,7 +15,7 @@ import json
 import os
 from typing import Any
 
-from m3_sdk import active_database
+from m3_sdk import active_database, destructive_tools_allowed
 
 from .spec import ToolSpec, memory_core
 
@@ -194,9 +194,7 @@ async def execute_tool_structured(
 # `m3 <domain> <tool>` human CLI surface; both go through execute_tool_structured
 # so behavior cannot drift. See docs/DUAL_SURFACE_TOOL_ACCESS_PLAN.md.
 
-_DESTRUCTIVE_ALLOWED = os.environ.get(
-    "MCP_PROXY_ALLOW_DESTRUCTIVE", ""
-).lower() in ("1", "true", "yes")
+_DESTRUCTIVE_ALLOWED = destructive_tools_allowed()
 
 # Tools the dispatcher must NOT recurse into (would be confusing / cyclic).
 _DISPATCH_EXCLUDE = frozenset({"m3_call", "m3_index", "tools_load_domain", "tools_list_domains"})
@@ -243,7 +241,7 @@ async def _dispatch_one(tool: str, args: dict, *, dry_run: bool) -> Any:
                 "hint": "Meta/dispatcher tools cannot be called through m3_call."}
     if not destructive_allowed and not spec.default_allowed:
         return {"ok": False, "error": "destructive_gated", "tool": tool,
-                "hint": "This tool mutates/deletes. Set MCP_PROXY_ALLOW_DESTRUCTIVE=1 to enable."}
+                "hint": "This tool mutates/deletes. Set M3_MCP_PROXY_ALLOW_DESTRUCTIVE=1 to enable."}
     try:
         result = await execute_tool_structured(
             spec, args or {}, agent_id="", dry_run=dry_run)

@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_proxy.py
-sha1: 9a50dcb4f166
-mtime_utc: 2026-09-19T02:10:06.579773+00:00
-generated_utc: 2026-09-19T02:10:11.241247+00:00
+sha1: 48f1c94075b7
+mtime_utc: 2026-10-06T01:14:42.052000+00:00
+generated_utc: 2026-10-06T01:14:52.843427+00:00
 private: false
 ---
 
@@ -121,8 +121,8 @@ _(no argparse arguments detected)_
 
 - `m3_sdk (M3Context)`
 - `m3_sdk (acquire_or_exit)`
+- `m3_sdk (destructive_tools_allowed, getenv_compat)`
 - `m3_sdk (ensure_utf8)`
-- `m3_sdk (getenv_compat)`
 - `mcp_tool_catalog`
 - `memory_bridge`
 
@@ -132,7 +132,7 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 524)
+- `httpx.AsyncClient()` (line 525)
 
 
 ---

@@ -237,3 +237,17 @@ def test_m3_call_async_tool_dispatches():
         assert data["error"] == "call_failed"
     else:
         assert data["tool"] == "memory_search"
+
+
+def test_destructive_gate_reads_the_m3_name_and_the_legacy_name(monkeypatch):
+    """m3_call and the MCP proxy share one reading of the opt-in. m3_call once
+    read only the legacy name, so an operator who set the M3_ name still had
+    destructive tools refused through m3_call."""
+    import m3_sdk
+
+    for name in ("M3_MCP_PROXY_ALLOW_DESTRUCTIVE", "MCP_PROXY_ALLOW_DESTRUCTIVE"):
+        monkeypatch.delenv("M3_MCP_PROXY_ALLOW_DESTRUCTIVE", raising=False)
+        monkeypatch.delenv("MCP_PROXY_ALLOW_DESTRUCTIVE", raising=False)
+        assert m3_sdk.destructive_tools_allowed() is False
+        monkeypatch.setenv(name, "1")
+        assert m3_sdk.destructive_tools_allowed() is True, name

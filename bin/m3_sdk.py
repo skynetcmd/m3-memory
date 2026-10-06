@@ -167,6 +167,17 @@ def resolve_warehouse_dsn() -> "str | None":
     return (get_secret("PG_URL") or "").strip() or None
 
 
+def destructive_tools_allowed() -> bool:
+    """Whether catalog tools marked default_allowed=False may run through a proxy.
+
+    The one reading of the opt-in, shared by the MCP proxy and the m3_call
+    dispatcher: M3_MCP_PROXY_ALLOW_DESTRUCTIVE, or its legacy name
+    MCP_PROXY_ALLOW_DESTRUCTIVE, set to 1/true/yes.
+    """
+    raw = getenv_compat("M3_MCP_PROXY_ALLOW_DESTRUCTIVE", "MCP_PROXY_ALLOW_DESTRUCTIVE", "")
+    return (raw or "").lower() in ("1", "true", "yes")
+
+
 # name -> submodules whose namespace must observe a rebind of that name. The
 # first entry is the canonical read source used by the facade's own __getattr__.
 _ROUTED = {
