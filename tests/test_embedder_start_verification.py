@@ -376,3 +376,5 @@ def test_wait_serving_gives_up_at_the_deadline(monkeypatch):
 def _quiet_service_cmd_follows_the_fake(monkeypatch):
     """Route the quiet variant through whatever _service_cmd a test fakes."""
     monkeypatch.setattr(ea, "_service_cmd_quiet", lambda *a, **k: ea._service_cmd(*a, **k))
+    # Reads this machine's real launchd/systemd/SCM state otherwise.
+    monkeypatch.setattr(ea, "_service_defined_on_disk", lambda: False)

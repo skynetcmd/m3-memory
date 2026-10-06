@@ -960,7 +960,7 @@ def cmd_install(args: argparse.Namespace) -> int:
 
     # Registered, running and on the current binary: nothing to install or
     # start, and a port-in-use notice would be about this same service.
-    registered = _service_reports_installed(binary, gguf)
+    registered = _service_reports_installed(binary, gguf) or _service_defined_on_disk()
     if (registered and _service_reports_running(binary, gguf)
             and not _service_binary_is_stale(binary)):
         return _verify_started_or_explain(binary, gguf)
@@ -1125,6 +1125,28 @@ def _print_stop_proc_hint(script_name: str) -> None:
               f"'*{script_name}*' }} | ForEach {{ Stop-Process -Id $_.ProcessId -Force }}")
     else:
         print(f"           pkill -f {script_name}   # find + stop it")
+
+
+def _service_defined_on_disk() -> bool:
+    """True when the embed service's definition (launchd plist / systemd unit /
+    SCM entry) exists even though the manager does not list it: `m3 stop`
+    unloads it on macOS, after which `m3-embed-server status` says "not
+    installed". The owner of that check is install_schedules; False when it
+    cannot be loaded or cannot tell.
+    """
+    import importlib
+
+    here = Path(__file__).resolve().parent
+    for bin_dir in (here / "bin", here.parent / "bin"):
+        if not (bin_dir / "install_schedules.py").is_file():
+            continue
+        if str(bin_dir) not in sys.path:
+            sys.path.insert(0, str(bin_dir))
+        try:
+            return importlib.import_module("install_schedules")._rust_embed_service_loaded() is True
+        except Exception:  # noqa: BLE001 — unknown is "not shown as registered"
+            return False
+    return False
 
 
 def _import_model_fetch(name: str):
