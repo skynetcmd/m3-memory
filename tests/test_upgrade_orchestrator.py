@@ -29,6 +29,10 @@ _SPEC.loader.exec_module(m3u)
 def _step3_runs_nothing(monkeypatch):
     """Step 3 captures `m3 stop --quiet`; tests stub `run`, so stub this too."""
     monkeypatch.setattr(m3u, "run_captured", lambda cmd, **k: "")
+    # Steps 2 and 5 capture their output; route them through whatever `run` a
+    # test fakes, so its exit codes (and recorded calls) still apply.
+    monkeypatch.setattr(m3u, "run_captured_rc",
+                        lambda cmd, **k: (m3u.run(cmd, dry=False, **k), ""))
 
 
 def _mk(base: pathlib.Path, rel: str) -> pathlib.Path:
@@ -674,3 +678,54 @@ def test_run_does_not_echo_the_command(monkeypatch, capsys):
     monkeypatch.setattr(m3u.subprocess, "run", lambda cmd, **k: type("R", (), {"returncode": 0})())
     m3u.run(["/full/path/m3", "stop"], dry=False)
     assert "$ " not in capsys.readouterr().out
+
+
+# Real `m3 doctor --fix --fix-hooks` output from a healthy upgrade (rc45, macOS).
+_HEALTHY_DOCTOR = """\
+[OK] m3 HEALTHY · 82000 memories · embedder: shared server (:8082) · chatlog: active (144467 rows)
+agent MCP configs: all healthy.
+[OK] memory bridge found
+==> Running m3-memory self-repair...
+Repair Summary: NOTHING_TO_DO (run_migrations skipped, rebuild_fts5 skipped, embed_backfill skipped, rebuild_cohesion skipped)
+✅ shared-embedder: OK (config + server + keep-alive)
+[OK] Web Dashboard available at: http://127.0.0.1:8088  (pid 97002)
+✅ agent paths: OK (1 wired host(s), no dead or stale paths)
+✅ claude mcp: single direct server (mcp__m3_memory__)
+  [ok] plugin plugin: ✔ m3 is already at the latest version (2026.10.5.0).
+"""
+
+
+def test_a_healthy_doctor_collapses_to_its_health_line():
+    assert m3u.doctor_is_all_healthy(_HEALTHY_DOCTOR) is True
+
+
+@pytest.mark.parametrize("extra", [
+    "  [ok] plugin plugin: ✔ Plugin \"m3\" updated from 2026.10.5.0 to 2026.10.6.0.",  # a change
+    "⚠️  plugin: 2026.10.5.0 installed, older than m3 2026.10.6.0",                    # a warning
+    "Repair Summary: OK (run_migrations ok)",                                           # a repair ran
+    "some line a future probe prints",                                                  # unknown
+])
+def test_anything_but_healthy_lines_shows_the_full_output(extra):
+    assert m3u.doctor_is_all_healthy(_HEALTHY_DOCTOR + extra + "\n") is False
+
+
+def test_empty_doctor_output_is_not_healthy():
+    assert m3u.doctor_is_all_healthy("") is False
+
+
+def test_step_five_prints_one_line_when_doctor_is_healthy(tmp_path, monkeypatch, capsys):
+    scripts, pkg = _pip_install(tmp_path)
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    monkeypatch.setattr(m3u, "run", lambda cmd, **k: 0)
+    monkeypatch.setattr(m3u, "run_captured_rc", lambda cmd, **k: (
+        0, _HEALTHY_DOCTOR if "doctor" in cmd else "upgrading m3-memory...\n"))
+    m3u.main(["--yes"])
+    out = capsys.readouterr().out
+    assert "[OK] m3 HEALTHY" in out
+    assert "Repair Summary" not in out
+    assert "upgrading m3-memory..." not in out          # pipx lines only on failure
+    assert out.startswith("[detect] pip install")       # one detect line
+    assert "evidence" not in out

@@ -50,6 +50,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess  # nosec B404 - orchestrates known package managers, never a shell
 import sys
@@ -544,17 +545,39 @@ def _cmd_label(cmd: list[str]) -> str:
     return " ".join([pathlib.Path(cmd[0]).stem, *cmd[1:]])
 
 
-def run_captured(cmd: list[str], *, timeout: int = 900) -> str:
-    """Run ``cmd`` and return its combined output, for the caller to print only
-    when there is something to say. A failure to launch comes back as text."""
+def run_captured_rc(cmd: list[str], *, timeout: int = 900,
+                    env: dict[str, str] | None = None) -> tuple[int, str]:
+    """Run ``cmd`` and return (exit code, combined output), for the caller to
+    print only when there is something to say. A failure to launch is rc 127
+    (timeout 124, as run() reports them) with the reason as text."""
     try:
         cp = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",  # nosec B603
-                            errors="replace", timeout=timeout)
-        return (cp.stdout or "") + (cp.stderr or "")
+                            errors="replace", timeout=timeout, env=env)
+        return cp.returncode, (cp.stdout or "") + (cp.stderr or "")
     except OSError:
-        return f"      !! could not run: {cmd[0]}\n"
+        return 127, f"      !! could not run: {cmd[0]}\n"
     except subprocess.TimeoutExpired:
-        return f"      !! timed out after {timeout}s\n"
+        return 124, f"      !! timed out after {timeout}s\n"
+
+
+def run_captured(cmd: list[str], *, timeout: int = 900) -> str:
+    """run_captured_rc's output only."""
+    return run_captured_rc(cmd, timeout=timeout)[1]
+
+
+# Lines `m3 doctor --fix --fix-hooks` prints when a check passed and nothing
+# was changed. A run made only of these collapses to its health line; any other
+# line (a repair, a warning, a probe added later) shows the full output.
+_DOCTOR_HEALTHY = re.compile(
+    r"^(\[OK\] m3 HEALTHY|agent MCP configs: all healthy\.|\[OK\] memory bridge found"
+    r"|==> Running m3-memory self-repair|Repair Summary: NOTHING_TO_DO"
+    r"|✅ |\[OK\] Web Dashboard available at|agent paths: no wired agent configs found"
+    r"|\s*\[ok\] plugin plugin: .*already at the latest version)")
+
+
+def doctor_is_all_healthy(out: str) -> bool:
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    return bool(lines) and all(_DOCTOR_HEALTHY.match(ln) for ln in lines)
 
 
 def summary_lines(*, old: str | None, new: str | None, unchanged: bool,
@@ -622,11 +645,13 @@ def main(argv: list[str] | None = None) -> int:
 
     pkg = find_m3_package(m3)
     method, evidence = detect_install_method(pkg)
-    print(f"[detect] install method: {method}")
-    print(f"         evidence      : {evidence}")
     spec = pipx_source(pkg) if method == PIPX else None
+    source = f", source {spec or 'unknown (no pipx metadata)'}" if method == PIPX else ""
+    print(f"[detect] {method} install{source}")
+    # The evidence explains a refusal (plugin / unknown) or a dry run's plan.
+    if args.dry_run or method in (PLUGIN, UNKNOWN):
+        print(f"         evidence      : {evidence}")
     if method == PIPX:
-        print(f"         source        : {spec or 'unknown (no pipx metadata)'}")
         if args.from_pypi:
             print("         --from-pypi   : reinstalling from PyPI (the source becomes m3-memory)")
         elif spec and not source_is_pypi(spec):
@@ -762,8 +787,9 @@ def main(argv: list[str] | None = None) -> int:
     # stop does not remove, but the payload that owns the detector is about to
     # be deleted.
     loop_was_installed = cognitive_loop_installed(m3)
-    print(f"\ncognitive loop currently installed: "
-          f"{'yes' if loop_was_installed else 'no' if loop_was_installed is False else 'unknown'}")
+    if args.dry_run:   # otherwise step 4 carries it (and notes when unknown)
+        print(f"\ncognitive loop currently installed: "
+              f"{'yes' if loop_was_installed else 'no' if loop_was_installed is False else 'unknown'}")
 
     if not args.skip_stop:
         print(f"\n[1/5] stopping m3 DB writers: {_cmd_label([m3, 'stop'])}")
@@ -780,7 +806,14 @@ def main(argv: list[str] | None = None) -> int:
         if not args.skip_stop:
             print("Step 1 stopped m3's services; `m3 setup` starts them again.")
         return 2
-    rc = run(up, dry=dry)
+    if dry:
+        rc = run(up, dry=dry)
+    else:
+        # The package manager's own lines ("upgrading m3-memory...") are shown
+        # only on failure (or into a --log); the summary reports the versions.
+        rc, out = run_captured_rc(up, timeout=900)
+        if rc != 0 or args.log:
+            print(out.rstrip())
     if rc != 0:
         importable = subprocess.run(  # nosec B603 - argv list, no shell
             # In the OWNING interpreter, never this process (see module docstring).
@@ -893,7 +926,15 @@ def main(argv: list[str] | None = None) -> int:
     # timestamp before writing (see environment_probe.repair).
     doctor_cmd = [m3, "doctor", "--fix", "--fix-hooks"]
     print(f"\n[5/5] verifying and repairing: {_cmd_label(doctor_cmd)}")
-    rc = run(doctor_cmd, dry=dry, timeout=300)
+    if dry:
+        rc = run(doctor_cmd, dry=dry, timeout=300)
+    else:
+        rc, out = run_captured_rc(doctor_cmd, timeout=300)
+        if rc == 0 and not args.log and doctor_is_all_healthy(out):
+            # Every check passed and nothing was repaired: its health line says it.
+            print(next(ln for ln in out.splitlines() if ln.strip()))
+        else:
+            print(out.rstrip())
     if rc != 0:
         print(
             f"\n`m3 doctor --fix --fix-hooks` reported problems (exit {rc}). The\n"
