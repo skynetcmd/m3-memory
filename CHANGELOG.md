@@ -47,8 +47,10 @@ the policy is forward-going only.
 - **An unattended Windows upgrade no longer waits on an administrator prompt
   nobody can answer.** It raised one, waited out setup's 15-minute budget, and
   reported setup as failed; it now finishes and names `m3 doctor --fix` for the
-  step that needs approval.
-  **Affected:** Windows upgrades run with `--yes` or without a console ·
+  step that needs approval. An administrator step you approve is now reported
+  as done (it was reported as declined), and a prompt left unanswered for five
+  minutes no longer runs its steps if approved later.
+  **Affected:** Windows setups and upgrades that need administrator rights ·
   **Action:** none · **Data status:** none.
 
 ### Changed
