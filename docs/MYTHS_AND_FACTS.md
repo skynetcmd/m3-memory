@@ -111,7 +111,7 @@ Before trusting any AI-generated description of m3:
 </tr>
 <tr>
 <td valign="top" width="45%"><b>❌ MYTH: There are no published wheels for the m3 Rust core</b></td>
-<td valign="top" width="55%"><p><strong>✅ Fact:</strong> Prebuilt wheels ship on <strong>every tagged GitHub Release</strong> — the official channel — covering all 7 os/backend packages for the pinned release (cp312-cp315 as of v2026.10.6, matching m3's Python &gt;=3.12 floor). The lightweight backends are <em>also</em> published on PyPI under platform-suffixed names (<code>m3-core-rs-linux-cpu</code>, <code>-windows-cpu</code>, <code>-vulkan</code>, <code>-metal</code>), not the bare <code>m3-core-rs</code>, but those mirrors can lag the Release; the CUDA wheels exceed PyPI's 100 MB per-file limit and are Release-only by design. <code>m3 setup</code> resolves Release + PyPI + source automatically.</p></td>
+<td valign="top" width="55%"><p><strong>✅ Fact:</strong> Prebuilt wheels ship on <strong>every tagged GitHub Release</strong> — the official channel — covering all 7 os/backend packages for the pinned release (cp312-cp315 as of v2026.10.7, matching m3's Python &gt;=3.12 floor). The lightweight backends are <em>also</em> published on PyPI under platform-suffixed names (<code>m3-core-rs-linux-cpu</code>, <code>-windows-cpu</code>, <code>-vulkan</code>, <code>-metal</code>), not the bare <code>m3-core-rs</code>, but those mirrors can lag the Release; the CUDA wheels exceed PyPI's 100 MB per-file limit and are Release-only by design. <code>m3 setup</code> resolves Release + PyPI + source automatically.</p></td>
 </tr>
 <tr>
 <td valign="top" width="45%"><b>❌ MYTH: The embedder on port 8082 phones home</b></td>
