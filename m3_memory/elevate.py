@@ -39,21 +39,22 @@ class ElevationBatch:
         return len(self.actions)
 
     def render_script(self, results_path: str, log_dir: str,
-                      expires_utc: "str | None" = None) -> str:
+                      expires_epoch: "int | None" = None) -> str:
         """The PowerShell the elevated process runs: each action in order, its
         output to its own log and its exit code under its label, then the codes
         written as JSON.
 
-        `expires_utc` (ISO 8601): a prompt approved after this runs nothing. A
-        dialog outlives the setup that raised it when that setup is killed, and
-        was once approved 44 minutes later, restarting a service mid-way
-        through an unrelated run.
+        `expires_epoch` (Unix seconds, UTC): a prompt approved after this runs
+        nothing. A dialog outlives the setup that raised it when that setup is
+        killed, and was once approved 44 minutes later, restarting a service
+        mid-way through an unrelated run. Epoch seconds, not a parsed date:
+        [datetime]::Parse turns "+00:00" into LOCAL time, so every prompt read
+        as expired west of UTC.
         """
         lines = ["$ErrorActionPreference = 'Continue'", "$r = [ordered]@{}"]
-        if expires_utc:
+        if expires_epoch is not None:
             lines.append(
-                f"if ([datetime]::UtcNow -gt [datetime]::Parse({_ps_quote(expires_utc)}, "
-                "$null, [Globalization.DateTimeStyles]::RoundtripKind)) { "
+                f"if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -gt {int(expires_epoch)}) {{ "
                 f"@{{expired = 1}} | ConvertTo-Json | Set-Content -LiteralPath "
                 f"{_ps_quote(results_path)} -Encoding UTF8; exit 0 }}")
         for i, (label, argv) in enumerate(self.actions):
@@ -81,14 +82,13 @@ class ElevationBatch:
             return {}
         if sys.platform != "win32":
             return None
-        import datetime
-        expires = (datetime.datetime.now(datetime.timezone.utc)
-                   + datetime.timedelta(seconds=timeout)).isoformat()
+        import time
+        expires = int(time.time()) + timeout
         tmp = _workdir()
         script = os.path.join(tmp, "actions.ps1")
         results = os.path.join(tmp, "results.json")
         with open(script, "w", encoding="utf-8-sig", newline="") as fh:
-            fh.write(self.render_script(results, tmp, expires_utc=expires))
+            fh.write(self.render_script(results, tmp, expires_epoch=expires))
         launcher = (
             "$p = Start-Process -FilePath 'powershell' -ArgumentList "
             f"'-NoProfile','-ExecutionPolicy','Bypass','-File',{_ps_quote(script)} "

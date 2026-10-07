@@ -175,6 +175,26 @@ def test_the_batch_workdir_names_the_user_so_elevated_results_are_readable():
 def test_an_expired_prompt_runs_nothing():
     b = elevate.ElevationBatch()
     b.add("stop", ["x", "stop"])
-    script = b.render_script("C:/t/results.json", "C:/t", expires_utc="2026-01-01T00:00:00+00:00")
+    script = b.render_script("C:/t/results.json", "C:/t", expires_epoch=1_700_000_000)
     first_action = script.index("& 'x' 'stop'")
     assert script.index("expired = 1") < first_action, "expiry check must come first"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="evaluates the PowerShell condition")
+@pytest.mark.parametrize("offset, expired", [(300, False), (-300, True)])
+def test_the_expiry_condition_holds_in_powershell(offset, expired):
+    """Evaluate the rendered condition itself, unelevated. The first version
+    parsed an ISO date, which PowerShell turned into LOCAL time: a deadline five
+    minutes ahead read as expired west of UTC, so every approval was refused."""
+    import subprocess
+    import time
+
+    b = elevate.ElevationBatch()
+    b.add("stop", ["x", "stop"])
+    script = b.render_script("C:/t/r.json", "C:/t", expires_epoch=int(time.time()) + offset)
+    line = next(ln for ln in script.splitlines() if "expired = 1" in ln)
+    cond = line[line.index("(") + 1: line.index(") {")]
+    out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                          f"if ({cond}) {{ 'EXPIRED' }} else {{ 'valid' }}"],
+                         capture_output=True, text=True).stdout.strip()
+    assert out == ("EXPIRED" if expired else "valid"), (offset, out)
