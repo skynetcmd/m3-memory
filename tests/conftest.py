@@ -1446,6 +1446,17 @@ def _get_template_db() -> Path:
     return _TEMPLATE_DB_PATH
 
 
+def orthogonal_vectors(names, dim: int = 64) -> dict[str, list[float]]:
+    """One-hot vectors for `names`, a DIFFERENT axis each, so no two resolve to
+    each other by cosine. A hash-mod-dim index collides (64 axes, three names:
+    ~5% of random names), and the colliding entity is then correctly merged —
+    a test failure that is not a product failure."""
+    names = list(dict.fromkeys(names))
+    if len(names) > dim:
+        raise ValueError(f"{len(names)} names need more than {dim} axes")
+    return {n: [1.0 if k == i else 0.0 for k in range(dim)] for i, n in enumerate(names)}
+
+
 def create_full_main_schema(db_path) -> None:
     """Create a fresh main-DB-schema at `db_path` (post-v031 canonical).
 

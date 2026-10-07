@@ -14,7 +14,6 @@ Real store (template schema), real `_db()`; only the embedder is faked.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import importlib
 import sqlite3
 import sys
@@ -26,9 +25,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 
 
 def _vec(name: str) -> list[float]:
-    """Deterministic, near-orthogonal per name: nothing resolves by cosine."""
-    i = int(hashlib.sha256(name.encode()).hexdigest(), 16) % 64
-    return [1.0 if k == i else 0.0 for k in range(64)]
+    """Orthogonal per name: nothing resolves by cosine."""
+    from conftest import orthogonal_vectors
+    return orthogonal_vectors(_NAMES)[name]
+
+
+_NAMES = ["Alpha Industries", "Beta Logistics", "Gamma Freight", "Zeta Holdings"]
 
 
 @pytest.fixture

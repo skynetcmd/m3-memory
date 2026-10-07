@@ -204,7 +204,6 @@ def test_entity_writer_holds_no_connection_across_embedding_awaits_on_pg(pg_back
     only the embedder is faked (see test_entity_write_lock.py for SQLite)."""
     import asyncio
     import contextlib
-    import hashlib
     import importlib
 
     monkeypatch.setenv("M3_DB_BACKEND", "postgres")
@@ -238,11 +237,13 @@ def test_entity_writer_holds_no_connection_across_embedding_awaits_on_pg(pg_back
         finally:
             open_now[0] -= 1
 
+    from conftest import orthogonal_vectors
+    vecs = orthogonal_vectors([*names, f"Zeta {tag} Holdings"])
+
     async def embed(name):
         seen.append(open_now[0])
         await asyncio.sleep(0)
-        i = int(hashlib.sha256(name.encode()).hexdigest(), 16) % 64
-        return [1.0 if k == i else 0.0 for k in range(64)]
+        return vecs[name]
 
     async def extractor(_text):
         return {"entities": [{"canonical_name": n, "entity_type": "organization"} for n in names],
