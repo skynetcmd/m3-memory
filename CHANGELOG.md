@@ -77,6 +77,14 @@ the policy is forward-going only.
   **Affected:** installs using the Rust embed server · **Action:** none;
   `m3 upgrade` installs the new core · **Data status:** none.
 
+### Security
+
+- **The homelab-dashboard example pins `source-map-js` 1.2.2**
+  (GHSA-68fv-2mgg-jv7q, a denial of service in a build-time dependency).
+  **Affected:** anyone who ran `npm install` in
+  `examples/homelab-dashboard/frontend` · **Action:** re-run `npm install`
+  there · **Data status:** none.
+
 ### Changed
 
 - **`m3 stop` on macOS and Linux leaves the Rust embed server running,** as
