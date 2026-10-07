@@ -151,3 +151,30 @@ def test_stale_detection_compares_process_start_with_core_install(monkeypatch, t
     import psutil
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [_P(1, 500.0), _P(2, 2000.0)])
     assert [s["pid"] for s in embedder_admin.stale_embed_servers()] == [1]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ACLs")
+def test_the_batch_workdir_names_the_user_so_elevated_results_are_readable():
+    """mkdtemp's Python 3.13+ ACL is OWNER RIGHTS + SYSTEM + Administrators: a
+    file the ELEVATED process writes there is owned by Administrators and the
+    caller cannot read results.json, so an approved batch read as declined."""
+    import getpass
+    import shutil
+    import subprocess
+
+    d = elevate._workdir()
+    try:
+        out = subprocess.run(["icacls", d], capture_output=True, text=True).stdout
+        aces = [ln.replace(d, "").strip().lower() for ln in out.splitlines() if "(" in ln]
+        user = getpass.getuser().lower()
+        assert any(a.split(":")[0].endswith("\\" + user) for a in aces), aces
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_an_expired_prompt_runs_nothing():
+    b = elevate.ElevationBatch()
+    b.add("stop", ["x", "stop"])
+    script = b.render_script("C:/t/results.json", "C:/t", expires_utc="2026-01-01T00:00:00+00:00")
+    first_action = script.index("& 'x' 'stop'")
+    assert script.index("expired = 1") < first_action, "expiry check must come first"

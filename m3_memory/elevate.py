@@ -38,11 +38,24 @@ class ElevationBatch:
     def __len__(self) -> int:
         return len(self.actions)
 
-    def render_script(self, results_path: str, log_dir: str) -> str:
+    def render_script(self, results_path: str, log_dir: str,
+                      expires_utc: "str | None" = None) -> str:
         """The PowerShell the elevated process runs: each action in order, its
         output to its own log and its exit code under its label, then the codes
-        written as JSON."""
+        written as JSON.
+
+        `expires_utc` (ISO 8601): a prompt approved after this runs nothing. A
+        dialog outlives the setup that raised it when that setup is killed, and
+        was once approved 44 minutes later, restarting a service mid-way
+        through an unrelated run.
+        """
         lines = ["$ErrorActionPreference = 'Continue'", "$r = [ordered]@{}"]
+        if expires_utc:
+            lines.append(
+                f"if ([datetime]::UtcNow -gt [datetime]::Parse({_ps_quote(expires_utc)}, "
+                "$null, [Globalization.DateTimeStyles]::RoundtripKind)) { "
+                f"@{{expired = 1}} | ConvertTo-Json | Set-Content -LiteralPath "
+                f"{_ps_quote(results_path)} -Encoding UTF8; exit 0 }}")
         for i, (label, argv) in enumerate(self.actions):
             call = "& " + " ".join(_ps_quote(a) for a in argv)
             log = _ps_quote(os.path.join(log_dir, f"{i}.log"))
@@ -53,21 +66,29 @@ class ElevationBatch:
                      f"-Encoding UTF8")
         return "\r\n".join(lines) + "\r\n"
 
-    def run(self) -> "dict[str, dict] | None":
+    def run(self, timeout: int = 300) -> "dict[str, dict] | None":
         """Run every queued action in one elevated process. Returns
         {label: {"rc": exit code, "output": last lines}}, or None when the
-        prompt was declined or the elevated process wrote no results (then
-        nothing can be assumed to have run).
+        prompt was declined, expired, or the elevated process wrote no results
+        (then nothing can be assumed to have run).
+
+        `timeout` bounds the wait for the dialog. It stays well inside the
+        caller's own budget (`m3 upgrade` gives setup 900 s), so a missed
+        prompt costs this step, not the whole setup; past it, the script
+        refuses to run (see render_script).
         """
         if not self.actions:
             return {}
         if sys.platform != "win32":
             return None
-        tmp = tempfile.mkdtemp(prefix="m3-elevate-")
+        import datetime
+        expires = (datetime.datetime.now(datetime.timezone.utc)
+                   + datetime.timedelta(seconds=timeout)).isoformat()
+        tmp = _workdir()
         script = os.path.join(tmp, "actions.ps1")
         results = os.path.join(tmp, "results.json")
         with open(script, "w", encoding="utf-8-sig", newline="") as fh:
-            fh.write(self.render_script(results, tmp))
+            fh.write(self.render_script(results, tmp, expires_utc=expires))
         launcher = (
             "$p = Start-Process -FilePath 'powershell' -ArgumentList "
             f"'-NoProfile','-ExecutionPolicy','Bypass','-File',{_ps_quote(script)} "
@@ -75,13 +96,13 @@ class ElevationBatch:
         )
         try:
             subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", launcher],
-                           timeout=900, check=False, capture_output=True)
+                           timeout=timeout, check=False, capture_output=True)
         except (OSError, subprocess.SubprocessError):
             return None
         try:
             with open(results, encoding="utf-8-sig") as fh:
                 data = json.load(fh)
-            if not isinstance(data, dict):
+            if not isinstance(data, dict) or data.get("expired"):
                 return None
             out: "dict[str, dict]" = {}
             for i, (label, _argv) in enumerate(self.actions):
@@ -94,6 +115,19 @@ class ElevationBatch:
         finally:
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _workdir() -> str:
+    """A fresh directory under %TEMP% that the elevated process's files stay
+    readable in. tempfile.mkdtemp() is wrong here: on Python 3.13+ it applies an
+    ACL of OWNER RIGHTS + SYSTEM + Administrators, and a file the ELEVATED
+    process writes is owned by Administrators, so this unelevated caller could
+    not read results.json and reported an approved, successful batch as
+    declined. A plain mkdir inherits %TEMP%'s ACL, which names the user."""
+    import uuid
+    path = os.path.join(tempfile.gettempdir(), f"m3-elevate-{uuid.uuid4().hex[:12]}")
+    os.mkdir(path)
+    return path
 
 
 def _tail(path: str, lines: int = 8) -> str:
