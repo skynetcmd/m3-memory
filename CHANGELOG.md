@@ -44,6 +44,13 @@ the policy is forward-going only.
   the previous native core, run `m3 doctor --fix` and approve the prompt ·
   **Data status:** none.
 
+- **An unattended Windows upgrade no longer waits on an administrator prompt
+  nobody can answer.** It raised one, waited out setup's 15-minute budget, and
+  reported setup as failed; it now finishes and names `m3 doctor --fix` for the
+  step that needs approval.
+  **Affected:** Windows upgrades run with `--yes` or without a console ·
+  **Action:** none · **Data status:** none.
+
 ### Changed
 
 - **Upgrades no longer repeat "no local LLM runtime detected"** on a machine
