@@ -596,6 +596,29 @@ def _as_upgrade() -> dict[str, str]:
     return {**os.environ, UPGRADE_CALLER_ENV: "upgrade"}
 
 
+def m3_still_installed(owner_python: str) -> bool | None:
+    """Whether m3 still imports in its own interpreter after a failed step 2.
+
+    True / False only on evidence: an import that succeeds, or one that fails
+    with ModuleNotFoundError. Anything else is None (unknown): on Windows a
+    process can die before running a line (0xC0000142, measured on a failed
+    upgrade), and reading that as "not installed" told a user with a working
+    m3 that it was gone.
+    """
+    try:
+        cp = subprocess.run(  # nosec B603 - argv list, no shell
+            # In the OWNING interpreter, never this process (see module docstring).
+            [owner_python, "-c", "import importlib; importlib.import_module('m3_memory.cli')"],
+            capture_output=True, text=True, errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if cp.returncode == 0:
+        return True
+    if "ModuleNotFoundError" in (cp.stderr or ""):
+        return False
+    return None
+
+
 def no_cache_env() -> dict[str, str]:
     """The environment with pip's and uv's caches bypassed (pipx uses either)."""
     return {**os.environ, "PIP_NO_CACHE_DIR": "1", "UV_NO_CACHE": "1"}
@@ -886,14 +909,15 @@ def main(argv: list[str] | None = None) -> int:
         if rc != 0 or args.log:
             print(out.rstrip())
     if rc != 0:
-        importable = subprocess.run(  # nosec B603 - argv list, no shell
-            # In the OWNING interpreter, never this process (see module docstring).
-            [owner_python, "-c", "import importlib; importlib.import_module('m3_memory.cli')"],
-            capture_output=True
-        ).returncode == 0
-        if importable:
+        installed = m3_still_installed(owner_python)
+        if installed is True:
             print(f"\nUpgrade command failed (exit {rc}). Nothing further was run; "
                   f"m3 {old_version or ''} is still installed.")
+        elif installed is None:
+            print(f"\nUpgrade command failed (exit {rc}), and whether m3 is still "
+                  f"installed could not be checked. Run `m3 --version`; if it fails, "
+                  f'restore with:\n    "{owner_python}" -m pip install --force-reinstall '
+                  f"--no-deps m3-memory{'==' + old_version if old_version else ''}")
         else:
             print(f"\nUpgrade command failed (exit {rc}) after removing the old "
                   "package: m3 is NOT installed now.\nRestore it once nothing "

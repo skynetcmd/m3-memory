@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_upgrade.py
-sha1: 88909d838bb0
-mtime_utc: 2026-10-07T13:32:25.529653+00:00
-generated_utc: 2026-10-07T13:32:38.439742+00:00
+sha1: 6a19e51ab48e
+mtime_utc: 2026-10-07T23:14:39.968952+00:00
+generated_utc: 2026-10-07T23:14:55.949825+00:00
 private: false
 ---
 
@@ -60,7 +60,7 @@ is stopped or replaced.
 ## Entry points
 
 - `def run()` (line 531)
-- `def main()` (line 680)
+- `def main()` (line 703)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -104,7 +104,7 @@ _(none detected)_
 - `subprocess.run()  → `cmd`` (line 551)
 - `subprocess.run()  → `cmd`` (line 572)
 - `subprocess.run()` (line 129)
-- `subprocess.run()` (line 889)
+- `subprocess.run()` (line 609)
 
 
 ---

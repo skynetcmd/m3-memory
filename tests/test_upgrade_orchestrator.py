@@ -363,12 +363,15 @@ def test_an_open_launcher_is_reported_locked_and_left_intact(tmp_path):
     assert sorted(p.name for p in scripts.iterdir()) == ["m3.exe", "mcp-memory.exe", "python.exe"]
 
 
-@pytest.mark.parametrize("importable, expect", [
-    (True, "m3 2026.10.4.2 is still installed"),
-    (False, "m3 is NOT installed now"),
+@pytest.mark.parametrize("probe_rc, probe_err, expect", [
+    (0, "", "m3 2026.10.4.2 is still installed"),
+    (1, "ModuleNotFoundError: No module named 'm3_memory'", "m3 is NOT installed now"),
+    # The probe itself died before running a line (seen on Windows): unknown,
+    # not "not installed" -- that told a user with a working m3 it was gone.
+    (3221225794, "", "could not be checked"),
 ])
 def test_a_failed_upgrade_reports_what_is_actually_installed(tmp_path, monkeypatch, capsys,
-                                                             importable, expect):
+                                                             probe_rc, probe_err, expect):
     scripts, pkg = _pip_install(tmp_path)
     monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
     monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
@@ -382,13 +385,16 @@ def test_a_failed_upgrade_reports_what_is_actually_installed(tmp_path, monkeypat
 
     monkeypatch.setattr(m3u, "run", _run)
     monkeypatch.setattr(m3u.subprocess, "run",
-                        lambda *a, **k: type("R", (), {"returncode": 0 if importable else 1})())
+                        lambda *a, **k: type("R", (), {"returncode": probe_rc,
+                                                       "stderr": probe_err})())
     assert m3u.main(["--yes"]) == 1
     out = capsys.readouterr().out
     assert expect in out
     assert "still on its previous version" not in out
-    if not importable:
+    if probe_rc != 0:
         assert "--force-reinstall --no-deps m3-memory==2026.10.4.2" in out
+    if probe_rc == 3221225794:
+        assert "NOT installed" not in out
 
 
 def test_from_pypi_reinstalls_pipx_from_the_index():
