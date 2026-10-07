@@ -118,17 +118,23 @@ def test_shell_rc_has_reads_the_effective_assignment(monkeypatch, tmp_path, text
 
 
 @pytest.mark.parametrize("from_upgrade", [True, False])
-def test_no_runtime_guidance_is_one_line_under_the_upgrade(monkeypatch, capsys, from_upgrade):
-    """The full how-to-add-a-model guidance is for setup; under `m3 upgrade` the
-    same unchanged state was six lines on every run."""
+def test_no_runtime_guidance_is_for_setup_not_the_upgrade(monkeypatch, capsys, from_upgrade):
+    """The full how-to-add-a-model guidance is for setup. Under `m3 upgrade` a
+    host that never had a runtime is the standing state: nothing is printed
+    (it was six lines, then one, on every run). A runtime that WAS enabled and
+    went away is a change, covered in test_upgrade_output_and_cache_retry."""
     for var in ("M3_LLM_URL", "LLM_ENDPOINTS_CSV", "M3_LLM_ENDPOINTS_CSV"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(setup_wizard, "_endpoint_reachable", lambda url, **k: False)
+    monkeypatch.setattr(setup_wizard, "_llm_switch_enabled", lambda var: False)
     if from_upgrade:
         monkeypatch.setenv(setup_wizard.UPGRADE_CALLER_ENV, "upgrade")
     else:
         monkeypatch.delenv(setup_wizard.UPGRADE_CALLER_ENV, raising=False)
     setup_wizard._probe_llm_endpoints(object(), argparse.Namespace(non_interactive=True))
     out = [ln for ln in capsys.readouterr().out.splitlines() if ln.strip()]
-    assert any("no local LLM runtime detected" in ln for ln in out)
-    assert (len(out) == 1) is from_upgrade, out
+    if from_upgrade:
+        assert out == []
+    else:
+        assert any("no local LLM runtime detected" in ln for ln in out)
+        assert len(out) > 1, out
