@@ -64,6 +64,24 @@ PLUGIN = "plugin"
 UNKNOWN = "unknown"
 
 
+def find_m3_launcher() -> str | None:
+    """The m3 launcher: PATH first, else the one in this interpreter's own venv.
+
+    `m3 upgrade` runs this script with the install's venv python, so its
+    launcher sits beside sys.executable even when the shell's PATH lacks the
+    pipx bin directory (`~/.local/bin/m3 upgrade` from a bare ssh shell).
+    """
+    found = shutil.which("m3") or shutil.which("mcp-memory")
+    if found:
+        return found
+    here = pathlib.Path(sys.executable).parent
+    for name in ("m3.exe", "m3") if sys.platform == "win32" else ("m3",):
+        candidate = here / name
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def find_m3_package(exe: str) -> pathlib.Path | None:
     """Locate the INSTALLED m3_memory package without importing it.
 
@@ -648,9 +666,10 @@ def main(argv: list[str] | None = None) -> int:
     except (AttributeError, ValueError):
         pass
 
-    m3 = shutil.which("m3") or shutil.which("mcp-memory")
+    m3 = find_m3_launcher()
     if not m3:
-        print("m3 is not on PATH. Install it first, e.g. `pipx install m3-memory`.")
+        print("m3 was not found on PATH or beside this interpreter "
+              f"({sys.executable}). Install it first, e.g. `pipx install m3-memory`.")
         return 1
 
     pkg = find_m3_package(m3)
@@ -843,7 +862,7 @@ def main(argv: list[str] | None = None) -> int:
         return rc
 
     # Re-resolve: step 2 may have replaced the executable we started with.
-    m3 = shutil.which("m3") or shutil.which("mcp-memory") or m3
+    m3 = find_m3_launcher() or m3
 
     # Say plainly when step 2 changed nothing. A package manager exits 0 when the
     # source already holds the installed version, and without this the run ends

@@ -1316,8 +1316,10 @@ def _offer_touchid_sudo() -> None:
 
 def _restart_stale_embed_server() -> None:
     """After a core upgrade, an embed service started earlier still runs the old
-    binary. Unix setup restarts its user service itself; a Windows service runs
-    elevated, so its restart joins the administrator prompt (or is named)."""
+    binary. Unix setup restarts its user service itself and re-checks; a
+    Windows service runs elevated, so its restart joins the administrator
+    prompt (or is named). systemd's `enable --now` does not restart a running
+    unit, so re-registering it is not enough on Linux."""
     try:
         from m3_memory.embedder_admin import restart_embed_service_hint, stale_embed_servers
         stale = stale_embed_servers()
@@ -1332,8 +1334,37 @@ def _restart_stale_embed_server() -> None:
                             [*cli, "stop"])
                 and _queue_elevated("start the embed service on the new core", [*cli, "start"])):
             return
+    else:
+        detail = _restart_embed_service_unix()
+        try:
+            still = stale_embed_servers()
+        except Exception:  # noqa: BLE001 — diagnostic only
+            still = stale
+        if not still:
+            _ok(f"  embed server restarted on the new native core (was pid {pids})")
+            return
+        pids = ", ".join(str(s["pid"]) for s in still)
+        if detail:
+            _say(f"    {detail}")
     _warn(f"  the embed server (pid {pids}) still runs the previous native core. "
           f"restart it: {restart_embed_service_hint()}")
+
+
+def _restart_embed_service_unix() -> str:
+    """Stop then start the user embed service through m3's own embedder
+    commands. Returns "" on success, else the last line of what failed."""
+    cli = _m3_cli("embedder")
+    for verb in ("stop", "start"):
+        try:
+            proc = subprocess.run([*cli, verb], capture_output=True, text=True,
+                                  timeout=120, check=False)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return f"`m3 embedder {verb}` failed: {type(e).__name__}: {e}"
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+            return f"`m3 embedder {verb}` exited {proc.returncode}" + (
+                f": {tail[-1]}" if tail else "")
+    return ""
 
 
 def _report_unrun_elevation() -> None:
