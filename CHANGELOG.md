@@ -19,7 +19,7 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-## [2026.10.6.1] — 2026-10-06 — upgrades that finish on their own, on Linux too
+## [2026.10.7.0] — 2026-10-07 — upgrades that finish on their own, on Linux too
 
 ### Fixed
 
