@@ -33,6 +33,8 @@ def _step3_runs_nothing(monkeypatch):
     # test fakes, so its exit codes (and recorded calls) still apply.
     monkeypatch.setattr(m3u, "run_captured_rc",
                         lambda cmd, **k: (m3u.run(cmd, dry=False, **k), ""))
+    # Never ask the real PyPI from a test; tests that need it set their own.
+    monkeypatch.setattr(m3u, "pypi_latest", lambda: None)
 
 
 def _mk(base: pathlib.Path, rel: str) -> pathlib.Path:
@@ -702,7 +704,6 @@ def test_a_healthy_doctor_collapses_to_its_health_line():
 
 
 @pytest.mark.parametrize("extra", [
-    "  [ok] plugin plugin: ✔ Plugin \"m3\" updated from 2026.10.5.0 to 2026.10.6.0.",  # a change
     "⚠️  plugin: 2026.10.5.0 installed, older than m3 2026.10.6.0",                    # a warning
     "Repair Summary: OK (run_migrations ok)",                                           # a repair ran
     "some line a future probe prints",                                                  # unknown
@@ -713,6 +714,29 @@ def test_anything_but_healthy_lines_shows_the_full_output(extra):
 
 def test_empty_doctor_output_is_not_healthy():
     assert m3u.doctor_is_all_healthy("") is False
+
+
+def test_a_plugin_update_is_one_line_and_the_summary_says_restart(tmp_path, monkeypatch, capsys):
+    """A plugin update is a change, so it is shown, as one line; the report
+    around it stays collapsed, and the summary asks for a Claude Code restart."""
+    scripts, pkg = _pip_install(tmp_path)
+    monkeypatch.setattr(m3u.shutil, "which", lambda n: str(scripts / "m3.exe"))
+    monkeypatch.setattr(m3u, "find_m3_package", lambda exe: pkg)
+    monkeypatch.setattr(m3u, "locked_launchers", lambda d, n: [])
+    monkeypatch.setattr(m3u, "cognitive_loop_installed", lambda exe: True)
+    monkeypatch.setattr(m3u, "run", lambda cmd, **k: 0)
+    update = ('  [ok] plugin plugin: ✔ Plugin "m3" updated from 2026.10.6.0 to '
+              '2026.10.7.0 for scope user. Restart to apply changes.\n'
+              "  [ok] plugin restart: restart Claude Code to load the new version\n")
+    doctor = _HEALTHY_DOCTOR.replace(
+        '  [ok] plugin plugin: ✔ m3 is already at the latest version (2026.10.5.0).\n', update)
+    monkeypatch.setattr(m3u, "run_captured_rc", lambda cmd, **k: (
+        0, doctor if "doctor" in cmd else "upgrading m3-memory...\n"))
+    m3u.main(["--yes"])
+    out = capsys.readouterr().out
+    assert "[OK] Claude Code plugin updated: 2026.10.6.0 -> 2026.10.7.0" in out
+    assert "Repair Summary" not in out and "plugin restart" not in out
+    assert "restart Claude Code (its m3 plugin was updated)" in out
 
 
 def test_step_five_prints_one_line_when_doctor_is_healthy(tmp_path, monkeypatch, capsys):

@@ -596,11 +596,41 @@ def _as_upgrade() -> dict[str, str]:
     return {**os.environ, UPGRADE_CALLER_ENV: "upgrade"}
 
 
+def no_cache_env() -> dict[str, str]:
+    """The environment with pip's and uv's caches bypassed (pipx uses either)."""
+    return {**os.environ, "PIP_NO_CACHE_DIR": "1", "UV_NO_CACHE": "1"}
+
+
+def should_retry_uncached(*, unchanged: bool, local_source: bool,
+                          latest: str | None, installed: str | None) -> bool:
+    """Retry the install without caches only when it changed nothing, the
+    source is the package index, and PyPI says something else is current."""
+    return bool(unchanged and not local_source and latest and latest != installed)
+
+
+def pypi_latest() -> str | None:
+    """The newest m3-memory version PyPI serves right now (uncached), or None
+    when PyPI cannot be asked."""
+    import json
+    import urllib.request
+    try:
+        req = urllib.request.Request("https://pypi.org/pypi/m3-memory/json",
+                                     headers={"Cache-Control": "no-cache"})
+        with urllib.request.urlopen(req, timeout=10) as r:  # nosec B310 — fixed https URL
+            return str(json.load(r)["info"]["version"])
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 _DOCTOR_HEALTHY = re.compile(
     r"^(\[OK\] m3 HEALTHY|agent MCP configs: all healthy\.|\[OK\] memory bridge found"
     r"|==> Running m3-memory self-repair|Repair Summary: NOTHING_TO_DO"
     r"|✅ |\[OK\] Web Dashboard available at|agent paths: no wired agent configs found"
-    r"|\s*\[ok\] plugin plugin: .*already at the latest version)")
+    r"|\s*\[ok\] plugin plugin: .*already at the latest version"
+    r"|\s*\[ok\] plugin plugin: .*updated from \S+ to \S+"
+    r"|\s*\[ok\] plugin restart: )")
+
+_PLUGIN_UPDATED = re.compile(r"\[ok\] plugin plugin: .*updated from (\S+) to (\S+?)(?=\s|$)")
 
 
 def doctor_is_all_healthy(out: str) -> bool:
@@ -608,8 +638,16 @@ def doctor_is_all_healthy(out: str) -> bool:
     return bool(lines) and all(_DOCTOR_HEALTHY.match(ln) for ln in lines)
 
 
+def plugin_update(out: str) -> "tuple[str, str] | None":
+    """(from, to) when doctor updated the Claude Code plugin, else None. A new
+    plugin loads only when Claude Code restarts; `/mcp` does not load it."""
+    m = _PLUGIN_UPDATED.search(out)
+    return (m.group(1), m.group(2)) if m else None
+
+
 def summary_lines(*, old: str | None, new: str | None, unchanged: bool,
-                  agents_stopped: int, failed_step: str, rc: int, log: str) -> list[str]:
+                  agents_stopped: int, failed_step: str, rc: int, log: str,
+                  plugin_updated: bool = False) -> list[str]:
     """The end-of-run summary: the lines a user needs after the step output
     has scrolled away."""
     if unchanged:
@@ -618,7 +656,11 @@ def summary_lines(*, old: str | None, new: str | None, unchanged: bool,
         version = f"m3 {old or '?'} -> {new or '?'}"
     lines = ["", "Upgrade incomplete." if failed_step else "Done.",
              f"  version : {version}"]
-    if agents_stopped:
+    if plugin_updated:
+        # One instruction: `/mcp` reconnects the server but keeps the old plugin.
+        lines.append("  agents  : restart Claude Code (its m3 plugin was updated); "
+                     "reconnect or restart any other agent")
+    elif agents_stopped:
         lines.append(f"  agents  : m3 was stopped in {agents_stopped} agent session(s); "
                      "reconnect them (Claude Code: /mcp)")
     elif not unchanged:
@@ -869,11 +911,26 @@ def main(argv: list[str] | None = None) -> int:
     # in "Done." with the old version still installed.
     new_version = None if dry else installed_version(find_m3_package(m3) or pkg)
     unchanged = (not dry and old_version is not None and new_version == old_version)
+    local_source = bool(spec) and not source_is_pypi(spec) and not args.from_pypi
+    latest = pypi_latest() if unchanged and not local_source else None
+    if (should_retry_uncached(unchanged=unchanged, local_source=local_source,
+                              latest=latest, installed=old_version)
+            and not locked_launchers(scripts_dir, launchers)):
+        # pip's (and uv's) cached index can lag a release published minutes ago:
+        # the install "succeeds" on the old version while PyPI serves the new
+        # one. Only then is a second install worth its time.
+        print(f"\n  PyPI has {latest} but the cached index offered nothing newer; "
+              "asking again without the cache")
+        retry_rc, retry_out = run_captured_rc(up, timeout=900, env=no_cache_env())
+        if retry_rc != 0 or args.log:
+            print(retry_out.rstrip())
+        m3 = find_m3_launcher() or m3
+        new_version = installed_version(find_m3_package(m3) or pkg)
+        unchanged = old_version is not None and new_version == old_version
     if unchanged:
-        local_source = bool(spec) and not source_is_pypi(spec) and not args.from_pypi
         where = spec if local_source else "the package index"
         print(f"\n  [!] m3 is still {old_version}: {where} has no newer version.")
-        if spec and not source_is_pypi(spec) and not args.from_pypi:
+        if local_source:
             print("      This install tracks that source, not PyPI. To move to the "
                   "PyPI release: m3 upgrade --from-pypi")
 
@@ -925,13 +982,14 @@ def main(argv: list[str] | None = None) -> int:
               "installed; leaving that choice untouched. If it was running, "
               "`m3 doctor --fix` or `m3 schedules repair` will bring it back.")
     stopped_agents = 0 if dry else len(handed_stop) + len(agent_pids)
+    plugin_changed: list[bool] = [False]
 
     def _summary(failed_step: str = "", rc: int = 0) -> None:
         if not dry:
             print("\n".join(summary_lines(
                 old=old_version, new=new_version, unchanged=unchanged,
                 agents_stopped=stopped_agents, failed_step=failed_step, rc=rc,
-                log=args.log)))
+                log=args.log, plugin_updated=plugin_changed[0])))
 
     # Tells setup that this run verifies and summarizes (see setup_wizard._called_by_upgrade).
     rc = run(setup_cmd, dry=dry, env=_as_upgrade())
@@ -959,9 +1017,14 @@ def main(argv: list[str] | None = None) -> int:
         rc = run(doctor_cmd, dry=dry, timeout=300)
     else:
         rc, out = run_captured_rc(doctor_cmd, timeout=300)
+        updated = plugin_update(out)
+        plugin_changed[0] = updated is not None
         if rc == 0 and not args.log and doctor_is_all_healthy(out):
-            # Every check passed and nothing was repaired: its health line says it.
+            # Every check passed and nothing else was repaired: its health line
+            # says it, plus the plugin update when there was one.
             print(next(ln for ln in out.splitlines() if ln.strip()))
+            if updated:
+                print(f"[OK] Claude Code plugin updated: {updated[0]} -> {updated[1]}")
         else:
             print(out.rstrip())
     if rc != 0:
