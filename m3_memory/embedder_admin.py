@@ -681,6 +681,51 @@ def restart_embed_service_hint() -> str:
     return "m3 embedder stop && m3 embedder start"
 
 
+def _is_windows() -> bool:
+    """Platform seam for restart_stale_embed_service (tests patch this)."""
+    return sys.platform == "win32"
+
+
+def restart_stale_embed_service(*, allow_elevation: bool) -> dict:
+    """Restart an embed server still running a replaced core, then re-check.
+
+    The Windows service runs elevated: with `allow_elevation` its stop and start
+    share one UAC prompt, without it nothing runs (a scheduled `doctor --fix`
+    must never raise a prompt). Returns {"outcome", "pids", "detail"} where
+    outcome is none | restarted | still-stale | needs-admin | declined.
+    """
+    stale = stale_embed_servers()
+    pids = [s["pid"] for s in stale]
+    if not stale:
+        return {"outcome": "none", "pids": [], "detail": ""}
+    binary = _server_binary()
+    if not binary:
+        return {"outcome": "still-stale", "pids": pids, "detail": "embed-server binary not found"}
+    detail = ""
+    if _is_windows():
+        if not allow_elevation:
+            return {"outcome": "needs-admin", "pids": pids, "detail": ""}
+        from m3_memory.elevate import ElevationBatch
+        batch = ElevationBatch()
+        batch.add("stop the embed service", [str(binary), "stop"])
+        batch.add("start the embed service on the new core", [str(binary), "start"])
+        results = batch.run()
+        if results is None:
+            return {"outcome": "declined", "pids": pids, "detail": ""}
+        detail = "; ".join(f"{label}: exit {r['rc']}" for label, r in results.items()
+                           if r["rc"] != 0)
+    else:
+        gguf = _find_bundled_gguf() or Path("/")
+        for verb in ("stop", "start"):
+            rc = _service_cmd_quiet(binary, gguf, verb)
+            if rc != 0:
+                detail = f"`m3-embed-server {verb}` exited {rc}"
+                break
+    still = stale_embed_servers()
+    return {"outcome": "still-stale" if still else "restarted",
+            "pids": [s["pid"] for s in still] or pids, "detail": detail}
+
+
 _SERVE_WAIT_S = 60.0
 
 

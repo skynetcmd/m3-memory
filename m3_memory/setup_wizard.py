@@ -1335,36 +1335,20 @@ def _restart_stale_embed_server() -> None:
                 and _queue_elevated("start the embed service on the new core", [*cli, "start"])):
             return
     else:
-        detail = _restart_embed_service_unix()
+        from m3_memory.embedder_admin import restart_stale_embed_service
         try:
-            still = stale_embed_servers()
-        except Exception:  # noqa: BLE001 — diagnostic only
-            still = stale
-        if not still:
+            res = restart_stale_embed_service(allow_elevation=False)
+        except Exception as e:  # noqa: BLE001 — reported below, never fatal
+            res = {"outcome": "still-stale", "pids": [s["pid"] for s in stale],
+                   "detail": f"{type(e).__name__}: {e}"}
+        if res["outcome"] in ("restarted", "none"):
             _ok(f"  embed server restarted on the new native core (was pid {pids})")
             return
-        pids = ", ".join(str(s["pid"]) for s in still)
-        if detail:
-            _say(f"    {detail}")
+        pids = ", ".join(str(p) for p in res["pids"])
+        if res["detail"]:
+            _say(f"    {res['detail']}")
     _warn(f"  the embed server (pid {pids}) still runs the previous native core. "
           f"restart it: {restart_embed_service_hint()}")
-
-
-def _restart_embed_service_unix() -> str:
-    """Stop then start the user embed service through m3's own embedder
-    commands. Returns "" on success, else the last line of what failed."""
-    cli = _m3_cli("embedder")
-    for verb in ("stop", "start"):
-        try:
-            proc = subprocess.run([*cli, verb], capture_output=True, text=True,
-                                  timeout=120, check=False)
-        except (OSError, subprocess.TimeoutExpired) as e:
-            return f"`m3 embedder {verb}` failed: {type(e).__name__}: {e}"
-        if proc.returncode != 0:
-            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-            return f"`m3 embedder {verb}` exited {proc.returncode}" + (
-                f": {tail[-1]}" if tail else "")
-    return ""
 
 
 def _report_unrun_elevation() -> None:
@@ -1856,9 +1840,14 @@ def _probe_llm_endpoints(plan: "SetupPlan", args: argparse.Namespace) -> None:
                  if _endpoint_reachable(url)]
     if not reachable:
         if _called_by_upgrade():
-            # Unchanged since the last setup, which gave the full guidance.
-            _say("  no local LLM runtime detected; enrichment stays off "
-                 "(see `m3 setup` for how to add one)")
+            # A runtime that was enabled is a change worth reporting: enrichment
+            # just stopped. None ever enabled is the standing state, which the
+            # last setup explained; an upgrade reports only changes.
+            enabled = [label for (label, _url, var, _val) in _LLM_RUNTIMES
+                       if _llm_switch_enabled(var)]
+            if enabled:
+                _warn(f"  {', '.join(enabled)} enabled for enrichment but not reachable "
+                      "now; enrichment pauses until it is running again")
             return
         _say("  no local LLM runtime detected on :1234 (LM Studio) or :11434 (Ollama)")
         _say("  enrichment needs a chat model. Start one, then run `m3 setup` again")
@@ -1898,6 +1887,16 @@ def _probe_llm_endpoints(plan: "SetupPlan", args: argparse.Namespace) -> None:
         _persist_env_var("M3_ENABLE_LMSTUDIO_FAILOVER", "0", non_interactive=args.non_interactive)
     if not lmstudio_live:
         _record_llm_switch("M3_ENABLE_LMSTUDIO_FAILOVER", "0")
+
+
+def _llm_switch_enabled(var: str) -> bool:
+    """True when a previous setup recorded this LLM runtime switch as on."""
+    try:
+        sys.path.insert(0, str(_bin_dir()))
+        from m3_core.llm_config import read_llm_config
+        return str(read_llm_config().get(var, "")).strip().lower() in ("1", "true", "yes", "on")
+    except (ImportError, OSError, ValueError):
+        return False
 
 
 def _record_llm_switch(var: str, val: str) -> None:

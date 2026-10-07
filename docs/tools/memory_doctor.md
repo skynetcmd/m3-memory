@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: 4d98da61ea63
-mtime_utc: 2026-10-06T20:21:01.920750+00:00
-generated_utc: 2026-10-06T20:21:09.110715+00:00
+sha1: e58aa29fd9d0
+mtime_utc: 2026-10-07T13:32:27.636726+00:00
+generated_utc: 2026-10-07T13:32:38.497015+00:00
 private: false
 ---
 
@@ -75,6 +75,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_memory.embedder_admin (repair_exec_bit)`
+- `m3_memory.embedder_admin (restart_stale_embed_service)`
 - `m3_sdk (add_database_arg)`
 - `m3_sdk (resolve_db_path)`
 
