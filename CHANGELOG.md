@@ -19,6 +19,38 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.10.7.1] — 2026-10-07 — upgrades that say only what you need to do
+
+### Fixed
+
+- **An upgrade that updates the Claude Code plugin says so in one line and
+  asks for one action: restart Claude Code.** It used to print the whole
+  health report, then suggest `/mcp`, which does not load a new plugin.
+  **Affected:** installs using the m3 Claude Code plugin · **Action:** none ·
+  **Data status:** none.
+
+- **`m3 upgrade` installs a release published minutes earlier** even when the
+  package manager's cached index has not caught up; it used to report
+  "no newer version".
+  **Affected:** pipx installs, seen on Windows · **Action:** none ·
+  **Data status:** none.
+
+- **A new native core takes effect without a manual restart.** On Linux,
+  re-registering the Rust embed server restarts it (m3-core-rs 3.10.7). On
+  Windows, `m3 doctor --fix` at a console restarts an embed server an
+  unattended upgrade could not, after one administrator prompt.
+  **Affected:** installs with the Rust embed server (Linux, Windows) ·
+  **Action:** on Windows, if `m3 doctor` reports the embed server still runs
+  the previous native core, run `m3 doctor --fix` and approve the prompt ·
+  **Data status:** none.
+
+### Changed
+
+- **Upgrades no longer repeat "no local LLM runtime detected"** on a machine
+  that never had one; they warn instead when a runtime that was enabled for
+  enrichment is not reachable.
+  **Affected:** all platforms · **Action:** none · **Data status:** none.
+
 ## [2026.10.7.0] — 2026-10-07 — upgrades that finish on their own, on Linux too
 
 ### Fixed
