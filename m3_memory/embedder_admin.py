@@ -1161,8 +1161,15 @@ def cmd_install_gpu(args: argparse.Namespace) -> int:
         backend=backend,
         force=force,
     )
-    if rc == 0:
-        print("[OK] m3-core-rs installed; restart any running embedder service.")
+    if rc == 0 and not getattr(args, "from_setup", False):
+        # Name a restart only when a server really is still on the old binary.
+        stale = stale_embed_servers()
+        if stale:
+            pids = ", ".join(str(s["pid"]) for s in stale)
+            print(f"[OK] m3-core-rs installed; the embed server (pid {pids}) still runs "
+                  f"the previous core. restart it: {restart_embed_service_hint()}")
+        else:
+            print("[OK] m3-core-rs installed")
     return rc
 
 
@@ -1548,6 +1555,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Reinstall even if the target m3-core-rs version is already present "
              "(default: skip the re-download when already current).",
     )
+    # Setup reports the install and restarts a stale server itself.
+    p_install_gpu.add_argument("--from-setup", action="store_true", help=argparse.SUPPRESS)
     p_install_gpu.set_defaults(func=cmd_install_gpu)
 
     p_start = sub.add_parser("start", help="Start the CPU embedder service.")

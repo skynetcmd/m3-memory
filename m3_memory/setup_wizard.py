@@ -2297,7 +2297,7 @@ def _step_rust_core(plan: "SetupPlan") -> bool:
         pass
 
     _say(f"  installing m3-core-rs {M3_CORE_RS_VERSION}")
-    cmd = _m3_cli("embedder", "install-gpu")
+    cmd = _m3_cli("embedder", "install-gpu", "--from-setup")
     if not plan.allow_native_source_build:
         cmd.append("--no-source-fallback")
     try:
@@ -2339,7 +2339,7 @@ def _step_gpu_embedder(plan: "SetupPlan") -> bool:
     Always non-fatal — m3 works either way.
     """
     _say("  tier 1: installing the native in-process embedder (Project Oxidation)")
-    cmd = _m3_cli("embedder", "install-gpu")
+    cmd = _m3_cli("embedder", "install-gpu", "--from-setup")
     if not plan.allow_native_source_build:
         cmd.append("--no-source-fallback")
     try:

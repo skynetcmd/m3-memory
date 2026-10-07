@@ -156,3 +156,26 @@ def test_no_launcher_anywhere_says_where_it_looked(monkeypatch, tmp_path, capsys
     assert m3u.main(["--dry-run"]) == 1
     out = capsys.readouterr().out
     assert "not found on PATH or beside this interpreter" in out and str(tmp_path) in out
+
+
+# ── `m3 embedder install-gpu`'s closing line ─────────────────────────────────
+
+def _install_gpu(monkeypatch, stale):
+    import argparse
+
+    from m3_memory import rust_core_install
+    monkeypatch.setattr(rust_core_install, "install_rust_core", lambda **k: 0)
+    monkeypatch.setattr(embedder_admin, "stale_embed_servers", lambda: stale)
+    return lambda **kw: embedder_admin.cmd_install_gpu(argparse.Namespace(**kw))
+
+
+def test_install_gpu_from_setup_leaves_the_report_to_setup(monkeypatch, capsys):
+    _install_gpu(monkeypatch, _STALE)(from_setup=True)
+    assert capsys.readouterr().out == ""
+
+
+def test_install_gpu_names_a_restart_only_when_a_server_is_stale(monkeypatch, capsys):
+    _install_gpu(monkeypatch, _STALE)()
+    assert "embed server (pid 4242) still runs the previous core" in capsys.readouterr().out
+    _install_gpu(monkeypatch, [])()
+    assert capsys.readouterr().out.strip() == "[OK] m3-core-rs installed"
