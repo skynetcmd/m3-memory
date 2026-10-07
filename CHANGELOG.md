@@ -66,6 +66,17 @@ the policy is forward-going only.
   `~/.openclaw` if you no longer use OpenClaw; keep `HERMES_HOME` as it is ·
   **Data status:** none.
 
+- **The Rust embed server reports what it did** (m3-core-rs 3.10.6).
+  `m3-embed-server start`, `stop`, `install` and `uninstall` print the state the
+  service reached rather than "signal sent"; errors name their cause (not
+  installed, access denied, an unreadable config file, an invalid `M3_EMBED_*`
+  value). On macOS, `stop` now stops the server (launchd restarted it before),
+  and an installed but unloaded agent reports `stopped`, not `not installed`. A
+  Windows server that is still starting is no longer mistaken for an
+  unregistered one.
+  **Affected:** installs using the Rust embed server · **Action:** none;
+  `m3 upgrade` installs the new core · **Data status:** none.
+
 ### Changed
 
 - **`m3 stop` on macOS and Linux leaves the Rust embed server running,** as

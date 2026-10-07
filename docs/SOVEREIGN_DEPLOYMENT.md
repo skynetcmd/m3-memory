@@ -57,7 +57,7 @@ LFS-tracked model file and any extra wheels you'll need offline.
    does not pull it in — stage it explicitly for an air-gapped target.
 
    **Get it from the GitHub Release — that is the official channel.** The
-   Release for tag `v2026.10.1` is intended to carry every wheel — 7 os/backend
+   Release for tag `v2026.10.6` is intended to carry every wheel — 7 os/backend
    packages × cp311–cp315 (a one-time cp311 courtesy set; the matrix is
    cp312–cp315 from the next release) — plus a `SHA256SUMS` asset.
 
@@ -69,14 +69,14 @@ LFS-tracked model file and any extra wheels you'll need offline.
 
    ```bash
    # add -p '*linux*cuda*cp313*' to fetch only the wheel you need
-   gh release download v2026.10.1 --repo skynetcmd/m3-core-rs --dir _assets/python_wheels
+   gh release download v2026.10.6 --repo skynetcmd/m3-core-rs --dir _assets/python_wheels
    ```
 
    Do **not** treat PyPI as the source here. It cannot carry the CUDA wheels at
    all — they exceed its 100 MB per-file limit by an order of magnitude
    (windows-cuda ~244 MiB, linux-cuda ~949 MiB), so that gap is permanent rather
    than a publishing backlog — and the PyPI-eligible backends are currently
-   *stale*, still serving 3.7.4 while the Release ships 3.10.1 (and only three
+   *stale*, still serving 3.7.4 while the Release ships 3.10.6 (and only three
    of the projects resolve at all — measured 2026-09-20). A PyPI-first
    fetch would quietly stage an old core and exit 0, which is why
    `m3_memory/rust_core_install.py` cascades **GitHub Release → PyPI → source**

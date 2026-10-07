@@ -1137,8 +1137,9 @@ def _print_stop_proc_hint(script_name: str) -> None:
 def _service_defined_on_disk() -> bool:
     """True when the embed service's definition (launchd plist / systemd unit /
     SCM entry) exists even though the manager does not list it: `m3 stop`
-    unloads it on macOS, after which `m3-embed-server status` says "not
-    installed". The owner of that check is install_schedules; False when it
+    unloads it on macOS, after which `m3-embed-server status` from cores up to
+    3.10.1 says "not installed" (3.10.6 says "stopped"). The owner of that
+    check is install_schedules; False when it
     cannot be loaded or cannot tell.
     """
     import importlib

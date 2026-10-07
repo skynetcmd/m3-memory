@@ -37,9 +37,14 @@ from m3_memory._platform import os_name as _os_name
 # PyPI install (by version) and the GitHub-release asset fetch (by tag).
 # 3.7.4 was the first release whose wheels bundle the m3-embed-server binary.
 #
-# 3.10.1 / v2026.10.1. Verify the Release is complete with:
-#   gh release view v2026.10.1 --repo skynetcmd/m3-core-rs
+# 3.10.6 / v2026.10.6. Verify the Release is complete with:
+#   gh release view v2026.10.6 --repo skynetcmd/m3-core-rs
 #   (expect 29 assets: 7 (os,backend) packages x cp312-315, + SHA256SUMS)
+#
+# 3.10.6: m3-embed-server's start/stop/install/uninstall report the state the
+# service reached, macOS `stop` unloads the agent (KeepAlive restarted a
+# killed one), and macOS `status` reports an unloaded, installed agent as
+# stopped. _service_defined_on_disk still covers cores up to 3.10.1.
 #
 # 3.10.1 is the fix for 3.9.20, whose wheels ALL stored m3-embed-server
 # non-executable (0600 linux/macos, 0644 windows), so the shared embed server
@@ -125,8 +130,8 @@ from m3_memory._platform import os_name as _os_name
 # signal they are five versions behind. Fixing the publishers does not make
 # PyPI-first correct again; leave the Release first. PyPI publishing is opt-in
 # and off by default in release.yml.
-M3_CORE_RS_VERSION = "3.10.1"
-M3_CORE_RS_GIT_TAG = "v2026.10.1"
+M3_CORE_RS_VERSION = "3.10.6"
+M3_CORE_RS_GIT_TAG = "v2026.10.6"
 
 # Cargo features per backend, mirroring build_wheel.py's _MATRIX (the source
 # fallback passes these to maturin via pip's config-settings).
