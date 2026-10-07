@@ -16,6 +16,30 @@ import sys
 UPGRADE_CALLER_ENV = "M3_SETUP_CALLER"
 
 
+def console_has_person() -> bool:
+    """True when a person is at this console.
+
+    On Windows, isatty() is not enough: the NUL device reports itself as a
+    character device, so `< NUL` (how scripts and schedulers detach stdin) reads
+    as a terminal. GetConsoleMode succeeds only for a real console input handle.
+    bin/m3_upgrade.py keeps a copy (interactive_console) because it cannot
+    import this package; a test pins the two together.
+    """
+    try:
+        if sys.stdin is None or not sys.stdin.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    if os.name != "nt":
+        return True
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    handle = kernel32.GetStdHandle(wintypes.DWORD(-10 & 0xFFFFFFFF))  # STD_INPUT_HANDLE
+    mode = wintypes.DWORD()
+    return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+
 def called_by_upgrade() -> bool:
     """True when this process runs on behalf of `m3 upgrade`."""
     return os.environ.get(UPGRADE_CALLER_ENV) == "upgrade"

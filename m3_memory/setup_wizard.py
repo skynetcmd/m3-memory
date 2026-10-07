@@ -1259,9 +1259,18 @@ def _flush_elevation(*, gui: bool = False) -> None:
     _say(f"Setup needs administrator rights for {len(batch)} step(s):")
     for label, _argv in batch.actions:
         print(f"    - {label}")
-    if not gui and not _ask_yes_no("  Approve them in one Windows admin prompt?", default=True):
-        _warn("  skipped; run `m3 schedules repair` from an admin shell later.")
-        return
+    if not gui:
+        raw = _prompt("  Approve them in one Windows admin prompt? [Y/n] ")
+        if raw is None:
+            # Nobody to answer here means nobody to approve the UAC dialog
+            # either; raising it would only wait out setup's time budget.
+            _warn("  not run: no one is here to approve the administrator prompt. "
+                  "At a console, run `m3 doctor --fix` (and `m3 schedules repair` "
+                  "for scheduled tasks) and approve it.")
+            return
+        if raw.strip().lower() in ("n", "no"):
+            _warn("  skipped; run `m3 schedules repair` from an admin shell later.")
+            return
     outcome: dict = {}
 
     def _run() -> bool:
@@ -1443,11 +1452,11 @@ def _stdin_is_interactive() -> bool:
 
     False on a closed/detached stdin (services, CI, piped installers) so those
     paths keep the copy-paste banner instead of blocking on input nobody sends.
+    isatty() alone is fooled by Windows' NUL device: an unattended upgrade then
+    raised a UAC prompt nobody saw and waited out setup's whole budget.
     """
-    try:
-        return bool(sys.stdin is not None and sys.stdin.isatty())
-    except (AttributeError, ValueError):
-        return False
+    from m3_memory.wizard.ui import console_has_person
+    return console_has_person()
 
 
 def _offer_elevated_schedule_repair(script: str, *, non_interactive: bool) -> "bool | None":

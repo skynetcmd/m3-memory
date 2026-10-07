@@ -179,3 +179,41 @@ def test_install_gpu_names_a_restart_only_when_a_server_is_stale(monkeypatch, ca
     assert "embed server (pid 4242) still runs the previous core" in capsys.readouterr().out
     _install_gpu(monkeypatch, [])()
     assert capsys.readouterr().out.strip() == "[OK] m3-core-rs installed"
+
+
+# ── who can approve an administrator prompt ──────────────────────────────────
+
+def _body(fn) -> str:
+    """Source after the docstring: the logic, without the prose around it."""
+    import ast
+    import inspect
+    import textwrap
+    node = ast.parse(textwrap.dedent(inspect.getsource(fn))).body[0]
+    return "\n".join(ast.unparse(stmt) for stmt in node.body[1:])
+
+
+def test_upgrade_and_setup_ask_the_same_is_a_person_here_question():
+    from m3_memory.wizard.ui import console_has_person
+    assert _body(console_has_person) == _body(m3u.interactive_console)
+
+
+def test_no_answer_means_no_uac_prompt(monkeypatch, capsys):
+    ran: list = []
+
+    class _Batch:
+        actions = [("stop the embed service", ["x", "stop"])]
+
+        def __len__(self):
+            return 1
+
+        def run(self):
+            ran.append(True)
+            return {}
+
+    monkeypatch.setattr(setup_wizard, "_ELEVATION", _Batch())
+    monkeypatch.setattr(setup_wizard, "_prompt", lambda _q: None)
+    setup_wizard._flush_elevation()
+    out = capsys.readouterr().out
+    assert ran == []
+    assert "no one is here to approve the administrator prompt" in out
+    assert "m3 doctor --fix" in out

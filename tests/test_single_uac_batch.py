@@ -74,6 +74,9 @@ def batching(monkeypatch):
 
 def test_setup_queues_privileged_steps_and_asks_once(batching, monkeypatch, capsys):
     asked, runs = [], []
+    # The approval question goes through _prompt, so "no answer" (None) can be
+    # told apart from "yes"; any other question would still use _ask_yes_no.
+    monkeypatch.setattr(setup_wizard, "_prompt", lambda q: asked.append(q) or "y")
     monkeypatch.setattr(setup_wizard, "_ask_yes_no", lambda q, default=True: asked.append(q) or True)
     monkeypatch.setattr(setup_wizard, "_runas_schedule_repair_windows",
                         lambda s: pytest.fail("must queue, not prompt now"))

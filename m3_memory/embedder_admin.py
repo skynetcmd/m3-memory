@@ -677,7 +677,7 @@ def stale_embed_servers() -> "list[dict]":
 def restart_embed_service_hint() -> str:
     """The command that restarts the embed service on this OS."""
     if sys.platform == "win32":
-        return "m3 embedder stop; m3 embedder start   (from an admin shell)"
+        return "m3 doctor --fix   (at a console; approve the administrator prompt)"
     return "m3 embedder stop && m3 embedder start"
 
 
