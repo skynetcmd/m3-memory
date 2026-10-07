@@ -36,6 +36,53 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 
 
+def _repair_embed_server(args) -> None:
+    """--fix repairs for the embed server: the binary's exec bit and a server
+    still on a replaced core. Called from the --fix branch, which returns
+    before the report section; both repairs used to sit in that section and
+    never ran."""
+    # A non-executable binary is m3's OWN file and a packaging defect, not
+    # the user's config, so --fix repairs it without the --fix-hooks gate
+    # (that gate exists for ~/.claude, which belongs to the user). The
+    # repair escalates to `sudo -n` only for a root-owned install and never
+    # prompts, so it stays safe from a scheduled task.
+    try:
+        from m3_memory.embedder_admin import repair_exec_bit
+
+        _res = repair_exec_bit(dry_run=args.dry_run)
+        if _res["status"] != "ok":
+            print(f"  [{_res['status']}] embed-server exec bit: "
+                  f"{_res['detail']}")
+    except Exception as _exc:  # noqa: BLE001 — never break doctor
+        print(f"  [skipped] embed-server exec bit: {_exc}")
+
+    # An embed server still on a replaced core: an upgrade whose UAC
+    # prompt nobody answered leaves one on Windows. Elevation only with
+    # a person at the console, never from a scheduled task.
+    if not args.dry_run:
+        try:
+            from m3_memory.embedder_admin import restart_stale_embed_service
+            from m3_memory.wizard.ui import console_has_person
+
+            _r = restart_stale_embed_service(allow_elevation=console_has_person())
+            _p = ", ".join(str(p) for p in _r["pids"])
+            if _r["outcome"] == "restarted":
+                print(f"  [fixed] embed-server restarted on the new native core "
+                      f"(was pid {_p})")
+            elif _r["outcome"] == "needs-admin":
+                print(f"  [needs admin] embed-server (pid {_p}) still runs the "
+                      "previous core; run `m3 doctor --fix` at a console to "
+                      "approve the restart")
+            elif _r["outcome"] == "declined":
+                print(f"  [not fixed] embed-server (pid {_p}): the administrator "
+                      "prompt was declined or missed")
+            elif _r["outcome"] == "still-stale":
+                print(f"  [not fixed] embed-server (pid {_p}) still runs the "
+                      f"previous core{': ' + _r['detail'] if _r['detail'] else ''}")
+        except Exception as _exc:  # noqa: BLE001 — never break doctor
+            print(f"  [skipped] embed-server restart: {_exc}")
+
+
 def main() -> int:
     # Quiet the llama.cpp/GGML backend process-wide BEFORE any probe loads the
     # bge-m3 GGUF. The cascade probe loads the embedder IN-PROCESS and the
@@ -246,6 +293,9 @@ def main() -> int:
                     continue   # the plugin line that follows carries the outcome
                 print(f"  [{act['status']}] plugin {act['action']}: {act['detail']}")
 
+        if not args.skip_embed_server:
+            _repair_embed_server(args)
+
         if res["summary"] == "failed" or shared_rc != 0:
             return 1
         return 0
@@ -306,47 +356,6 @@ def main() -> int:
         # binary is not a Python-side failure.
         embed_server_probe.run(brief=brief)
 
-        # A non-executable binary is m3's OWN file and a packaging defect, not
-        # the user's config, so --fix repairs it without the --fix-hooks gate
-        # (that gate exists for ~/.claude, which belongs to the user). The
-        # repair escalates to `sudo -n` only for a root-owned install and never
-        # prompts, so it stays safe from a scheduled task.
-        if args.fix:
-            try:
-                from m3_memory.embedder_admin import repair_exec_bit
-
-                _res = repair_exec_bit(dry_run=args.dry_run)
-                if _res["status"] != "ok":
-                    print(f"  [{_res['status']}] embed-server exec bit: "
-                          f"{_res['detail']}")
-            except Exception as _exc:  # noqa: BLE001 — never break doctor
-                print(f"  [skipped] embed-server exec bit: {_exc}")
-
-            # An embed server still on a replaced core: an upgrade whose UAC
-            # prompt nobody answered leaves one on Windows. Elevation only with
-            # a person at the console, never from a scheduled task.
-            if not args.dry_run:
-                try:
-                    from m3_memory.embedder_admin import restart_stale_embed_service
-                    from m3_memory.wizard.ui import console_has_person
-
-                    _r = restart_stale_embed_service(allow_elevation=console_has_person())
-                    _p = ", ".join(str(p) for p in _r["pids"])
-                    if _r["outcome"] == "restarted":
-                        print(f"  [fixed] embed-server restarted on the new native core "
-                              f"(was pid {_p})")
-                    elif _r["outcome"] == "needs-admin":
-                        print(f"  [needs admin] embed-server (pid {_p}) still runs the "
-                              "previous core; run `m3 doctor --fix` at a console to "
-                              "approve the restart")
-                    elif _r["outcome"] == "declined":
-                        print(f"  [not fixed] embed-server (pid {_p}): the administrator "
-                              "prompt was declined or missed")
-                    elif _r["outcome"] == "still-stale":
-                        print(f"  [not fixed] embed-server (pid {_p}) still runs the "
-                              f"previous core{': ' + _r['detail'] if _r['detail'] else ''}")
-                except Exception as _exc:  # noqa: BLE001 — never break doctor
-                    print(f"  [skipped] embed-server restart: {_exc}")
 
     if not args.skip_oxidation:
         from doctor import oxidation_probe
