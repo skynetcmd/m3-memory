@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: e58aa29fd9d0
-mtime_utc: 2026-10-07T13:32:27.636726+00:00
-generated_utc: 2026-10-07T13:32:38.497015+00:00
+sha1: 7ff99962b148
+mtime_utc: 2026-10-07T22:45:36.703097+00:00
+generated_utc: 2026-10-07T22:45:37.845207+00:00
 private: false
 ---
 
@@ -76,6 +76,7 @@ _(none detected)_
 
 - `m3_memory.embedder_admin (repair_exec_bit)`
 - `m3_memory.embedder_admin (restart_stale_embed_service)`
+- `m3_memory.wizard.ui (console_has_person)`
 - `m3_sdk (add_database_arg)`
 - `m3_sdk (resolve_db_path)`
 

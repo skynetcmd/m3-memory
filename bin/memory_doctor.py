@@ -328,9 +328,9 @@ def main() -> int:
             if not args.dry_run:
                 try:
                     from m3_memory.embedder_admin import restart_stale_embed_service
+                    from m3_memory.wizard.ui import console_has_person
 
-                    _r = restart_stale_embed_service(
-                        allow_elevation=sys.stdin is not None and sys.stdin.isatty())
+                    _r = restart_stale_embed_service(allow_elevation=console_has_person())
                     _p = ", ".join(str(p) for p in _r["pids"])
                     if _r["outcome"] == "restarted":
                         print(f"  [fixed] embed-server restarted on the new native core "
