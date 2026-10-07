@@ -58,14 +58,14 @@ COMMAND_CMDLINES = [
 
 @pytest.mark.parametrize("cmd", SERVER_CMDLINES)
 def test_bare_m3_is_detected_as_the_mcp_server(cmd):
-    assert m3_halt._MCP_BARE_M3_RE.search(cmd), (
+    assert m3_halt.writer_role(cmd.split()) == "mcp", (
         f"a bare `m3` starts the MCP server and must be seen as a writer: {cmd!r}"
     )
 
 
 @pytest.mark.parametrize("cmd", COMMAND_CMDLINES)
 def test_m3_subcommands_are_not_the_server(cmd):
-    assert not m3_halt._MCP_BARE_M3_RE.search(cmd), (
+    assert m3_halt.writer_role(cmd.split()) is None, (
         f"an m3 SUBCOMMAND holds no DB and must not be flagged as a writer — "
         f"flagging `m3 setup` made the installer abort on its own parent: {cmd!r}"
     )
@@ -91,3 +91,47 @@ def test_the_real_bridge_still_matches_a_signature():
     """
     assert "mcp" in m3_halt._WRITER_CMDLINE_SIGNATURES
     assert "mcp-memory" in m3_halt._WRITER_CMDLINE_SIGNATURES["mcp"]
+
+
+# ── what a process RUNS, not what its arguments mention ──────────────────────
+# Substring matching made `m3 stop` kill any process that merely NAMED a writer.
+# Measured 2026-10-07: it killed the shell driving an upgrade, whose next child
+# then failed with 0xC0000142. These are argv lists, as psutil returns them.
+
+MENTIONS_ONLY = [
+    ["C:/Program Files/Git/bin/bash.exe", "-c",
+     "echo $(powershell -c \"Get-Process | ? { $_.Name -eq 'm3-embed-server.exe' }\")"],
+    ["grep", "-n", "m3_cognitive_loop.py", "bin/install_schedules.py"],
+    ["tail", "-f", "/home/u/.m3/logs/m3_embed_server_inproc.log"],
+    ["code", "bin/m3_cognitive_loop.py"],
+    ["/usr/bin/python3", "-c", "import subprocess; subprocess.run(['m3_cognitive_loop.py'])"],
+    ["bash", "-c", "which m3"],
+    ["pgrep", "-fa", "m3-embed-server"],
+]
+
+REAL_WRITERS = [
+    # Task Scheduler: pythonw + quoted script path + args
+    ([r"C:\v\Scripts\pythonw.exe", r'"C:\v\Lib\site-packages\m3_memory\bin\m3_cognitive_loop.py"',
+      "--interval", "60", "--background"], "cognitive-loop"),
+    # the waiter is launched with -u before its script
+    (["/home/u/.local/share/pipx/venvs/m3-memory/bin/python", "-u",
+      "/home/u/.local/share/pipx/venvs/m3-memory/lib/python3.13/site-packages/m3_memory/bin/m3_notification_waiter.py"],
+     "waiter"),
+    (["/v/bin/python3.14", "-X", "utf8", "/v/bin/embed_server_inproc.py"], "embed-server"),
+    # systemd/launchd run the Rust server binary directly
+    (["/home/u/.local/share/pipx/venvs/m3-memory/lib/python3.13/site-packages/m3_core_rs/m3-embed-server"],
+     "embed-server"),
+    # a Linux console script runs as interpreter + script
+    (["/v/bin/python", "/home/u/.local/bin/mcp-memory"], "mcp"),
+    ([r"C:\py\python.exe", r"C:\v\bin\mcp_proxy.py"], "mcp"),
+]
+
+
+@pytest.mark.parametrize("argv", MENTIONS_ONLY)
+def test_naming_a_writer_does_not_make_a_process_one(argv):
+    assert m3_halt.writer_role(argv) is None, argv
+
+
+@pytest.mark.parametrize("argv, role", REAL_WRITERS)
+def test_every_real_launch_shape_is_still_found(argv, role):
+    assert m3_halt.writer_role(argv) == role, argv

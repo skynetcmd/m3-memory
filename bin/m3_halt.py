@@ -35,7 +35,6 @@ import enum
 import json
 import logging
 import os
-import re
 import sys
 import threading
 import time
@@ -338,19 +337,11 @@ _WRITER_CMDLINE_SIGNATURES = {
 # as a writer. But `m3 setup`, `m3 doctor`, `m3 stop`, `m3 memory ...` are all
 # short-lived COMMANDS that hold nothing.
 #
-# The old signatures were the substrings "/m3.exe", "\\m3.exe", "/m3 ", "\\m3 ",
-# which match the EXECUTABLE and cannot tell those apart — so `m3 setup` flagged
-# ITSELF as a live MCP server. On Windows that was fatal rather than cosmetic:
-# preflight found its own parent "holding" the DB, correctly refused to kill an
-# ancestor, and aborted the install (exit 2). `m3 setup` simply could not run
-# through the console script. Meanwhile the real server (memory_bridge.py) was
-# matched by NONE of them — the signature was inverted.
+# Executable substrings ("/m3.exe", "/m3 ") cannot tell those apart, and made
+# `m3 setup` flag ITSELF as a live MCP server (on Windows preflight then refused
+# to kill its own ancestor and aborted the install). writer_role() decides from
+# the program a process runs and its first argument instead.
 #
-# Anchoring on END-OF-CMDLINE captures exactly "m3 was invoked with no
-# subcommand", cross-platform (works for /usr/local/bin/m3 and a quoted Windows
-# path alike), with no dependency on which flags a future subcommand adds.
-_MCP_BARE_M3_RE = re.compile(
-    r"""(?:^|[\\/ "'])m3(?:\.exe)?["']?(?:\s+serve\b.*)?\s*$""", re.I)
 # Fallback process-NAME substrings, used when a process's cmdline is unreadable —
 # which happens for an ELEVATED process when the installer runs unprivileged
 # (psutil returns an empty cmdline / raises AccessDenied). The name alone can't
@@ -367,6 +358,61 @@ _WRITER_NAME_SIGNATURES = {
     "embed-server": ("m3-embed-server",),
 }
 _INTERPRETER_NAMES = ("python", "pythonw", "python3")
+
+
+def _bare(token: str) -> str:
+    """Lower-cased file name of an argv token, quotes and `.exe` dropped."""
+    name = token.strip("\"'").replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+_PY_OPTS_WITH_VALUE = ("-X", "-W", "-Q", "-c", "-m")
+
+
+def _program_and_args(argv: "list[str]") -> "tuple[str, list[str]]":
+    """The program a process RUNS and its arguments: argv[0], or for a Python
+    interpreter the script it was given. ("", []) when there is none.
+
+    Signatures used to be matched as substrings of the whole command line, so
+    `m3 stop` killed any process that merely NAMED a writer: a shell running
+    `grep m3-embed-server`, a `tail -f` of a log, an editor. Measured
+    2026-10-07: it killed the shell driving an upgrade, whose next child then
+    failed with 0xC0000142. Only argv[0] or an interpreter's script runs.
+    """
+    if not argv:
+        return "", []
+    first = _bare(argv[0])
+    if not first.startswith(_INTERPRETER_NAMES):
+        return first, list(argv[1:])
+    i = 1
+    while i < len(argv):
+        tok = argv[i]
+        if tok in ("-c", "-m"):
+            return "", []                      # inline code / a module, not a script
+        if tok in _PY_OPTS_WITH_VALUE:
+            i += 2
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        return _bare(tok), list(argv[i + 1:])
+    return "", []
+
+
+def writer_role(argv: "list[str]") -> "str | None":
+    """The writer role a process with this argv plays, or None. The one owner of
+    that decision: the scan and the tests both call it."""
+    program, args = _program_and_args(argv)
+    if not program:
+        return None
+    for role, sigs in _WRITER_CMDLINE_SIGNATURES.items():
+        if any(program == _bare(sig) for sig in sigs):
+            return role
+    # A BARE `m3` (no subcommand) IS the MCP server, and so is `m3 serve`;
+    # `m3 setup` / `m3 doctor` / `m3 stop` are commands that hold nothing.
+    if program == "m3" and (not args or args[0] == "serve"):
+        return "mcp"
+    return None
 
 
 def scan_db_writer_processes(engine_root: Optional[str] = None) -> list[ProcInfo]:
@@ -404,19 +450,11 @@ def scan_db_writer_processes(engine_root: Optional[str] = None) -> list[ProcInfo
             cmdline = " ".join(proc.info.get("cmdline") or [])
             name = (proc.info.get("name") or "").lower()
 
-            # 1. Precise cmdline match (the normal, unprivileged-readable case).
+            # 1. Precise cmdline match (the normal, unprivileged-readable case):
+            #    what the process RUNS, never what its arguments mention.
             matched = None
             if cmdline:
-                for role, sigs in _WRITER_CMDLINE_SIGNATURES.items():
-                    if any(sig in cmdline for sig in sigs):
-                        matched = role
-                        break
-                # A BARE `m3` (no subcommand) IS the MCP server; `m3 setup` /
-                # `m3 doctor` / `m3 stop` are commands that hold nothing. See
-                # _MCP_BARE_M3_RE — an executable-substring match cannot tell
-                # them apart and made the installer flag itself.
-                if matched is None and _MCP_BARE_M3_RE.search(cmdline):
-                    matched = "mcp"
+                matched = writer_role(proc.info.get("cmdline") or [])
             if matched:
                 # Skip a SHIM generation — it shares the real worker's cmdline
                 # but holds nothing and can never quiesce, so counting it burns
