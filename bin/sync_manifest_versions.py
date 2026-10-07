@@ -122,6 +122,27 @@ def _sync_security_supported(target: str, *, check: bool) -> "str | None":
     return None
 
 
+_ROADMAP_MD = _ROOT / "docs" / "ROADMAP.md"
+
+
+def _sync_roadmap_current(target: str, *, check: bool) -> "str | None":
+    """Keep ROADMAP.md's "Current version" line on the released version. It was
+    hand-maintained and named 2026.10.6.0 after 2026.10.7.0 had shipped."""
+    if not _ROADMAP_MD.is_file():
+        return f"{_ROADMAP_MD.relative_to(_ROOT)}: missing"
+    text = _ROADMAP_MD.read_text(encoding="utf-8")
+    m = re.compile(r"Current version: \*\*v([^*\s]+)\*\*").search(text)
+    rel = _ROADMAP_MD.relative_to(_ROOT)
+    if not m:
+        return f"{rel}: no 'Current version' line found"
+    if m.group(1) == target:
+        return None
+    if check:
+        return f"{rel}: current version v{m.group(1)} != v{target}"
+    _ROADMAP_MD.write_text(text[: m.start(1)] + target + text[m.end(1):], encoding="utf-8")
+    return None
+
+
 # Match a JSON ``"version": "X.Y.Z…"`` pair. Surgical TEXT edit — we rewrite ONLY
 # the version value and leave every other byte (em-dashes, array layout, spacing)
 # untouched. Re-serializing the whole file via json.dump would reflow arrays and
@@ -184,7 +205,8 @@ def main() -> int:
     # otherwise -- so a release can never ship a stale badge or a security
     # document naming the wrong supported line.
     for label, fn in (("pypi badge", _sync_pypi_badge),
-                      ("SECURITY.md supported versions", _sync_security_supported)):
+                      ("SECURITY.md supported versions", _sync_security_supported),
+                      ("ROADMAP.md current version", _sync_roadmap_current)):
         # Ask in check-mode FIRST so we know whether a write is actually needed.
         # Reporting "wrote X" for a file that was already current is a small lie,
         # and a sync tool that overstates its work is one you stop reading.
@@ -194,7 +216,7 @@ def main() -> int:
         if args.check:
             drifted.append(problem)
             continue
-        if problem.endswith(": missing") or "no '(latest)' row" in problem:
+        if problem.endswith(": missing") or " found" in problem:
             drifted.append(problem)       # cannot fix by rewriting
             continue
         fn(target, check=False)
