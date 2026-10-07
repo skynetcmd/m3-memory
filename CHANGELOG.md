@@ -19,6 +19,23 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.10.6.1] — 2026-10-06 — upgrades that finish on their own, on Linux too
+
+### Fixed
+
+- **Linux: an upgrade that installs a new native core restarts the Rust embed
+  server.** In 2026.10.6.0 the server kept the previous core and setup only
+  printed the restart command.
+  **Affected:** Linux installs with the Rust embed server ·
+  **Action:** none; `m3 upgrade` restarts a server still on the previous core ·
+  **Data status:** none.
+
+- **`m3 upgrade` finds its own launcher when the shell's PATH lacks the pipx
+  bin directory,** instead of reporting m3 as not installed.
+  **Affected:** running `~/.local/bin/m3 upgrade` from a shell without
+  `~/.local/bin` on PATH (macOS, Linux) · **Action:** none ·
+  **Data status:** none.
+
 ## [2026.10.6.0] — 2026-10-06 — upgrades that finish on their own
 
 ### Fixed
