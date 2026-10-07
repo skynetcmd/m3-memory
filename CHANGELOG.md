@@ -23,6 +23,12 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **`m3 stop`, setup and upgrades no longer stop programs that merely mention
+  an m3 process.** A terminal running `grep m3-embed-server`, a `tail -f` of an
+  m3 log or an editor with an m3 script open could be stopped as if it were
+  that process; only processes that run it are stopped now.
+  **Affected:** all platforms · **Action:** none · **Data status:** none.
+
 - **An upgrade that updates the Claude Code plugin says so in one line and
   asks for one action: restart Claude Code.** It used to print the whole
   health report, then suggest `/mcp`, which does not load a new plugin.
