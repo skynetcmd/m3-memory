@@ -102,7 +102,7 @@ MENTIONS_ONLY = [
     ["C:/Program Files/Git/bin/bash.exe", "-c",
      "echo $(powershell -c \"Get-Process | ? { $_.Name -eq 'm3-embed-server.exe' }\")"],
     ["grep", "-n", "m3_cognitive_loop.py", "bin/install_schedules.py"],
-    ["tail", "-f", "/home/u/.m3/logs/m3_embed_server_inproc.log"],
+    ["tail", "-f", "/var/log/m3/m3_embed_server_inproc.log"],
     ["code", "bin/m3_cognitive_loop.py"],
     ["/usr/bin/python3", "-c", "import subprocess; subprocess.run(['m3_cognitive_loop.py'])"],
     ["bash", "-c", "which m3"],
@@ -114,15 +114,15 @@ REAL_WRITERS = [
     ([r"C:\v\Scripts\pythonw.exe", r'"C:\v\Lib\site-packages\m3_memory\bin\m3_cognitive_loop.py"',
       "--interval", "60", "--background"], "cognitive-loop"),
     # the waiter is launched with -u before its script
-    (["/home/u/.local/share/pipx/venvs/m3-memory/bin/python", "-u",
-      "/home/u/.local/share/pipx/venvs/m3-memory/lib/python3.13/site-packages/m3_memory/bin/m3_notification_waiter.py"],
+    (["/opt/pipx/venvs/m3-memory/bin/python", "-u",
+      "/opt/pipx/venvs/m3-memory/lib/python3.13/site-packages/m3_memory/bin/m3_notification_waiter.py"],
      "waiter"),
     (["/v/bin/python3.14", "-X", "utf8", "/v/bin/embed_server_inproc.py"], "embed-server"),
     # systemd/launchd run the Rust server binary directly
-    (["/home/u/.local/share/pipx/venvs/m3-memory/lib/python3.13/site-packages/m3_core_rs/m3-embed-server"],
+    (["/opt/pipx/venvs/m3-memory/lib/python3.13/site-packages/m3_core_rs/m3-embed-server"],
      "embed-server"),
     # a Linux console script runs as interpreter + script
-    (["/v/bin/python", "/home/u/.local/bin/mcp-memory"], "mcp"),
+    (["/v/bin/python", "/opt/pipx/bin/mcp-memory"], "mcp"),
     ([r"C:\py\python.exe", r"C:\v\bin\mcp_proxy.py"], "mcp"),
 ]
 
