@@ -332,27 +332,73 @@ async def test_doctor_classification_all_four_states():
 
 @pytest.mark.asyncio
 async def test_doctor_per_probe_timeouts_respected(monkeypatch):
-    """Each probe has a 2s timeout. Even if every probe hangs for its
-    full 2s, total wall-clock should stay <5s thanks to asyncio.gather
-    parallelism (not <8s = 4×2s sequential)."""
+    """A probe that hangs is bounded by its own 2s timeout, so doctor still
+    returns well inside 5s. Only ONE probe hangs here, so this cannot tell
+    concurrent from sequential probes (measured: it passed with gather made
+    sequential); test_doctor_probes_run_concurrently covers that."""
     # Point tier-2 at a port that will time out (not refuse): use
     # 198.51.100.1 (TEST-NET-2, RFC 5737) — packets get dropped, not
     # ICMP-refused, so the probe must hit its own 2s timeout.
-    monkeypatch.setenv("M3_EMBED_FALLBACK_URL", "http://198.51.100.1:8082")
-
     import time
 
     from memory.doctor import memory_doctor_impl
+
+    # Warm up first, against a port that refuses at once: the first call in a
+    # process also pays one-off initialisation (store, imports), which on a slow
+    # CI runner pushed a concurrent run past the budget (5.6s, windows py3.13)
+    # without any probe running sequentially. Only the hanging run is timed.
+    monkeypatch.setenv("M3_EMBED_FALLBACK_URL", "http://127.0.0.1:1")
+    await asyncio.wait_for(memory_doctor_impl(), timeout=8.0)
+
+    monkeypatch.setenv("M3_EMBED_FALLBACK_URL", "http://198.51.100.1:8082")
     t0 = time.perf_counter()
     out = await asyncio.wait_for(memory_doctor_impl(), timeout=8.0)
     elapsed = time.perf_counter() - t0
-    # Sequential would be ~4×2s = 8s. Parallel must be much less.
     assert elapsed < 5.0, (
-        f"doctor took {elapsed:.1f}s with one hanging probe — probes "
-        f"are running sequentially instead of concurrently"
+        f"doctor took {elapsed:.1f}s with one hanging probe — a probe is not "
+        f"bounded by its own timeout"
     )
     # Tier-2 must report unreachable rather than crash
     assert out["tier_2"]["status"] != "online"
+
+
+@pytest.mark.asyncio
+async def test_doctor_probes_run_concurrently(monkeypatch):
+    """All four probes slowed by 1s: concurrent ~1s, sequential ~4s. The
+    timeout test above hangs one probe only and passed with gather made
+    sequential, so it never guarded this."""
+    import time
+
+    import memory.doctor as d
+
+    # Each probe's REAL result, captured once; the timed run replays it after a
+    # fixed 1s, so the timing depends only on how the probes are scheduled — not
+    # on how long the real ones take here (2s+ on Windows, measured).
+    monkeypatch.setenv("M3_EMBED_FALLBACK_URL", "http://127.0.0.1:1")   # refuses at once
+    results = {name: getattr(d, name)() for name in ("_probe_tier1", "_probe_tier2", "_probe_db")}
+    results["_probe_roundtrip"] = await d._probe_roundtrip()
+
+    def slow(name):
+        def probe(*_a, **_k):
+            time.sleep(1.0)
+            return results[name]
+        return probe
+
+    async def slow_roundtrip(*_a, **_k):
+        await asyncio.sleep(1.0)
+        return results["_probe_roundtrip"]
+
+    for name in ("_probe_tier1", "_probe_tier2", "_probe_db"):
+        monkeypatch.setattr(d, name, slow(name))
+    monkeypatch.setattr(d, "_probe_roundtrip", slow_roundtrip)
+
+    t0 = time.perf_counter()
+    await asyncio.wait_for(d.memory_doctor_impl(), timeout=10.0)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 3.0, (
+        f"doctor took {elapsed:.1f}s with four 1s probes — they are running "
+        f"sequentially instead of concurrently"
+    )
 
 
 @pytest.mark.asyncio
