@@ -19,6 +19,17 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+  - **Multi-agent and team setups: every read and write is checked against the
+    calling agent.** In secure mode an agent sees and changes only its own private
+    rows and the rows shared with it, and a row it may not reach answers exactly as
+    a missing one. The checks add ~5-10%, with no more than 10s (p95) for most calls. 
+    **Affected:** installs with `security.mode = "secure"` (schema size: all installs)
+  · **Action:** none · **Data status:** unchanged.
+
+  - **More of the hot path runs in the Rust core (pad on Project Oxidation).** These moves serve integrity and consistency across platforms, while minimizing real-world performance impacts. 
+    **Affected:** installs with the Rust core · **Action:** none · **Data status:**
+  unchanged.
+
 ## [2026.10.25.0] — 2026-10-25 — a cognitive loop that keeps running, backfill that keeps its checks
 
 ### Changed
