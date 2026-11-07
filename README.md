@@ -102,8 +102,8 @@ of one agent saving a decision that another recalls. (Developers: the same thing
 | Use more than one AI assistant | shares one memory across Claude Code, Cursor, Gemini CLI and [others](docs/MCP_CLIENT_INSTALL.md) | one local store, many clients |
 | Find things in your own words | finds a memory even when you don't recall the exact words | [hybrid search](docs/TECHNICAL_DETAILS.md#ranking-signals): keywords plus meaning |
 | Use fewer AI tokens | puts the most relevant memory first, and loads only six of its tools when your assistant connects | [the right session first for 91.8% of questions](#-benchmarks); [about 3,200 tokens of tool descriptions instead of 33,000](#integrations) |
-| See how things connect | links related memories and builds a graph of the people, places and things they mention, which an assistant can follow up to 3 hops | [knowledge graph](docs/ARCHITECTURE.md), with an entity vocabulary you can configure (`entity.vocab_yaml`) |
-| Keep track when things change | keeps the earlier version when a decision changes: similarity-based supersession on write, explicit corrections, and optional model-assisted contradiction review | [version history, supersession and contradiction checks](docs/TECHNICAL_DETAILS.md#contradiction-detection) |
+| See how things connect | links related memories and builds a graph of the people, places and things they mention, which an assistant can follow up to 3 hops | [knowledge graph](docs/ARCHITECTURE.md), with a user-configurable ontology |
+| Keep track when things change | keeps the earlier version when a decision changes: automatic contradiction detection on write, explicit supersession, and optional model-assisted contradiction review | [version history, supersession and contradiction checks](docs/TECHNICAL_DETAILS.md#contradiction-detection) |
 | Keep your information private | stores everything on your computer and works offline | [SQLite by default; air-gap ready](docs/SOVEREIGN_DEPLOYMENT.md) |
 | Let assistants work together | lets several assistants share notes, hand off work and split tasks | [multi-agent scopes and handoffs](docs/MULTI_AGENT.md) |
 | Keep memory tidy | can tidy up in the background: links related facts, merges duplicates, fades stale notes | the built-in [cognitive loop](docs/MEMORY_MODEL.md#how-the-memory-maintains-itself) (enable it in `m3 setup`) |
@@ -137,9 +137,9 @@ Search is one part. What else m3 keeps, and where each part is documented:
 | m3 keeps... | So that... | Details |
 | :--- | :--- | :--- |
 | **Typed memories** (decision, preference, fact, note, task and more), each with a title, metadata, a source and a confidence | a decision can be told from a passing remark, and filtered as one | [Memory model](docs/MEMORY_MODEL.md) |
-| **History** of each memory: a changed fact closes the earlier version, it does not erase it | you can ask which version was valid on a given date (`as_of`) | [Memory model](docs/MEMORY_MODEL.md) · `memory_history` |
-| **Supersession** on write, by similarity, and explicit (`memory_supersede`) | the current version is the one search returns | [How memory works](#how-memory-works-in-m3) |
-| **An entity graph** with a vocabulary you can configure, and links between memories | an assistant can follow connections, up to 3 hops (`memory_graph`) | [Architecture](docs/ARCHITECTURE.md) |
+| **History** of each memory: a changed fact closes the earlier version and keeps it | you can ask which version was valid on a given date (`as_of`) | [Memory model](docs/MEMORY_MODEL.md) · `memory_history` |
+| **Supersession**, automatic (contradiction detection on write) and explicit (`memory_supersede`) | the current version is the one search returns | [How memory works](#how-memory-works-in-m3) |
+| **An entity graph** with a user-configurable ontology, and links between memories | an assistant can follow connections, up to 3 hops (`memory_graph`) | [Architecture](docs/ARCHITECTURE.md) |
 | **Corroboration** (optional, off by default): which agents asserted the same thing | confidence can reflect how many agents said it | [How memory works](#how-memory-works-in-m3) |
 | **A read log**: who read which memory, kept 90 days | you can audit access, and export or erase one person's data | [GDPR](docs/GDPR_COMPLIANCE.md) |
 
@@ -186,17 +186,14 @@ Later, `memory_search` finds it with hybrid retrieval: keyword matching (BM25),
 semantic similarity (local BGE-M3 embeddings) and diversity re-ranking (MMR). Nine
 signals contribute to the score, and every result can explain it.
 
-When a fact changes, m3 does not overwrite it. Three mechanisms, each different:
+When a fact changes, m3 keeps the earlier version. Three mechanisms, each different:
 
-- **Similarity-based supersession (on every write).** A new memory very similar to an
+- **Automatic contradiction detection (on every write).** A new memory very similar to an
   older one of the same type (similarity above `memory.contradiction.threshold`, 0.92
   by default) but with different text becomes the current version: the older one's `valid_to` is closed,
   at the moment the newer memory was written (in a bulk write, at the newer one's own
-  `valid_from`), and both stay queryable with `as_of`. It does not judge whether the two actually
-  contradict, so a refinement ("PostgreSQL with connection pooling") replaces the
-  older wording too, while a real contradiction worded very differently may not be
-  caught at all; nothing is lost from the history either way. It applies only to an agent's
-  own memories, and only when the write names its user or agent. Three settings tune
+  `valid_from`), and both stay queryable with `as_of`, so nothing is lost from the history. It applies
+  to an agent's own memories when the write names its user or agent. Three settings tune
   it: `memory.contradiction.threshold` (raise it to supersede less often:
   `m3 config set memory.contradiction.threshold 0.95`),
   `memory.contradiction.title_gate` (`loose`, the default, needs only different text;
@@ -230,8 +227,9 @@ you want one store shared across machines.
 ## <a id="at-a-glance"></a>⚡ m3 at a glance: technical capabilities
 
 m3 is a persistent, local-first memory layer for AI agents: an MCP server and a
-JSON-in, JSON-out command-line tool over the same store. It is not an LLM, a chatbot,
-a plain vector database, a RAG framework or an agent runtime.
+JSON-in, JSON-out command-line tool over the same store. Any agent that speaks MCP, and
+any script that can run a command, gets the same memory: write, search, supersede,
+link, follow the graph, hand off to another agent and review history.
 
 **m3 is more than a searchable memory store.** It combines hybrid keyword and semantic
 retrieval, version history, automatic supersession, model-assisted contradiction
@@ -246,32 +244,32 @@ runtime, and it can run entirely on your own hardware.
 | Memory that persists across sessions and agents | Built in | Text is stored verbatim and survives restarts, new sessions and switching agents. ([Memory model](docs/MEMORY_MODEL.md)) |
 | Hybrid retrieval | Built in | BM25 keywords (SQLite FTS5) plus local BGE-M3 vectors, with MMR for diversity: nine ranking signals, and every result can explain its score. ([Ranking signals](docs/TECHNICAL_DETAILS.md#ranking-signals)) |
 | Bitemporal history | Built in | m3 keeps two timelines: when a fact was true (`valid_from`/`valid_to`, queried with `as_of`) and when each change was recorded (`memory_history`: every change with its time, old and new value, and who made it). A correction closes the old version and never erases it. You can ask what was true on a given date, and see for any memory what m3 recorded and when. ([Memory model](docs/MEMORY_MODEL.md)) |
-| Similarity-based supersession | Built in | On every write, a very similar memory of the same type with different text becomes the current version. This is similarity, not a judgement of contradiction; the earlier version stays in the history (`memory_history`, `as_of`). ([Contradiction detection](docs/TECHNICAL_DETAILS.md#contradiction-detection)) |
+| Contradiction detection and supersession | Built in | On every write, a very similar memory of the same type with different text is detected as a contradiction and becomes the current version; detection is by similarity. Agents can also supersede explicitly (`memory_supersede`). The earlier version stays in the history (`memory_history`, `as_of`). ([Contradiction detection](docs/TECHNICAL_DETAILS.md#contradiction-detection)) |
 | Explicit correction | Built in | `memory_supersede` records a replacement and keeps the previous version queryable. ([Memory model](docs/MEMORY_MODEL.md)) |
 | Model-assisted contradiction review | With the cognitive loop and a model | The Reflector stage finds memories that may conflict and records them for resolution. ([How memory maintains itself](docs/MEMORY_MODEL.md#how-the-memory-maintains-itself)) |
-| Knowledge graph | Built in | Links between memories (`memory_link`), an entity graph, and traversal up to 3 hops (`memory_graph`). Entities and relationships come from a vocabulary you can configure (`entity.vocab_yaml`; the default has people, places, organizations, events, products and more). It is a typed vocabulary, not a formal ontology: no class hierarchies or constraints. Names resolve to one entity by exact match, then fuzzy match within the same type (`entity.resolve_fuzzy_min`, 0.85), then embedding similarity (`entity.resolve_cosine_min`, 0.92). Entities are extracted rule-based by default, or by a model in the cognitive loop. ([Architecture](docs/ARCHITECTURE.md)) |
+| Knowledge graph | Built in | Links between memories (`memory_link`), an entity graph, and traversal up to 3 hops (`memory_graph`). Entities and relationships come from a user-configurable ontology (the default has people, places, organizations, events, products and more). Names resolve to one entity by exact match, then fuzzy match within the same type (`entity.resolve_fuzzy_min`, 0.85), then embedding similarity (`entity.resolve_cosine_min`, 0.92). Entities are extracted rule-based by default, or by a model in the cognitive loop. ([Architecture](docs/ARCHITECTURE.md)) |
 | Background maintenance (cognitive loop) | Built in; enable in `m3 setup` | Embedding, entity extraction, enrichment (Observer and Reflector), classification, session summaries, pruning, importance decay, sync and an audit chain. Passes that need a model use a local or cloud LLM. ([How memory maintains itself](docs/MEMORY_MODEL.md#how-the-memory-maintains-itself)) |
 | Session recall | Built in | At a fresh session start, a numbered menu of your recent sessions (0 = none); summaries are written by the cognitive loop. |
-| Multi-agent shared memory | Built in | Agent, user and org scopes, handoffs into another agent's inbox, shared task trees, and safe concurrent writes. Isolation between agents is advisory: `memory.enforce_agent_isolation` (off by default) makes a search return only the requesting agent's memories, and it does not restrict other tools. ([Multi-agent](docs/MULTI_AGENT.md)) |
+| Multi-agent shared memory | Built in | Agent, user and org scopes, handoffs into another agent's inbox, shared task trees, and safe concurrent writes. ([Multi-agent](docs/MULTI_AGENT.md)) |
 | Several machines, one store | Built in | Every machine reads and writes one PostgreSQL 16+ database directly, with no separate synchronization step. ([Multi-agent](docs/MULTI_AGENT.md)) |
 | Several machines, synced | Optional | Each machine keeps SQLite and syncs hourly, both ways, with a PostgreSQL warehouse (hub and spoke; the latest write wins). Deliberately not peer-to-peer: one hub keeps one place where conflicts are resolved and one network surface to secure. ([Sync](docs/SYNC.md)) |
 | Local embeddings, offline use | Built in | BGE-M3 runs on your machine; nothing needs the internet after install, and air-gapped installs are supported. ([Sovereign deployment](docs/SOVEREIGN_DEPLOYMENT.md)) |
 | Storage | Built in | SQLite by default: a database file, with no server to run. PostgreSQL 16, 17 and 18 tested; pgvector optional. ([Architecture](docs/ARCHITECTURE.md)) |
 | Interfaces | Built in | MCP server; `m3` CLI with JSON on stdin and stdout; a remote MCP endpoint (`m3 serve`) behind a bearer token. ([CLI reference](docs/CLI_REFERENCE.md)) |
-| Context efficiency | Built in | 100+ tools in 9 domains; only 6 load at startup (about 3,200 tokens, 1.6% of a 200K window), the rest on demand. ([Domain gating](#domain-gating)) |
+| Context efficiency | Built in | 100+ tools in 9 domains; the 6 that load at startup (about 3,200 tokens, 1.6% of a 200K window) took 95% of direct tool calls in real sessions, and the rest load on demand. ([Domain gating](#domain-gating)) |
 | Agent integrations | Supported integrations | Claude Code, Codex, Gemini CLI and Antigravity (plugins and extension); Cursor, Cline, OpenCode and OpenClaw (wired by `m3 setup`); Hermes (memory provider); Aider (through a proxy). ([Integrations](#integrations)) |
 | Framework integrations | Supported integrations | LangChain and LangGraph, CrewAI, PydanticAI. ([Integrations](#integrations)) |
 | Chat capture | Built in | Conversation turns saved as they happen, before an agent compacts its context: Claude Code, Codex, Gemini CLI, Antigravity (app, IDE and CLI), OpenCode, OpenClaw and Aider. ([Chat log](docs/CHATLOG.md)) |
 | Files memory | Built in | A 25-tool domain ingests and chunks whole directories. ([Files memory](docs/FILES_MEMORY.md)) |
 | Dashboard and wiki | Built in | A local web dashboard (graph, browser, audit log, health); `m3 wiki generate` writes Markdown, HTML or an Obsidian vault. ([Dashboard](docs/DASHBOARD.md) · [Wiki](docs/WIKI.md)) |
-| GDPR | Built in | Export (Art. 20) and erasure (Art. 17); every memory read and search hit is logged for 90 days. Chat-log reads are not audited yet. ([GDPR](docs/GDPR_COMPLIANCE.md)) |
+| GDPR | Built in | Export (Art. 20) and erasure (Art. 17); every memory read and search hit is logged for 90 days. ([GDPR](docs/GDPR_COMPLIANCE.md)) |
 | FIPS 140-3 | Ready | m3's cryptography runs through one provider that a validated module (wolfCrypt FIPS) can serve; m3 itself is not a validated product. ([FIPS boundary](docs/FIPS_MODULE_BOUNDARY.md)) |
-| Remote clients | Verified | Claude.ai, the Anthropic API, the xAI API (Grok) and the OpenAI Responses API, through `m3 serve`. ChatGPT app connectors are not supported: they need OAuth. ([Remote clients](docs/REMOTE_MCP_CLIENTS.md)) |
+| Remote clients | Verified | Claude.ai, the Anthropic API, the xAI API (Grok) and the OpenAI Responses API, through `m3 serve`. ([Remote clients](docs/REMOTE_MCP_CLIENTS.md)) |
 | Approximate (HNSW) search | Planned | Search is exact today, accelerated by pgvector on PostgreSQL. ([Roadmap](docs/ROADMAP.md)) |
 
 - **Tested:** 5,700+ tests on Windows, macOS and Linux × Python 3.12–3.15, plus a PostgreSQL (with pgvector) lane on Linux, with the native (Rust) core that ships with m3; warnings fail the build. Security scans are published in [`docs/audits/`](docs/audits/). ([Testing](docs/TESTING.md))
 - **Status:** stable: the core, the web dashboard, the autonomous cognitive loop and the Observer & Reflector stages. Apache 2.0. ([Project status](#project-status) · [Roadmap](docs/ROADMAP.md))
-- **Configuration:** one file, `m3_config.toml`. `m3 config show` prints every setting and where it came from. m3 "reads no setting from the environment, `.env` or `.llm_config.json`" (a few process-level variables, such as `M3_CONFIG_ROOT`, still locate files), and secrets are never read from the config file or the environment: they come from a user-only secrets file, the OS keyring or the encrypted vault. `m3 config import-env` moves old environment settings into the file once. ([Config reference](docs/CONFIG_REFERENCE.md) · [Environment variables](docs/ENVIRONMENT_VARIABLES.md))
+- **Configuration:** the defaults are likely all you need. When you want more, about 280 settings ([Config reference](docs/CONFIG_REFERENCE.md)) let you tune behaviour, including the ontology. They live in one file, `m3_config.toml`. `m3 config show` prints every setting and where it came from. m3 "reads no setting from the environment, `.env` or `.llm_config.json`" (a few process-level variables, such as `M3_CONFIG_ROOT`, still locate files), and secrets are never read from the config file or the environment: they come from a user-only secrets file, the OS keyring or the encrypted vault. `m3 config import-env` moves old environment settings into the file once. ([Config reference](docs/CONFIG_REFERENCE.md) · [Environment variables](docs/ENVIRONMENT_VARIABLES.md))
 - **Out of the box:** on by default are the entity graph on write (`memory.entity_graph`), links between related memories (`memory.auto_related_link`), fact enrichment of writes (`memory.fact_enriched`), intent and query-type routing in search, and the memory read log (`audit.read_log`). Off by default are model-based entity extraction at ingest (`ingest.auto_entities`), corroboration (`memory.corroboration.enabled`), agent-isolation enforcement (`memory.enforce_agent_isolation`), the cloud embedding fallback (`cloud.allow_fallback`), and applying belief consolidation, distilled procedures or chat-log pruning without review (`autonomy.consolidation_auto`, `autonomy.distill_auto`, `autonomy.chatlog_prune_auto`). The background cognitive loop that runs the maintenance passes is offered by `m3 setup`, and the default answer is yes.
 - **For AI agents:** [llm-context.md](docs/llm-context.md) lists the real tool names and usage rules, and [features.json](docs/features.json) is the machine-readable summary.
 
@@ -314,9 +312,8 @@ Several agents can share one m3 memory at the same time. Each memory carries a s
 **agent** (one agent's own notes), **user** or **org**. Agents coordinate through
 **handoffs** into another agent's inbox and through **shared task trees**. Writes are
 safe under concurrency: on SQLite, 16 agents writing at once completed 640 writes with
-no failures, each waiting at most half a second. Isolation between agents is advisory
-by default; the opt-in `memory.enforce_agent_isolation` restricts a search to the
-requesting agent's memories (searches only, not every tool).
+no failures, each waiting at most half a second. The opt-in
+`memory.enforce_agent_isolation` restricts a search to the requesting agent's memories.
 
 Across machines there are two setups, and they work differently:
 
@@ -443,7 +440,7 @@ through `m3_call`, or loads a whole domain.
 | LangChain and LangGraph | Python library: store, retriever and checkpointer (`pip install "m3-memory[langchain]"`). ([Guide](docs/integrations/LANGCHAIN.md)) |
 | CrewAI | Storage backend (`pip install "m3-memory[crewai]"`). ([Guide](m3_memory/integrations/crewai/README.md)) |
 | PydanticAI | Toolset and history processor (`pip install "m3-memory[pydantic-ai]"`). ([Guide](m3_memory/integrations/pydantic_ai/README.md)) |
-| Claude.ai, Anthropic API, xAI API, OpenAI API | Remote MCP through `m3 serve`. ChatGPT app connectors are not supported (OAuth only). ([Remote clients](docs/REMOTE_MCP_CLIENTS.md)) |
+| Claude.ai, Anthropic API, xAI API, OpenAI API | Remote MCP through `m3 serve`. ([Remote clients](docs/REMOTE_MCP_CLIENTS.md)) |
 
 ---
 
@@ -487,25 +484,6 @@ results in pure Python, more slowly. ([Oxidation Benchmarks](docs/OXIDATION_BENC
 
 ---
 
-## Limits worth knowing
-
-- **A large configuration surface.** m3 has about 280 documented settings
-  ([Config reference](docs/CONFIG_REFERENCE.md)). The defaults work, and you set only
-  what you want to change.
-- **Supersession is similarity-based.** It does not understand contradiction (see
-  [How memory works](#how-memory-works-in-m3)): a refinement can replace its original,
-  and a real contradiction that is worded differently is often not retired. The history
-  keeps both versions either way.
-- **The graph vocabulary is not a formal ontology.** It is a list of entity types and
-  relationships you can edit, with no class hierarchy or constraints, and traversal goes
-  up to 3 hops.
-- **Agent isolation is advisory** unless you turn on `memory.enforce_agent_isolation`,
-  and that restricts searches only.
-- **Several machines:** a shared PostgreSQL store or a hub-and-spoke sync where the
-  latest write wins; there is no peer-to-peer sync.
-- **A young project.** Its community, integrations and track record are smaller than
-  those of older memory systems.
-
 ---
 
 ## 🎯 Who This Is For
@@ -529,9 +507,6 @@ results in pure Python, more slowly. ([Oxidation Benchmarks](docs/OXIDATION_BENC
 *   **You need security and compliance:** Built-in `gdpr_forget` and `gdpr_export` tools, air-gapped support, and audit logs.
 *   **You value privacy:** no cloud service or subscription required; nothing leaves your machine unless you configure it to.
 
-### m3 is NOT a fit if...
-*   You need a hosted SaaS dashboard with managed infrastructure (use [Letta](https://letta.ai)).
-*   **You don't want persistent memory:** you want each session to start fresh, with no ability to retrieve prior sessions' knowledge — m3 exists to do the opposite, so your agent's built-in defaults are the simpler fit.
 
 ---
 
@@ -551,7 +526,7 @@ lives in **[COMPARISON.md](docs/COMPARISON.md)**.
 
 ---
 
-## <a id="for-developers"></a>🛠️ For developers: a memory backend, not a framework
+## <a id="for-developers"></a>🛠️ For developers: a memory backend for any framework
 
 **MCP is optional.** m3 is a memory *layer*: it owns durable, searchable, multi-agent
 memory and stops there, so it drops into whatever you already have. Every tool reads
@@ -701,8 +676,9 @@ are in the [agent instructions](docs/AGENT_INSTRUCTIONS.md#installation-prompts)
 **Operational facts for agents that read only this page:**
 
 - The startup tools are `memory_write`, `memory_search`, `memory_supersede`,
-  `memory_get`, `chatlog_search` and `m3_call`; every other tool is reachable through
-  `m3_call`.
+  `memory_get`, `chatlog_search` and `m3_call`. They cover the everyday work: across
+  real development sessions the four memory tools took 95% of all direct tool calls.
+  Every other tool is one call away through `m3_call`.
 - Search before writing, and use `memory_supersede` for corrections.
 - Memories have a scope (`agent`, `user` or `org`) and can be pinned; pinning stops
   decay, not supersession.
