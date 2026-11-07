@@ -245,7 +245,7 @@ runtime, and it can run entirely on your own hardware.
 | :--- | :--- | :--- |
 | Memory that persists across sessions and agents | Built in | Text is stored verbatim and survives restarts, new sessions and switching agents. ([Memory model](docs/MEMORY_MODEL.md)) |
 | Hybrid retrieval | Built in | BM25 keywords (SQLite FTS5) plus local BGE-M3 vectors, with MMR for diversity: nine ranking signals, and every result can explain its score. ([Ranking signals](docs/TECHNICAL_DETAILS.md#ranking-signals)) |
-| Version history | Built in | Every memory has a validity window (`valid_from`, `valid_to`); `as_of` returns the memories whose window contains a date. A correction closes the old version and never erases it. `as_of` filters that window only: it does not ask what the store held on a given day. ([Memory model](docs/MEMORY_MODEL.md)) |
+| Bitemporal history | Built in | m3 keeps two timelines: when a fact was true (`valid_from`/`valid_to`, queried with `as_of`) and when each change was recorded (`memory_history`: every change with its time, old and new value, and who made it). A correction closes the old version and never erases it. You can ask what was true on a given date, and see for any memory what m3 recorded and when. ([Memory model](docs/MEMORY_MODEL.md)) |
 | Similarity-based supersession | Built in | On every write, a very similar memory of the same type with different text becomes the current version. This is similarity, not a judgement of contradiction; the earlier version stays in the history (`memory_history`, `as_of`). ([Contradiction detection](docs/TECHNICAL_DETAILS.md#contradiction-detection)) |
 | Explicit correction | Built in | `memory_supersede` records a replacement and keeps the previous version queryable. ([Memory model](docs/MEMORY_MODEL.md)) |
 | Model-assisted contradiction review | With the cognitive loop and a model | The Reflector stage finds memories that may conflict and records them for resolution. ([How memory maintains itself](docs/MEMORY_MODEL.md#how-the-memory-maintains-itself)) |
@@ -496,8 +496,6 @@ results in pure Python, more slowly. ([Oxidation Benchmarks](docs/OXIDATION_BENC
   [How memory works](#how-memory-works-in-m3)): a refinement can replace its original,
   and a real contradiction that is worded differently is often not retired. The history
   keeps both versions either way.
-- **History is a validity window, not a ledger.** `as_of` filters `valid_from` and
-  `valid_to`; m3 does not answer "what did the store hold on a given day".
 - **The graph vocabulary is not a formal ontology.** It is a list of entity types and
   relationships you can edit, with no class hierarchy or constraints, and traversal goes
   up to 3 hops.
